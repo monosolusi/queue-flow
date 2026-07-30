@@ -1,6 +1,15 @@
 import type { TicketNumber } from '../value-objects/ticket-number';
 
 /**
+ * NestJS DI token for {@link ISequenceRepository}. Interfaces are erased at
+ * runtime, so the application layer injects the port by this Symbol rather
+ * than by type metadata. A plain language builtin — no framework import — so
+ * it does not compromise domain purity (NFR-MNT-01), mirroring the
+ * {@link QUEUE_REPOSITORY} pattern.
+ */
+export const SEQUENCE_REPOSITORY = Symbol('SEQUENCE_REPOSITORY');
+
+/**
  * Repository abstraction for the per-category, per-day ticket sequence.
  * FR-ENG-01 (generation) and FR-ENG-05 (daily reset). Implementations MUST make
  * `nextTicketNumber` atomic so a crash mid-increment leaves the sequence
