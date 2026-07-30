@@ -80,6 +80,17 @@ Default state machine: `WAITING → CALLING → SERVING → COMPLETED`, plus
 states (`PREPARING`, `PAYMENT`, …) are configurable via the wizard; each
 transition carries an `action_label` that becomes a Caller UI button.
 
+**Transfer Queue** ("pindah kategori", FR-CLR-03) is modeled as a first-class
+**configurable transition**, not a special case: the `TransferTicketUseCase`
+validates `currentStatus → targetStatus` (default `WAITING`) against the
+active `ITransitionPolicy` like any other transition, then reassigns the
+category and reissues a per-category ticket number (clearing the counter). The
+PRD §7 default state machine has no transfer edge, so transfer is rejected
+with `InvalidStateTransitionException` until the wizard adds one (e.g.
+`CALLING → WAITING` labelled "Pindah Kategori"). The use case pre-checks
+before reserving the new number so an illegal transfer burns no sequence
+(NFR-REL-02).
+
 The full reference config JSON (store name, daily_reset, state_machine,
 categories, routings) lives in PRD §7 — read it before touching config code.
 

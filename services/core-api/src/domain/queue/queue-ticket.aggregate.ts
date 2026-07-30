@@ -8,6 +8,7 @@ import type { TicketId } from './value-objects/ticket-id';
 import { TicketCreatedEvent } from './events/ticket-created.event';
 import { TicketCalledEvent } from './events/ticket-called.event';
 import { TicketStatusChangedEvent } from './events/ticket-status-changed.event';
+import { TicketTransferredEvent } from './events/ticket-transferred.event';
 
 /**
  * Aggregate root for a single queue ticket. All status mutations flow through
@@ -161,6 +162,62 @@ export class QueueTicket extends AggregateRoot<TicketId> {
   /** Skip / mark absent. CALLING -> SKIPPED ("Lewati / Absen"). */
   public skip(policy: ITransitionPolicy, now = Date.now()): void {
     this.transitionTo(TicketStatus.SKIPPED, policy, now);
+  }
+
+  /**
+   * Transfer this ticket to a different category — "pindah kategori"
+   * (FR-CLR-03). A first-class **configurable** transition: the status leg
+   * (current -> `targetStatus`, default `WAITING`) is validated against the
+   * active {@link ITransitionPolicy} exactly like any other transition, so an
+   * active state machine without the edge (e.g. the PRD §7 default has no
+   * `CALLING -> WAITING`) rejects the transfer with
+   * {@link InvalidStateTransitionException}. The wizard/admin enables transfer
+   * by adding the edge (e.g. `CALLING -> WAITING` labelled "Pindah Kategori").
+   *
+   * On success the category is reassigned, a new per-category
+   * {@link TicketNumber} is applied, and the counter is cleared — the ticket
+   * re-enters the queue under the new category. Records a
+   * {@link TicketStatusChangedEvent} (the status leg) and a
+   * {@link TicketTransferredEvent} (the category/number reassignment) so
+   * downstream can sync on the re-issued number.
+   */
+  public transferTo(
+    newCategoryId: string,
+    newTicketNumber: TicketNumber,
+    targetStatus: StatusValue,
+    policy: ITransitionPolicy,
+    now = Date.now(),
+  ): void {
+    const from = this._currentStatus;
+    if (!policy.isAllowed(from, targetStatus)) {
+      throw new InvalidStateTransitionException(from, targetStatus);
+    }
+    const oldCategoryId = this._categoryId;
+    const oldTicketNumber = this._ticketNumber;
+    this._currentStatus = targetStatus;
+    this._categoryId = newCategoryId;
+    this._ticketNumber = newTicketNumber;
+    this._counterId = null;
+    this._updatedAt = now;
+    this.record(
+      new TicketStatusChangedEvent(
+        this.id.value,
+        from,
+        targetStatus,
+        policy.actionLabelFor(from, targetStatus),
+        now,
+      ),
+    );
+    this.record(
+      new TicketTransferredEvent(
+        this.id.value,
+        oldCategoryId,
+        newCategoryId,
+        oldTicketNumber.formatted(),
+        newTicketNumber.formatted(),
+        now,
+      ),
+    );
   }
 
   private transitionTo(target: StatusValue, policy: ITransitionPolicy, now: number): void {
