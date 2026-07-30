@@ -1,4 +1,5 @@
 export * from './entities/category';
+export * from './event-publisher.port';
 export * from './events/daily-queue-reset.event';
 export * from './events/ticket-called.event';
 export * from './events/ticket-created.event';
