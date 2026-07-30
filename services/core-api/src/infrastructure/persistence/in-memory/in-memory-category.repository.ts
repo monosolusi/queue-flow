@@ -19,4 +19,9 @@ export class InMemoryCategoryRepository implements ICategoryRepository {
   async save(category: Category): Promise<void> {
     this.byId.set(category.id.value, category);
   }
+
+  /** Test/dev-only: drops all stored categories. Not on the port interface. */
+  clear(): void {
+    this.byId.clear();
+  }
 }

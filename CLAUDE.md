@@ -137,8 +137,12 @@ with no duplicate/lost ticket numbers.
 
 - **Git initialized** — remote `monosolusi/queue-flow`, default branch `main`.
   The `services/core-api/` NestJS project and its Clean Architecture domain
-  layer are merged (QUE-8, PR #1); QUE-12 added the local WebSocket broadcaster.
-  Other services are not yet scaffolded.
+  layer are merged (QUE-8, PR #1); QUE-12 added the local WebSocket broadcaster;
+  QUE-10 added the state-transition validator + queue action use cases (merged,
+  PR #4). QUE-19 scaffolded `services/caller-service/` (Vite + React + TS PWA)
+  and added core-api's first read-only REST surface (`GET /api/counters`,
+  `GET /api/queue?counterId=N`) — In Review, PR #5. Other services are not yet
+  scaffolded.
 - **PRD language:** the Linear PRD is written in **Bahasa Indonesia** with
   English technical terms. UI `action_label` values ("Panggil Berikutnya",
   "Lewati / Absen", "Selesai Layan") are Indonesian — match them verbatim
@@ -196,7 +200,30 @@ with no duplicate/lost ticket numbers.
   app boots on `@nestjs/platform-express` — both platform packages must stay
   installed or `NestFactory.create` fails with "No driver (HTTP) has been
   selected."
-- Frontends are React-family; `caller-service` is a PWA. Keep them offline-capable.
+- Frontends are React-family; `caller-service` is a PWA. Keep them
+  offline-capable (bundle + precache all assets — vite-plugin-pwa; relative
+  `/api` + `/ws` URLs so they're same-origin behind NGINX with no per-service
+  config, proxied to `core-api:3000` by Vite in dev).
+- **Frontend service conventions** (established by `caller-service`, QUE-19):
+  - **Vite + vitest config typing:** `vite.config.ts` imports `defineConfig`
+    from `vitest/config` (not `vite`) whenever it carries a `test` field —
+    otherwise `tsc -b` fails with `'test' does not exist in type
+    'UserConfigExport'`.
+  - **jsdom has no global `WebSocket`.** Realtime clients take an injectable
+    `WebSocketCtor` and avoid referencing global `WebSocket.OPEN` /
+    `WebSocket.CONNECTING` (use the numeric readyState constants inline) so a
+    test-injected fake transport works. The provider/test seam is the
+    *transport constructor*, not a pre-built socket.
+  - **Providers that own a long-lived resource** (WebSocket, EventSource,
+    polling timer) accept construction **options**, never a pre-built instance.
+    The provider constructs the resource and wires its own handlers; an
+    injected instance would carry pre-bound handlers that never reach the
+    store. Tests inject options (e.g. `{ WebSocketCtor: FakeWebSocket }`) and
+    drive the fake transport.
+  - **React 18 batches dispatches** from non-React async callbacks (e.g. a WS
+    `onopen`/`onmessage` handler). In RTL tests, assert the resulting DOM with
+    `await screen.findByText(...)`, not the synchronous `screen.getByText(...)`
+    which reads the DOM before the batched re-render flushes.
 - When adding a feature, map it to the relevant FR-* / NFR-* requirement in the
   PRD and the bounded context it belongs to. Preserve the interface boundaries
   (e.g. don't leak admin DTOs into `ICallerApi`).

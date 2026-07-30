@@ -18,4 +18,9 @@ export class InMemoryCounterRoutingRuleRepository implements ICounterRoutingRule
   async save(rule: CounterRoutingRule): Promise<void> {
     this.byCounterId.set(rule.counterId, rule);
   }
+
+  /** Test/dev-only: drops all stored routing rules. Not on the port interface. */
+  clear(): void {
+    this.byCounterId.clear();
+  }
 }
