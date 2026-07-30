@@ -29,6 +29,24 @@ export class InMemoryQueueRepository implements IQueueRepository {
       .sort((a, b) => a.createdAt - b.createdAt);
   }
 
+  async findWaitingByCategories(categoryIds: readonly string[]): Promise<QueueTicket[]> {
+    const ids = new Set(categoryIds);
+    return this.waiting()
+      .filter((t) => ids.has(t.categoryId))
+      .sort((a, b) => a.createdAt - b.createdAt);
+  }
+
+  async findActiveByCounter(counterId: number): Promise<QueueTicket[]> {
+    return [...this.tickets.values()]
+      .filter(
+        (t) =>
+          t.counterId === counterId &&
+          (t.currentStatus === TicketStatus.CALLING ||
+            t.currentStatus === TicketStatus.SERVING),
+      )
+      .sort((a, b) => a.updatedAt - b.updatedAt);
+  }
+
   async findNextWaiting(query: NextTicketQuery): Promise<QueueTicket | null> {
     const candidates = this.waiting().filter((t) =>
       query.assignedCategoryIds.includes(t.categoryId),
@@ -55,5 +73,10 @@ export class InMemoryQueueRepository implements IQueueRepository {
     return [...this.tickets.values()].filter(
       (t) => t.currentStatus === TicketStatus.WAITING,
     );
+  }
+
+  /** Test/dev-only: drops all stored tickets. Not on the port interface. */
+  clear(): void {
+    this.tickets.clear();
   }
 }
