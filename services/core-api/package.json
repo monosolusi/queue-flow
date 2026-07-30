@@ -1,0 +1,28 @@
+{
+  "name": "@qms/core-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Core API service for the Enterprise Offline Queue Management System (QMS).",
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "arch:check": "depcruise --config .dependency-cruiser.cjs src",
+    "verify": "npm run arch:check && npm test && npm run build"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "@types/node": "^22.0.0",
+    "dependency-cruiser": "^16.0.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.0",
+    "typescript": "^5.7.0"
+  }
+}

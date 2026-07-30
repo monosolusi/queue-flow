@@ -1,0 +1,49 @@
+/** @type {import('dependency-cruiser').IConfiguration} */
+module.exports = {
+  extends: 'dependency-cruiser/configs/recommended-strict',
+  forbidden: [
+    {
+      // NFR-MNT-01 / DoD-1: the Domain layer must be free of ORM, HTTP
+      // framework, and I/O library dependencies. No exceptions.
+      name: 'domain-no-framework-imports',
+      severity: 'error',
+      from: { path: '^src/domain/' },
+      to: {
+        path: '^(node:)?(@nestjs/.*|typeorm|@prisma/.*|pg|express|ws|reflect-metadata|mikro-orm|knex|sequelize|mongoose|fastify)',
+      },
+    },
+    {
+      // Domain may only depend on itself + node built-ins. It must never reach
+      // into application, infrastructure, or interface-adapter layers.
+      name: 'domain-isolation',
+      severity: 'error',
+      from: { path: '^src/domain/' },
+      to: {
+        path: '^src/(application|infrastructure|interface-adapters)/',
+      },
+    },
+    {
+      // Bounded-context anti-corruption: the Queue context must not import Store
+      // Config internals. The only legitimate link between the two contexts is
+      // Store Config -> Queue (Store Config implements the Queue-defined
+      // ITransitionPolicy port). Shared types belong in the shared kernel.
+      name: 'queue-no-store-config',
+      severity: 'error',
+      from: { path: '^src/domain/queue/' },
+      to: { path: '^src/domain/store-config/' },
+    },
+    {
+      // No circular imports within the domain.
+      name: 'domain-no-circular',
+      severity: 'error',
+      from: { path: '^src/domain/' },
+      to: { path: '^src/domain/', circular: true },
+    },
+  ],
+  options: {
+    doNotFollow: { path: 'node_modules' },
+    tsPreCompilationDeps: true,
+    enhancedResolveOptions: { exportsFields: ['exports'] },
+    exclude: { path: ['test/', '\\.spec\\.', '\\.d\\.ts$'] },
+  },
+};
