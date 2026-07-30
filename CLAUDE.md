@@ -152,10 +152,22 @@ with no duplicate/lost ticket numbers.
 - Domain purity is enforced by **dependency-cruiser** — run
   `npm run arch:check` from `services/core-api`. It forbids `src/domain/**`
   from importing any ORM/HTTP/IO library (NFR-MNT-01) and forbids the Queue
-  bounded context from importing Store Config internals (anti-corruption).
-  Types shared across bounded contexts (e.g. `PriorityPolicy`) live in the
-  shared kernel `src/domain/shared/`. Aggregate IDs are branded types
-  (e.g. `TicketId`) to prevent cross-aggregate ID confusion.
+  bounded context from importing Store Config internals (anti-corruption). It
+  also forbids `src/application/**` from importing `src/infrastructure/**`
+  (`application-no-infrastructure`) so use cases depend on domain ports, never
+  concrete repos (DIP). Types shared across bounded contexts (e.g.
+  `PriorityPolicy`) live in the shared kernel `src/domain/shared/`. Aggregate
+  IDs are branded types (e.g. `TicketId`) to prevent cross-aggregate ID
+  confusion.
+- **Use-case conventions** (`src/application/**`): a use case injects only
+  domain **ports** (interfaces) — e.g. `IQueueRepository`,
+  `ICounterRoutingRuleRepository`, `ITransitionPolicy` — never infrastructure
+  concretions. It returns a transport-agnostic **DTO** (discriminated-union
+  result), never the aggregate itself, so the interface-adapter layer maps it
+  to HTTP/WS. Command + result DTOs are co-located with the use case. The
+  active `StateMachine` (from `SystemConfiguration`) is supplied to the use
+  case as an `ITransitionPolicy` by the interface-adapter/DI layer, not loaded
+  by the use case.
 - **dep-cruiser resolution gotcha:** `arch:check` flags a bare import as
   `not-to-unresolvable` when the package's `package.json` `exports` field has no
   `default` condition (e.g. `ws`). Either add `conditionNames` to

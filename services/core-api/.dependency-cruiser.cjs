@@ -39,6 +39,15 @@ module.exports = {
       from: { path: '^src/domain/' },
       to: { path: '^src/domain/', circular: true },
     },
+    {
+      // NFR-MNT-01 (Clean Architecture) applied to the Application layer: use
+      // cases depend on domain ports, never on infrastructure concretions
+      // (DIP). The interface-adapter layer wires concrete repositories in.
+      name: 'application-no-infrastructure',
+      severity: 'error',
+      from: { path: '^src/application/' },
+      to: { path: '^src/infrastructure/' },
+    },
   ],
   options: {
     doNotFollow: { path: 'node_modules' },
