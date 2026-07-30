@@ -139,12 +139,15 @@ with no duplicate/lost ticket numbers.
   The `services/core-api/` NestJS project and its Clean Architecture domain
   layer are merged (QUE-8, PR #1); QUE-12 added the local WebSocket broadcaster;
   QUE-10 added the state-transition validator + queue action use cases (merged,
-  PR #4). QUE-19 scaffolded `services/caller-service/` (Vite + React + TS PWA)
-  and added core-api's first read-only REST surface (`GET /api/counters`,
-  `GET /api/queue?counterId=N`) — In Review, PR #5. QUE-9 added ticket
-  generation: `CreateTicketUseCase` + `POST /api/tickets` (per-category, per-day
-  `A-001` sequence via `ISequenceRepository`). Other services are not yet
-  scaffolded.
+  PR #4). QUE-19 (merged, PR #5) scaffolded `services/caller-service/`
+  (Vite + React + TS PWA) and added core-api's first read-only REST surface
+  (`GET /api/counters`, `GET /api/queue?counterId=N`). QUE-9 (merged, PR #6)
+  added ticket generation: `CreateTicketUseCase` + `POST /api/tickets`
+  (per-category, per-day `A-001` sequence via `ISequenceRepository`). QUE-17
+  (In Review, PR #7) scaffolded `services/kiosk-service/` (Vite + React + TS PWA,
+  the visitor touchscreen kiosk, port 3001 at `/kiosk`) and added
+  `GET /api/categories` (`ListCategoriesUseCase`) for the kiosk category-select
+  screen. Other services (`tv-display`, `admin`) are not yet scaffolded.
 - **PRD language:** the Linear PRD is written in **Bahasa Indonesia** with
   English technical terms. UI `action_label` values ("Panggil Berikutnya",
   "Lewati / Absen", "Selesai Layan") are Indonesian — match them verbatim
@@ -224,6 +227,17 @@ with no duplicate/lost ticket numbers.
   the same per-concern module split. A use-case module imports
   `PersistenceModule` + `RealtimeModule` and provides the framework-free use
   case via a factory injecting the repo tokens + `QueueEventDispatcher`.
+  **Read use cases live in the bounded context that owns the entity they
+  read:** `ListCategoriesUseCase` (`GET /api/categories`, QUE-17) lives in
+  `application/queue` because `Category` is a Queue-context entity, and it joins
+  the read-only `RestApiModule` — even though categories are also referenced by
+  `CounterRoutingRule` in Store Config, the read stays in its owning context
+  and does **not** join routing data (anti-corruption).
+- **Kiosk ticket flow (QUE-17):** the kiosk takes a category via
+  `GET /api/categories`, then `POST /api/tickets` (QUE-9) on tap, and shows the
+  issued `ticketNumber` on a result screen. Printing is QUE-18 (not wired here).
+  The kiosk owns only selection + issuance — **no realtime/WS** (it is not a
+  queue monitor) and no per-device binding.
 - **`QueueEventDispatcher` import gotcha:** the dispatcher is NOT re-exported
   by the `src/application/queue` barrel — import it via the direct path
   `src/application/queue/queue-event-dispatcher` (as `realtime.module.ts` and
@@ -252,6 +266,23 @@ with no duplicate/lost ticket numbers.
     `onopen`/`onmessage` handler). In RTL tests, assert the resulting DOM with
     `await screen.findByText(...)`, not the synchronous `screen.getByText(...)`
     which reads the DOM before the batched re-render flushes.
+  - **`tsc -b` composite artifacts are build output, not source.**
+    `tsconfig.node.json` (`composite: true`, includes `vite.config.ts`) emits
+    `vite.config.js`, `vite.config.d.ts`, and `*.tsbuildinfo` on every build.
+    Add a per-service `.gitignore` excluding them so the tree doesn't churn on
+    each build — `caller-service` predates this rule and tracks them; new
+    frontends (`kiosk-service` onward) gitignore them.
+  - **Public-touchscreen mutations need a synchronous double-tap guard.**
+    `disabled` only takes effect after a re-render, so two clicks landing in the
+    same tick both pass a state-based guard. For a kiosk "issue ticket" tap,
+    flip a `useRef<boolean>` in-flight flag *before* the first `await` and reset
+    it in `finally`; keep `disabled` as the visible affordance. Two taps must
+    produce exactly one mutation (asserted in the kiosk tests).
+  - **PWA `base`/`start_url`/`scope` must match the NGINX route** (e.g.
+    `/kiosk/`, `/caller/`) — otherwise an installed PWA's `start_url` resolves to
+    the gateway root, not the service, breaking offline launch. Set them when
+    scaffolding a new frontend. (Latent gap: `caller-service` and `kiosk-service`
+    currently use `/`; align existing services during the Hardening milestone.)
 - When adding a feature, map it to the relevant FR-* / NFR-* requirement in the
   PRD and the bounded context it belongs to. Preserve the interface boundaries
   (e.g. don't leak admin DTOs into `ICallerApi`).

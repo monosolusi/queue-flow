@@ -2,6 +2,7 @@ export * from './call-next-ticket.use-case';
 export * from './complete-ticket.use-case';
 export * from './create-ticket.use-case';
 export * from './get-queue-snapshot.use-case';
+export * from './list-categories.use-case';
 export * from './recall-ticket.use-case';
 export * from './serve-ticket.use-case';
 export * from './skip-ticket.use-case';

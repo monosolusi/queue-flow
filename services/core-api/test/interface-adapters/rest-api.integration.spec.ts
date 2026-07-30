@@ -28,16 +28,17 @@ import {
 
 /**
  * Integration: boots the real Nest app with the in-memory persistence module
- * and exercises the read-only REST surface the caller workspace depends on
- * (QUE-19). `QMS_DEV_SEED` is left unset so the dev seed does not run; data is
- * seeded directly through the repository tokens.
+ * and exercises the read-only REST surface the caller and kiosk workspaces
+ * depend on (QUE-19 + QUE-17). `QMS_DEV_SEED` is left unset so the dev seed
+ * does not run; data is seeded directly through the repository tokens.
  */
-describe('Caller REST read surface (integration — QUE-19)', () => {
+describe('Read-only REST surface (integration — QUE-19 + QUE-17)', () => {
   let app: INestApplication;
   let queue: IQueueRepository;
   let routingRules: ICounterRoutingRuleRepository;
   let categories: ICategoryRepository;
   let catAId: string;
+  let catBId: string;
 
   beforeAll(async () => {
     // AppModule wires the WS gateway, so the ws adapter must be bound to the
@@ -66,6 +67,7 @@ describe('Caller REST read surface (integration — QUE-19)', () => {
     await categories.save(catA);
     await categories.save(catB);
     catAId = catA.id.value;
+    catBId = catB.id.value;
 
     await routingRules.save(
       CounterRoutingRule.create(
@@ -124,6 +126,27 @@ describe('Caller REST read surface (integration — QUE-19)', () => {
       'A',
       'B',
     ]);
+  });
+
+  it('GET /api/categories returns the active categories for the kiosk screen (QUE-17)', async () => {
+    const res = await request(app.getHttpServer()).get('/api/categories');
+
+    expect(res.status).toBe(200);
+    // Seeded categories are A (Customer Service) and B (Kasir & Pembayaran).
+    expect(res.body).toHaveLength(2);
+    expect(res.body).toEqual([
+      { id: catAId, code: 'A', name: 'Customer Service' },
+      { id: catBId, code: 'B', name: 'Kasir & Pembayaran' },
+    ]);
+  });
+
+  it('GET /api/categories returns an empty list when no categories are configured', async () => {
+    (categories as InMemoryCategoryRepository).clear();
+
+    const res = await request(app.getHttpServer()).get('/api/categories');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
   });
 
   it('GET /api/queue?counterId=1 returns the active ticket and waiting queue for counter 1', async () => {
