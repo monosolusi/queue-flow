@@ -6,13 +6,15 @@
  * bounded context produced the event.
  *
  * `type` mirrors the {@link DomainEvent.type} constants exactly
- * (TICKET_CREATED, TICKET_CALLED, STATUS_UPDATED, SYSTEM_RESET).
+ * (TICKET_CREATED, TICKET_CALLED, STATUS_UPDATED, SYSTEM_RESET,
+ * TICKET_TRANSFERRED).
  */
 export type QueueLifecycleEventType =
   | 'TICKET_CREATED'
   | 'TICKET_CALLED'
   | 'STATUS_UPDATED'
-  | 'SYSTEM_RESET';
+  | 'SYSTEM_RESET'
+  | 'TICKET_TRANSFERRED';
 
 export interface TicketCreatedPayload {
   /** Formatted ticket number, e.g. "A-001". */
@@ -42,11 +44,23 @@ export interface SystemResetPayload {
   date: string;
 }
 
+export interface TicketTransferredPayload {
+  /** Category the ticket was moved from. */
+  fromCategoryId: string;
+  /** Category the ticket was moved to. */
+  toCategoryId: string;
+  /** Previous formatted ticket number, e.g. "A-001". */
+  fromTicketNumber: string;
+  /** New formatted ticket number issued under the target category. */
+  toTicketNumber: string;
+}
+
 export type QueueLifecyclePayload =
   | TicketCreatedPayload
   | TicketCalledPayload
   | StatusUpdatedPayload
-  | SystemResetPayload;
+  | SystemResetPayload
+  | TicketTransferredPayload;
 
 export interface QueueLifecycleWireEvent {
   type: QueueLifecycleEventType;

@@ -5,6 +5,7 @@ import {
   TicketCalledEvent,
   TicketCreatedEvent,
   TicketStatusChangedEvent,
+  TicketTransferredEvent,
 } from '../../src/domain/queue';
 import { WireEventMapper } from '../../src/interface-adapters/websocket/wire-event.mapper';
 
@@ -56,6 +57,24 @@ describe('WireEventMapper', () => {
       occurredAt: now,
       version: 1,
       payload: { resetTo: 1, date: '2026-07-30' },
+    });
+  });
+
+  it('maps TicketTransferredEvent to a TICKET_TRANSFERRED envelope', () => {
+    const wire = mapper.toWire(
+      new TicketTransferredEvent(id, 'CAT-A', 'CAT-B', 'A-001', 'B-007', now),
+    );
+    expect(wire).toEqual({
+      type: 'TICKET_TRANSFERRED',
+      aggregateId: id,
+      occurredAt: now,
+      version: 1,
+      payload: {
+        fromCategoryId: 'CAT-A',
+        toCategoryId: 'CAT-B',
+        fromTicketNumber: 'A-001',
+        toTicketNumber: 'B-007',
+      },
     });
   });
 

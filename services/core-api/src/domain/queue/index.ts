@@ -4,6 +4,7 @@ export * from './events/daily-queue-reset.event';
 export * from './events/ticket-called.event';
 export * from './events/ticket-created.event';
 export * from './events/ticket-status-changed.event';
+export * from './events/ticket-transferred.event';
 export * from './queue-ticket.aggregate';
 export * from './repositories/category.repository';
 export * from './repositories/queue.repository';

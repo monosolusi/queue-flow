@@ -4,6 +4,7 @@ import {
   TicketCalledEvent,
   TicketCreatedEvent,
   TicketStatusChangedEvent,
+  TicketTransferredEvent,
 } from '../../domain/queue';
 import type { QueueLifecycleWireEvent } from './dto/wire-event';
 
@@ -55,6 +56,18 @@ export class WireEventMapper {
         type: 'SYSTEM_RESET',
         ...base,
         payload: { resetTo: event.resetTo, date: event.date },
+      };
+    }
+    if (event instanceof TicketTransferredEvent) {
+      return {
+        type: 'TICKET_TRANSFERRED',
+        ...base,
+        payload: {
+          fromCategoryId: event.fromCategoryId,
+          toCategoryId: event.toCategoryId,
+          fromTicketNumber: event.fromTicketNumber,
+          toTicketNumber: event.toTicketNumber,
+        },
       };
     }
 

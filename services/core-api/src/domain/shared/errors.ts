@@ -47,3 +47,18 @@ export class EntityNotFoundException extends DomainError {
     super(`${entity} not found for id '${id}'`, 'ENTITY_NOT_FOUND');
   }
 }
+
+/**
+ * Thrown when an operation requires the active state machine but the store's
+ * {@link SystemConfiguration} has not been initialized yet — i.e. the first-run
+ * setup wizard has not completed. Supports the first-run guard FR-WZD-01: queue
+ * control actions are unavailable until the system is configured.
+ */
+export class SystemNotConfiguredException extends DomainError {
+  constructor() {
+    super(
+      'System configuration is not initialized — complete the first-run setup wizard first.',
+      'SYSTEM_NOT_CONFIGURED',
+    );
+  }
+}

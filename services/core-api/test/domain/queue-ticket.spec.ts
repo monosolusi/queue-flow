@@ -5,11 +5,16 @@ import {
   TicketStatus,
   ticketIdGenerate,
 } from '../../src/domain/queue';
-import { StateMachine } from '../../src/domain/store-config';
+import {
+  StateMachine,
+  StateSchema,
+  StateTransitionRule,
+} from '../../src/domain/store-config';
 import {
   TicketCalledEvent,
   TicketCreatedEvent,
   TicketStatusChangedEvent,
+  TicketTransferredEvent,
 } from '../../src/domain/queue';
 
 const FIXED_NOW = 1_700_000_000_000;
@@ -119,5 +124,106 @@ describe('QueueTicket aggregate', () => {
     ticket.markCalling(1, policy, FIXED_NOW);
     expect(ticket.pullDomainEvents().length).toBeGreaterThan(0);
     expect(ticket.pullDomainEvents()).toHaveLength(0);
+  });
+
+  describe('transferTo (pindah kategori — FR-CLR-03)', () => {
+    /**
+     * The default state machine has no transfer edge. A transfer is a
+     * first-class configurable transition, so the legal-transfer test uses a
+     * machine that adds `CALLING -> WAITING` ("Pindah Kategori") to the PRD §7
+     * default edges — exactly what the wizard/admin would configure to enable
+     * transfers.
+     */
+    const transferPolicy = new StateMachine(
+      StateSchema.of([
+        'WAITING',
+        'CALLING',
+        'SERVING',
+        'SKIPPED',
+        'COMPLETED',
+      ]),
+      [
+        ['WAITING', 'CALLING', 'Panggil Berikutnya'],
+        ['CALLING', 'SERVING', 'Mulai Melayani'],
+        ['CALLING', 'SKIPPED', 'Lewati / Absen'],
+        ['SKIPPED', 'CALLING', 'Panggil Ulang'],
+        ['SERVING', 'COMPLETED', 'Selesai Layan'],
+        ['CALLING', 'WAITING', 'Pindah Kategori'],
+      ].map(([from, to, actionLabel]) =>
+        StateTransitionRule.of(from, to, actionLabel),
+      ),
+    );
+
+    it('reassigns category + ticket number, clears the counter, and returns to WAITING', () => {
+      const ticket = newTicket('CAT-A');
+      ticket.markCalling(3, transferPolicy, FIXED_NOW);
+      ticket.pullDomainEvents(); // drop call events to isolate transfer
+
+      ticket.transferTo(
+        'CAT-B',
+        TicketNumber.of('B', 7),
+        TicketStatus.WAITING,
+        transferPolicy,
+        FIXED_NOW + 1,
+      );
+
+      expect(ticket.currentStatus).toBe(TicketStatus.WAITING);
+      expect(ticket.categoryId).toBe('CAT-B');
+      expect(ticket.ticketNumber.formatted()).toBe('B-007');
+      expect(ticket.counterId).toBeNull();
+    });
+
+    it('emits a STATUS_UPDATED and a TICKET_TRANSFERRED event carrying old/new category + number', () => {
+      const ticket = newTicket('CAT-A');
+      ticket.markCalling(1, transferPolicy, FIXED_NOW);
+      ticket.pullDomainEvents();
+
+      ticket.transferTo(
+        'CAT-B',
+        TicketNumber.of('B', 7),
+        TicketStatus.WAITING,
+        transferPolicy,
+        FIXED_NOW + 1,
+      );
+
+      const events = ticket.pullDomainEvents();
+      expect(events.map((e) => e.type)).toEqual([
+        'STATUS_UPDATED',
+        'TICKET_TRANSFERRED',
+      ]);
+      expect(events[0]).toBeInstanceOf(TicketStatusChangedEvent);
+      expect((events[0] as TicketStatusChangedEvent).actionLabel).toBe(
+        'Pindah Kategori',
+      );
+      expect(events[1]).toBeInstanceOf(TicketTransferredEvent);
+      const transferred = events[1] as TicketTransferredEvent;
+      expect(transferred.fromCategoryId).toBe('CAT-A');
+      expect(transferred.toCategoryId).toBe('CAT-B');
+      expect(transferred.fromTicketNumber).toBe('A-001');
+      expect(transferred.toTicketNumber).toBe('B-007');
+    });
+
+    it('throws InvalidStateTransitionException when the active machine has no transfer edge', () => {
+      // StateMachine.DEFAULT has no CALLING -> WAITING edge.
+      const ticket = newTicket();
+      ticket.markCalling(1, policy, FIXED_NOW);
+      ticket.pullDomainEvents();
+
+      expect(() =>
+        ticket.transferTo(
+          'CAT-B',
+          TicketNumber.of('B', 1),
+          TicketStatus.WAITING,
+          policy,
+          FIXED_NOW + 1,
+        ),
+      ).toThrow(InvalidStateTransitionException);
+
+      // State must be unchanged and no event recorded after a rejected transfer.
+      expect(ticket.currentStatus).toBe(TicketStatus.CALLING);
+      expect(ticket.categoryId).toBe('CAT-A');
+      expect(ticket.ticketNumber.formatted()).toBe('A-001');
+      expect(ticket.pendingEventCount).toBe(0);
+    });
   });
 });
