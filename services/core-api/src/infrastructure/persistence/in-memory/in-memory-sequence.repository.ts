@@ -31,4 +31,9 @@ export class InMemorySequenceRepository implements ISequenceRepository {
       }
     }
   }
+
+  /** Test/dev-only: drops all sequence counters. Not on the port interface. */
+  clear(): void {
+    this.sequences.clear();
+  }
 }

@@ -141,7 +141,9 @@ with no duplicate/lost ticket numbers.
   QUE-10 added the state-transition validator + queue action use cases (merged,
   PR #4). QUE-19 scaffolded `services/caller-service/` (Vite + React + TS PWA)
   and added core-api's first read-only REST surface (`GET /api/counters`,
-  `GET /api/queue?counterId=N`) — In Review, PR #5. Other services are not yet
+  `GET /api/queue?counterId=N`) — In Review, PR #5. QUE-9 added ticket
+  generation: `CreateTicketUseCase` + `POST /api/tickets` (per-category, per-day
+  `A-001` sequence via `ISequenceRepository`). Other services are not yet
   scaffolded.
 - **PRD language:** the Linear PRD is written in **Bahasa Indonesia** with
   English technical terms. UI `action_label` values ("Panggil Berikutnya",
@@ -200,6 +202,32 @@ with no duplicate/lost ticket numbers.
   app boots on `@nestjs/platform-express` — both platform packages must stay
   installed or `NestFactory.create` fails with "No driver (HTTP) has been
   selected."
+- **Ticket generation & daily sequence (QUE-9):** the kiosk takes a ticket via
+  `POST /api/tickets` → `CreateTicketUseCase`, which resolves the category,
+  reserves a per-category, per-day number (`A-001`) from the
+  `ISequenceRepository` port (atomic — no dupes/gaps, NFR-REL-02), mints a
+  `QueueTicket` (WAITING), persists, and broadcasts `TICKET_CREATED`. The daily
+  sequence key is `YYYY-MM-DD` in the store's **local** time (not UTC — single
+  on-premise box, NFR-SEC-01), owned by the **application layer** (a pure
+  `toDateKey(epochMs)` helper) and derived from an injected `clock` so the date
+  convention stays out of the pure domain and is testable. The
+  `ISequenceRepository` port carries a `SEQUENCE_REPOSITORY` Symbol DI token
+  like the other repo ports. True gap-free durability (reserve + insert in one
+  DB transaction) is the future PostgreSQL repo's job (QUE-28) — the in-memory
+  impl is tests/dev only.
+- **REST surface separation:** the read-only caller workspace surface
+  (`GET /api/counters`, `GET /api/queue`) lives in `RestApiModule` (QUE-19).
+  Mutation endpoints get their own module by concern — the kiosk
+  ticket-creation surface is `TicketsApiModule` (`POST /api/tickets`), kept
+  separate so the read-only module's purpose stays clean (SRP). Caller command
+  endpoints (call-next, serve, transfer, …) arrive in QUE-20 and should follow
+  the same per-concern module split. A use-case module imports
+  `PersistenceModule` + `RealtimeModule` and provides the framework-free use
+  case via a factory injecting the repo tokens + `QueueEventDispatcher`.
+- **`QueueEventDispatcher` import gotcha:** the dispatcher is NOT re-exported
+  by the `src/application/queue` barrel — import it via the direct path
+  `src/application/queue/queue-event-dispatcher` (as `realtime.module.ts` and
+  `tickets-api.module.ts` do), not from the `application/queue` index.
 - Frontends are React-family; `caller-service` is a PWA. Keep them
   offline-capable (bundle + precache all assets — vite-plugin-pwa; relative
   `/api` + `/ws` URLs so they're same-origin behind NGINX with no per-service
