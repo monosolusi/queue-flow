@@ -124,8 +124,9 @@ with no duplicate/lost ticket numbers.
 
 ## Repo state
 
-- **Not yet a git repository** — no commits, no `.git`. The only existing
-  content is `.claude/agents/`. Initialize git before the first commit.
+- **Git initialized** — remote `monosolusi/queue-flow`, default branch `main`.
+  The `services/core-api/` NestJS project and its Clean Architecture domain
+  layer are scaffolded (QUE-8). Other services are not yet scaffolded.
 - **PRD language:** the Linear PRD is written in **Bahasa Indonesia** with
   English technical terms. UI `action_label` values ("Panggil Berikutnya",
   "Lewati / Absen", "Selesai Layan") are Indonesian — match them verbatim
@@ -136,9 +137,24 @@ with no duplicate/lost ticket numbers.
 - The repo is a monorepo; each service lives in its own directory (e.g.
   `services/core-api/`, `services/kiosk/`). Establish this layout when
   scaffolding starts if no structure exists yet.
-- Backend language choice (Node.js/NestJS vs Go) for `core-api-service` is open
-  per the PRD — confirm with the team before committing; either way the Clean
-  Architecture layering rules apply identically.
+- Backend stack for `core-api-service` is **NestJS + TypeScript** (decided in
+  QUE-8, 2026-07-30 — the PRD left Node.js/NestJS vs Go open). The monorepo is
+  TypeScript throughout (frontends are React-family TS). The Domain layer
+  (`src/domain/**`) is pure TypeScript with zero framework/ORM/IO imports; the
+  Clean Architecture layering rules apply identically.
+- `core-api` internal layout: `src/domain` (pure, framework-free entities/VOs/
+  aggregates/events/ports), `src/application` (use cases), `src/infrastructure`
+  (repo implementations — `persistence/in-memory/` now, PostgreSQL later),
+  `src/interface-adapters` (REST controllers / WS gateways, added later).
+  Repository interfaces are **ports defined in the domain layer**; concrete
+  implementations live in infrastructure.
+- Domain purity is enforced by **dependency-cruiser** — run
+  `npm run arch:check` from `services/core-api`. It forbids `src/domain/**`
+  from importing any ORM/HTTP/IO library (NFR-MNT-01) and forbids the Queue
+  bounded context from importing Store Config internals (anti-corruption).
+  Types shared across bounded contexts (e.g. `PriorityPolicy`) live in the
+  shared kernel `src/domain/shared/`. Aggregate IDs are branded types
+  (e.g. `TicketId`) to prevent cross-aggregate ID confusion.
 - Frontends are React-family; `caller-service` is a PWA. Keep them offline-capable.
 - When adding a feature, map it to the relevant FR-* / NFR-* requirement in the
   PRD and the bounded context it belongs to. Preserve the interface boundaries
@@ -156,3 +172,6 @@ agent for ticket lifecycle and the `linear-*` skills (`linear-create-issue`,
 - **API gotcha:** `list_projects` with multiple `include*` flags raises a
   "query too complex" 400. Instead, `list_projects` filtered by `team` +
   `query:"QMS"`, then `get_project` (by name) for the full description.
+- **Ticket lifecycle convention:** move a ticket to **In Progress** once its
+  plan is approved (before coding begins), and to **In Review** when its PR is
+  opened. Attach the PR link to the Linear issue.
