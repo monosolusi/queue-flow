@@ -126,7 +126,8 @@ with no duplicate/lost ticket numbers.
 
 - **Git initialized** — remote `monosolusi/queue-flow`, default branch `main`.
   The `services/core-api/` NestJS project and its Clean Architecture domain
-  layer are scaffolded (QUE-8). Other services are not yet scaffolded.
+  layer are merged (QUE-8, PR #1); QUE-12 added the local WebSocket broadcaster.
+  Other services are not yet scaffolded.
 - **PRD language:** the Linear PRD is written in **Bahasa Indonesia** with
   English technical terms. UI `action_label` values ("Panggil Berikutnya",
   "Lewati / Absen", "Selesai Layan") are Indonesian — match them verbatim
@@ -167,6 +168,23 @@ with no duplicate/lost ticket numbers.
   active `StateMachine` (from `SystemConfiguration`) is supplied to the use
   case as an `ITransitionPolicy` by the interface-adapter/DI layer, not loaded
   by the use case.
+- **dep-cruiser resolution gotcha:** `arch:check` flags a bare import as
+  `not-to-unresolvable` when the package's `package.json` `exports` field has no
+  `default` condition (e.g. `ws`). Either add `conditionNames` to
+  `enhancedResolveOptions` in `.dependency-cruiser.cjs`, or don't import the
+  package directly in `src/` — depend on `@nestjs/*` wrappers or local
+  structural types instead (the WS gateway does the latter).
+- **NestJS DI for interface ports:** `interface` ports (`IQueueRepository`,
+  `IQueueEventPublisher`, …) are erased at runtime, so NestJS can't resolve
+  them by type metadata. Inject each via a co-located Symbol token + `@Inject`
+  (see `QUEUE_EVENT_PUBLISHER` in `event-publisher.port.ts`), and bind it in the
+  module with `{ provide: <token>, useClass: <impl> }`.
+- **Realtime stack (QUE-12):** the WS gateway uses `@nestjs/platform-ws`
+  (`WsAdapter`) and shares the HTTP port at path `/ws` (a gateway with no
+  explicit port binds `noServer` onto the HTTP server's `upgrade` event). The
+  app boots on `@nestjs/platform-express` — both platform packages must stay
+  installed or `NestFactory.create` fails with "No driver (HTTP) has been
+  selected."
 - Frontends are React-family; `caller-service` is a PWA. Keep them offline-capable.
 - When adding a feature, map it to the relevant FR-* / NFR-* requirement in the
   PRD and the bounded context it belongs to. Preserve the interface boundaries
@@ -187,3 +205,7 @@ agent for ticket lifecycle and the `linear-*` skills (`linear-create-issue`,
 - **Ticket lifecycle convention:** move a ticket to **In Progress** once its
   plan is approved (before coding begins), and to **In Review** when its PR is
   opened. Attach the PR link to the Linear issue.
+- **Branch naming:** `<type>/que-<n>-<slug>` where `<type>` ∈
+  `feat`/`fix`/`refactor`/`chore` (e.g.
+  `feat/que-12-local-websocket-event-broadcaster`). This overrides Linear's
+  suggested `franssiswanto/que-…` branch name.
