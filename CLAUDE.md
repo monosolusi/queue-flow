@@ -164,9 +164,10 @@ with no duplicate/lost ticket numbers.
   and the DoD-1..4 acceptance suite (`services/core-api/test/acceptance/`). The
   in-memory profile stays the dev/test default; `QMS_PERSISTENCE=postgres`
   activates the Postgres profile (DoD-4 verifies power-cut recovery against a
-  real Postgres). Remaining Hardening work: audit-trail analytics surface,
-  re-arming the daily-reset cron on wizard config change (pairs with audit),
-  and aligning `caller-service` PWA `base` to `/caller/`.
+  real Postgres). Remaining Hardening work: audit-trail analytics surface and
+  re-arming the daily-reset cron on wizard config change (pairs with audit).
+  The frontend PWA `base`/`start_url`/`scope` alignment (`/kiosk/`, `/tv/`,
+  `/caller/`, `/admin/`) is complete across all four services (QUE-27).
 - **PRD language:** the Linear PRD is written in **Bahasa Indonesia** with
   English technical terms. UI `action_label` values ("Panggil Berikutnya",
   "Lewati / Absen", "Selesai Layan") are Indonesian — match them verbatim
@@ -403,6 +404,30 @@ with no duplicate/lost ticket numbers.
   Its `resetDb()` drops+recreates the `public` schema (not `TRUNCATE`, which
   fails on a cold DB with "relation does not exist") so the next boot re-applies
   all migrations from pristine.
+- **Compose boot-order (QUE-27):** the `gateway` must `depends_on
+  core-api-service` with `condition: service_healthy`, and `core-api-service`
+  must carry a healthcheck (`/api/health` via `wget`, which ships in
+  `node:20-alpine` — no curl). Without it, nginx starts as soon as the
+  container process does and 502s through the ~1–2 s Nest bootstrap +
+  migration-runner window. `/api/health` (`HealthController`) answers
+  pre-wizard, so it is a true liveness probe, not just a process probe. The
+  four static-PWA frontends stay on `service_started` (their nginx is ready
+  instantly — no healthcheck needed).
+- **Topology smoke test (QUE-27):** `npm run compose:verify`
+  (`scripts/verify-topology.mjs`) is the gate proving the compose topology
+  serves every PRD route through the gateway. Tier 1 (no Docker daemon)
+  validates `docker compose config` + asserts all seven PRD services are
+  declared; tier 2 (when a daemon is up) boots the stack and asserts
+  `/api/health` 200, the `/` + `/wizard` 301 redirects, and the four PWA
+  routes 200 via the gateway, then `docker compose down -v`. It is
+  intentionally NOT part of `scripts/run-verify.mjs` so the per-service
+  unit/build gate gains no Docker dependency. **Gateway redirect assertion
+  gotcha:** nginx emits an ABSOLUTE `Location` (e.g. `http://localhost/admin/`)
+  for a relative `return 301 /admin/` (it resolves against the `Host` header),
+  so route assertions must match `Location` by suffix (`endsWith('/admin/')`),
+  not strict equality — and use Node's `http` module, not `fetch`
+  (`redirect: 'manual'` returns an opaqueredirect response with status 0 and
+  filtered headers, hiding the 301).
 - Frontends are React-family; `caller-service` is a PWA. Keep them
   offline-capable (bundle + precache all assets — vite-plugin-pwa; relative
   `/api` + `/ws` URLs so they're same-origin behind NGINX with no per-service
@@ -442,8 +467,8 @@ with no duplicate/lost ticket numbers.
   - **PWA `base`/`start_url`/`scope` must match the NGINX route** (e.g.
     `/kiosk/`, `/caller/`) — otherwise an installed PWA's `start_url` resolves to
     the gateway root, not the service, breaking offline launch. Set them when
-    scaffolding a new frontend. (Latent gap: `caller-service` and `kiosk-service`
-    currently use `/`; align existing services during the Hardening milestone.)
+    scaffolding a new frontend. (All four existing frontends — admin, kiosk, tv,
+    caller — are already aligned to their `/svc/` prefix; QUE-27.)
 - When adding a feature, map it to the relevant FR-* / NFR-* requirement in the
   PRD and the bounded context it belongs to. Preserve the interface boundaries
   (e.g. don't leak admin DTOs into `ICallerApi`).
