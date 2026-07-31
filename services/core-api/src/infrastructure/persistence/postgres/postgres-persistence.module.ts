@@ -8,6 +8,7 @@ import {
   COUNTER_ROUTING_RULE_REPOSITORY,
   SYSTEM_CONFIGURATION_REPOSITORY,
 } from '../../../domain/store-config';
+import { AUDIT_LOG_REPOSITORY } from '../../../domain/audit';
 import { TRANSACTION_MANAGER } from '../../../domain/shared';
 import { PG_CONNECTION, createPgPool } from './postgres-connection.provider';
 import { PostgresQueueRepository } from './postgres-queue.repository';
@@ -15,6 +16,7 @@ import { PostgresSequenceRepository } from './postgres-sequence.repository';
 import { PostgresCategoryRepository } from './postgres-category.repository';
 import { PostgresCounterRoutingRuleRepository } from './postgres-counter-routing-rule.repository';
 import { PostgresSystemConfigurationRepository } from './postgres-system-configuration.repository';
+import { PostgresAuditLogRepository } from './postgres-audit-log.repository';
 import { PostgresTransactionManager } from './postgres-transaction-manager';
 import { PostgresMigrationRunner } from './migration-runner';
 
@@ -40,6 +42,7 @@ import { PostgresMigrationRunner } from './migration-runner';
       provide: SYSTEM_CONFIGURATION_REPOSITORY,
       useClass: PostgresSystemConfigurationRepository,
     },
+    { provide: AUDIT_LOG_REPOSITORY, useClass: PostgresAuditLogRepository },
     {
       provide: TRANSACTION_MANAGER,
       useFactory: (pool) => new PostgresTransactionManager(pool),
@@ -53,6 +56,7 @@ import { PostgresMigrationRunner } from './migration-runner';
     CATEGORY_REPOSITORY,
     COUNTER_ROUTING_RULE_REPOSITORY,
     SYSTEM_CONFIGURATION_REPOSITORY,
+    AUDIT_LOG_REPOSITORY,
     TRANSACTION_MANAGER,
   ],
 })

@@ -23,8 +23,14 @@ import {
   DailyResetMode,
   SystemConfiguration,
 } from '../../src/domain/store-config';
+import {
+  type IAuditLogRepository,
+  AUDIT_LOG_REPOSITORY,
+  AuditAction,
+} from '../../src/domain/audit';
 import { Identifier } from '../../src/domain/shared';
 import {
+  InMemoryAuditLogRepository,
   InMemoryCategoryRepository,
   InMemoryQueueRepository,
   InMemorySequenceRepository,
@@ -48,6 +54,7 @@ describe('System daily-reset REST surface (integration — QUE-2)', () => {
   let categories: ICategoryRepository;
   let sequences: ISequenceRepository;
   let systemConfig: ISystemConfigurationRepository;
+  let auditLog: IAuditLogRepository;
   let port: number;
   let catAId: string;
 
@@ -60,6 +67,7 @@ describe('System daily-reset REST surface (integration — QUE-2)', () => {
     categories = app.get(CATEGORY_REPOSITORY);
     sequences = app.get(SEQUENCE_REPOSITORY);
     systemConfig = app.get(SYSTEM_CONFIGURATION_REPOSITORY);
+    auditLog = app.get(AUDIT_LOG_REPOSITORY);
   });
 
   afterAll(async () => {
@@ -71,6 +79,7 @@ describe('System daily-reset REST surface (integration — QUE-2)', () => {
     (categories as InMemoryCategoryRepository).clear();
     (sequences as InMemorySequenceRepository).clear();
     (systemConfig as InMemorySystemConfigurationRepository).clear();
+    (auditLog as InMemoryAuditLogRepository).clear();
 
     const catA = new Category(Identifier.generate(), 'A', 'Customer Service');
     await categories.save(catA);
@@ -195,5 +204,20 @@ describe('System daily-reset REST surface (integration — QUE-2)', () => {
 
     // Today's counter rolled back to resetTo (1) means the next mint is A-001.
     expect(await sequences.currentSequence(catAId, today)).toBe(0); // resetDaily sets to resetTo - 1
+  });
+
+  it('a manual daily-reset records a MANUAL_RESET audit entry (NFR-SEC-02)', async () => {
+    expect(await auditLog.list()).toHaveLength(0);
+
+    const res = await request(app.getHttpServer()).post('/api/system/daily-reset');
+    expect(res.status).toBe(201);
+
+    const entries = await auditLog.list();
+    expect(entries).toHaveLength(1);
+    expect(entries[0].action).toBe(AuditAction.MANUAL_RESET);
+    expect(entries[0].actor).toBe('admin');
+    expect(entries[0].after.resetTo).toBe(1);
+    expect(typeof entries[0].after.date).toBe('string');
+    expect(entries[0].before).toBeNull();
   });
 });

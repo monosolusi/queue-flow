@@ -33,6 +33,9 @@ export class SystemAdminController {
       throw new SystemNotConfiguredException();
     }
     const resetTo = system.dailyResetPolicy.resetTicketNumberTo;
-    return this.resetDailyQueue.execute({ resetTo });
+    // `actor` marks this as a manual, human-triggered reset so the use case
+    // records a `MANUAL_RESET` audit entry (NFR-SEC-02). The automatic
+    // cron-driven reset omits `actor` and is therefore not audited.
+    return this.resetDailyQueue.execute({ resetTo, actor: 'admin' });
   }
 }

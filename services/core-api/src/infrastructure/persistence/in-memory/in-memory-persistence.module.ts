@@ -8,8 +8,10 @@ import {
   COUNTER_ROUTING_RULE_REPOSITORY,
   SYSTEM_CONFIGURATION_REPOSITORY,
 } from '../../../domain/store-config';
+import { AUDIT_LOG_REPOSITORY } from '../../../domain/audit';
 import { TRANSACTION_MANAGER, NoOpTransactionManager } from '../../../domain/shared';
 import {
+  InMemoryAuditLogRepository,
   InMemoryCategoryRepository,
   InMemoryCounterRoutingRuleRepository,
   InMemoryQueueRepository,
@@ -39,6 +41,7 @@ import { DevSeedService } from '../seed/dev-seed.service';
       provide: SYSTEM_CONFIGURATION_REPOSITORY,
       useClass: InMemorySystemConfigurationRepository,
     },
+    { provide: AUDIT_LOG_REPOSITORY, useClass: InMemoryAuditLogRepository },
     { provide: TRANSACTION_MANAGER, useClass: NoOpTransactionManager },
     DevSeedService,
   ],
@@ -48,6 +51,7 @@ import { DevSeedService } from '../seed/dev-seed.service';
     CATEGORY_REPOSITORY,
     SEQUENCE_REPOSITORY,
     SYSTEM_CONFIGURATION_REPOSITORY,
+    AUDIT_LOG_REPOSITORY,
     TRANSACTION_MANAGER,
   ],
 })
