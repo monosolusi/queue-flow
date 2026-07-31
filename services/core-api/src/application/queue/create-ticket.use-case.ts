@@ -54,6 +54,21 @@ export function toDateKey(epochMs: number): string {
 }
 
 /**
+ * The epoch-ms timestamp of local midnight (00:00:00.000) on the day that
+ * contains `epochMs`. Used by the daily-reset archive step (QUE-16) as the
+ * threshold that separates "today" (kept in the active tickets store) from
+ * "previous days" (relocated to the archive store). The boundary is the
+ * store's *local* date, like {@link toDateKey} (single on-premise box,
+ * NFR-SEC-01), and is derived from the injected clock in the application
+ * layer so the date convention stays out of the pure domain. `Date` is a
+ * language builtin, not an I/O library, so layer purity holds.
+ */
+export function startOfLocalDay(epochMs: number): number {
+  const d = new Date(epochMs);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).getTime();
+}
+
+/**
  * The ticket-generation use case (FR-ENG-01 / FR-ENG-05). Orchestrates taking a
  * ticket at the kiosk:
  *

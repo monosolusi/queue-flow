@@ -393,3 +393,40 @@ fieldset {
   border: 1px solid rgba(192, 57, 43, 0.25);
   border-radius: 8px;
 }
+
+/* Inline field error (e.g. malformed cron expression — FR-WZD-05 / QUE-16). */
+.field__error {
+  display: block;
+  margin-top: 0.3rem;
+  font-size: 0.85rem;
+  color: var(--danger, #c0392b);
+}
+
+/* Step 5 — read-only review of the assembled configuration before activation. */
+.wizard__review {
+  display: grid;
+  gap: 1rem;
+  margin-top: 0.5rem;
+}
+.wizard__review-block {
+  padding: 0.75rem 1rem;
+  background: var(--surface-alt, #f7f8fa);
+  border: 1px solid var(--border, #e3e6ea);
+  border-radius: 8px;
+}
+.wizard__review-label {
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted, #6b7280);
+}
+.wizard__review-value,
+.wizard__review-list {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+.wizard__review-list {
+  list-style: disc inside;
+}

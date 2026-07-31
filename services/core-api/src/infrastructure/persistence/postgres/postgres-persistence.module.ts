@@ -3,6 +3,7 @@ import {
   CATEGORY_REPOSITORY,
   QUEUE_REPOSITORY,
   SEQUENCE_REPOSITORY,
+  TICKET_ARCHIVE_PORT,
 } from '../../../domain/queue';
 import {
   COUNTER_ROUTING_RULE_REPOSITORY,
@@ -46,6 +47,10 @@ import { PostgresMigrationRunner } from './migration-runner';
       useFactory: (pool) => new PostgresQueueRepository(pool),
       inject: [PG_CONNECTION],
     },
+    // The Postgres queue repo also implements ITicketArchivePort (QUE-16).
+    // Alias the same instance under the archive port token so the daily-reset
+    // use case depends on the small archive port (ISP), not the full repo.
+    { provide: TICKET_ARCHIVE_PORT, useExisting: QUEUE_REPOSITORY },
     {
       provide: SEQUENCE_REPOSITORY,
       useFactory: (pool) => new PostgresSequenceRepository(pool),
@@ -80,6 +85,7 @@ import { PostgresMigrationRunner } from './migration-runner';
   ],
   exports: [
     QUEUE_REPOSITORY,
+    TICKET_ARCHIVE_PORT,
     SEQUENCE_REPOSITORY,
     CATEGORY_REPOSITORY,
     COUNTER_ROUTING_RULE_REPOSITORY,

@@ -14,6 +14,7 @@ import {
   Category,
   QueueTicket,
   TicketNumber,
+  TicketStatus,
   ticketIdGenerate,
 } from '../../src/domain/queue';
 import {
@@ -36,7 +37,7 @@ import {
   InMemorySequenceRepository,
   InMemorySystemConfigurationRepository,
 } from '../../src/infrastructure/persistence/in-memory';
-import { toDateKey } from '../../src/application/queue';
+import { toDateKey, startOfLocalDay } from '../../src/application/queue';
 
 /**
  * Integration: boots the real Nest app (in-memory persistence) and exercises the
@@ -138,10 +139,13 @@ describe('System daily-reset REST surface (integration — QUE-2)', () => {
     const res = await request(app.getHttpServer()).post('/api/system/daily-reset');
 
     expect(res.status).toBe(201);
+    // The default policy has archivePreviousDayData = true, so the result
+    // carries archivedCount (0 here — no tickets were seeded this run).
     expect(res.body).toEqual({
       status: 'reset',
       date: toDateKey(Date.now()),
       resetTo: 1,
+      archivedCount: 0,
     });
   });
 
@@ -206,18 +210,56 @@ describe('System daily-reset REST surface (integration — QUE-2)', () => {
     expect(await sequences.currentSequence(catAId, today)).toBe(0); // resetDaily sets to resetTo - 1
   });
 
-  it('a manual daily-reset records a MANUAL_RESET audit entry (NFR-SEC-02)', async () => {
+  it('a manual daily-reset records ARCHIVE_PREVIOUS_DAY then MANUAL_RESET audit entries (NFR-SEC-02)', async () => {
     expect(await auditLog.list()).toHaveLength(0);
 
     const res = await request(app.getHttpServer()).post('/api/system/daily-reset');
     expect(res.status).toBe(201);
 
+    // The default policy has archivePreviousDayData = true, so the manual reset
+    // records both the archive step and the reset step, in that order.
     const entries = await auditLog.list();
-    expect(entries).toHaveLength(1);
-    expect(entries[0].action).toBe(AuditAction.MANUAL_RESET);
+    expect(entries).toHaveLength(2);
+    expect(entries[0].action).toBe(AuditAction.ARCHIVE_PREVIOUS_DAY);
     expect(entries[0].actor).toBe('admin');
-    expect(entries[0].after.resetTo).toBe(1);
-    expect(typeof entries[0].after.date).toBe('string');
     expect(entries[0].before).toBeNull();
+    expect(typeof entries[0].after.date).toBe('string');
+    expect(entries[0].after.archivedCount).toBe(0);
+    expect(entries[1].action).toBe(AuditAction.MANUAL_RESET);
+    expect(entries[1].actor).toBe('admin');
+    expect(entries[1].after.resetTo).toBe(1);
+    expect(typeof entries[1].after.date).toBe('string');
+    expect(entries[1].before).toBeNull();
+  });
+
+  it('relocates prior-day tickets to the archive store (FR-WZD-05 / QUE-16)', async () => {
+    // The default policy has archivePreviousDayData = true. Seed a ticket whose
+    // createdAt is one millisecond before local midnight today — i.e. yesterday
+    // — directly through the repo (bypassing the kiosk so its createdAt is past).
+    const yesterdayEnd = startOfLocalDay(Date.now()) - 1;
+    const priorDay = QueueTicket.reconstitute({
+      id: ticketIdGenerate(),
+      ticketNumber: TicketNumber.of('A', 999),
+      categoryId: catAId,
+      status: TicketStatus.WAITING,
+      counterId: null,
+      createdAt: yesterdayEnd,
+      updatedAt: yesterdayEnd,
+    });
+    await queue.save(priorDay);
+
+    // A today ticket issued through the kiosk stays in the active store.
+    const today = await request(app.getHttpServer()).post('/api/tickets').send({ categoryId: catAId });
+    expect(today.body.ticket.ticketNumber).toBe('A-001');
+
+    const res = await request(app.getHttpServer()).post('/api/system/daily-reset');
+    expect(res.status).toBe(201);
+    expect(res.body.archivedCount).toBe(1);
+
+    // The prior-day ticket was relocated to the archive; today's ticket remains active.
+    const archived = (queue as InMemoryQueueRepository).archivedTickets();
+    expect(archived).toHaveLength(1);
+    expect(archived[0].ticketNumber.formatted()).toBe('A-999');
+    expect(await queue.findById(priorDay.id)).toBeNull();
   });
 });

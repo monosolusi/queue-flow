@@ -3,6 +3,7 @@ import {
   CATEGORY_REPOSITORY,
   QUEUE_REPOSITORY,
   SEQUENCE_REPOSITORY,
+  TICKET_ARCHIVE_PORT,
 } from '../../../domain/queue';
 import {
   COUNTER_ROUTING_RULE_REPOSITORY,
@@ -34,6 +35,10 @@ import { DevSeedService } from '../seed/dev-seed.service';
 @Module({
   providers: [
     { provide: QUEUE_REPOSITORY, useClass: InMemoryQueueRepository },
+    // The in-memory queue repo also implements ITicketArchivePort (QUE-16).
+    // Alias the same instance under the archive port token so the daily-reset
+    // use case depends on the small archive port (ISP), not the full repo.
+    { provide: TICKET_ARCHIVE_PORT, useExisting: QUEUE_REPOSITORY },
     { provide: COUNTER_ROUTING_RULE_REPOSITORY, useClass: InMemoryCounterRoutingRuleRepository },
     { provide: CATEGORY_REPOSITORY, useClass: InMemoryCategoryRepository },
     { provide: SEQUENCE_REPOSITORY, useClass: InMemorySequenceRepository },
@@ -47,6 +52,7 @@ import { DevSeedService } from '../seed/dev-seed.service';
   ],
   exports: [
     QUEUE_REPOSITORY,
+    TICKET_ARCHIVE_PORT,
     COUNTER_ROUTING_RULE_REPOSITORY,
     CATEGORY_REPOSITORY,
     SEQUENCE_REPOSITORY,

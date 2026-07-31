@@ -7,6 +7,7 @@ import type {
   StateMachineDto,
   SystemConfigurationDto,
 } from '../api/types';
+import { validateCronExpression } from '../lib/cron';
 
 /**
  * One editable category row. `id` is carried for categories that already exist
@@ -118,6 +119,14 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
   }
 
   const { form } = state;
+
+  // Step-4-style cron validation, mirrored here so the operational panel cannot
+  // save a malformed cron either (FR-WZD-05 / QUE-16). In MANUAL mode there is no
+  // cron field, so the cron is always valid. Used both for the inline message and
+  // to disable the save button — same single source of truth as the wizard.
+  const cronError =
+    form.dailyReset.mode === 'AUTOMATIC_CRON' ? validateCronExpression(form.dailyReset.cronExpression) : null;
+  const dailyResetValid = cronError === null;
 
   async function save() {
     if (submittingRef.current) return;
@@ -300,7 +309,13 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
                 setState({ status: 'ready', form: { ...form, dailyReset: { ...form.dailyReset, cronExpression: e.target.value } } })
               }
               placeholder="0 0 * * *"
+              aria-label="Cron expression"
             />
+            {cronError && (
+              <span className="field__error" data-testid="cron-error">
+                {cronError}
+              </span>
+            )}
           </label>
         )}
         <label className="field">
@@ -332,6 +347,7 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
           <span>Arsipkan data hari sebelumnya</span>
         </label>
         <p className="admin-panel__hint">
+          Saat diaktifkan, data antrian hari sebelumnya dipindahkan ke arsip saat reset berikutnya berjalan.
           Perubahan cron/mode berlaku setelah restart layanan (scheduler di-armed saat boot).
         </p>
       </section>
@@ -356,7 +372,7 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
           type="button"
           className="btn btn--primary"
           onClick={save}
-          disabled={submitting}
+          disabled={submitting || !dailyResetValid}
           data-testid="admin-save"
         >
           {submitting ? 'Menyimpan…' : 'Simpan Konfigurasi'}
