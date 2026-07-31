@@ -508,6 +508,10 @@ with no duplicate/lost ticket numbers.
   Its `resetDb()` drops+recreates the `public` schema (not `TRUNCATE`, which
   fails on a cold DB with "relation does not exist") so the next boot re-applies
   all migrations from pristine.
+  **Jest call-order assertions:** this repo's `@types/jest` does not expose
+  `toHaveBeenCalledBefore` (TS2551 at compile). Assert mock call order with
+  numeric `mock.invocationCallOrder[i]` comparisons instead — e.g.
+  `expect(mockA.mock.invocationCallOrder[0]).toBeLessThan(mockB.mock.invocationCallOrder[0])`.
 - **Compose boot-order (QUE-27):** the `gateway` must `depends_on
   core-api-service` with `condition: service_healthy`, and `core-api-service`
   must carry a healthcheck (`/api/health` via `wget`, which ships in
