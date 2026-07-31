@@ -46,7 +46,7 @@ let failed = false;
 let tier2Up = false;
 
 // Plain GET with NO redirect following — returns status + Location + body so
-// we can assert both 200 (PWAs) and 301 (clean-browser redirects).
+// we can assert both 200 (PWAs) and 301/302 (clean-browser + first-run redirects).
 function get(path) {
   return new Promise((resolve, reject) => {
     const req = http.get(
@@ -62,6 +62,68 @@ function get(path) {
     req.on('error', reject);
     req.setTimeout(5000, () => req.destroy(new Error(`timeout GET ${path}`)));
   });
+}
+
+// JSON PUT — drives the wizard through the gateway so the first-run guard can
+// be exercised pre- and post-setup (FR-WZD-01). Returns status + body.
+function putJson(path, body) {
+  const payload = JSON.stringify(body);
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        host: HOST,
+        port: PORT,
+        path,
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload), Connection: 'close' },
+      },
+      (res) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () =>
+          resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString() }),
+        );
+      },
+    );
+    req.on('error', reject);
+    req.setTimeout(5000, () => req.destroy(new Error(`timeout PUT ${path}`)));
+    req.write(payload);
+    req.end();
+  });
+}
+
+// PRD §7 reference wizard payload. Intentionally inlined rather than shared
+// with `services/core-api/test/acceptance/_helpers.ts` `prdWizardPayload()`: a
+// shared fixture would couple this root infra script to a path inside a
+// service's test tree (and the TS helper can't be imported by a standalone mjs
+// without a TS loader). The two sites test different layers (in-process
+// supertest vs. the live gateway); drift is caught loudly — the acceptance
+// suite asserts the exact shape and this script PUTs it expecting 200. Keep
+// both in sync with PRD §7 when the wizard contract changes.
+function prdWizardPayload() {
+  return {
+    storeName: 'Toko Utama Surabaya',
+    stateMachine: {
+      states: ['WAITING', 'CALLING', 'SERVING', 'SKIPPED', 'COMPLETED'],
+      transitions: [
+        { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' },
+        { from: 'CALLING', to: 'SERVING', actionLabel: 'Mulai Melayani' },
+        { from: 'CALLING', to: 'SKIPPED', actionLabel: 'Lewati / Absen' },
+        { from: 'SKIPPED', to: 'CALLING', actionLabel: 'Panggil Ulang' },
+        { from: 'SERVING', to: 'COMPLETED', actionLabel: 'Selesai Layan' },
+      ],
+    },
+    dailyReset: { mode: 'AUTOMATIC_CRON', cronExpression: '0 0 * * *', resetTicketNumberTo: 1, archivePreviousDayData: true },
+    categories: [
+      { code: 'A', name: 'Customer Service' },
+      { code: 'B', name: 'Kasir & Pembayaran' },
+    ],
+    routingRules: [
+      { counterId: 1, counterName: 'Counter 1 (CS)', assignedCategoryCodes: ['A'], priorityPolicy: 'FIFO_GLOBAL' },
+      { counterId: 2, counterName: 'Counter 2 (Serbaguna)', assignedCategoryCodes: ['A', 'B'], priorityPolicy: 'CATEGORY_PRIORITY' },
+    ],
+    actor: 'admin',
+  };
 }
 
 async function waitFor(path, { wantStatus, wantBody, timeoutMs = 120_000 } = {}) {
@@ -132,10 +194,26 @@ async function tier2() {
   await assertRoute('GET /api/health', '/api/health', { status: 200, body: '"status":"ok"' });
   await assertRoute('GET / (clean browser)', '/', { status: 301, redirect: '/admin/' });
   await assertRoute('GET /wizard', '/wizard', { status: 301, redirect: '/admin/wizard' });
-  await assertRoute('GET /kiosk/', '/kiosk/', { status: 200, body: '/kiosk/manifest.webmanifest' });
-  await assertRoute('GET /tv/', '/tv/', { status: 200, body: '/tv/manifest.webmanifest' });
-  await assertRoute('GET /caller/', '/caller/', { status: 200, body: '/caller/manifest.webmanifest' });
   await assertRoute('GET /admin/', '/admin/', { status: 200, body: '/admin/manifest.webmanifest' });
+
+  // First-run guard (FR-WZD-01 / QUE-13): before setup, the operational PWA
+  // routes are redirected to the wizard at the gateway (auth_request ->
+  // /api/system/setup-status -> 302 /admin/wizard). They must NOT serve the PWA.
+  await assertRoute('GET /kiosk/ (pre-setup -> wizard)', '/kiosk/', { status: 302, redirect: '/admin/wizard' });
+  await assertRoute('GET /tv/ (pre-setup -> wizard)', '/tv/', { status: 302, redirect: '/admin/wizard' });
+  await assertRoute('GET /caller/ (pre-setup -> wizard)', '/caller/', { status: 302, redirect: '/admin/wizard' });
+
+  // Complete the wizard through the gateway, then re-assert the operational
+  // routes now serve their PWAs (guard opens once setup is complete).
+  const setup = await putJson('/api/system/config', prdWizardPayload());
+  if (setup.status !== 200) {
+    throw new Error(`PUT /api/system/config failed: ${setup.status} ${setup.body.slice(0, 120)}`);
+  }
+  process.stdout.write(`  PUT /api/system/config (wizard finalize): ${setup.status} OK\n`);
+
+  await assertRoute('GET /kiosk/ (post-setup)', '/kiosk/', { status: 200, body: '/kiosk/manifest.webmanifest' });
+  await assertRoute('GET /tv/ (post-setup)', '/tv/', { status: 200, body: '/tv/manifest.webmanifest' });
+  await assertRoute('GET /caller/ (post-setup)', '/caller/', { status: 200, body: '/caller/manifest.webmanifest' });
 }
 
 try {

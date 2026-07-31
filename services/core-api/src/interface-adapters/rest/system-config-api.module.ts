@@ -8,6 +8,7 @@ import { AUDIT_LOG_REPOSITORY } from '../../domain/audit';
 import { TRANSACTION_MANAGER } from '../../domain/shared';
 import {
   GetActiveStateMachineUseCase,
+  GetSetupStatusUseCase,
   GetSystemConfigurationUseCase,
   SaveSystemConfigurationUseCase,
 } from '../../application/store-config';
@@ -45,6 +46,11 @@ import { SystemConfigController } from './system-config.controller';
       provide: GetActiveStateMachineUseCase,
       inject: [SYSTEM_CONFIGURATION_REPOSITORY],
       useFactory: (config) => new GetActiveStateMachineUseCase(config),
+    },
+    {
+      provide: GetSetupStatusUseCase,
+      inject: [SYSTEM_CONFIGURATION_REPOSITORY],
+      useFactory: (config) => new GetSetupStatusUseCase(config),
     },
     {
       provide: SaveSystemConfigurationUseCase,

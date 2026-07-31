@@ -20,6 +20,9 @@ import {
  *  - clean store → `GET /api/system/config` returns `isInitialSetupCompleted:false`
  *    (does NOT throw — the wizard needs the default-shaped state machine to
  *    prefill, so a clean browser gets the redirect signal, not a 500).
+ *  - clean store → `GET /api/system/setup-status` returns 403
+ *    `SYSTEM_NOT_CONFIGURED` (the gateway auth_request probe — 403, not 500,
+ *    so the wizard can still boot).
  *  - before setup, queue endpoints respond 409 `SYSTEM_NOT_CONFIGURED`.
  *  - `PUT /api/system/config` with the PRD §7 payload completes setup
  *    (`isInitialSetupCompleted:true`) atomically.
@@ -59,6 +62,16 @@ describe('DoD-2 — First-Run Wizard API (FR-WZD-01..06)', () => {
     ]);
     expect(res.body.categories).toEqual([]);
     expect(res.body.routingRules).toEqual([]);
+  });
+
+  it('GET /api/system/setup-status returns 403 SETUP_REQUIRED on a clean store (gateway guard probe — FR-WZD-01)', async () => {
+    // The gateway's nginx auth_request subrequest maps 2xx -> allow, 401/403
+    // -> deny (302 /admin/wizard). A clean store must deny — but never throw
+    // (403, not 500) so the wizard itself can boot. The 403 carries a distinct
+    // `SETUP_REQUIRED` code (not the 409 `SYSTEM_NOT_CONFIGURED` domain error).
+    const res = await http(booted.app).get('/api/system/setup-status').expect(403);
+    expect(res.body.code).toBe('SETUP_REQUIRED');
+    expect(res.body.isInitialSetupCompleted).toBe(false);
   });
 
   it('before setup, the kiosk has no categories and the caller is hard-blocked (409 SYSTEM_NOT_CONFIGURED)', async () => {
@@ -105,6 +118,10 @@ describe('DoD-2 — First-Run Wizard API (FR-WZD-01..06)', () => {
 
   it('after setup, normal operations open: categories list + ticket creation + state-machine read', async () => {
     await http(booted.app).put('/api/system/config').send(prdWizardPayload()).expect(200);
+
+    // The gateway guard probe now allows operational routes through (200).
+    const status = await http(booted.app).get('/api/system/setup-status').expect(200);
+    expect(status.body.isInitialSetupCompleted).toBe(true);
 
     // The kiosk reads categories (FR-KSK-01).
     const cats = await http(booted.app).get('/api/categories').expect(200);
