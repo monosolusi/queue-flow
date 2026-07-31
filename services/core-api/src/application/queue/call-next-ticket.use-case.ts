@@ -2,9 +2,11 @@ import type { ICounterRoutingRuleRepository } from '../../domain/store-config';
 import type {
   IQueueRepository,
   ITransitionPolicy,
+  ITransitionPolicyResolver,
   NextTicketQuery,
 } from '../../domain/queue';
 import { EntityNotFoundException } from '../../domain/shared';
+import { QueueEventDispatcher } from './queue-event-dispatcher';
 
 /**
  * Command for the "call next" operation (FR-ENG-03). A counter requests its next
@@ -56,11 +58,19 @@ export class CallNextTicketUseCase {
   constructor(
     private readonly routingRules: ICounterRoutingRuleRepository,
     private readonly queue: IQueueRepository,
-    private readonly transitionPolicy: ITransitionPolicy,
+    private readonly policyResolver: ITransitionPolicyResolver,
+    private readonly dispatcher: QueueEventDispatcher,
     private readonly clock: () => number = () => Date.now(),
   ) {}
 
   async execute(command: CallNextTicketCommand): Promise<CallNextTicketResult> {
+    // Resolve the active transition policy per execution (QUE-2). The app boots
+    // before the first-run wizard creates a SystemConfiguration, so the policy
+    // cannot be resolved eagerly at construction — and the aggregate validates
+    // transitions synchronously, so a lazy async proxy is not an option. The use
+    // case resolves the (sync) policy here and passes it into the aggregate.
+    const transitionPolicy = await this.policyResolver.getActivePolicy();
+
     const rule = await this.routingRules.getByCounterId(command.counterId);
     if (!rule) {
       // A counter must have a routing rule — counters only serve their assigned
@@ -85,8 +95,10 @@ export class CallNextTicketUseCase {
     // acceptable for the in-memory / single-host scope of QUE-11; the future
     // PostgreSQL repository will enforce atomicity (SELECT ... FOR UPDATE +
     // conditional UPDATE) so a ticket is claimed by exactly one counter.
-    ticket.markCalling(command.counterId, this.transitionPolicy, this.clock());
+    ticket.markCalling(command.counterId, transitionPolicy, this.clock());
     await this.queue.save(ticket);
+    // Drain the recorded TicketCalledEvent so it actually broadcasts (FR-ENG-04).
+    await this.dispatcher.dispatch(ticket);
 
     return {
       status: 'called',

@@ -1,6 +1,5 @@
 import { Identifier } from '../../src/domain/shared';
 import { PriorityPolicy } from '../../src/domain/shared/priority-policy';
-import { StateMachine } from '../../src/domain/store-config';
 import {
   QueueTicket,
   TicketNumber,
@@ -13,6 +12,7 @@ import {
 } from '../../src/infrastructure/persistence/in-memory';
 import { CounterRoutingRule } from '../../src/domain/store-config';
 import { EntityNotFoundException } from '../../src/domain/shared';
+import { fakePolicyResolver, spyDispatcher } from './test-doubles';
 
 /** A WAITING ticket created at `createdAt` with category code `code` and `seq`. */
 function waiting(categoryId: string, code: string, seq: number, createdAt: number): QueueTicket {
@@ -35,19 +35,26 @@ function rule(
 }
 
 describe('CallNextTicketUseCase (counter routing engine — FR-ENG-03)', () => {
-  const transitionPolicy = StateMachine.DEFAULT;
   let now = 1_000;
   const clock = () => (now += 10);
 
   let queue: InMemoryQueueRepository;
   let routingRules: InMemoryCounterRoutingRuleRepository;
+  let dispatcher: ReturnType<typeof spyDispatcher>;
   let useCase: CallNextTicketUseCase;
 
   beforeEach(() => {
     now = 1_000;
     queue = new InMemoryQueueRepository();
     routingRules = new InMemoryCounterRoutingRuleRepository();
-    useCase = new CallNextTicketUseCase(routingRules, queue, transitionPolicy, clock);
+    dispatcher = spyDispatcher();
+    useCase = new CallNextTicketUseCase(
+      routingRules,
+      queue,
+      fakePolicyResolver(),
+      dispatcher,
+      clock,
+    );
   });
 
   it('FIFO_GLOBAL: picks the oldest WAITING ticket across all assigned categories', async () => {
@@ -114,7 +121,7 @@ describe('CallNextTicketUseCase (counter routing engine — FR-ENG-03)', () => {
     );
   });
 
-  it('transitions the selected ticket to CALLING, records a TicketCalledEvent, and persists it', async () => {
+  it('transitions the selected ticket to CALLING, broadcasts a TicketCalledEvent, and persists it', async () => {
     await routingRules.save(rule(2, ['CAT-A'], PriorityPolicy.FIFO_GLOBAL));
     const ticket = waiting('CAT-A', 'A', 1, 100);
     await queue.save(ticket);
@@ -122,9 +129,16 @@ describe('CallNextTicketUseCase (counter routing engine — FR-ENG-03)', () => {
     const result = await useCase.execute({ counterId: 2 });
     expect(result.status).toBe('called');
 
-    // The aggregate in memory moved to CALLING under counter 2 and emitted the event.
+    // The aggregate in memory moved to CALLING under counter 2.
     expect(ticket.currentStatus).toBe('CALLING');
     expect(ticket.counterId).toBe(2);
+
+    // The use case forwarded the aggregate to the dispatcher so the recorded
+    // TicketCalledEvent actually broadcasts (FR-ENG-04). The spy records the
+    // call; the aggregate still holds the event (the real dispatcher drains it,
+    // exercised in the realtime integration test).
+    expect(dispatcher.dispatch).toHaveBeenCalledTimes(1);
+    expect(dispatcher.dispatch).toHaveBeenCalledWith(ticket);
     const events = ticket.pullDomainEvents();
     expect(events.some((e) => e.type === 'TICKET_CALLED')).toBe(true);
 
@@ -132,5 +146,14 @@ describe('CallNextTicketUseCase (counter routing engine — FR-ENG-03)', () => {
     const reloaded = await queue.findById(ticket.id);
     expect(reloaded?.currentStatus).toBe('CALLING');
     expect(reloaded?.counterId).toBe(2);
+  });
+
+  it('does not dispatch when the queue is empty for the counter', async () => {
+    await routingRules.save(rule(1, ['CAT-A'], PriorityPolicy.FIFO_GLOBAL));
+
+    const result = await useCase.execute({ counterId: 1 });
+
+    expect(result).toEqual({ status: 'empty' });
+    expect(dispatcher.dispatch).not.toHaveBeenCalled();
   });
 });

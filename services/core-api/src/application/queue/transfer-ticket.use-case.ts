@@ -3,6 +3,7 @@ import type {
   IQueueRepository,
   ISequenceRepository,
   ITransitionPolicy,
+  ITransitionPolicyResolver,
   StatusValue,
   TicketId,
 } from '../../domain/queue';
@@ -11,6 +12,7 @@ import {
   EntityNotFoundException,
   InvalidStateTransitionException,
 } from '../../domain/shared';
+import { QueueEventDispatcher } from './queue-event-dispatcher';
 
 /**
  * Command for the "transfer queue" / "pindah kategori" operation (FR-CLR-03).
@@ -77,11 +79,16 @@ export class TransferTicketUseCase {
     private readonly queue: IQueueRepository,
     private readonly categories: ICategoryRepository,
     private readonly sequences: ISequenceRepository,
-    private readonly transitionPolicy: ITransitionPolicy,
+    private readonly policyResolver: ITransitionPolicyResolver,
+    private readonly dispatcher: QueueEventDispatcher,
     private readonly clock: () => number = () => Date.now(),
   ) {}
 
   public async execute(command: TransferTicketCommand): Promise<TransferTicketResult> {
+    // Resolve the active transition policy per execution (see CallNextTicketUseCase
+    // for the rationale — the aggregate validates transitions synchronously).
+    const transitionPolicy = await this.policyResolver.getActivePolicy();
+
     const ticket = await this.queue.findById(command.ticketId);
     if (!ticket) {
       throw new EntityNotFoundException('QueueTicket', command.ticketId.value);
@@ -90,7 +97,7 @@ export class TransferTicketUseCase {
     const targetStatus = command.targetStatus ?? TicketStatus.WAITING;
     // Pre-check before reserving a sequence number so an illegal transfer
     // does not advance (and thus gap) the per-category sequence (NFR-REL-02).
-    if (!this.transitionPolicy.isAllowed(ticket.currentStatus, targetStatus)) {
+    if (!transitionPolicy.isAllowed(ticket.currentStatus, targetStatus)) {
       throw new InvalidStateTransitionException(ticket.currentStatus, targetStatus);
     }
 
@@ -111,10 +118,13 @@ export class TransferTicketUseCase {
       command.targetCategoryId,
       newTicketNumber,
       targetStatus,
-      this.transitionPolicy,
+      transitionPolicy,
       this.clock(),
     );
     await this.queue.save(ticket);
+    // Drain the recorded TicketTransferredEvent + TicketStatusChangedEvent so
+    // they broadcast (FR-ENG-04).
+    await this.dispatcher.dispatch(ticket);
 
     return {
       status: 'transferred',

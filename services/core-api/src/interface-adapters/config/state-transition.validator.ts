@@ -1,4 +1,4 @@
-import type { ITransitionPolicy, StatusValue } from '../../domain/queue';
+import type { ITransitionPolicy, ITransitionPolicyResolver, StatusValue } from '../../domain/queue';
 import type { ISystemConfigurationRepository } from '../../domain/store-config';
 import {
   InvalidStateTransitionException,
@@ -12,16 +12,21 @@ import {
  * Reads the singleton {@link SystemConfiguration} and yields its active
  * `StateMachine` as the {@link ITransitionPolicy} the queue action use cases
  * validate every transition against. All queue control actions share this one
- * validator (AC#3 — "Queue control actions memanfaatkan validator yang sama"):
- * use cases receive the resolved `ITransitionPolicy` directly and never load
+ * resolver (AC#3 — "Queue control actions memanfaatkan validator yang sama"):
+ * use cases call {@link getActivePolicy} per execution and never load
  * configuration themselves, per the application-layer DIP convention.
+ *
+ * Implements the domain {@link ITransitionPolicyResolver} port so the DI layer
+ * can bind it under the `TRANSITION_POLICY_RESOLVER` token and inject it into the
+ * queue command use cases (QUE-2). The use cases resolve the active policy per
+ * execution (not as a constructor snapshot) because the app boots before the
+ * first-run wizard creates a `SystemConfiguration` — see the port's docstring.
  *
  * Lives in the interface-adapter / DI layer: it is the seam between the Store
  * Config context (where the active state machine is configured) and the Queue
- * use cases (which depend only on the `ITransitionPolicy` port). Concrete NestJS
- * wiring (providing the resolved policy to use cases) is added in QUE-11.
+ * use cases (which depend only on the `ITransitionPolicyResolver` port).
  */
-export class StateTransitionValidator {
+export class StateTransitionValidator implements ITransitionPolicyResolver {
   constructor(private readonly config: ISystemConfigurationRepository) {}
 
   /**

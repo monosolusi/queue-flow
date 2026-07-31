@@ -9,6 +9,7 @@ import {
 } from '../../src/domain/queue';
 import { RecallTicketUseCase } from '../../src/application/queue';
 import { InMemoryQueueRepository } from '../../src/infrastructure/persistence/in-memory';
+import { fakePolicyResolver, spyDispatcher } from './test-doubles';
 
 const FIXED_NOW = 1_700_000_000_000;
 
@@ -31,20 +32,21 @@ function skippedTicket(): QueueTicket {
 }
 
 describe('RecallTicketUseCase (Panggil Ulang — FR-CLR-03)', () => {
-  const transitionPolicy = StateMachine.DEFAULT;
   let now = FIXED_NOW;
   const clock = () => (now += 10);
 
   let queue: InMemoryQueueRepository;
+  let dispatcher: ReturnType<typeof spyDispatcher>;
   let useCase: RecallTicketUseCase;
 
   beforeEach(() => {
     now = FIXED_NOW;
     queue = new InMemoryQueueRepository();
-    useCase = new RecallTicketUseCase(queue, transitionPolicy, clock);
+    dispatcher = spyDispatcher();
+    useCase = new RecallTicketUseCase(queue, fakePolicyResolver(), dispatcher, clock);
   });
 
-  it('recalls a SKIPPED ticket back to CALLING and persists it', async () => {
+  it('recalls a SKIPPED ticket back to CALLING, broadcasts STATUS_UPDATED, and persists it', async () => {
     const ticket = skippedTicket();
     await queue.save(ticket);
 
@@ -53,6 +55,11 @@ describe('RecallTicketUseCase (Panggil Ulang — FR-CLR-03)', () => {
     expect(result.status).toBe('recalled');
     expect(result.ticket.status).toBe(TicketStatus.CALLING);
     expect(result.ticket.ticketId).toBe(ticket.id.value);
+
+    // The use case drained the recorded TicketStatusChangedEvent via the
+    // dispatcher so it broadcasts (FR-ENG-04).
+    expect(dispatcher.dispatch).toHaveBeenCalledTimes(1);
+    expect(dispatcher.dispatch).toHaveBeenCalledWith(ticket);
 
     expect(ticket.currentStatus).toBe(TicketStatus.CALLING);
     const reloaded = await queue.findById(ticket.id);
@@ -63,6 +70,7 @@ describe('RecallTicketUseCase (Panggil Ulang — FR-CLR-03)', () => {
     await expect(useCase.execute({ ticketId: ticketIdGenerate() })).rejects.toBeInstanceOf(
       EntityNotFoundException,
     );
+    expect(dispatcher.dispatch).not.toHaveBeenCalled();
   });
 
   it('throws InvalidStateTransitionException when recalling a non-skipped ticket', async () => {
@@ -77,5 +85,6 @@ describe('RecallTicketUseCase (Panggil Ulang — FR-CLR-03)', () => {
     // State unchanged; no NEW event recorded after the rejected transition.
     expect(ticket.currentStatus).toBe(TicketStatus.CALLING);
     expect(ticket.pendingEventCount).toBe(0);
+    expect(dispatcher.dispatch).not.toHaveBeenCalled();
   });
 });

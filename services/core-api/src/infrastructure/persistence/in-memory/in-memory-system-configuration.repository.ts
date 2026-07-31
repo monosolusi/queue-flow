@@ -19,4 +19,9 @@ export class InMemorySystemConfigurationRepository
   async save(config: SystemConfiguration): Promise<void> {
     this.config = config;
   }
+
+  /** Test/dev-only: drops the held configuration. Not on the port interface. */
+  clear(): void {
+    this.config = null;
+  }
 }
