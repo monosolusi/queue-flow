@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { WizardPage } from './WizardPage';
 import type { IAdminApi } from '../api/admin-api';
-import { DEFAULT_STATE_MACHINE, type SaveSystemConfigurationPayload, type SystemConfigurationDto } from '../api/types';
+import { DEFAULT_CATEGORIES, DEFAULT_STATE_MACHINE, type SaveSystemConfigurationPayload, type SystemConfigurationDto } from '../api/types';
 
 /** A clean store mirrors core-api's `GetSystemConfigurationUseCase`: the default
  *  state machine is returned even before setup (so the wizard is prefilled). */
@@ -52,18 +52,17 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     const { api, save } = makeApi();
     renderWizard(api);
 
-    // Step 1 — store name (FR-WZD-02).
+    // Step 1 — store profile + counter count + categories (FR-WZD-02).
     expect(await screen.findByTestId('step-1')).toBeInTheDocument();
     const nameInput = screen.getByPlaceholderText('mis. Apotek Sehat Sentosa');
     await userEvent.type(nameInput, 'Apotek Sehat Sentosa');
+    // Default category template (PRD §7) is prefilled and read-only, so no
+    // category typing is needed; the counter count defaults to 1.
+    expect(screen.getByTestId('cat-readonly')).toBeInTheDocument();
     await userEvent.click(screen.getByTestId('wizard-next'));
 
-    // Step 2 — categories + counters + routing (FR-WZD-03).
+    // Step 2 — routing matrix (FR-WZD-03). Assign category A to Counter 1.
     expect(await screen.findByTestId('step-2')).toBeInTheDocument();
-    // The fallback category 'A' has an empty name; fill it.
-    const categoryNameInput = screen.getByLabelText('Kategori 1 nama');
-    await userEvent.type(categoryNameInput, 'Customer Service');
-    // Assign category A to Counter 1.
     await userEvent.click(screen.getByRole('checkbox', { name: 'A' }));
     await userEvent.click(screen.getByTestId('wizard-next'));
 
@@ -90,13 +89,15 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     // Navigation to the admin home (FR-WZD-06 — operational access after setup).
     expect(await screen.findByText('Admin Panel Home')).toBeInTheDocument();
 
-    // The PUT payload carries the entered store name, the category, the
-    // routing assignment, the default state machine, and the daily-reset
-    // policy with actor 'admin' (NFR-SEC-02).
+    // The PUT payload carries the entered store name, the PRD §7 default
+    // categories (no ids — backend mints them on first save), the routing
+    // assignment, the default state machine, and the daily-reset policy with
+    // actor 'admin' (NFR-SEC-02). `categoriesMode` is a UI-only preset and must
+    // never reach the wire (mirrors `stateMachine.mode`).
     expect(save).toHaveBeenCalledTimes(1);
     const payload = save.mock.calls[0][0] as SaveSystemConfigurationPayload;
     expect(payload.storeName).toBe('Apotek Sehat Sentosa');
-    expect(payload.categories).toEqual([{ code: 'A', name: 'Customer Service' }]);
+    expect(payload.categories).toEqual(DEFAULT_CATEGORIES.map((c) => ({ ...c })));
     expect(payload.routingRules).toHaveLength(1);
     expect(payload.routingRules[0].assignedCategoryCodes).toEqual(['A']);
     expect(payload.routingRules[0].priorityPolicy).toBe('FIFO_GLOBAL');
@@ -106,6 +107,7 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     expect(payload.dailyReset.cronExpression).toBe('0 0 * * *');
     expect(payload.dailyReset.resetTicketNumberTo).toBe(1);
     expect(payload.actor).toBe('admin');
+    expect((payload as unknown as Record<string, unknown>).categoriesMode).toBeUndefined();
   });
 
   it('lets the manager move back between steps', async () => {
@@ -317,13 +319,12 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     const { api } = makeApi();
     renderWizard(api);
 
-    // Step 1 — store name.
+    // Step 1 — store name (default category template prefilled, read-only).
     await (await screen.findByTestId('step-1'));
     await userEvent.type(screen.getByPlaceholderText('mis. Apotek Sehat Sentosa'), 'Apotek Sehat');
     await userEvent.click(screen.getByTestId('wizard-next'));
-    // Step 2 — category A -> Customer Service, assign A to Counter 1.
+    // Step 2 — assign category A to Counter 1.
     await screen.findByTestId('step-2');
-    await userEvent.type(screen.getByLabelText('Kategori 1 nama'), 'Customer Service');
     await userEvent.click(screen.getByRole('checkbox', { name: 'A' }));
     await userEvent.click(screen.getByTestId('wizard-next'));
     // Step 3 — default state machine.
@@ -377,5 +378,201 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     expect(screen.getByTestId('wizard-next')).not.toBeDisabled();
 
     expect(save).not.toHaveBeenCalled();
+  });
+
+  it('switches to custom categories, adds a category, and sends the custom list (without mode) in the PUT payload', async () => {
+    const { api, save } = makeApi();
+    renderWizard(api);
+
+    // Step 1 — switch to custom categories and add a third category C / Farmasi.
+    await (await screen.findByTestId('step-1'));
+    await userEvent.click(screen.getByLabelText(/Susun kategori sendiri/));
+    expect(screen.getByTestId('cat-editor')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '+ Tambah Kategori' }));
+    const codeInputs = screen.getAllByLabelText(/^Kategori \d+ kode$/);
+    const nameInputs = screen.getAllByLabelText(/^Kategori \d+ nama$/);
+    await userEvent.type(codeInputs[codeInputs.length - 1], 'C');
+    await userEvent.type(nameInputs[nameInputs.length - 1], 'Farmasi');
+    // Custom list is valid (A, B, C — all uppercase, non-empty, unique) → Lanjut enabled.
+    expect(screen.getByTestId('wizard-next')).not.toBeDisabled();
+    await userEvent.click(screen.getByTestId('wizard-next'));
+
+    // Walk the remaining steps to finalize.
+    await screen.findByTestId('step-2');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-3');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-4');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-5');
+    await userEvent.click(screen.getByTestId('wizard-finalize'));
+    await screen.findByText('Admin Panel Home');
+
+    const payload = save.mock.calls[0][0] as SaveSystemConfigurationPayload;
+    expect(payload.categories).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'C', name: 'Farmasi' }),
+        expect.objectContaining({ code: 'A', name: 'Customer Service' }),
+      ]),
+    );
+    expect(payload.categories).toHaveLength(3);
+    // `categoriesMode` is a UI-only preset and must never reach the wire.
+    expect((payload as unknown as Record<string, unknown>).categoriesMode).toBeUndefined();
+  });
+
+  it('blocks advancing past step 1 when a custom category has a duplicate code', async () => {
+    const { api, save } = makeApi();
+    renderWizard(api);
+
+    await (await screen.findByTestId('step-1'));
+    await userEvent.click(screen.getByLabelText(/Susun kategori sendiri/));
+    // Add a second category and set its code to A (collides with the prefilled A).
+    await userEvent.click(screen.getByRole('button', { name: '+ Tambah Kategori' }));
+    const codeInputs = screen.getAllByLabelText(/^Kategori \d+ kode$/);
+    await userEvent.type(codeInputs[codeInputs.length - 1], 'A');
+
+    expect(screen.getByTestId('cat-errors')).toBeInTheDocument();
+    expect(screen.getByTestId('wizard-next')).toBeDisabled();
+
+    // A click attempts to advance but the guard holds — still on step 1, no save.
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    expect(screen.getByTestId('step-1')).toBeInTheDocument();
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('syncs routing rule rows to the counter count input (add/remove)', async () => {
+    const { api } = makeApi();
+    renderWizard(api);
+
+    // Step 1 — set the counter count to 3. The count input is a controlled
+    // numeric input bound to routingRules.length, so set it via fireEvent.change
+    // (userEvent.clear snaps back to the clamped length, making type append).
+    await (await screen.findByTestId('step-1'));
+    const countInput = screen.getByLabelText('Jumlah counter aktif');
+    fireEvent.change(countInput, { target: { value: '3' } });
+    await userEvent.click(screen.getByTestId('wizard-next'));
+
+    // Step 2 — three counter rows are present.
+    expect(await screen.findByTestId('step-2')).toBeInTheDocument();
+    expect(screen.getAllByLabelText(/^Counter \d+ nama$/)).toHaveLength(3);
+
+    // Back to step 1, reduce to 1 → step 2 shows a single row. Re-query the
+    // count input: the {step === N && ...} block unmounts step 1 on navigation,
+    // so the previously-captured node is detached and its events would no-op.
+    await userEvent.click(screen.getByText('Kembali'));
+    await screen.findByTestId('step-1');
+    fireEvent.change(screen.getByLabelText('Jumlah counter aktif'), { target: { value: '1' } });
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    expect(await screen.findByTestId('step-2')).toBeInTheDocument();
+    expect(screen.getAllByLabelText(/^Counter \d+ nama$/)).toHaveLength(1);
+  });
+
+  it('infers custom category mode when the prefilled categories differ from the PRD default', async () => {
+    const customConfig: SystemConfigurationDto = {
+      ...cleanStore(),
+      categories: [{ id: '11111111-1111-4111-8111-111111111111', code: 'A', name: 'Farmasi' }],
+    };
+    const { api } = makeApi(customConfig);
+    renderWizard(api);
+
+    // A non-default category list opens step 1 in custom mode with the editor.
+    await (await screen.findByTestId('step-1'));
+    expect(screen.getByTestId('cat-editor')).toBeInTheDocument();
+    expect(screen.queryByTestId('cat-readonly')).not.toBeInTheDocument();
+  });
+
+  it('preserves existing category ids when re-editing a default-category store', async () => {
+    // A store that saved the default preset carries ids on A/B. Keeping the
+    // default mode and re-saving MUST reuse those ids (not mint new ones) so
+    // existing QueueTicket.categoryId references stay valid.
+    const idA = '11111111-1111-4111-8111-111111111111';
+    const idB = '22222222-2222-4222-8222-222222222222';
+    const configuredStore: SystemConfigurationDto = {
+      ...cleanStore(),
+      isInitialSetupCompleted: true,
+      storeName: 'Toko Lama',
+      categories: [
+        { id: idA, code: 'A', name: 'Customer Service' },
+        { id: idB, code: 'B', name: 'Kasir & Pembayaran' },
+      ],
+      routingRules: [
+        { counterId: 1, counterName: 'Counter 1', assignedCategoryIds: [idA], priorityPolicy: 'FIFO_GLOBAL' },
+      ],
+    };
+    const { api, save } = makeApi(configuredStore);
+    renderWizard(api);
+
+    // Step 1 opens in default mode (inferred by code+name, ignoring id) and is
+    // read-only. Walk to finalize without touching categories.
+    await (await screen.findByTestId('step-1'));
+    expect(screen.getByTestId('cat-readonly')).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-2');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-3');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-4');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-5');
+    await userEvent.click(screen.getByTestId('wizard-finalize'));
+    await screen.findByText('Admin Panel Home');
+
+    const payload = save.mock.calls[0][0] as SaveSystemConfigurationPayload;
+    expect(payload.categories).toEqual([
+      { id: idA, code: 'A', name: 'Customer Service' },
+      { id: idB, code: 'B', name: 'Kasir & Pembayaran' },
+    ]);
+  });
+
+  it('preserves original category ids across a custom detour that removes a row', async () => {
+    // The default-mode force-reset draws its id pool from the prefill, not the
+    // live editable list — so a custom detour that removes category A, then
+    // switches back to default, MUST still reuse A's original id (not mint a
+    // fresh one and orphan every QueueTicket.categoryId that referenced it).
+    const idA = '11111111-1111-4111-8111-111111111111';
+    const idB = '22222222-2222-4222-8222-222222222222';
+    const configuredStore: SystemConfigurationDto = {
+      ...cleanStore(),
+      isInitialSetupCompleted: true,
+      storeName: 'Toko Lama',
+      categories: [
+        { id: idA, code: 'A', name: 'Customer Service' },
+        { id: idB, code: 'B', name: 'Kasir & Pembayaran' },
+      ],
+      routingRules: [
+        { counterId: 1, counterName: 'Counter 1', assignedCategoryIds: [idA], priorityPolicy: 'FIFO_GLOBAL' },
+      ],
+    };
+    const { api, save } = makeApi(configuredStore);
+    renderWizard(api);
+
+    // Step 1 opens in default mode; switch to custom, remove category A, switch back.
+    await (await screen.findByTestId('step-1'));
+    expect(screen.getByTestId('cat-readonly')).toBeInTheDocument();
+    await userEvent.click(screen.getByLabelText(/Susun kategori sendiri/));
+    // Remove the first category row (A).
+    await userEvent.click(screen.getAllByRole('button', { name: 'Hapus' })[0]);
+    expect(screen.getAllByLabelText(/^Kategori \d+ kode$/)).toHaveLength(1);
+    // Switch back to default — A reappears with its ORIGINAL id from the prefill.
+    await userEvent.click(screen.getByLabelText(/Gunakan kategori default/));
+    expect(screen.getByTestId('cat-readonly')).toBeInTheDocument();
+
+    // Walk to finalize.
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-2');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-3');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-4');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-5');
+    await userEvent.click(screen.getByTestId('wizard-finalize'));
+    await screen.findByText('Admin Panel Home');
+
+    const payload = save.mock.calls[0][0] as SaveSystemConfigurationPayload;
+    expect(payload.categories).toEqual([
+      { id: idA, code: 'A', name: 'Customer Service' },
+      { id: idB, code: 'B', name: 'Kasir & Pembayaran' },
+    ]);
   });
 });

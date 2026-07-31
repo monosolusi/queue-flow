@@ -88,6 +88,19 @@ export interface SaveSystemConfigurationResult {
   readonly storeName: string;
 }
 
+/**
+ * The PRD §7 default category preset (prefilled into the wizard's Step 1
+ * category designer when the manager keeps the "default" template). Like
+ * {@link DEFAULT_STATE_MACHINE} this is a client mirror of the PRD §7 reference
+ * config. `id` is intentionally absent — the backend mints one on first save;
+ * on a re-edit the prefill carries the existing ids and the wizard's
+ * id-preserving force-reset keeps them (see `defaultCategoriesWithIds`).
+ */
+export const DEFAULT_CATEGORIES: readonly WizardCategoryDto[] = [
+  { code: 'A', name: 'Customer Service' },
+  { code: 'B', name: 'Kasir & Pembayaran' },
+];
+
 /** The PRD §7 default state machine (prefilled into the wizard designer). */
 export const DEFAULT_STATE_MACHINE: StateMachineDto = {
   states: ['WAITING', 'CALLING', 'SERVING', 'SKIPPED', 'COMPLETED'],
