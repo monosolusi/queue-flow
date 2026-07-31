@@ -298,6 +298,33 @@ with no duplicate/lost ticket numbers.
   Hardening milestone (cron/mode changes take effect on next restart);
   categories/routing take effect immediately via per-execution policy
   resolution.
+- **Wizard state-machine designer step (QUE-15, FR-WZD-04):** the wizard's
+  step 3 lets the manager pick the PRD §7 default state machine or build a
+  custom one. The default/custom choice is a **client-only preset** — a
+  `mode: 'default' | 'custom'` field on the wizard's state-machine form slice
+  that is **never sent to core-api** (the `PUT /api/system/config` payload is
+  always the full `{ states, transitions }` graph; `mode` is stripped in
+  `finalize` and force-resets to the PRD §7 default when `'default'`, so a
+  half-edited custom graph a manager abandoned cannot leak onto the wire — no
+  `StateMachineDto` contract drift). It is inferred on prefill by structural
+  deep-equal against `DEFAULT_STATE_MACHINE`. In custom mode the `states` list
+  is editable (add/remove) and each transition's `from`/`to` are **`<select>`
+  dropdowns constrained to the current `states` list** — this structurally
+  prevents the backend `StateMachine` ctor's `transition references states not
+  in the schema` 400 (the manager can only pick existing states). A state
+  referenced by any transition cannot be removed (`Hapus` disabled), and
+  renaming a state propagates to every transition that referenced the old name
+  (no dangling edge). **Client validation mirrors the backend:** the wizard's
+  `validateCustomStateMachine` mirrors `StateSchema.of` (≥1 state, non-empty
+  unique names) and `StateMachine` ctor (≥1 transition, `from`/`to` ∈ schema,
+  no duplicate `from->to` edges, non-empty `actionLabel`) invariants, and
+  `Lanjut` is disabled on step 3 while invalid — so the wizard never submits a
+  graph the backend would reject. **General rule for the admin/wizard client:**
+  mirror core-api value-object invariants in client-side validation AND use
+  constrained inputs (dropdowns over the live list) to make invalid states
+  unconstructable, rather than relying on a backend 400 round-trip. The
+  routing-matrix step (FR-WZD-03) was already satisfied by the existing
+  per-counter checkbox matrix; QUE-15 touched only step 3.
 - **REST surface separation:** the read-only caller workspace surface
   (`GET /api/counters`, `GET /api/queue`) lives in `RestApiModule` (QUE-19).
   Mutation endpoints get their own module by concern — the kiosk
