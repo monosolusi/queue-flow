@@ -1,0 +1,13 @@
+{
+  "name": "queue-flow",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Enterprise Offline Queue Management System (QMS) — monorepo root. Scripts only (no dependencies, no workspaces): each service owns its own package.json and install.",
+  "license": "UNLICENSED",
+  "scripts": {
+    "verify": "node scripts/run-verify.mjs",
+    "acceptance": "node scripts/run-acceptance.mjs",
+    "compose:up": "docker compose up -d --build",
+    "compose:down": "docker compose down"
+  }
+}
