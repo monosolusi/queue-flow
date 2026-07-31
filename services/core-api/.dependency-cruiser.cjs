@@ -9,7 +9,10 @@ module.exports = {
       severity: 'error',
       from: { path: '^src/domain/' },
       to: {
-        path: '^(node:)?(@nestjs/.*|typeorm|@prisma/.*|pg|express|ws|reflect-metadata|mikro-orm|knex|sequelize|mongoose|fastify)',
+        // dep-cruiser resolves bare specifiers to `node_modules/<pkg>/...`, so the
+        // anchor must allow that prefix (without it the regex never matches and
+        // the rule is a silent no-op). `node:` covers built-in modules.
+        path: '^(node:)?(node_modules/)?(@nestjs/.*|typeorm|@prisma/.*|pg|express|ws|reflect-metadata|mikro-orm|knex|sequelize|mongoose|fastify)',
       },
     },
     {
@@ -47,6 +50,24 @@ module.exports = {
       severity: 'error',
       from: { path: '^src/application/' },
       to: { path: '^src/infrastructure/' },
+    },
+    {
+      // NFR-MNT-01 (Clean Architecture) applied to the Application layer: use
+      // cases must stay free of ORM / HTTP framework / I-O library imports
+      // (mirrors `domain-no-framework-imports`). Enforced from QUE-30 onward
+      // now that `pg` lives in the repo, so a use case can never reach for the
+      // driver directly — it goes through the {@link ITransactionManager} /
+      // repository ports defined in the domain.
+      name: 'application-no-framework-imports',
+      severity: 'error',
+      from: { path: '^src/application/' },
+      to: {
+        // dep-cruiser resolves bare specifiers to `node_modules/<pkg>/...`, so the
+        // anchor must allow that prefix (without it the regex never matches and
+        // the rule is a silent no-op — it previously passed a real `@nestjs/common`
+        // import in queue-event-dispatcher). `node:` covers built-in modules.
+        path: '^(node:)?(node_modules/)?(@nestjs/.*|typeorm|@prisma/.*|pg|express|ws|reflect-metadata|mikro-orm|knex|sequelize|mongoose|fastify)',
+      },
     },
   ],
   options: {

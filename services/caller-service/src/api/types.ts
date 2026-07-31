@@ -13,6 +13,19 @@ export interface AssignedCategoryDto {
   readonly name: string;
 }
 
+/** One transition in the active state machine (FR-CLR-02). */
+export interface StateTransitionDto {
+  readonly from: string;
+  readonly to: string;
+  readonly actionLabel: string;
+}
+
+/** The active state-machine graph, returned by `GET /api/system/state-machine`. */
+export interface StateMachineDto {
+  readonly states: readonly string[];
+  readonly transitions: readonly StateTransitionDto[];
+}
+
 /** Counter master data, returned by `GET /api/counters` (FR-CLR-01). */
 export interface CounterDto {
   readonly counterId: number;

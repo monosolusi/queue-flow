@@ -24,7 +24,7 @@ import { StateTransitionValidator } from './state-transition.validator';
  * infrastructure/domain.
  */
 @Module({
-  imports: [PersistenceModule],
+  imports: [PersistenceModule.forRoot()],
   providers: [
     {
       provide: TRANSITION_POLICY_RESOLVER,

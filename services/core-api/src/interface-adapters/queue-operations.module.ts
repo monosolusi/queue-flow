@@ -6,6 +6,8 @@ import {
   TRANSITION_POLICY_RESOLVER,
 } from '../domain/queue';
 import { COUNTER_ROUTING_RULE_REPOSITORY } from '../domain/store-config';
+import { AUDIT_LOG_REPOSITORY } from '../domain/audit';
+import { TRANSACTION_MANAGER } from '../domain/shared';
 import {
   CallNextTicketUseCase,
   CompleteTicketUseCase,
@@ -15,6 +17,7 @@ import {
   SkipTicketUseCase,
   TransferTicketUseCase,
 } from '../application/queue';
+import { RecordAuditEntryUseCase } from '../application/audit/record-audit-entry.use-case';
 import { QueueEventDispatcher } from '../application/queue/queue-event-dispatcher';
 import { PersistenceModule } from '../infrastructure/persistence/persistence.module';
 import { RealtimeModule } from './websocket/realtime.module';
@@ -38,7 +41,7 @@ import { SystemConfigModule } from './config/system-config.module';
  * while unit tests construct the use cases directly with a deterministic clock.
  */
 @Module({
-  imports: [PersistenceModule, RealtimeModule, SystemConfigModule],
+  imports: [PersistenceModule.forRoot(), RealtimeModule, SystemConfigModule],
   providers: [
     {
       provide: CallNextTicketUseCase,
@@ -47,9 +50,10 @@ import { SystemConfigModule } from './config/system-config.module';
         QUEUE_REPOSITORY,
         TRANSITION_POLICY_RESOLVER,
         QueueEventDispatcher,
+        TRANSACTION_MANAGER,
       ],
-      useFactory: (routingRules, queue, policyResolver, dispatcher) =>
-        new CallNextTicketUseCase(routingRules, queue, policyResolver, dispatcher),
+      useFactory: (routingRules, queue, policyResolver, dispatcher, txManager) =>
+        new CallNextTicketUseCase(routingRules, queue, policyResolver, dispatcher, undefined, txManager),
     },
     {
       provide: ServeTicketUseCase,
@@ -89,9 +93,15 @@ import { SystemConfigModule } from './config/system-config.module';
     },
     {
       provide: ResetDailyQueueUseCase,
-      inject: [SEQUENCE_REPOSITORY, QueueEventDispatcher],
-      useFactory: (sequences, dispatcher) =>
-        new ResetDailyQueueUseCase(sequences, dispatcher),
+      inject: [SEQUENCE_REPOSITORY, QueueEventDispatcher, AUDIT_LOG_REPOSITORY, TRANSACTION_MANAGER],
+      useFactory: (sequences, dispatcher, auditLog, txManager) =>
+        new ResetDailyQueueUseCase(
+          sequences,
+          dispatcher,
+          undefined, // clock — keep the () => Date.now default
+          new RecordAuditEntryUseCase(auditLog),
+          txManager,
+        ),
     },
   ],
   exports: [

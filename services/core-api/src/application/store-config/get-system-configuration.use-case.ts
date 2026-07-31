@@ -1,0 +1,143 @@
+import type { ISystemConfigurationRepository } from '../../domain/store-config';
+import type { ICategoryRepository } from '../../domain/queue';
+import type { ICounterRoutingRuleRepository } from '../../domain/store-config';
+import { StateMachine } from '../../domain/store-config';
+import { DailyResetPolicy, DailyResetMode } from '../../domain/store-config';
+import type { PriorityPolicy } from '../../domain/shared';
+
+/**
+ * Read-side projection of the active state machine for the caller panel
+ * (FR-CLR-02). A flat, transport-agnostic graph — not the `StateMachine`
+ * aggregate — so the caller can render one button per outgoing edge of the
+ * active ticket's status. Use cases never return the aggregate itself.
+ */
+export interface StateMachineDto {
+  readonly states: readonly string[];
+  readonly transitions: readonly {
+    readonly from: string;
+    readonly to: string;
+    readonly actionLabel: string;
+  }[];
+}
+
+/** A category projected for the config read surface. */
+export interface ConfigCategoryDto {
+  readonly id: string;
+  readonly code: string;
+  readonly name: string;
+}
+
+/** A counter routing rule projected for the config read surface. */
+export interface ConfigRoutingRuleDto {
+  readonly counterId: number;
+  readonly counterName: string;
+  readonly assignedCategoryIds: readonly string[];
+  readonly priorityPolicy: PriorityPolicy;
+}
+
+export interface DailyResetPolicyDto {
+  readonly mode: DailyResetMode;
+  readonly cronExpression: string | null;
+  readonly resetTicketNumberTo: number;
+  readonly archivePreviousDayData: boolean;
+}
+
+/**
+ * The full system-configuration projection returned to the admin / wizard
+ * (FR-WZD-01..06). `isInitialSetupCompleted` drives the first-run redirect.
+ */
+export interface SystemConfigurationDto {
+  readonly isInitialSetupCompleted: boolean;
+  readonly storeName: string;
+  readonly stateMachine: StateMachineDto;
+  readonly dailyResetPolicy: DailyResetPolicyDto;
+  readonly categories: readonly ConfigCategoryDto[];
+  readonly routingRules: readonly ConfigRoutingRuleDto[];
+}
+
+/** Projects the domain `StateMachine` into the flat {@link StateMachineDto}. */
+export function projectStateMachine(sm: StateMachine): StateMachineDto {
+  return {
+    states: [...sm.stateSchema.states],
+    transitions: sm.transitions.map((t) => ({
+      from: t.from,
+      to: t.to,
+      actionLabel: t.actionLabel,
+    })),
+  };
+}
+
+/** Projects the default state machine (PRD §7) — used when no config exists yet. */
+function defaultStateMachine(): StateMachineDto {
+  return projectStateMachine(StateMachine.DEFAULT);
+}
+
+function defaultDailyReset(): DailyResetPolicyDto {
+  const p = DailyResetPolicy.DEFAULT;
+  return {
+    mode: p.mode,
+    cronExpression: p.cronExpression,
+    resetTicketNumberTo: p.resetTicketNumberTo,
+    archivePreviousDayData: p.archivePreviousDayData,
+  };
+}
+
+/**
+ * Read-side use case: returns the full system configuration for the admin panel
+ * and the first-run wizard (FR-WZD-01). When no `SystemConfiguration` exists yet
+ * (clean store), it returns a **default-shaped DTO with
+ * `isInitialSetupCompleted: false`** rather than throwing — so a clean browser
+ * fetching `GET /api/system/config` gets the redirect signal and the wizard can
+ * prefill the PRD §7 default state machine. Depends only on ports (DIP).
+ */
+export class GetSystemConfigurationUseCase {
+  constructor(
+    private readonly config: ISystemConfigurationRepository,
+    private readonly categories: ICategoryRepository,
+    private readonly routingRules: ICounterRoutingRuleRepository,
+  ) {}
+
+  public async execute(): Promise<SystemConfigurationDto> {
+    const system = await this.config.get();
+    const [allCategories, allRules] = await Promise.all([
+      this.categories.getAll(),
+      this.routingRules.getAll(),
+    ]);
+
+    if (!system) {
+      return {
+        isInitialSetupCompleted: false,
+        storeName: '',
+        stateMachine: defaultStateMachine(),
+        dailyResetPolicy: defaultDailyReset(),
+        categories: [],
+        routingRules: [],
+      };
+    }
+
+    return {
+      isInitialSetupCompleted: system.isInitialSetupCompleted,
+      storeName: system.storeName,
+      stateMachine: projectStateMachine(system.stateMachine),
+      dailyResetPolicy: {
+        mode: system.dailyResetPolicy.mode,
+        cronExpression: system.dailyResetPolicy.cronExpression,
+        resetTicketNumberTo: system.dailyResetPolicy.resetTicketNumberTo,
+        archivePreviousDayData: system.dailyResetPolicy.archivePreviousDayData,
+      },
+      categories: allCategories
+        .slice()
+        .sort((a, b) => a.code.localeCompare(b.code))
+        .map((c) => ({ id: c.id.value, code: c.code, name: c.name })),
+      routingRules: allRules
+        .slice()
+        .sort((a, b) => a.counterId - b.counterId)
+        .map((r) => ({
+          counterId: r.counterId,
+          counterName: r.counterName,
+          assignedCategoryIds: [...r.assignedCategoryIds],
+          priorityPolicy: r.priorityPolicy,
+        })),
+    };
+  }
+}

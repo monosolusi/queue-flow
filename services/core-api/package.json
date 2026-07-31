@@ -6,8 +6,10 @@
   "license": "UNLICENSED",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "postbuild": "node -e \"require('node:fs').cpSync('src/infrastructure/persistence/postgres/migrations','dist/infrastructure/persistence/postgres/migrations',{recursive:true})\"",
     "test": "jest",
     "test:watch": "jest --watch",
+    "test:acceptance": "jest --testMatch '**/*.acceptance.spec.ts'",
     "arch:check": "depcruise --config .dependency-cruiser.cjs src",
     "verify": "npm run arch:check && npm test && npm run build"
   },
@@ -19,6 +21,7 @@
     "@nestjs/schedule": "^6.1.3",
     "@nestjs/websockets": "^11.0.0",
     "cron": "^4.4.0",
+    "pg": "^8.13.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.0",
     "ws": "^8.18.0"
@@ -26,6 +29,7 @@
   "devDependencies": {
     "@types/jest": "^29.5.0",
     "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.0",
     "@types/supertest": "^6.0.0",
     "@types/ws": "^8.5.13",
     "dependency-cruiser": "^16.0.0",

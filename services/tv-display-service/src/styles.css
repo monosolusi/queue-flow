@@ -1,0 +1,185 @@
+:root {
+  --bg: #0f172a;
+  --surface: #1e293b;
+  --surface-2: #334155;
+  --text: #f1f5f9;
+  --text-muted: #94a3b8;
+  --accent: #2563eb;
+  --accent-contrast: #ffffff;
+  --success: #16a34a;
+  --warn: #d97706;
+  --danger: #dc2626;
+  --radius: 18px;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.tv-board {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 1.5rem 2rem;
+  gap: 1.25rem;
+}
+.tv-board__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.tv-board__storename {
+  margin: 0;
+  font-size: 2rem;
+}
+.tv-board__main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 1.5rem;
+  min-height: 0;
+}
+
+/* Now serving ------------------------------------------------------------- */
+.now-serving {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 2rem;
+}
+.now-serving--empty {
+  color: var(--text-muted);
+}
+.now-serving__empty-text {
+  font-size: 2rem;
+  margin: 0;
+}
+.now-serving__label {
+  font-size: 1.5rem;
+  letter-spacing: 0.25em;
+  color: var(--text-muted);
+}
+.now-serving__number {
+  font-size: 14rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  line-height: 1;
+}
+.now-serving__counter {
+  font-size: 2.5rem;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* Call history ------------------------------------------------------------ */
+.call-history {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  overflow: hidden;
+}
+.call-history__title {
+  margin: 0 0 1rem;
+  font-size: 1.5rem;
+}
+.call-history__empty {
+  color: var(--text-muted);
+  font-size: 1.25rem;
+}
+.call-history__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+.call-history__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  background: var(--surface-2);
+  border-radius: 12px;
+}
+.call-history__number {
+  font-size: 2.5rem;
+  font-weight: 700;
+}
+.call-history__counter {
+  color: var(--text-muted);
+  font-size: 1.25rem;
+}
+
+/* Connection status ------------------------------------------------------- */
+.connection-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1.1rem;
+  color: var(--text-muted);
+}
+.connection-status__dot {
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+.connection-status--open .connection-status__dot {
+  background: var(--success);
+}
+.connection-status--connecting .connection-status__dot {
+  background: var(--warn);
+}
+.connection-status--closed .connection-status__dot {
+  background: var(--danger);
+}
+.connection-status--open {
+  color: var(--success);
+}
+.connection-status--closed {
+  color: var(--danger);
+}
+
+/* Running text marquee (FR-TV-03) ----------------------------------------- */
+.tv-board__marquee {
+  overflow: hidden;
+  white-space: nowrap;
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 0.75rem 0;
+}
+.marquee__track {
+  display: inline-block;
+  padding-left: 100%;
+  font-size: 1.5rem;
+  color: var(--text-muted);
+  animation: marquee 22s linear infinite;
+}
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .marquee__track {
+    animation: none;
+    padding-left: 0;
+  }
+}

@@ -20,7 +20,14 @@ import { WireEventMapper } from './wire-event.mapper';
     QueueRealtimeGateway,
     WireEventMapper,
     { provide: QUEUE_EVENT_PUBLISHER, useClass: WebSocketEventPublisher },
-    QueueEventDispatcher,
+    // Plain-class seam (no `@Injectable`): wire via a factory injecting the
+    // publisher Symbol so the application layer stays framework-free
+    // (NFR-MNT-01, `application-no-framework-imports`).
+    {
+      provide: QueueEventDispatcher,
+      useFactory: (publisher: IQueueEventPublisher) => new QueueEventDispatcher(publisher),
+      inject: [QUEUE_EVENT_PUBLISHER],
+    },
   ],
   exports: [QueueEventDispatcher, QUEUE_EVENT_PUBLISHER],
 })

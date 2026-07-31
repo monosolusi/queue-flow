@@ -1,0 +1,97 @@
+# Enterprise Offline Queue Management System (QMS) — single-host deployment.
+#
+# Every service runs in its own container on one local PC server, fronted by
+# the `gateway` reverse proxy. Bring the whole stack up with one command:
+#
+#   docker compose up -d
+#
+# Then open http://antrian.local/ (or the server IP) — a clean browser is
+# redirected to /admin/wizard for first-run setup (FR-WZD-01). No internet is
+# required at runtime (NFR-REL-01); every container self-heals (NFR-REL-03).
+
+services:
+  # --- Database ------------------------------------------------------------
+  # PostgreSQL 15 with WAL (default) — durable ticket/sequence state so a
+  # power cut leaves the DB consistent with no dupes/gaps (NFR-REL-02).
+  db-service:
+    image: postgres:15-alpine
+    restart: always # NFR-REL-03
+    environment:
+      POSTGRES_DB: qms
+      POSTGRES_USER: qms
+      POSTGRES_PASSWORD: qms
+      # WAL + fsync are on by default in the official image (durable commits).
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qms -d qms"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Internal only — not published to the LAN (NFR-SEC-01).
+
+  # --- Backend ------------------------------------------------------------
+  core-api-service:
+    build:
+      context: ./services/core-api
+    restart: always # NFR-REL-03
+    depends_on:
+      db-service:
+        condition: service_healthy
+    environment:
+      # PostgreSQL profile — boot migration runner + WAL-durable repos.
+      QMS_PERSISTENCE: postgres
+      QMS_DB_URL: postgresql://qms:qms@db-service:5432/qms
+      NODE_ENV: production
+    expose:
+      - "3000"
+    # Not published directly — the gateway proxies /api + /ws here.
+
+  # --- Frontends (static PWAs served by per-service nginx) ---------------
+  kiosk-service:
+    build:
+      context: ./services/kiosk-service
+    restart: always # NFR-REL-03
+    expose:
+      - "80"
+
+  tv-display-service:
+    build:
+      context: ./services/tv-display-service
+    restart: always # NFR-REL-03
+    expose:
+      - "80"
+
+  caller-service:
+    build:
+      context: ./services/caller-service
+    restart: always # NFR-REL-03
+    expose:
+      - "80"
+
+  admin-service:
+    build:
+      context: ./services/admin-service
+    restart: always # NFR-REL-03
+    expose:
+      - "80"
+
+  # --- Gateway -----------------------------------------------------------
+  # The single LAN-facing entry point. Reverse-proxies /api + /ws to core-api
+  # and each frontend sub-path to its PWA container. Serves nothing itself.
+  gateway:
+    image: nginx:alpine
+    restart: always # NFR-REL-03
+    depends_on:
+      - core-api-service
+      - kiosk-service
+      - tv-display-service
+      - caller-service
+      - admin-service
+    ports:
+      - "80:80"
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+
+volumes:
+  pgdata:

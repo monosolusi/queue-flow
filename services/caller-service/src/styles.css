@@ -255,8 +255,22 @@ button {
   font-weight: 700;
 }
 
-.workspace__actions {
+.action-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
   min-height: 6rem;
-  border: 2px dashed var(--surface-2);
-  border-radius: var(--radius);
+}
+.action-controls__call-next {
+  min-width: 12rem;
+}
+.action-controls__edge {
+  min-width: 9rem;
+}
+.action-controls__error {
+  flex-basis: 100%;
+  color: var(--danger);
+  font-size: 0.95rem;
+  margin: 0;
 }

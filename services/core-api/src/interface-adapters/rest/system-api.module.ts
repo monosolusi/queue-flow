@@ -12,7 +12,7 @@ import { SystemAdminController } from './system-admin.controller';
  * operations are a distinct concern.
  */
 @Module({
-  imports: [QueueOperationsModule, PersistenceModule],
+  imports: [QueueOperationsModule, PersistenceModule.forRoot()],
   controllers: [SystemAdminController],
 })
 export class SystemApiModule {}

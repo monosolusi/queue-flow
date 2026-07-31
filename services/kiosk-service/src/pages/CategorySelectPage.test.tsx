@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { CategorySelectPage } from './CategorySelectPage';
 import type { CategoryDto, CreatedTicketDto } from '../api/types';
 import type { IKioskApi } from '../api/kiosk-api';
+import type { IPrintProvider, PrintPayload } from '../print/print-provider';
 
 const categories: CategoryDto[] = [
   { id: 'cat-a', code: 'A', name: 'Customer Service' },
@@ -26,11 +27,14 @@ function makeApi(
 }
 
 /** Renders the select page inside a router so `useNavigate` works. */
-function renderSelect(api: IKioskApi) {
+function renderSelect(api: IKioskApi, printProvider?: IPrintProvider) {
   return render(
     <MemoryRouter initialEntries={['/']}>
       <Routes>
-        <Route path="/" element={<CategorySelectPage api={api} />} />
+        <Route
+          path="/"
+          element={<CategorySelectPage api={api} printProvider={printProvider} />}
+        />
         <Route path="/tiket" element={<div>Ticket Result</div>} />
       </Routes>
     </MemoryRouter>,
@@ -102,5 +106,68 @@ describe('CategorySelectPage (kiosk — FR-KSK-01 / QUE-17)', () => {
 
     expect(await screen.findByText(/gagal membuat tiket/i)).toBeInTheDocument();
     expect(button).not.toBeDisabled();
+  });
+
+  it('fires the thermal print within 1.5s of ticket creation (FR-KSK-02/03, NFR-PERF-03)', async () => {
+    let createResolvedAt = 0;
+    const createTicket = vi.fn(
+      (id: string) =>
+        new Promise<CreatedTicketDto>((resolve) => {
+          // Resolve on a microtask so we can stamp the moment the POST resolves.
+          Promise.resolve().then(() => {
+            createResolvedAt = performance.now();
+            resolve(ticket(id, 'A-001'));
+          });
+        }),
+    );
+    let printed: PrintPayload | undefined;
+    let printCalledAt = 0;
+    const printProvider: IPrintProvider = {
+      print: vi.fn((p: PrintPayload) => {
+        printed = p;
+        printCalledAt = performance.now();
+        return Promise.resolve();
+      }),
+    };
+
+    renderSelect(makeApi(categories, createTicket), printProvider);
+
+    await screen.findByText('Customer Service');
+    await userEvent.click(screen.getByText('Customer Service'));
+
+    // Navigating to the result page only happens after the print has fired
+    // (fire-and-forget, but synchronous in the post-resolve continuation).
+    expect(await screen.findByText('Ticket Result')).toBeInTheDocument();
+    expect(printProvider.print).toHaveBeenCalledTimes(1);
+    expect(printed!.ticketNumber).toBe('A-001');
+    expect(printed!.categoryName).toBe('Customer Service');
+    // NFR-PERF-03: physical print triggers within 1.5 s of the POST resolving.
+    expect(printCalledAt - createResolvedAt).toBeLessThan(1500);
+  });
+
+  it('still navigates when the print provider rejects (print failure is non-fatal)', async () => {
+    const createTicket = vi.fn((id: string) => Promise.resolve(ticket(id, 'A-001')));
+    const printProvider: IPrintProvider = {
+      print: vi.fn(() => Promise.reject(new Error('printer offline'))),
+    };
+
+    renderSelect(makeApi(categories, createTicket), printProvider);
+
+    await screen.findByText('Customer Service');
+    await userEvent.click(screen.getByText('Customer Service'));
+
+    expect(await screen.findByText('Ticket Result')).toBeInTheDocument();
+    expect(printProvider.print).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not print when no print provider is wired (printing optional)', async () => {
+    const createTicket = vi.fn((id: string) => Promise.resolve(ticket(id, 'A-001')));
+    // No printProvider passed — existing flows without a printer are unbroken.
+    renderSelect(makeApi(categories, createTicket));
+
+    await screen.findByText('Customer Service');
+    await userEvent.click(screen.getByText('Customer Service'));
+
+    expect(await screen.findByText('Ticket Result')).toBeInTheDocument();
   });
 });

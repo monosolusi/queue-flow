@@ -1,10 +1,6 @@
-import { Inject, Injectable } from '@nestjs/common';
 import type { AggregateRoot } from '../../domain/shared/aggregate-root';
 import type { DomainEvent } from '../../domain/shared/domain-event';
-import {
-  QUEUE_EVENT_PUBLISHER,
-  type IQueueEventPublisher,
-} from '../../domain/queue/event-publisher.port';
+import type { IQueueEventPublisher } from '../../domain/queue/event-publisher.port';
 
 /**
  * Application-layer seam that drains the domain events recorded on an
@@ -13,14 +9,15 @@ import {
  * recorded events become realtime broadcasts (FR-ENG-04).
  *
  * Depends on the port, never on the WebSocket transport, so the application
- * layer stays decoupled from infrastructure (DIP).
+ * layer stays decoupled from infrastructure (DIP). This is a plain class — no
+ * `@Injectable`/`@Inject` — mirroring the use-case "pure class" philosophy so
+ * the application layer carries zero framework imports (NFR-MNT-01,
+ * `application-no-framework-imports`). {@link RealtimeModule} wires it via a
+ * factory injecting the {@link QUEUE_EVENT_PUBLISHER} Symbol token; use-case
+ * modules then inject the `QueueEventDispatcher` class token it exports.
  */
-@Injectable()
 export class QueueEventDispatcher {
-  constructor(
-    @Inject(QUEUE_EVENT_PUBLISHER)
-    private readonly publisher: IQueueEventPublisher,
-  ) {}
+  constructor(private readonly publisher: IQueueEventPublisher) {}
 
   public async dispatch(aggregate: AggregateRoot): Promise<void> {
     const events = aggregate.pullDomainEvents();

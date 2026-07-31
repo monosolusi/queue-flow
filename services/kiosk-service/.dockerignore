@@ -1,0 +1,11 @@
+node_modules
+dist
+coverage
+*.log
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+.git
+.gitignore
+Dockerfile
+.dockerignore

@@ -49,10 +49,28 @@ const snapshot: QueueSnapshotDto = {
   waitingCount: 1,
 };
 
+const defaultStateMachine = {
+  states: ['WAITING', 'CALLING', 'SERVING', 'SKIPPED', 'COMPLETED'],
+  transitions: [
+    { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' },
+    { from: 'CALLING', to: 'SERVING', actionLabel: 'Mulai Melayani' },
+    { from: 'CALLING', to: 'SKIPPED', actionLabel: 'Lewati / Absen' },
+    { from: 'SKIPPED', to: 'CALLING', actionLabel: 'Panggil Ulang' },
+    { from: 'SERVING', to: 'COMPLETED', actionLabel: 'Selesai Layan' },
+  ],
+};
+
 function makeApi(snap: QueueSnapshotDto = snapshot): ICallerApi {
   return {
     listCounters: () => Promise.resolve([]),
     getQueueSnapshot: vi.fn(() => Promise.resolve(snap)),
+    getActiveStateMachine: vi.fn(() => Promise.resolve(defaultStateMachine)),
+    callNext: vi.fn(() => Promise.resolve()),
+    serve: vi.fn(() => Promise.resolve()),
+    complete: vi.fn(() => Promise.resolve()),
+    skip: vi.fn(() => Promise.resolve()),
+    recall: vi.fn(() => Promise.resolve()),
+    transfer: vi.fn(() => Promise.resolve()),
   };
 }
 

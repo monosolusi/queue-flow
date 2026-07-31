@@ -1,0 +1,128 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from '@jest/globals';
+import {
+  type BootedApp,
+  clearRepos,
+  createApp,
+  http,
+  prdWizardPayload,
+} from './_helpers';
+
+/**
+ * DoD-2 — First-Run Wizard (API half, FR-WZD-01..06).
+ *
+ * PRD §8 bullet 2: a clean browser is redirected to /wizard, and completing the
+ * 4 steps opens normal operations. The browser redirect is verified by the
+ * admin-service vitest suite (SetupGuard redirects to /wizard when
+ * `isInitialSetupCompleted === false`; WizardPage walks the 4 steps and PUTs
+ * the payload). This spec verifies the **backend contract** that drives that
+ * behaviour, in-process with supertest (the authoritative DoD-2 gate):
+ *
+ *  - clean store → `GET /api/system/config` returns `isInitialSetupCompleted:false`
+ *    (does NOT throw — the wizard needs the default-shaped state machine to
+ *    prefill, so a clean browser gets the redirect signal, not a 500).
+ *  - before setup, queue endpoints respond 409 `SYSTEM_NOT_CONFIGURED`.
+ *  - `PUT /api/system/config` with the PRD §7 payload completes setup
+ *    (`isInitialSetupCompleted:true`) atomically.
+ *  - after setup, queue endpoints succeed (normal operations open).
+ *
+ * The browser-side Playwright spec from the original plan is intentionally
+ * omitted (air-gapped fallback the plan allows): the admin-service vitest
+ * component tests cover the redirect + 4-step walk, and this spec covers the
+ * contract. No DB, no network.
+ */
+describe('DoD-2 — First-Run Wizard API (FR-WZD-01..06)', () => {
+  let booted: BootedApp;
+
+  beforeAll(async () => {
+    booted = await createApp();
+  });
+
+  afterAll(async () => {
+    await booted.app.close();
+  });
+
+  beforeEach(() => {
+    clearRepos(booted.app);
+  });
+
+  it('a clean store reports isInitialSetupCompleted:false with a default-shaped config', async () => {
+    const res = await http(booted.app).get('/api/system/config').expect(200);
+    expect(res.body.isInitialSetupCompleted).toBe(false);
+    // The wizard prefills the default state machine even before setup, so the
+    // designer is never empty (FR-WZD-04 default graph).
+    expect(res.body.stateMachine.states).toEqual([
+      'WAITING',
+      'CALLING',
+      'SERVING',
+      'SKIPPED',
+      'COMPLETED',
+    ]);
+    expect(res.body.categories).toEqual([]);
+    expect(res.body.routingRules).toEqual([]);
+  });
+
+  it('before setup, the kiosk has no categories and the caller is hard-blocked (409 SYSTEM_NOT_CONFIGURED)', async () => {
+    // The kiosk reads categories — none exist before the wizard configures them,
+    // so the visitor has nothing to select (FR-KSK-01 cannot operate pre-setup).
+    const cats = await http(booted.app).get('/api/categories').expect(200);
+    expect(cats.body).toEqual([]);
+
+    // The caller command surface resolves the active transition policy, which
+    // reads SystemConfiguration — no config -> 409 SYSTEM_NOT_CONFIGURED.
+    const callRes = await http(booted.app)
+      .post('/api/queue/call-next')
+      .send({ counterId: 1 });
+    expect(callRes.status).toBe(409);
+    expect(callRes.body.code).toBe('SYSTEM_NOT_CONFIGURED');
+
+    // The active state machine read (caller dynamic buttons) is blocked too.
+    const smRes = await http(booted.app).get('/api/system/state-machine');
+    expect(smRes.status).toBe(409);
+    expect(smRes.body.code).toBe('SYSTEM_NOT_CONFIGURED');
+  });
+
+  it('PUT /api/system/config with the PRD §7 payload completes initial setup (FR-WZD-06)', async () => {
+    const res = await http(booted.app)
+      .put('/api/system/config')
+      .send(prdWizardPayload())
+      .expect(200);
+    expect(res.body.isInitialSetupCompleted).toBe(true);
+    expect(res.body.storeName).toBe('Toko Utama Surabaya');
+  });
+
+  it('a bad wizard payload (duplicate category codes) is rejected 400 — setup is NOT silently completed', async () => {
+    const bad = prdWizardPayload();
+    bad.categories = [
+      { code: 'A', name: 'Customer Service' },
+      { code: 'A', name: 'Duplikat' },
+    ];
+    const res = await http(booted.app).put('/api/system/config').send(bad);
+    expect(res.status).toBe(400);
+    // Setup must not flip to true on a rejected save.
+    const cfg = await http(booted.app).get('/api/system/config').expect(200);
+    expect(cfg.body.isInitialSetupCompleted).toBe(false);
+  });
+
+  it('after setup, normal operations open: categories list + ticket creation + state-machine read', async () => {
+    await http(booted.app).put('/api/system/config').send(prdWizardPayload()).expect(200);
+
+    // The kiosk reads categories (FR-KSK-01).
+    const cats = await http(booted.app).get('/api/categories').expect(200);
+    expect(cats.body).toHaveLength(2);
+    expect(cats.body.map((c: { code: string }) => c.code).sort()).toEqual(['A', 'B']);
+
+    // The caller reads the active state machine (FR-CLR-02 dynamic buttons).
+    const sm = await http(booted.app).get('/api/system/state-machine').expect(200);
+    expect(sm.body.transitions).toHaveLength(5);
+
+    // The kiosk issues a ticket (FR-ENG-01) — now unblocked.
+    const catA = cats.body.find((c: { code: string }) => c.code === 'A');
+    const ticket = await http(booted.app)
+      .post('/api/tickets')
+      .send({ categoryId: catA.id })
+      .expect(201);
+    expect(ticket.body.status).toBe('created');
+    expect(ticket.body.ticket.ticketNumber).toBe('A-001');
+    expect(ticket.body.ticket.status).toBe('WAITING');
+  });
+});

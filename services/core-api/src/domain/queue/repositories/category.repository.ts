@@ -14,4 +14,6 @@ export interface ICategoryRepository {
   getById(id: string): Promise<Category | null>;
   getByCode(code: string): Promise<Category | null>;
   save(category: Category): Promise<void>;
+  /** Removes every category (wizard full-replacement save, QUE-30). */
+  deleteAll(): Promise<void>;
 }
