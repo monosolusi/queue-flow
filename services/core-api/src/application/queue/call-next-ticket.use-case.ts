@@ -5,7 +5,7 @@ import type {
   ITransitionPolicyResolver,
   NextTicketQuery,
 } from '../../domain/queue';
-import { EntityNotFoundException } from '../../domain/shared';
+import { EntityNotFoundException, ITransactionManager, NoOpTransactionManager } from '../../domain/shared';
 import { QueueEventDispatcher } from './queue-event-dispatcher';
 
 /**
@@ -61,6 +61,7 @@ export class CallNextTicketUseCase {
     private readonly policyResolver: ITransitionPolicyResolver,
     private readonly dispatcher: QueueEventDispatcher,
     private readonly clock: () => number = () => Date.now(),
+    private readonly txManager: ITransactionManager = new NoOpTransactionManager(),
   ) {}
 
   async execute(command: CallNextTicketCommand): Promise<CallNextTicketResult> {
@@ -85,18 +86,26 @@ export class CallNextTicketUseCase {
       priorityPolicy: rule.priorityPolicy,
     };
 
-    const ticket = await this.queue.findNextWaiting(query);
+    // Claim the next WAITING ticket + persist the CALLING transition inside one
+    // transaction (QUE-30 / NFR-REL-02). The PostgreSQL implementation enforces
+    // that two counters cannot claim the same ticket concurrently (row lock +
+    // conditional UPDATE inside the tx); the in-memory / no-op manager is a
+    // pass-through. The realtime broadcast is drained *after* the commit so a
+    // rolled-back claim is never announced.
+    const ticket = await this.txManager.runInTransaction(async () => {
+      const next = await this.queue.findNextWaiting(query);
+      if (!next) {
+        return null;
+      }
+      next.markCalling(command.counterId, transitionPolicy, this.clock());
+      await this.queue.save(next);
+      return next;
+    });
+
     if (!ticket) {
       return { status: 'empty' };
     }
 
-    // NOTE: findNextWaiting -> markCalling -> save is not atomic across counters.
-    // Two counters could select the same WAITING ticket concurrently. This is
-    // acceptable for the in-memory / single-host scope of QUE-11; the future
-    // PostgreSQL repository will enforce atomicity (SELECT ... FOR UPDATE +
-    // conditional UPDATE) so a ticket is claimed by exactly one counter.
-    ticket.markCalling(command.counterId, transitionPolicy, this.clock());
-    await this.queue.save(ticket);
     // Drain the recorded TicketCalledEvent so it actually broadcasts (FR-ENG-04).
     await this.dispatcher.dispatch(ticket);
 

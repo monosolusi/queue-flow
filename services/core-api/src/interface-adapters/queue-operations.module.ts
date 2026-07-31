@@ -6,6 +6,7 @@ import {
   TRANSITION_POLICY_RESOLVER,
 } from '../domain/queue';
 import { COUNTER_ROUTING_RULE_REPOSITORY } from '../domain/store-config';
+import { TRANSACTION_MANAGER } from '../domain/shared';
 import {
   CallNextTicketUseCase,
   CompleteTicketUseCase,
@@ -38,7 +39,7 @@ import { SystemConfigModule } from './config/system-config.module';
  * while unit tests construct the use cases directly with a deterministic clock.
  */
 @Module({
-  imports: [PersistenceModule, RealtimeModule, SystemConfigModule],
+  imports: [PersistenceModule.forRoot(), RealtimeModule, SystemConfigModule],
   providers: [
     {
       provide: CallNextTicketUseCase,
@@ -47,9 +48,10 @@ import { SystemConfigModule } from './config/system-config.module';
         QUEUE_REPOSITORY,
         TRANSITION_POLICY_RESOLVER,
         QueueEventDispatcher,
+        TRANSACTION_MANAGER,
       ],
-      useFactory: (routingRules, queue, policyResolver, dispatcher) =>
-        new CallNextTicketUseCase(routingRules, queue, policyResolver, dispatcher),
+      useFactory: (routingRules, queue, policyResolver, dispatcher, txManager) =>
+        new CallNextTicketUseCase(routingRules, queue, policyResolver, dispatcher, undefined, txManager),
     },
     {
       provide: ServeTicketUseCase,

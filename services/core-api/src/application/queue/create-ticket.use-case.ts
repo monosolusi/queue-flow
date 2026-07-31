@@ -4,7 +4,7 @@ import type {
   ISequenceRepository,
 } from '../../domain/queue';
 import { QueueTicket, ticketIdGenerate } from '../../domain/queue';
-import { EntityNotFoundException } from '../../domain/shared';
+import { EntityNotFoundException, ITransactionManager, NoOpTransactionManager } from '../../domain/shared';
 import { QueueEventDispatcher } from './queue-event-dispatcher';
 
 /**
@@ -72,14 +72,15 @@ export function toDateKey(epochMs: number): string {
  * (NFR-MNT-01). Concrete wiring (NestJS providers) is supplied by the
  * interface-adapter layer.
  *
- * NOTE: reserve → create → save is not atomic *within* the use case. True
- * gap-free durability (reserve the sequence and insert the ticket in one
- * database transaction, surviving a power cut mid-write) is the future
- * PostgreSQL repository's responsibility (QUE-28 / NFR-REL-02). The in-memory
- * implementation is for tests and local dev only. There is no pre-check that
- * can fail after a number is reserved — unlike {@link TransferTicketUseCase},
- * which pre-checks the transition before reserving — so a normal create burns
- * no sequence on a rejected command.
+ * NOTE: reserve → create → save is wrapped in a single {@link
+ * ITransactionManager} transaction so a durable (PostgreSQL) implementation
+ * commits the sequence reservation and the ticket insert atomically — a power
+ * cut mid-write rolls the sequence advance back too, so no duplicate numbers
+ * and no gaps (NFR-REL-02, QUE-30). The in-memory / no-op transaction manager is
+ * a pure pass-through, so tests and local dev behave exactly as before. There
+ * is no pre-check that can fail after a number is reserved — unlike {@link
+ * TransferTicketUseCase}, which pre-checks the transition before reserving —
+ * so a normal create burns no sequence on a rejected command.
  */
 export class CreateTicketUseCase {
   constructor(
@@ -88,6 +89,7 @@ export class CreateTicketUseCase {
     private readonly sequences: ISequenceRepository,
     private readonly dispatcher: QueueEventDispatcher,
     private readonly clock: () => number = () => Date.now(),
+    private readonly txManager: ITransactionManager = new NoOpTransactionManager(),
   ) {}
 
   public async execute(command: CreateTicketCommand): Promise<CreateTicketResult> {
@@ -96,16 +98,23 @@ export class CreateTicketUseCase {
       throw new EntityNotFoundException('Category', command.categoryId);
     }
 
-    const now = this.clock();
-    const dateKey = toDateKey(now);
-    const ticketNumber = await this.sequences.nextTicketNumber(
-      category.id.value,
-      category.code,
-      dateKey,
-    );
+    // Reserve + persist inside one transaction so a durable implementation
+    // commits the sequence reservation and ticket insert atomically (NFR-REL-
+    // 02). The realtime broadcast is drained *after* the commit so we never
+    // announce a state change that rolled back.
+    const ticket = await this.txManager.runInTransaction(async () => {
+      const now = this.clock();
+      const dateKey = toDateKey(now);
+      const ticketNumber = await this.sequences.nextTicketNumber(
+        category.id.value,
+        category.code,
+        dateKey,
+      );
+      const created = QueueTicket.create(ticketIdGenerate(), ticketNumber, category.id.value, now);
+      await this.queue.save(created);
+      return created;
+    });
 
-    const ticket = QueueTicket.create(ticketIdGenerate(), ticketNumber, category.id.value, now);
-    await this.queue.save(ticket);
     await this.dispatcher.dispatch(ticket);
 
     return {

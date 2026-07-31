@@ -14,7 +14,7 @@ import { DailyResetSchedulerService } from './daily-reset-scheduler.service';
  * {@link AppModule} so the `SchedulerRegistry` is available app-wide.
  */
 @Module({
-  imports: [PersistenceModule, QueueOperationsModule],
+  imports: [PersistenceModule.forRoot(), QueueOperationsModule],
   providers: [DailyResetSchedulerService],
 })
 export class SchedulerModule {}

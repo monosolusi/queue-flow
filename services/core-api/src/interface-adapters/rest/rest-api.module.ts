@@ -24,7 +24,7 @@ import { DomainExceptionFilter } from './domain-exception.filter';
  * each is `provide`d as itself.
  */
 @Module({
-  imports: [PersistenceModule],
+  imports: [PersistenceModule.forRoot()],
   controllers: [CountersController, QueueController, CategoriesController],
   providers: [
     // Global HTTP filter mapping domain errors to HTTP statuses so the
