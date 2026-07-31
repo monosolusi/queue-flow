@@ -285,7 +285,12 @@ with no duplicate/lost ticket numbers.
   `DailyQueueResetEvent` (type `SYSTEM_RESET`) is the one such event in QUE-2's
   scope; it carries a sentinel `SYSTEM_AGGREGATE_ID = 'system'` (exported from
   `daily-queue-reset.event.ts`) since `DomainEvent` requires an `aggregateId`
-  but no `SystemAggregate` exists.
+  but no `SystemAggregate` exists. **Transfer emits two events:** because
+  transfer ("Pindah Kategori") is a first-class transition, the aggregate
+  records both a `STATUS_UPDATED` (CALLING → WAITING, actionLabel "Pindah
+  Kategori") **and** a `TICKET_TRANSFERRED` — so a realtime test asserting a
+  transfer must collect 2 messages, not 1 (the other single-transition commands
+  emit exactly one `STATUS_UPDATED`).
 - **Daily reset engine (QUE-2, FR-ENG-05):** `ResetDailyQueueUseCase`
   (`application/queue`) owns only `ISequenceRepository` + `QueueEventDispatcher`
   + an injected `clock`. It derives `date = toDateKey(clock())` internally (the
