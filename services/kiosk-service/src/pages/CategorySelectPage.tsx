@@ -2,9 +2,15 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { CategoryDto, CreatedTicketDto } from '../api/types';
 import type { IKioskApi } from '../api/kiosk-api';
+import type { IPrintProvider, PrintPayload } from '../print/print-provider';
 
 export interface CategorySelectPageProps {
   readonly api: IKioskApi;
+  /** Thermal print provider (FR-KSK-02/03). When present, the kiosk fires a
+   * print immediately after a ticket is issued — within the 1.5 s budget
+   * (NFR-PERF-03). Optional so existing flows/tests without a printer are
+   * unbroken; the App wires a {@link BrowserPrintProvider} by default. */
+  readonly printProvider?: IPrintProvider;
 }
 
 /** Result of issuing a ticket, carried to the result page via router state. */
@@ -33,7 +39,7 @@ type IssueState =
  * before React re-renders — and the `disabled` attribute is the visible
  * affordance of the same state.
  */
-export function CategorySelectPage({ api }: CategorySelectPageProps) {
+export function CategorySelectPage({ api, printProvider }: CategorySelectPageProps) {
   const navigate = useNavigate();
   const [load, setLoad] = useState<LoadState>({ status: 'loading' });
   const [issue, setIssue] = useState<IssueState>({ status: 'idle' });
@@ -68,6 +74,21 @@ export function CategorySelectPage({ api }: CategorySelectPageProps) {
     setIssue({ status: 'issuing', categoryId: category.id });
     try {
       const ticket = await api.createTicket(category.id);
+      // Fire the thermal print immediately after issuance (FR-KSK-02/03,
+      // NFR-PERF-03 < 1.5 s). Print is fire-and-forget: the print dialog / ESC/POS
+      // handoff must never block the result screen, and a print failure is
+      // non-fatal (the result page is the source of truth). The provider is an
+      // OCP extension point — the page never knows the print mechanism.
+      if (printProvider) {
+        const payload: PrintPayload = {
+          ticketNumber: ticket.ticketNumber,
+          categoryName: category.name,
+          issuedAt: Date.now(),
+        };
+        void printProvider.print(payload).catch(() => {
+          /* print failure is non-fatal — the result screen shows the ticket */
+        });
+      }
       navigate('/tiket', { state: { ticket, categoryName: category.name } satisfies IssuedTicket });
     } catch (err) {
       setIssue({
