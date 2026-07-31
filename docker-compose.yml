@@ -46,6 +46,15 @@ services:
     expose:
       - "3000"
     # Not published directly — the gateway proxies /api + /ws here.
+    healthcheck:
+      # /api/health answers pre-wizard (HealthController), so this is a true
+      # liveness probe for the Nest bootstrap + migration runner, not just
+      # the process. `wget` ships in node:20-alpine (no curl needed).
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
 
   # --- Frontends (static PWAs served by per-service nginx) ---------------
   kiosk-service:
@@ -83,11 +92,16 @@ services:
     image: nginx:alpine
     restart: always # NFR-REL-03
     depends_on:
-      - core-api-service
-      - kiosk-service
-      - tv-display-service
-      - caller-service
-      - admin-service
+      core-api-service:
+        condition: service_healthy
+      kiosk-service:
+        condition: service_started
+      tv-display-service:
+        condition: service_started
+      caller-service:
+        condition: service_started
+      admin-service:
+        condition: service_started
     ports:
       - "80:80"
     volumes:

@@ -8,6 +8,7 @@
     "verify": "node scripts/run-verify.mjs",
     "acceptance": "node scripts/run-acceptance.mjs",
     "compose:up": "docker compose up -d --build",
-    "compose:down": "docker compose down"
+    "compose:down": "docker compose down",
+    "compose:verify": "node scripts/verify-topology.mjs"
   }
 }

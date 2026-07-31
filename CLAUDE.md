@@ -164,9 +164,10 @@ with no duplicate/lost ticket numbers.
   and the DoD-1..4 acceptance suite (`services/core-api/test/acceptance/`). The
   in-memory profile stays the dev/test default; `QMS_PERSISTENCE=postgres`
   activates the Postgres profile (DoD-4 verifies power-cut recovery against a
-  real Postgres). Remaining Hardening work: audit-trail analytics surface,
-  re-arming the daily-reset cron on wizard config change (pairs with audit),
-  and aligning `caller-service` PWA `base` to `/caller/`.
+  real Postgres). Remaining Hardening work: audit-trail analytics surface and
+  re-arming the daily-reset cron on wizard config change (pairs with audit).
+  The frontend PWA `base`/`start_url`/`scope` alignment (`/kiosk/`, `/tv/`,
+  `/caller/`, `/admin/`) is complete across all four services (QUE-27).
 - **PRD language:** the Linear PRD is written in **Bahasa Indonesia** with
   English technical terms. UI `action_label` values ("Panggil Berikutnya",
   "Lewati / Absen", "Selesai Layan") are Indonesian — match them verbatim
@@ -442,8 +443,8 @@ with no duplicate/lost ticket numbers.
   - **PWA `base`/`start_url`/`scope` must match the NGINX route** (e.g.
     `/kiosk/`, `/caller/`) — otherwise an installed PWA's `start_url` resolves to
     the gateway root, not the service, breaking offline launch. Set them when
-    scaffolding a new frontend. (Latent gap: `caller-service` and `kiosk-service`
-    currently use `/`; align existing services during the Hardening milestone.)
+    scaffolding a new frontend. (All four existing frontends — admin, kiosk, tv,
+    caller — are already aligned to their `/svc/` prefix; QUE-27.)
 - When adding a feature, map it to the relevant FR-* / NFR-* requirement in the
   PRD and the bounded context it belongs to. Preserve the interface boundaries
   (e.g. don't leak admin DTOs into `ICallerApi`).

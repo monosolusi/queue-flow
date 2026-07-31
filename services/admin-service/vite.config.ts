@@ -8,12 +8,13 @@ import { VitePWA } from 'vite-plugin-pwa';
 // port 3000, so the app uses relative `/api` and `/ws` URLs in both
 // environments (NFR-REL-01 — no remote calls).
 //
-// Unlike caller-service/kiosk-service (which use base '/' — a latent gap noted in
-// CLAUDE.md), admin-service is scaffolded with the correct sub-path base from
-// the start: Vite `base: '/admin/'` makes the built assets reference
-// `/admin/assets/...`, and the PWA `start_url`/`scope` are `/admin/` so an
-// installed PWA launches at the admin route, not the gateway root. The
-// BrowserRouter `basename` in main.tsx matches.
+// All four frontends (admin/kiosk/tv/caller) are aligned to their gateway
+// sub-path: Vite `base: '/admin/'` makes the built assets reference
+// `/admin/assets/...`, the PWA `start_url`/`scope` are `/admin/` so an
+// installed PWA launches at the admin route (not the gateway root), and the
+// BrowserRouter `basename` in main.tsx matches. The gateway strips the
+// prefix via its trailing-slash proxy_pass, so the per-service nginx serves
+// the bundle at root and the prefixed asset URLs round-trip correctly.
 export default defineConfig({
   base: '/admin/',
   plugins: [
