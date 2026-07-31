@@ -13,4 +13,6 @@ export interface ICounterRoutingRuleRepository {
   getByCounterId(counterId: number): Promise<CounterRoutingRule | null>;
   getAll(): Promise<CounterRoutingRule[]>;
   save(rule: CounterRoutingRule): Promise<void>;
+  /** Removes every routing rule (wizard full-replacement save, QUE-30). */
+  deleteAll(): Promise<void>;
 }

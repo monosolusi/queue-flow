@@ -5,6 +5,7 @@ import { RestApiModule } from './interface-adapters/rest/rest-api.module';
 import { TicketsApiModule } from './interface-adapters/rest/tickets-api.module';
 import { QueueCommandsApiModule } from './interface-adapters/rest/queue-commands-api.module';
 import { SystemApiModule } from './interface-adapters/rest/system-api.module';
+import { SystemConfigApiModule } from './interface-adapters/rest/system-config-api.module';
 import { HealthModule } from './interface-adapters/rest/health.module';
 import { SchedulerModule } from './infrastructure/scheduler/scheduler.module';
 
@@ -15,8 +16,10 @@ import { SchedulerModule } from './infrastructure/scheduler/scheduler.module';
  * surface (QUE-9) are imported here too. QUE-2 adds the queue command REST
  * surface (call-next/serve/complete/skip/recall/transfer), the system-admin
  * daily-reset surface, and the automatic daily-reset scheduler. QUE-30 adds the
- * health probe and wires persistence via `PersistenceModule.forRoot()` inside
- * each feature module (env-driven in-memory ↔ PostgreSQL).
+ * health probe, the system-config / wizard REST surface
+ * (`GET|PUT /api/system/config`, `GET /api/system/state-machine`), and wires
+ * persistence via `PersistenceModule.forRoot()` inside each feature module
+ * (env-driven in-memory ↔ PostgreSQL).
  */
 @Module({
   imports: [
@@ -26,6 +29,7 @@ import { SchedulerModule } from './infrastructure/scheduler/scheduler.module';
     TicketsApiModule,
     QueueCommandsApiModule,
     SystemApiModule,
+    SystemConfigApiModule,
     HealthModule,
     SchedulerModule,
   ],

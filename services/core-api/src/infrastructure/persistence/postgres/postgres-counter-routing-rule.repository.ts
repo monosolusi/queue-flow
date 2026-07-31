@@ -54,6 +54,12 @@ export class PostgresCounterRoutingRuleRepository implements ICounterRoutingRule
       );
     });
   }
+
+  async deleteAll(): Promise<void> {
+    await withDbClient(this.pool, async (client) => {
+      await client.query('DELETE FROM counter_routing_rules');
+    });
+  }
 }
 
 function toRule(row: RoutingRow): CounterRoutingRule {

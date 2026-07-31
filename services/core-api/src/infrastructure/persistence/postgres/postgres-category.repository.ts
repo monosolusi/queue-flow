@@ -48,6 +48,12 @@ export class PostgresCategoryRepository implements ICategoryRepository {
       );
     });
   }
+
+  async deleteAll(): Promise<void> {
+    await withDbClient(this.pool, async (client) => {
+      await client.query('DELETE FROM categories');
+    });
+  }
 }
 
 function toCategory(row: CategoryRow): Category {

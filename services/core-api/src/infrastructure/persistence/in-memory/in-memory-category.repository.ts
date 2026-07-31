@@ -20,6 +20,10 @@ export class InMemoryCategoryRepository implements ICategoryRepository {
     this.byId.set(category.id.value, category);
   }
 
+  async deleteAll(): Promise<void> {
+    this.byId.clear();
+  }
+
   /** Test/dev-only: drops all stored categories. Not on the port interface. */
   clear(): void {
     this.byId.clear();

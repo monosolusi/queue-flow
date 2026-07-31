@@ -19,6 +19,10 @@ export class InMemoryCounterRoutingRuleRepository implements ICounterRoutingRule
     this.byCounterId.set(rule.counterId, rule);
   }
 
+  async deleteAll(): Promise<void> {
+    this.byCounterId.clear();
+  }
+
   /** Test/dev-only: drops all stored routing rules. Not on the port interface. */
   clear(): void {
     this.byCounterId.clear();

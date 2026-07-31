@@ -13,6 +13,19 @@ import { AuditAction } from './audit-action';
  */
 export type AuditSnapshot = Record<string, unknown>;
 
+/**
+ * Coerces a domain/DTO object into an opaque {@link AuditSnapshot}. Named
+ * interfaces (e.g. `StateMachineDto`) are not directly assignable to
+ * `Record<string, unknown>` (they lack an implicit index signature), so the
+ * mutating use case calls this at the anti-corruption boundary — the audit
+ * context stores snapshots as schema-less JSON and must not import the
+ * mutated aggregate's type. `object` is assignable to `AuditSnapshot` via this
+ * cast (the reverse direction is structurally valid), so no `unknown` detour.
+ */
+export function toSnapshot(value: object): AuditSnapshot {
+  return value as AuditSnapshot;
+}
+
 export interface AuditLogEntryProps {
   /** Stable unique id (UUID v4) for the entry — assigned at creation. */
   readonly id: string;
