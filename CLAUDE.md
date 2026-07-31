@@ -273,6 +273,31 @@ with no duplicate/lost ticket numbers.
   like the other repo ports. True gap-free durability (reserve + insert in one
   DB transaction) is the future PostgreSQL repo's job (QUE-28) — the in-memory
   impl is tests/dev only.
+- **Admin operational config panel (QUE-24, FR-ADM-01):** post-setup the
+  manager edits categories, counter routing, and the daily-reset policy in
+  place at `/admin` (the read-only dashboard became a sectioned editor); the
+  wizard stays the guided first-run and the editor for `storeName` + the state
+  machine. It reuses the existing audited `PUT /api/system/config` full save
+  (DRY — no new REST surface, no duplicated audit/tx wiring): GET the full
+  config, edit the in-scope sections, **passthrough** unchanged `storeName` +
+  `stateMachine`, PUT the full payload back. **Category id-preservation is
+  load-bearing:** `QueueTicket.categoryId` stores the category UUID, and
+  `SaveSystemConfigurationUseCase.buildCategories` reuses a provided `id`
+  (`Identifier.of(id)`) but regenerates it when `id` is absent — so any client
+  re-editing categories post-setup MUST send the existing `id` for unchanged
+  categories (omit it only for newly added ones), or it mints new ids and
+  orphans every existing ticket's `categoryId`. (The wizard re-edit prefill
+  previously dropped ids and routing assignments — a latent bug QUE-24 fixed.)
+  **Client boundary id↔code mapping:** `GET /api/system/config` returns
+  routing `assignedCategoryIds`, but `PUT` expects `assignedCategoryCodes` —
+  the admin/wizard client maps id→code on load (via the categories' id→code
+  map) and sends codes; the backend resolves codes→ids at save.
+  `Identifier.of` only accepts a v4 UUID (`Identifier.isValid`), so
+  fixtures/payloads must use real v4 UUIDs, not arbitrary slugs like
+  `'cat-a'`. Scheduler re-arm on reset-policy change is still deferred to the
+  Hardening milestone (cron/mode changes take effect on next restart);
+  categories/routing take effect immediately via per-execution policy
+  resolution.
 - **REST surface separation:** the read-only caller workspace surface
   (`GET /api/counters`, `GET /api/queue`) lives in `RestApiModule` (QUE-19).
   Mutation endpoints get their own module by concern — the kiosk

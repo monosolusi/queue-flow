@@ -61,18 +61,26 @@ export function WizardPage({ api }: { api: IAdminApi }) {
       .getSystemConfig()
       .then((config) => {
         if (cancelled) return;
+        // Preserve existing category ids across re-edit so re-save does not
+        // mint new ids and orphan tickets' `categoryId` (QueueTicket stores the
+        // category UUID). Map routing `assignedCategoryIds` -> codes so the
+        // checkbox matrix reflects the saved assignments instead of resetting
+        // to empty (the prior prefill dropped both).
+        const idToCode = new Map(config.categories.map((c) => [c.id, c.code]));
         setForm({
           storeName: config.storeName,
           categories:
             config.categories.length > 0
-              ? config.categories.map((c) => ({ code: c.code, name: c.name }))
+              ? config.categories.map((c) => ({ id: c.id, code: c.code, name: c.name }))
               : [{ code: 'A', name: '' }],
           routingRules:
             config.routingRules.length > 0
               ? config.routingRules.map((r) => ({
                   counterId: r.counterId,
                   counterName: r.counterName,
-                  assignedCategoryCodes: [],
+                  assignedCategoryCodes: r.assignedCategoryIds
+                    .map((id) => idToCode.get(id))
+                    .filter((code): code is string => Boolean(code)),
                   priorityPolicy: r.priorityPolicy,
                 }))
               : [
