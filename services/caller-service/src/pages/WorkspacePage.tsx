@@ -1,4 +1,5 @@
 import { ActiveTicketCard } from '../components/ActiveTicketCard';
+import { ActionControls } from '../components/ActionControls';
 import { CounterHeader } from '../components/CounterHeader';
 import { WaitingQueueList } from '../components/WaitingQueueList';
 import type { BoundCounter } from '../state/counter-binding';
@@ -11,12 +12,14 @@ export interface WorkspacePageProps {
 
 /**
  * The active queue workspace: header (counter identity + WS status + change
- * counter), the prominent active ticket, and the live waiting list. Action
- * controls (call next / skip / complete / recall) are deliberately NOT wired
- * here — that is QUE-20.
+ * counter), the prominent active ticket, the live waiting list, and the
+ * dynamic action controls (FR-CLR-02). Action buttons are rendered from the
+ * active state machine + the active ticket's status by {@link ActionControls};
+ * the store delivers the resulting lifecycle event over the WebSocket so the
+ * workspace updates without a manual refetch.
  */
 export function WorkspacePage({ bound, onUnbind }: WorkspacePageProps) {
-  const { state } = useQueueStore();
+  const { state, api } = useQueueStore();
   const active = state.active[0] ?? null;
 
   return (
@@ -32,8 +35,7 @@ export function WorkspacePage({ bound, onUnbind }: WorkspacePageProps) {
         <div className="workspace__body">
           <ActiveTicketCard ticket={active} />
           <WaitingQueueList tickets={state.waiting} waitingCount={state.waitingCount} />
-          {/* QUE-20: dynamic action controls (Panggil Berikutnya / Lewati / Selesai Layan / Panggil Ulang). */}
-          <section className="workspace__actions" aria-label="Aksi" />
+          <ActionControls api={api} bound={bound} active={active} />
         </div>
       )}
     </main>

@@ -191,6 +191,9 @@ export interface QueueStoreValue {
   readonly state: QueueState;
   /** Force a fresh snapshot fetch (e.g. after SYSTEM_RESET). */
   readonly refetch: () => void;
+  /** The caller API (exposed so action controls can issue commands + read the
+   *  active state machine without a separate prop drill — FR-CLR-02). */
+  readonly api: ICallerApi;
 }
 
 const QueueStoreContext = createContext<QueueStoreValue | null>(null);
@@ -256,7 +259,7 @@ export function QueueStoreProvider({ bound, api, children, socketOptions }: Queu
     };
   }, []);
 
-  const value = useMemo<QueueStoreValue>(() => ({ state, refetch }), [state, refetch]);
+  const value = useMemo<QueueStoreValue>(() => ({ state, refetch, api }), [state, refetch, api]);
   return <QueueStoreContext.Provider value={value}>{children}</QueueStoreContext.Provider>;
 }
 
