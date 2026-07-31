@@ -11,25 +11,106 @@ import {
   type WizardRoutingRuleDto,
 } from '../api/types';
 
+/** One transition edge in the editable state machine. */
+interface Transition {
+  from: string;
+  to: string;
+  actionLabel: string;
+}
+
+/**
+ * The editable state-machine form slice. `mode` is a **client-only preset** —
+ * it is never sent to core-api (the PUT payload is always the full
+ * `{ states, transitions }` graph). `'default'` locks the form to the PRD §7
+ * default graph; `'custom'` opens the states + transitions editor. It is
+ * inferred on prefill (deep-equal to {@link DEFAULT_STATE_MACHINE} ⇒ default)
+ * so a re-edit of a store that never customized stays in default mode.
+ */
+interface StateMachineForm {
+  mode: 'default' | 'custom';
+  states: string[];
+  transitions: Transition[];
+}
+
 /** The editable wizard form model (mirrors the PUT payload pieces). */
 interface WizardForm {
   storeName: string;
   categories: WizardCategoryDto[];
   routingRules: WizardRoutingRuleDto[];
-  stateMachine: { states: string[]; transitions: { from: string; to: string; actionLabel: string }[] };
+  stateMachine: StateMachineForm;
   dailyReset: { mode: DailyResetMode; cronExpression: string; resetTicketNumberTo: number; archivePreviousDayData: boolean };
 }
 
 const TOTAL_STEPS = 4;
+
+function defaultStateMachineForm(): StateMachineForm {
+  return {
+    mode: 'default',
+    states: [...DEFAULT_STATE_MACHINE.states],
+    transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
+  };
+}
 
 function emptyForm(): WizardForm {
   return {
     storeName: '',
     categories: [{ code: 'A', name: '' }],
     routingRules: [{ counterId: 1, counterName: 'Counter 1', assignedCategoryCodes: [], priorityPolicy: 'FIFO_GLOBAL' as PriorityPolicy }],
-    stateMachine: { states: [...DEFAULT_STATE_MACHINE.states], transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })) },
+    stateMachine: defaultStateMachineForm(),
     dailyReset: { ...DEFAULT_DAILY_RESET, cronExpression: DEFAULT_DAILY_RESET.cronExpression ?? '' },
   };
+}
+
+/** Structural deep-equal against the PRD §7 default graph (prefill mode inference). */
+function isDefaultGraph(states: readonly string[], transitions: readonly Transition[]): boolean {
+  if (states.length !== DEFAULT_STATE_MACHINE.states.length) return false;
+  if (transitions.length !== DEFAULT_STATE_MACHINE.transitions.length) return false;
+  const sameStates = states.every((s, i) => s === DEFAULT_STATE_MACHINE.states[i]);
+  if (!sameStates) return false;
+  return transitions.every((t, i) => {
+    const d = DEFAULT_STATE_MACHINE.transitions[i];
+    return t.from === d.from && t.to === d.to && t.actionLabel === d.actionLabel;
+  });
+}
+
+/**
+ * Validate a custom state machine, mirroring the backend invariants
+ * (`StateMachine` / `StateSchema` in `core-api`) so the wizard never submits a
+ * graph the backend would reject with a 400. Returns a list of human-readable
+ * (Indonesian) error strings; empty means valid.
+ */
+function validateCustomStateMachine(form: StateMachineForm): string[] {
+  const errors: string[] = [];
+  const { states, transitions } = form;
+  if (states.length === 0) errors.push('State machine harus memiliki minimal satu state.');
+  if (transitions.length === 0) errors.push('State machine harus memiliki minimal satu transisi.');
+  const seenStates = new Set<string>();
+  for (const s of states) {
+    if (!s || !s.trim()) errors.push('Nama state tidak boleh kosong.');
+    else if (seenStates.has(s)) errors.push(`State '${s}' duplikat.`);
+    seenStates.add(s);
+  }
+  const seenEdges = new Set<string>();
+  for (const t of transitions) {
+    if (!t.actionLabel || !t.actionLabel.trim()) errors.push('Label aksi tidak boleh kosong.');
+    if (!seenStates.has(t.from)) errors.push(`Transisi '${t.from}'→'${t.to}': state '${t.from}' tidak dikenal.`);
+    if (!seenStates.has(t.to)) errors.push(`Transisi '${t.from}'→'${t.to}': state '${t.to}' tidak dikenal.`);
+    const edge = `${t.from}->${t.to}`;
+    if (seenEdges.has(edge)) errors.push(`Transisi '${t.from}'→'${t.to}' duplikat.`);
+    seenEdges.add(edge);
+  }
+  // De-duplicate identical messages (e.g. several empty labels).
+  return [...new Set(errors)];
+}
+
+/** States referenced by at least one transition — removing these would dangle an edge. */
+function referencedStates(form: StateMachineForm): Set<string> {
+  const refs = new Set<string>();
+  for (const t of form.transitions) {
+    refs.add(t.from);
+    refs.add(t.to);
+  }
+  return refs;
 }
 
 /**
@@ -92,6 +173,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                   },
                 ],
           stateMachine: {
+            mode: isDefaultGraph(config.stateMachine.states, config.stateMachine.transitions) ? 'default' : 'custom',
             states: [...config.stateMachine.states],
             transitions: config.stateMachine.transitions.map((t) => ({ ...t })),
           },
@@ -116,16 +198,47 @@ export function WizardPage({ api }: { api: IAdminApi }) {
 
   const categoryCodes = useMemo(() => form.categories.map((c) => c.code), [form.categories]);
 
-  const next = () => setStep((s) => Math.min(TOTAL_STEPS, s + 1));
+  // Step 3 is the only step with structural validation; the others are free-form
+  // (the backend validates store name / categories / routing). Compute the
+  // custom-state-machine errors once so the UI and the next/finalize guard share
+  // one source of truth. Default mode is always valid (the PRD §7 graph is).
+  const smErrors = useMemo(
+    () => (form.stateMachine.mode === 'custom' ? validateCustomStateMachine(form.stateMachine) : []),
+    [form.stateMachine],
+  );
+  const step3Valid = smErrors.length === 0;
+  // States referenced by at least one transition — hoisted out of the render
+  // loop so the states editor's remove-guard reads one shared set.
+  const referencedStateSet = useMemo(
+    () => (form.stateMachine.mode === 'custom' ? referencedStates(form.stateMachine) : new Set<string>()),
+    [form.stateMachine],
+  );
+
+  const next = () => {
+    // Block advancing past step 3 while the custom state machine is invalid so
+    // the manager never reaches finalize with a graph the backend would 400.
+    if (step === 3 && !step3Valid) return;
+    setStep((s) => Math.min(TOTAL_STEPS, s + 1));
+  };
   const back = () => setStep((s) => Math.max(1, s - 1));
 
   async function finalize() {
     setSubmitting(true);
     setError(null);
     try {
+      // `mode` is a client-only preset; never sent to core-api. In default mode
+      // force the PRD §7 graph so a half-edited custom graph the manager
+      // abandoned does not leak into the payload.
+      const sm: StateMachineDto =
+        form.stateMachine.mode === 'default'
+          ? {
+              states: [...DEFAULT_STATE_MACHINE.states],
+              transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
+            }
+          : { states: form.stateMachine.states, transitions: form.stateMachine.transitions };
       await api.saveSystemConfig({
         storeName: form.storeName,
-        stateMachine: form.stateMachine as StateMachineDto,
+        stateMachine: sm,
         dailyReset: {
           mode: form.dailyReset.mode,
           cronExpression: form.dailyReset.mode === 'AUTOMATIC_CRON' ? form.dailyReset.cronExpression : null,
@@ -284,40 +397,142 @@ export function WizardPage({ api }: { api: IAdminApi }) {
           <section className="wizard__step" data-testid="step-3">
             <h2 className="wizard__step-title">State Machine</h2>
             <p className="wizard__hint">
-              Transisi default dari PRD §7 sudah terisi. Label aksi menjadi tombol di panel caller.
+              Pilih state machine default (PRD §7) atau susun sendiri. Label aksi menjadi tombol di panel caller.
             </p>
-            <ul className="entry-list">
-              {form.stateMachine.transitions.map((t, i) => (
-                <li key={i} className="entry-row entry-row--transition">
-                  <input
-                    className="field__input entry-row__state"
-                    type="text"
-                    value={t.from}
-                    onChange={(e) => updateTransition(form, setForm, i, { from: e.target.value.toUpperCase() })}
-                    aria-label={`Transisi ${i + 1} from`}
-                  />
-                  <span className="entry-row__arrow">→</span>
-                  <input
-                    className="field__input entry-row__state"
-                    type="text"
-                    value={t.to}
-                    onChange={(e) => updateTransition(form, setForm, i, { to: e.target.value.toUpperCase() })}
-                    aria-label={`Transisi ${i + 1} to`}
-                  />
-                  <input
-                    className="field__input entry-row__label"
-                    type="text"
-                    value={t.actionLabel}
-                    onChange={(e) => updateTransition(form, setForm, i, { actionLabel: e.target.value })}
-                    placeholder="Label aksi (Indonesia)"
-                    aria-label={`Transisi ${i + 1} label aksi`}
-                  />
-                </li>
-              ))}
-            </ul>
-            <button type="button" className="btn btn--secondary" onClick={() => addTransition(form, setForm)}>
-              + Tambah Transisi
-            </button>
+
+            <fieldset className="radio-group" data-testid="sm-mode">
+              <legend>Jenis state machine</legend>
+              <label className="radio-group__item">
+                <input
+                  type="radio"
+                  name="sm-mode"
+                  value="default"
+                  checked={form.stateMachine.mode === 'default'}
+                  onChange={() => setForm({ ...form, stateMachine: defaultStateMachineForm() })}
+                />
+                Gunakan state machine default (PRD §7)
+              </label>
+              <label className="radio-group__item">
+                <input
+                  type="radio"
+                  name="sm-mode"
+                  value="custom"
+                  checked={form.stateMachine.mode === 'custom'}
+                  onChange={() =>
+                    setForm({ ...form, stateMachine: { ...form.stateMachine, mode: 'custom' } })
+                  }
+                />
+                Susun state machine sendiri
+              </label>
+            </fieldset>
+
+            {form.stateMachine.mode === 'default' ? (
+              <div className="sm-readonly" data-testid="sm-readonly">
+                <p className="wizard__hint">State machine default (read-only):</p>
+                <ul className="entry-list">
+                  {form.stateMachine.transitions.map((t, i) => (
+                    <li key={i} className="entry-row entry-row--transition">
+                      <span className="entry-row__state">{t.from}</span>
+                      <span className="entry-row__arrow">→</span>
+                      <span className="entry-row__state">{t.to}</span>
+                      <span className="entry-row__label">{t.actionLabel}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <div className="sm-editor" data-testid="sm-editor">
+                <h3 className="wizard__subhead">States</h3>
+                <ul className="entry-list">
+                  {form.stateMachine.states.map((s, i) => {
+                    const referenced = referencedStateSet.has(s);
+                    return (
+                      <li key={i} className="entry-row entry-row--state">
+                        <input
+                          className="field__input entry-row__state"
+                          type="text"
+                          value={s}
+                          onChange={(e) => updateState(form, setForm, i, e.target.value.toUpperCase())}
+                          aria-label={`State ${i + 1}`}
+                        />
+                        <button
+                          type="button"
+                          className="btn btn--ghost"
+                          onClick={() => removeState(form, setForm, i)}
+                          disabled={referenced}
+                          title={referenced ? 'State sedang dipakai transisi' : 'Hapus state'}
+                        >
+                          Hapus
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <button type="button" className="btn btn--secondary" onClick={() => addState(form, setForm)}>
+                  + Tambah State
+                </button>
+
+                <h3 className="wizard__subhead">Transisi</h3>
+                <ul className="entry-list">
+                  {form.stateMachine.transitions.map((t, i) => (
+                    <li key={i} className="entry-row entry-row--transition">
+                      <select
+                        className="field__input entry-row__state"
+                        value={t.from}
+                        onChange={(e) => updateTransition(form, setForm, i, { from: e.target.value })}
+                        aria-label={`Transisi ${i + 1} from`}
+                      >
+                        {form.stateMachine.states.map((s, si) => (
+                          <option key={`${si}-${s}`} value={s}>
+                            {s}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="entry-row__arrow">→</span>
+                      <select
+                        className="field__input entry-row__state"
+                        value={t.to}
+                        onChange={(e) => updateTransition(form, setForm, i, { to: e.target.value })}
+                        aria-label={`Transisi ${i + 1} to`}
+                      >
+                        {form.stateMachine.states.map((s, si) => (
+                          <option key={`${si}-${s}`} value={s}>
+                            {s}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        className="field__input entry-row__label"
+                        type="text"
+                        value={t.actionLabel}
+                        onChange={(e) => updateTransition(form, setForm, i, { actionLabel: e.target.value })}
+                        placeholder="Label aksi (Indonesia)"
+                        aria-label={`Transisi ${i + 1} label aksi`}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn--ghost"
+                        onClick={() => removeTransition(form, setForm, i)}
+                        disabled={form.stateMachine.transitions.length <= 1}
+                      >
+                        Hapus
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <button type="button" className="btn btn--secondary" onClick={() => addTransition(form, setForm)}>
+                  + Tambah Transisi
+                </button>
+
+                {smErrors.length > 0 && (
+                  <ul className="wizard__errors" data-testid="sm-errors">
+                    {smErrors.map((msg) => (
+                      <li key={msg}>{msg}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
           </section>
         )}
 
@@ -380,7 +595,13 @@ export function WizardPage({ api }: { api: IAdminApi }) {
           Kembali
         </button>
         {step < TOTAL_STEPS ? (
-          <button type="button" className="btn btn--primary" onClick={next} data-testid="wizard-next">
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={next}
+            disabled={(step === 3 && !step3Valid) || submitting}
+            data-testid="wizard-next"
+          >
             Lanjut
           </button>
         ) : (
@@ -438,5 +659,37 @@ function updateTransition(form: WizardForm, setForm: (f: WizardForm) => void, i:
   setForm({ ...form, stateMachine: { ...form.stateMachine, transitions } });
 }
 function addTransition(form: WizardForm, setForm: (f: WizardForm) => void) {
-  setForm({ ...form, stateMachine: { ...form.stateMachine, transitions: [...form.stateMachine.transitions, { from: '', to: '', actionLabel: '' }] } });
+  // Seed a new edge from the first state to itself (or empty when no states yet)
+  // so the dropdowns always carry a valid value; the manager adjusts from there.
+  const firstState = form.stateMachine.states[0] ?? '';
+  setForm({
+    ...form,
+    stateMachine: {
+      ...form.stateMachine,
+      transitions: [...form.stateMachine.transitions, { from: firstState, to: firstState, actionLabel: '' }],
+    },
+  });
+}
+function removeTransition(form: WizardForm, setForm: (f: WizardForm) => void, i: number) {
+  setForm({ ...form, stateMachine: { ...form.stateMachine, transitions: form.stateMachine.transitions.filter((_, idx) => idx !== i) } });
+}
+
+function updateState(form: WizardForm, setForm: (f: WizardForm) => void, i: number, value: string) {
+  const states = form.stateMachine.states.map((s, idx) => (idx === i ? value : s));
+  // Renaming a state must propagate to any transition that referenced the old
+  // name, so a rename never leaves a dangling edge (the dropdowns would then
+  // show the old value which is no longer in the states list).
+  const oldName = form.stateMachine.states[i];
+  const transitions = form.stateMachine.transitions.map((t) => ({
+    from: t.from === oldName ? value : t.from,
+    to: t.to === oldName ? value : t.to,
+    actionLabel: t.actionLabel,
+  }));
+  setForm({ ...form, stateMachine: { ...form.stateMachine, states, transitions } });
+}
+function addState(form: WizardForm, setForm: (f: WizardForm) => void) {
+  setForm({ ...form, stateMachine: { ...form.stateMachine, states: [...form.stateMachine.states, ''] } });
+}
+function removeState(form: WizardForm, setForm: (f: WizardForm) => void, i: number) {
+  setForm({ ...form, stateMachine: { ...form.stateMachine, states: form.stateMachine.states.filter((_, idx) => idx !== i) } });
 }

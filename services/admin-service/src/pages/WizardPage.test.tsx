@@ -69,9 +69,10 @@ describe('WizardPage (FR-WZD-02..06)', () => {
 
     // Step 3 — state machine designer with the PRD §7 default prefilled (FR-WZD-04).
     expect(await screen.findByTestId('step-3')).toBeInTheDocument();
-    // The five default transitions are prefilled (Panggil Berikutnya etc.).
-    expect(screen.getByDisplayValue('Panggil Berikutnya')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('Selesai Layan')).toBeInTheDocument();
+    // Default mode renders the five default transitions read-only (no inputs).
+    expect(screen.getByTestId('sm-readonly')).toBeInTheDocument();
+    expect(screen.getByText('Panggil Berikutnya')).toBeInTheDocument();
+    expect(screen.getByText('Selesai Layan')).toBeInTheDocument();
     await userEvent.click(screen.getByTestId('wizard-next'));
 
     // Step 4 — daily reset policy (FR-WZD-05).
@@ -153,5 +154,146 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     expect(save).toHaveBeenCalledTimes(1);
     // Finalize is re-enabled (not stuck in "Menyimpan…").
     expect(screen.getByTestId('wizard-finalize')).not.toBeDisabled();
+  });
+
+  it('infers custom mode when the prefilled graph differs from the PRD default', async () => {
+    const customConfig: SystemConfigurationDto = {
+      ...cleanStore(),
+      stateMachine: {
+        states: ['WAITING', 'CALLING', 'SERVING', 'PREPARING', 'COMPLETED'],
+        transitions: [
+          { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' },
+          { from: 'CALLING', to: 'SERVING', actionLabel: 'Mulai Melayani' },
+          { from: 'SERVING', to: 'PREPARING', actionLabel: 'Siapkan' },
+          { from: 'PREPARING', to: 'COMPLETED', actionLabel: 'Selesai Layan' },
+        ],
+      },
+    };
+    const { api } = makeApi(customConfig);
+    renderWizard(api);
+
+    await (await screen.findByTestId('step-1'));
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-2');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    expect(await screen.findByTestId('step-3')).toBeInTheDocument();
+    // A non-default graph opens in custom mode with the editor (not read-only).
+    expect(screen.getByTestId('sm-editor')).toBeInTheDocument();
+    expect(screen.queryByTestId('sm-readonly')).not.toBeInTheDocument();
+  });
+
+  it('adds a custom state and transition and sends them (without mode) in the PUT payload', async () => {
+    const { api, save } = makeApi();
+    renderWizard(api);
+
+    // Step 1 → 2 → 3.
+    await (await screen.findByTestId('step-1'));
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-2');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    expect(await screen.findByTestId('step-3')).toBeInTheDocument();
+
+    // Switch to custom mode.
+    await userEvent.click(screen.getByLabelText(/Susun state machine sendiri/));
+    expect(screen.getByTestId('sm-editor')).toBeInTheDocument();
+
+    // Add a PREPARING state, then a transition SERVING → PREPARING ("Siapkan").
+    await userEvent.click(screen.getByRole('button', { name: '+ Tambah State' }));
+    const stateInputs = screen.getAllByLabelText(/^State \d+$/);
+    await userEvent.type(stateInputs[stateInputs.length - 1], 'PREPARING');
+
+    await userEvent.click(screen.getByRole('button', { name: '+ Tambah Transisi' }));
+    const fromSelects = screen.getAllByLabelText(/Transisi \d+ from/);
+    const toSelects = screen.getAllByLabelText(/Transisi \d+ to/);
+    const lastFrom = fromSelects[fromSelects.length - 1];
+    const lastTo = toSelects[toSelects.length - 1];
+    await userEvent.selectOptions(lastFrom, 'SERVING');
+    await userEvent.selectOptions(lastTo, 'PREPARING');
+    const labelInputs = screen.getAllByLabelText(/Transisi \d+ label aksi/);
+    await userEvent.type(labelInputs[labelInputs.length - 1], 'Siapkan');
+
+    // Advance to finalize — step 3 must be valid (Lanjut enabled).
+    expect(screen.getByTestId('wizard-next')).not.toBeDisabled();
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    expect(await screen.findByTestId('step-4')).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('wizard-finalize'));
+    await screen.findByText('Admin Panel Home');
+
+    const payload = save.mock.calls[0][0] as SaveSystemConfigurationPayload;
+    expect(payload.stateMachine.states).toContain('PREPARING');
+    expect(payload.stateMachine.transitions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ from: 'SERVING', to: 'PREPARING', actionLabel: 'Siapkan' }),
+      ]),
+    );
+    // `mode` is a UI-only preset and must never reach the wire payload.
+    expect((payload.stateMachine as unknown as Record<string, unknown>).mode).toBeUndefined();
+  });
+
+  it('reverts to the default graph when switching back to default after editing custom', async () => {
+    const { api, save } = makeApi();
+    renderWizard(api);
+
+    await (await screen.findByTestId('step-1'));
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-2');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-3');
+
+    // Custom → add a stray state → back to default → finalize sends the PRD default.
+    await userEvent.click(screen.getByLabelText(/Susun state machine sendiri/));
+    await userEvent.click(screen.getByRole('button', { name: '+ Tambah State' }));
+    await userEvent.click(screen.getByLabelText(/Gunakan state machine default/));
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    expect(await screen.findByTestId('step-4')).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('wizard-finalize'));
+    await screen.findByText('Admin Panel Home');
+
+    const payload = save.mock.calls[0][0] as SaveSystemConfigurationPayload;
+    expect(payload.stateMachine.states).toEqual([...DEFAULT_STATE_MACHINE.states]);
+    expect(payload.stateMachine.transitions).toHaveLength(5);
+  });
+
+  it('blocks removal of a state that is referenced by a transition', async () => {
+    const { api } = makeApi();
+    renderWizard(api);
+
+    await (await screen.findByTestId('step-1'));
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-2');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-3');
+    await userEvent.click(screen.getByLabelText(/Susun state machine sendiri/));
+
+    // WAITING is referenced by the default `WAITING -> CALLING` edge, so its
+    // remove button must be disabled.
+    const waitRemove = screen.getAllByRole('button', { name: 'Hapus' }).find((b) =>
+      b.closest('.entry-row--state')?.querySelector('input')?.value === 'WAITING',
+    );
+    expect(waitRemove).toBeDefined();
+    expect(waitRemove).toBeDisabled();
+  });
+
+  it('blocks advancing past step 3 when the custom graph is invalid (duplicate edge)', async () => {
+    const { api, save } = makeApi();
+    renderWizard(api);
+
+    await (await screen.findByTestId('step-1'));
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-2');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-3');
+    await userEvent.click(screen.getByLabelText(/Susun state machine sendiri/));
+
+    // Add a duplicate of the existing WAITING -> CALLING edge with an empty
+    // label (two violations: duplicate edge + empty action label).
+    await userEvent.click(screen.getByRole('button', { name: '+ Tambah Transisi' }));
+    await userEvent.click(screen.getByTestId('wizard-next'));
+
+    // Still on step 3; Lanjut is disabled and no save happened.
+    expect(screen.getByTestId('step-3')).toBeInTheDocument();
+    expect(screen.getByTestId('wizard-next')).toBeDisabled();
+    expect(screen.getByTestId('sm-errors')).toBeInTheDocument();
+    expect(save).not.toHaveBeenCalled();
   });
 });

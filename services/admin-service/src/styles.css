@@ -326,7 +326,12 @@ fieldset {
 }
 .entry-row--transition {
   display: grid;
-  grid-template-columns: 7rem 1.5rem 7rem 1fr;
+  grid-template-columns: 7rem 1.5rem 7rem 1fr auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+.entry-row--state {
+  display: flex;
   gap: 0.5rem;
   align-items: center;
 }
@@ -355,4 +360,36 @@ fieldset {
   gap: 0.3rem;
   align-items: center;
   font-size: 0.95rem;
+}
+
+.radio-group {
+  border: 1px solid var(--surface-2);
+  border-radius: 8px;
+  padding: 0.6rem;
+  display: flex;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+  margin: 0 0 1rem;
+}
+.radio-group__item {
+  display: inline-flex;
+  gap: 0.3rem;
+  align-items: center;
+  font-size: 0.95rem;
+}
+
+.sm-readonly .entry-row__state,
+.sm-readonly .entry-row__label {
+  padding: 0 0.4rem;
+  font-size: 0.95rem;
+}
+
+.wizard__errors {
+  margin: 0.75rem 0 0;
+  padding: 0.6rem 0.9rem;
+  list-style: disc inside;
+  color: var(--danger, #c0392b);
+  background: rgba(192, 57, 43, 0.06);
+  border: 1px solid rgba(192, 57, 43, 0.25);
+  border-radius: 8px;
 }
