@@ -1,5 +1,6 @@
 import {
   IQueueRepository,
+  ITicketArchivePort,
   NextTicketQuery,
   QueueTicket,
   TicketId,
@@ -12,8 +13,9 @@ import { PriorityPolicy } from '../../../domain/shared/priority-policy';
  * the development runtime (LSP — interchangeable with the future PostgreSQL
  * repository). Not for production; data is lost on restart.
  */
-export class InMemoryQueueRepository implements IQueueRepository {
+export class InMemoryQueueRepository implements IQueueRepository, ITicketArchivePort {
   private readonly tickets = new Map<string, QueueTicket>();
+  private readonly archivedTicketsList: QueueTicket[] = [];
 
   async save(ticket: QueueTicket): Promise<void> {
     this.tickets.set(ticket.id.value, ticket);
@@ -69,14 +71,38 @@ export class InMemoryQueueRepository implements IQueueRepository {
     return candidates[0];
   }
 
+  async archiveTicketsBefore(thresholdMs: number): Promise<number> {
+    // Relocate every ticket older than the threshold (local midnight today)
+    // into the archive list, removing it from the active store. Mirrors the
+    // Postgres DELETE→archive move. NOTE: unlike the Postgres impl, this
+    // mutation is NOT rolled back on a transaction failure — the in-memory
+    // `NoOpTransactionManager` is a pure pass-through, so a `resetDaily`
+    // throw after the archive leaves tickets moved-but-not-reset. This is the
+    // documented dev-only limitation (gap-free durability is the Postgres
+    // repo's job, per CLAUDE.md); do not treat the in-memory impl as a true
+    // LSP substitute for the Postgres impl on the archive+reset failure path.
+    const toMove = [...this.tickets.values()].filter((t) => t.createdAt < thresholdMs);
+    for (const t of toMove) {
+      this.tickets.delete(t.id.value);
+    }
+    this.archivedTicketsList.push(...toMove);
+    return toMove.length;
+  }
+
   private waiting(): QueueTicket[] {
     return [...this.tickets.values()].filter(
       (t) => t.currentStatus === TicketStatus.WAITING,
     );
   }
 
-  /** Test/dev-only: drops all stored tickets. Not on the port interface. */
+  /** Test/dev-only: drops all stored tickets (active + archived). Not on the port interface. */
   clear(): void {
     this.tickets.clear();
+    this.archivedTicketsList.length = 0;
+  }
+
+  /** Test/dev-only: snapshot of tickets relocated to the archive store. Not on the port interface. */
+  archivedTickets(): readonly QueueTicket[] {
+    return [...this.archivedTicketsList];
   }
 }

@@ -9,6 +9,7 @@ export * from './queue-ticket.aggregate';
 export * from './repositories/category.repository';
 export * from './repositories/queue.repository';
 export * from './repositories/sequence.repository';
+export * from './repositories/ticket-archive.port';
 export * from './state-machine.port';
 export * from './value-objects/ticket-id';
 export * from './value-objects/ticket-number';

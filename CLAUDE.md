@@ -325,6 +325,58 @@ with no duplicate/lost ticket numbers.
   unconstructable, rather than relying on a backend 400 round-trip. The
   routing-matrix step (FR-WZD-03) was already satisfied by the existing
   per-counter checkbox matrix; QUE-15 touched only step 3.
+- **Wizard daily-reset step + finalization (QUE-16, FR-WZD-05/06):** the
+  wizard's `archivePreviousDayData` flag was stored but **inert**; QUE-16 wires
+  the reset engine to honor it and adds a finalization review step. **Archive
+  semantic:** `true` (default) relocates every ticket in the active store with
+  `created_at < startOfLocalDay(now)` into a new `archived_tickets` table
+  *before* the sequence reset (regardless of status — "active" = "in the active
+  table", not "non-terminal"); `false` is a **no-op**, not a purge (the AC says
+  "arsipkan"). A dedicated **`ITicketArchivePort`** (one method, `domain/queue`)
+  is added on ISP grounds — the reset use case needs only the archive op, not
+  the full `IQueueRepository` surface. The concrete queue repos implement
+  **both** ports; NestJS binds `TICKET_ARCHIVE_PORT` via
+  `useExisting: QUEUE_REPOSITORY` (works for `useClass` and `useFactory`
+  bindings — one repo instance serves both tokens). **Anti-corruption preserved:**
+  `ResetDailyQueueUseCase` stays Store-Config-free; `SystemAdminController` and
+  `DailyResetSchedulerService` read `DailyResetPolicy.archivePreviousDayData`
+  and thread the scalar `archivePreviousDay: boolean` into the command, exactly
+  the existing `resetTo` pattern. **Atomicity (NFR-REL-02):** archive + reset +
+  (manual) audit all run inside one `txManager.runInTransaction(...)` callback;
+  the `SYSTEM_RESET` event dispatches **after** commit (a rolled-back reset is
+  never broadcast). The Postgres archive is a single `WITH moved AS (DELETE …
+  RETURNING …) INSERT … SELECT` CTE enlisting on the ambient `AsyncLocalStorage`
+  client. **Audit:** `AuditAction.ARCHIVE_PREVIOUS_DAY` is recorded **manual path
+  only** (`command.actor` set), mirroring `MANUAL_RESET` scoping — the automatic
+  cron reset is not audited. **`startOfLocalDay(epochMs)`** (local-midnight epoch)
+  lives in `application/queue/create-ticket.use-case.ts` next to `toDateKey`,
+  keeping the date convention out of the domain; the archive threshold is
+  `created_at < startOfLocalDay(now)` (no `date_key` column — avoids
+  timezone-fragile SQL). **In-memory rollback caveat:** `NoOpTransactionManager`
+  is a pure pass-through, so `InMemoryQueueRepository.archiveTicketsBefore` does
+  NOT roll back on a `resetDaily` throw (the Postgres impl does) — the in-memory
+  impl is explicitly **not** an LSP substitute on the archive+reset failure path
+  (documented dev-only limitation; gap-free durability is the Postgres repo's
+  job). **Client cron validation:** `validateCronExpression` (pure helper in
+  `admin-service/src/lib/cron.ts`) validates a 5-field cron (star / numbers /
+  comma lists / ranges / steps; no named months/days) so the wizard + admin
+  panel never submit an expression the boot-time `CronJob` would reject — the
+  backend `DailyResetPolicy` VO only checks non-empty when
+  `mode === AUTOMATIC_CRON`; backend cron-**format** enforcement is deferred to
+  Hardening (pairs with scheduler re-arm). It gates the wizard step-4 `Lanjut`
+  and the admin `Simpan Konfigurasi` button (single source of truth). **Wizard
+  step 5 (FR-WZD-06):** a read-only review of the whole assembled form (store
+  name, categories, routing, state machine, daily reset) renders from the
+  in-memory form (no API call); the `Simpan & Aktifkan` (`wizard-finalize`)
+  button now lives here — `TOTAL_STEPS` is 5. `finalize()` is unchanged (the
+  payload already strips `mode` + nulls cron). **Default policy gotcha:** the
+  default `DailyResetPolicy` has `archivePreviousDayData = true`, so
+  `POST /api/system/daily-reset` **always** returns `archivedCount` in its
+  result DTO (0 when no prior-day tickets) — the integration spec's `toEqual`
+  must include it, and a manual reset now records **two** audit entries
+  (`ARCHIVE_PREVIOUS_DAY` then `MANUAL_RESET`), not one. **Deferred:** backend
+  cron-format enforcement and scheduler re-arm on policy change (still
+  Hardening, pairs with audit-trail analytics surface).
 - **REST surface separation:** the read-only caller workspace surface
   (`GET /api/counters`, `GET /api/queue`) lives in `RestApiModule` (QUE-19).
   Mutation endpoints get their own module by concern — the kiosk

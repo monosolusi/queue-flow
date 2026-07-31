@@ -48,7 +48,7 @@ function renderWizard(api: IAdminApi) {
 }
 
 describe('WizardPage (FR-WZD-02..06)', () => {
-  it('walks all four steps and saves the configuration on finalize', async () => {
+  it('walks all five steps, renders the review, and saves the configuration on finalize', async () => {
     const { api, save } = makeApi();
     renderWizard(api);
 
@@ -77,6 +77,14 @@ describe('WizardPage (FR-WZD-02..06)', () => {
 
     // Step 4 — daily reset policy (FR-WZD-05).
     expect(await screen.findByTestId('step-4')).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('wizard-next'));
+
+    // Step 5 — review & activate (FR-WZD-06).
+    expect(await screen.findByTestId('step-5')).toBeInTheDocument();
+    expect(screen.getByTestId('wizard-review')).toBeInTheDocument();
+    expect(screen.getByTestId('review-store-name')).toHaveTextContent('Apotek Sehat Sentosa');
+    expect(screen.getByTestId('review-categories')).toHaveTextContent(/Customer Service/);
+    expect(screen.getByTestId('review-daily-reset')).toHaveTextContent(/Otomatis/);
     await userEvent.click(screen.getByTestId('wizard-finalize'));
 
     // Navigation to the admin home (FR-WZD-06 — operational access after setup).
@@ -126,6 +134,8 @@ describe('WizardPage (FR-WZD-02..06)', () => {
 
     // Switch mode to MANUAL.
     await userEvent.selectOptions(screen.getByLabelText('Mode'), 'MANUAL');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    expect(await screen.findByTestId('step-5')).toBeInTheDocument();
     await userEvent.click(screen.getByTestId('wizard-finalize'));
     await screen.findByText('Admin Panel Home');
 
@@ -140,7 +150,7 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     );
     renderWizard(api);
 
-    // Walk to step 4 and finalize.
+    // Walk to step 5 (the review step) and finalize.
     await (await screen.findByTestId('step-1'));
     await userEvent.click(screen.getByTestId('wizard-next'));
     expect(await screen.findByTestId('step-2')).toBeInTheDocument();
@@ -148,6 +158,8 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     expect(await screen.findByTestId('step-3')).toBeInTheDocument();
     await userEvent.click(screen.getByTestId('wizard-next'));
     expect(await screen.findByTestId('step-4')).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    expect(await screen.findByTestId('step-5')).toBeInTheDocument();
     await userEvent.click(screen.getByTestId('wizard-finalize'));
 
     expect(await screen.findByText(/state machine tidak valid/i)).toBeInTheDocument();
@@ -216,6 +228,8 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     expect(screen.getByTestId('wizard-next')).not.toBeDisabled();
     await userEvent.click(screen.getByTestId('wizard-next'));
     expect(await screen.findByTestId('step-4')).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    expect(await screen.findByTestId('step-5')).toBeInTheDocument();
     await userEvent.click(screen.getByTestId('wizard-finalize'));
     await screen.findByText('Admin Panel Home');
 
@@ -246,6 +260,8 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     await userEvent.click(screen.getByLabelText(/Gunakan state machine default/));
     await userEvent.click(screen.getByTestId('wizard-next'));
     expect(await screen.findByTestId('step-4')).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    expect(await screen.findByTestId('step-5')).toBeInTheDocument();
     await userEvent.click(screen.getByTestId('wizard-finalize'));
     await screen.findByText('Admin Panel Home');
 
@@ -294,6 +310,72 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     expect(screen.getByTestId('step-3')).toBeInTheDocument();
     expect(screen.getByTestId('wizard-next')).toBeDisabled();
     expect(screen.getByTestId('sm-errors')).toBeInTheDocument();
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('renders a read-only review of the full configuration on step 5 (FR-WZD-06)', async () => {
+    const { api } = makeApi();
+    renderWizard(api);
+
+    // Step 1 — store name.
+    await (await screen.findByTestId('step-1'));
+    await userEvent.type(screen.getByPlaceholderText('mis. Apotek Sehat Sentosa'), 'Apotek Sehat');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    // Step 2 — category A -> Customer Service, assign A to Counter 1.
+    await screen.findByTestId('step-2');
+    await userEvent.type(screen.getByLabelText('Kategori 1 nama'), 'Customer Service');
+    await userEvent.click(screen.getByRole('checkbox', { name: 'A' }));
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    // Step 3 — default state machine.
+    await screen.findByTestId('step-3');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    // Step 4 — daily reset (default automatic, valid cron).
+    await screen.findByTestId('step-4');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+
+    // Step 5 — the review renders a summary of every assembled section.
+    expect(await screen.findByTestId('step-5')).toBeInTheDocument();
+    expect(screen.getByTestId('review-store-name')).toHaveTextContent('Apotek Sehat');
+    expect(screen.getByTestId('review-categories')).toHaveTextContent(/Customer Service/);
+    expect(screen.getByTestId('review-routing')).toHaveTextContent(/Counter 1/);
+    expect(screen.getByTestId('review-state-machine')).toHaveTextContent(/Default/);
+    expect(screen.getByTestId('review-daily-reset')).toHaveTextContent(/Otomatis/);
+    expect(screen.getByTestId('review-daily-reset')).toHaveTextContent(/aktif/);
+  });
+
+  it('blocks advancing past step 4 when the cron expression is malformed (FR-WZD-05 / QUE-16)', async () => {
+    const { api, save } = makeApi();
+    renderWizard(api);
+
+    // Walk to step 4.
+    await (await screen.findByTestId('step-1'));
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-2');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-3');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    expect(await screen.findByTestId('step-4')).toBeInTheDocument();
+
+    // The default cron '0 0 * * *' is valid → Lanjut enabled, no error shown.
+    expect(screen.getByTestId('wizard-next')).not.toBeDisabled();
+    expect(screen.queryByTestId('cron-error')).not.toBeInTheDocument();
+
+    // Enter a malformed cron (only 3 fields) → Lanjut disabled, error shown.
+    await userEvent.clear(screen.getByLabelText('Cron expression'));
+    await userEvent.type(screen.getByLabelText('Cron expression'), '0 0 *');
+    expect(screen.getByTestId('cron-error')).toBeInTheDocument();
+    expect(screen.getByTestId('wizard-next')).toBeDisabled();
+
+    // A click attempts to advance but the guard holds — still on step 4.
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    expect(screen.getByTestId('step-4')).toBeInTheDocument();
+
+    // Fix the cron → error clears and Lanjut re-enables.
+    await userEvent.clear(screen.getByLabelText('Cron expression'));
+    await userEvent.type(screen.getByLabelText('Cron expression'), '0 0 * * *');
+    expect(screen.queryByTestId('cron-error')).not.toBeInTheDocument();
+    expect(screen.getByTestId('wizard-next')).not.toBeDisabled();
+
     expect(save).not.toHaveBeenCalled();
   });
 });

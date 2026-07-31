@@ -3,6 +3,7 @@ import {
   CATEGORY_REPOSITORY,
   QUEUE_REPOSITORY,
   SEQUENCE_REPOSITORY,
+  TICKET_ARCHIVE_PORT,
   TRANSITION_POLICY_RESOLVER,
 } from '../domain/queue';
 import { COUNTER_ROUTING_RULE_REPOSITORY } from '../domain/store-config';
@@ -93,14 +94,21 @@ import { SystemConfigModule } from './config/system-config.module';
     },
     {
       provide: ResetDailyQueueUseCase,
-      inject: [SEQUENCE_REPOSITORY, QueueEventDispatcher, AUDIT_LOG_REPOSITORY, TRANSACTION_MANAGER],
-      useFactory: (sequences, dispatcher, auditLog, txManager) =>
+      inject: [
+        SEQUENCE_REPOSITORY,
+        QueueEventDispatcher,
+        AUDIT_LOG_REPOSITORY,
+        TRANSACTION_MANAGER,
+        TICKET_ARCHIVE_PORT,
+      ],
+      useFactory: (sequences, dispatcher, auditLog, txManager, ticketArchive) =>
         new ResetDailyQueueUseCase(
           sequences,
           dispatcher,
           undefined, // clock — keep the () => Date.now default
           new RecordAuditEntryUseCase(auditLog),
           txManager,
+          ticketArchive,
         ),
     },
   ],

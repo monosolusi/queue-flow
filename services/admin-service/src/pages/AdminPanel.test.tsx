@@ -216,4 +216,30 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     expect(save).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('admin-save')).not.toBeDisabled();
   });
+
+  it('disables save and shows an error when the cron expression is malformed (FR-WZD-05 / QUE-16)', async () => {
+    const { api, save } = makeApi();
+    renderPanel(api);
+    await screen.findByText('Apotek Sehat');
+
+    // The default cron '0 0 * * *' is valid → save enabled, no error.
+    expect(screen.getByTestId('admin-save')).not.toBeDisabled();
+    expect(screen.queryByTestId('cron-error')).not.toBeInTheDocument();
+
+    // Enter a malformed cron (out-of-range hour field) → save disabled, error shown.
+    await userEvent.clear(screen.getByLabelText('Cron expression'));
+    await userEvent.type(screen.getByLabelText('Cron expression'), '0 99 * * *');
+    expect(screen.getByTestId('cron-error')).toBeInTheDocument();
+    expect(screen.getByTestId('admin-save')).toBeDisabled();
+
+    // A save click is blocked — nothing is sent with a malformed cron.
+    await userEvent.click(screen.getByTestId('admin-save'));
+    expect(save).not.toHaveBeenCalled();
+
+    // Fix it → error clears and save re-enables.
+    await userEvent.clear(screen.getByLabelText('Cron expression'));
+    await userEvent.type(screen.getByLabelText('Cron expression'), '0 0 * * *');
+    expect(screen.queryByTestId('cron-error')).not.toBeInTheDocument();
+    expect(screen.getByTestId('admin-save')).not.toBeDisabled();
+  });
 });

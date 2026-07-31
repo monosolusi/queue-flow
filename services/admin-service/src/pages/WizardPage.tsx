@@ -10,6 +10,7 @@ import {
   type WizardCategoryDto,
   type WizardRoutingRuleDto,
 } from '../api/types';
+import { validateCronExpression } from '../lib/cron';
 
 /** One transition edge in the editable state machine. */
 interface Transition {
@@ -41,7 +42,7 @@ interface WizardForm {
   dailyReset: { mode: DailyResetMode; cronExpression: string; resetTicketNumberTo: number; archivePreviousDayData: boolean };
 }
 
-const TOTAL_STEPS = 4;
+const TOTAL_STEPS = 5;
 
 function defaultStateMachineForm(): StateMachineForm {
   return {
@@ -114,12 +115,17 @@ function referencedStates(form: StateMachineForm): Set<string> {
 }
 
 /**
- * The first-run setup wizard (FR-WZD-02..06). Four steps:
+ * The first-run setup wizard (FR-WZD-02..06). Five steps:
  *  1. Store name (FR-WZD-02).
  *  2. Counters + categories + routing matrix + priority policy (FR-WZD-03).
  *  3. State-machine designer — states + transitions + Indonesian action labels,
  *     PRD §7 default graph prefilled (FR-WZD-04).
- *  4. Daily-reset policy — mode/cron/resetTo/archive (FR-WZD-05).
+ *  4. Daily-reset policy — mode/cron/resetTo/archive (FR-WZD-05). The cron field
+ *     is validated client-side ({@link validateCronExpression}) so the wizard
+ *     never submits an expression the boot-time scheduler would reject.
+ *  5. Review — a read-only summary of the whole assembled configuration before
+ *     the manager activates it (FR-WZD-06). No API call; renders from the
+ *     in-memory form. The `Simpan & Aktifkan` button lives here.
  *
  * On mount it loads the current config (`GET /api/system/config`) to prefill the
  * form, so the wizard also serves as a re-editor after initial setup. On
@@ -214,10 +220,24 @@ export function WizardPage({ api }: { api: IAdminApi }) {
     [form.stateMachine],
   );
 
+  // Step 4 cron validation. The cron field is only relevant in AUTOMATIC_CRON
+  // mode; in MANUAL mode there is no field, so the step is always valid. The
+  // error string drives both the inline message and the Lanjut guard so the
+  // manager cannot advance to the review step with a cron the scheduler would
+  // reject at boot.
+  const cronError = useMemo(
+    () => (form.dailyReset.mode === 'AUTOMATIC_CRON' ? validateCronExpression(form.dailyReset.cronExpression) : null),
+    [form.dailyReset.mode, form.dailyReset.cronExpression],
+  );
+  const step4Valid = cronError === null;
+
   const next = () => {
     // Block advancing past step 3 while the custom state machine is invalid so
     // the manager never reaches finalize with a graph the backend would 400.
     if (step === 3 && !step3Valid) return;
+    // Block advancing past step 4 while the cron is malformed so the manager
+    // never reaches the review step with a cron the scheduler would reject.
+    if (step === 4 && !step4Valid) return;
     setStep((s) => Math.min(TOTAL_STEPS, s + 1));
   };
   const back = () => setStep((s) => Math.max(1, s - 1));
@@ -270,7 +290,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
       </header>
 
       <ol className="wizard__steps-bar">
-        {[1, 2, 3, 4].map((n) => (
+        {[1, 2, 3, 4, 5].map((n) => (
           <li key={n} className={`wizard__step-dot ${n === step ? 'is-current' : ''} ${n < step ? 'is-done' : ''}`}>
             {n}
           </li>
@@ -559,7 +579,13 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                   value={form.dailyReset.cronExpression}
                   onChange={(e) => setForm({ ...form, dailyReset: { ...form.dailyReset, cronExpression: e.target.value } })}
                   placeholder="0 0 * * *"
+                  aria-label="Cron expression"
                 />
+                {cronError && (
+                  <span className="field__error" data-testid="cron-error">
+                    {cronError}
+                  </span>
+                )}
               </label>
             )}
             <label className="field">
@@ -586,6 +612,67 @@ export function WizardPage({ api }: { api: IAdminApi }) {
             </label>
           </section>
         )}
+
+        {step === 5 && (
+          <section className="wizard__step" data-testid="step-5">
+            <h2 className="wizard__step-title">Tinjau &amp; Aktifkan</h2>
+            <p className="wizard__hint">
+              Tinjau konfigurasi sebelum disimpan. Setelah aktif, sistem keluar dari mode setup awal.
+            </p>
+
+            <div className="wizard__review" data-testid="wizard-review">
+              <div className="wizard__review-block">
+                <h3 className="wizard__review-label">Nama Toko</h3>
+                <p className="wizard__review-value" data-testid="review-store-name">
+                  {form.storeName || '—'}
+                </p>
+              </div>
+
+              <div className="wizard__review-block">
+                <h3 className="wizard__review-label">Kategori</h3>
+                <ul className="wizard__review-list" data-testid="review-categories">
+                  {form.categories.map((c, i) => (
+                    <li key={i}>
+                      <strong>{c.code || '—'}</strong> — {c.name || '—'}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div className="wizard__review-block">
+                <h3 className="wizard__review-label">Counter &amp; Routing</h3>
+                <ul className="wizard__review-list" data-testid="review-routing">
+                  {form.routingRules.map((r, i) => (
+                    <li key={i}>
+                      <strong>{r.counterName || `Counter ${r.counterId}`}</strong> ({r.priorityPolicy}) →{' '}
+                      {r.assignedCategoryCodes.length > 0 ? r.assignedCategoryCodes.join(', ') : 'tidak ada kategori'}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div className="wizard__review-block">
+                <h3 className="wizard__review-label">State Machine</h3>
+                <p className="wizard__review-value" data-testid="review-state-machine">
+                  {form.stateMachine.mode === 'default'
+                    ? `Default (PRD §7) — ${form.stateMachine.states.length} state, ${form.stateMachine.transitions.length} transisi`
+                    : `Custom — ${form.stateMachine.states.length} state, ${form.stateMachine.transitions.length} transisi`}
+                </p>
+              </div>
+
+              <div className="wizard__review-block">
+                <h3 className="wizard__review-label">Kebijakan Reset Harian</h3>
+                <p className="wizard__review-value" data-testid="review-daily-reset">
+                  {form.dailyReset.mode === 'AUTOMATIC_CRON'
+                    ? `Otomatis (cron: ${form.dailyReset.cronExpression || '—'})`
+                    : 'Manual'}
+                  {' · '}reset ke {form.dailyReset.resetTicketNumberTo}
+                  {' · '}arsip hari sebelumnya: {form.dailyReset.archivePreviousDayData ? 'aktif' : 'nonaktif'}
+                </p>
+              </div>
+            </div>
+          </section>
+        )}
       </div>
 
       {error && <p className="wizard__error">Gagal menyimpan: {error}</p>}
@@ -599,7 +686,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
             type="button"
             className="btn btn--primary"
             onClick={next}
-            disabled={(step === 3 && !step3Valid) || submitting}
+            disabled={(step === 3 && !step3Valid) || (step === 4 && !step4Valid) || submitting}
             data-testid="wizard-next"
           >
             Lanjut

@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import {
   type IQueueRepository,
+  type ITicketArchivePort,
   type NextTicketQuery,
   QueueTicket,
   type TicketId,
@@ -30,7 +31,7 @@ interface TicketRow {
  * claim the same WAITING ticket — the second tx blocks on the row lock, then
  * re-reads under READ COMMITTED and sees the ticket is no longer WAITING.
  */
-export class PostgresQueueRepository implements IQueueRepository {
+export class PostgresQueueRepository implements IQueueRepository, ITicketArchivePort {
   constructor(private readonly pool: Pool) {}
 
   async save(ticket: QueueTicket): Promise<void> {
@@ -111,6 +112,24 @@ export class PostgresQueueRepository implements IQueueRepository {
         [TicketStatus.WAITING, cats],
       );
       return rows.length ? toTicket(rows[0]) : null;
+    });
+  }
+
+  async archiveTicketsBefore(thresholdMs: number): Promise<number> {
+    return withDbClient(this.pool, async (client) => {
+      // DELETE → archive in one CTE statement so the move is atomic; enlists on
+      // the ambient reset transaction via withDbClient (NFR-REL-02). `rowCount`
+      // is the number of rows inserted into the archive (= rows deleted).
+      const { rowCount } = await client.query(
+        `WITH moved AS (
+           DELETE FROM tickets WHERE created_at < $1
+           RETURNING id, ticket_number, category_id, status, counter_id, created_at, updated_at
+         )
+         INSERT INTO archived_tickets (id, ticket_number, category_id, status, counter_id, created_at, updated_at)
+         SELECT id, ticket_number, category_id, status, counter_id, created_at, updated_at FROM moved`,
+        [thresholdMs],
+      );
+      return rowCount ?? 0;
     });
   }
 }

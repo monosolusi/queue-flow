@@ -65,13 +65,19 @@ export class DailyResetSchedulerService implements OnModuleInit {
     }
 
     const job = new CronJob(policy.cronExpression, () => {
-      void this.resetDailyQueue.execute({ resetTo: policy.resetTicketNumberTo });
+      void this.resetDailyQueue.execute({
+        resetTo: policy.resetTicketNumberTo,
+        // `archivePreviousDay` translates `DailyResetPolicy.archivePreviousDayData`
+        // (FR-WZD-05 / QUE-16). No `actor` → the automatic path is not audited
+        // (NFR-SEC-02), matching the manual-reset scoping.
+        archivePreviousDay: policy.archivePreviousDayData,
+      });
     });
     this.registry.addCronJob(DailyResetSchedulerService.CRON_NAME, job);
     job.start();
 
     this.logger.log(
-      `Daily reset cron armed: '${policy.cronExpression}' (resetTo=${policy.resetTicketNumberTo}).`,
+      `Daily reset cron armed: '${policy.cronExpression}' (resetTo=${policy.resetTicketNumberTo}, archive=${policy.archivePreviousDayData}).`,
     );
   }
 }
