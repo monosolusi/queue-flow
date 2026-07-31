@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Test coverage
+coverage/
+
+# tsc -b composite-project emit artifacts for vite.config.ts (tsconfig.node.json).
+# Regenerated on every build — must not be committed (avoids build-churn).
+vite.config.js
+vite.config.d.ts
+*.tsbuildinfo
+
+# Logs & OS
+*.log
+.DS_Store
