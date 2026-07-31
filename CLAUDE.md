@@ -377,6 +377,36 @@ with no duplicate/lost ticket numbers.
   (`ARCHIVE_PREVIOUS_DAY` then `MANUAL_RESET`), not one. **Deferred:** backend
   cron-format enforcement and scheduler re-arm on policy change (still
   Hardening, pairs with audit-trail analytics surface).
+- **Wizard store-profile + category step (QUE-14, FR-WZD-02):** the wizard's
+  step 1 is "Profil Toko & Kategori" — store name + **active counter count** +
+  categories with a **PRD §7 Default / Custom preset** (mirrors the QUE-15
+  state-machine `mode` pattern: a client-only `categoriesMode: 'default' |
+  'custom'` on the form, stripped at finalize, inferred on prefill by
+  deep-equal against `DEFAULT_CATEGORIES` in `admin-service/src/api/types.ts`
+  — `A=Customer Service`, `B=Kasir & Pembayaran`). Step 2 is the routing
+  matrix only (assign categories + priority per counter); the counter count
+  is owned by step 1 via `setCounterCount`, which syncs `routingRules` length
+  (append default-named counters / truncate, **no renumber** — preserves
+  counter identity) and clamps `>=1`. **Id-preservation is load-bearing and
+  diverges from the state-machine pattern:** the state-machine force-reset can
+  blindly use `DEFAULT_STATE_MACHINE` because the graph carries no ids, but
+  `QueueTicket.categoryId` stores the category UUID, so the default-mode
+  force-reset (`defaultCategoriesWithIds`, called from the default radio
+  `onChange` and `finalize`) MUST draw its id pool from the **prefill**
+  (`loadedCategoriesRef`, the categories as originally loaded with their
+  persisted ids), NOT the live `form.categories` — otherwise a custom detour
+  that removes a row, then switches back to default, would mint fresh UUIDs
+  and orphan every ticket that referenced the removed code. The prefill-pool
+  keeps the original ids across any custom round-trip. **`setCounterCount`
+  uses `max(existing counterId)+1`, not `length+1`** — a re-edit can load a
+  gapped/non-sequential set of counterIds and `length+1` would collide (the
+  backend `buildRoutingRules` rejects duplicate counterIds with a 400).
+  **Client validation mirrors the backend `Category` VO**
+  (`validateCustomCategories`: code `^[A-Z]+$`, non-empty name, no dupes; per-row
+  error prefixes so the dedup `Set` keeps distinct rows distinguishable) and
+  gates step-1 `Lanjut`. Store-name validation stays backend-side (existing
+  behavior; out of scope). No core-api change — the PUT contract already
+  accepted the category list; the restructure is admin-service client only.
 - **REST surface separation:** the read-only caller workspace surface
   (`GET /api/counters`, `GET /api/queue`) lives in `RestApiModule` (QUE-19).
   Mutation endpoints get their own module by concern — the kiosk
@@ -610,6 +640,18 @@ with no duplicate/lost ticket numbers.
     flip a `useRef<boolean>` in-flight flag *before* the first `await` and reset
     it in `finally`; keep `disabled` as the visible affordance. Two taps must
     produce exactly one mutation (asserted in the kiosk tests).
+  - **Step-form RTL tests: re-query DOM nodes after step re-entry, and use
+    `fireEvent.change` for controlled numeric inputs bound to derived state.**
+    The wizard renders each step with `{step === N && <section>…}`, so navigating
+    away (next) **unmounts** the step and going back (Kembali) **recreates** the
+    nodes — a `const input = screen.getBy…` captured on the first visit is a
+    detached node after a round-trip; `fireEvent.change` / `userEvent.type` on it
+    no-ops (state never updates). Re-query via `screen.getBy…` after the
+    `findByTestId('step-N')` that confirms re-entry. Separately, a controlled
+    numeric input whose `value` is derived from state (e.g. `value={form.routingRules.length}`) cannot be set with `userEvent.clear` + `type`:
+    `clear` fires `onChange('')` → clamps back to the current length, so the
+    field snaps back and `type` appends to the stale value. Use
+    `fireEvent.change(input, { target: { value: '3' } })` to set it cleanly.
   - **PWA `base`/`start_url`/`scope` must match the NGINX route** (e.g.
     `/kiosk/`, `/caller/`) — otherwise an installed PWA's `start_url` resolves to
     the gateway root, not the service, breaking offline launch. Set them when

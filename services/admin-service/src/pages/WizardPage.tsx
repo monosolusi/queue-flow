@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { IAdminApi } from '../api/admin-api';
 import {
   type DailyResetMode,
   type PriorityPolicy,
+  DEFAULT_CATEGORIES,
   DEFAULT_STATE_MACHINE,
   DEFAULT_DAILY_RESET,
   type StateMachineDto,
@@ -33,10 +34,24 @@ interface StateMachineForm {
   transitions: Transition[];
 }
 
+/**
+ * `categoriesMode` is a **client-only preset** — never sent to core-api (the PUT
+ * payload is always the full `WizardCategoryDto[]` list, mirroring how
+ * `stateMachine.mode` is stripped). `'default'` locks the form to the PRD §7
+ * {@link DEFAULT_CATEGORIES} template (read-only); `'custom'` opens the code/name
+ * editor. It is inferred on prefill (deep-equal to `DEFAULT_CATEGORIES` by
+ * code+name, ignoring `id`) so a re-edit of a store that never customized stays in
+ * default mode. The `finalize` force-reset preserves any existing ids by
+ * code-match (see {@link defaultCategoriesWithIds}), because
+ * `QueueTicket.categoryId` stores the category UUID and minting new ids on a
+ * re-save would orphan every ticket — the one real difference from the state-
+ * machine preset, whose graph carries no ids.
+ */
 /** The editable wizard form model (mirrors the PUT payload pieces). */
 interface WizardForm {
   storeName: string;
   categories: WizardCategoryDto[];
+  categoriesMode: 'default' | 'custom';
   routingRules: WizardRoutingRuleDto[];
   stateMachine: StateMachineForm;
   dailyReset: { mode: DailyResetMode; cronExpression: string; resetTicketNumberTo: number; archivePreviousDayData: boolean };
@@ -55,11 +70,69 @@ function defaultStateMachineForm(): StateMachineForm {
 function emptyForm(): WizardForm {
   return {
     storeName: '',
-    categories: [{ code: 'A', name: '' }],
+    categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })),
+    categoriesMode: 'default',
     routingRules: [{ counterId: 1, counterName: 'Counter 1', assignedCategoryCodes: [], priorityPolicy: 'FIFO_GLOBAL' as PriorityPolicy }],
     stateMachine: defaultStateMachineForm(),
     dailyReset: { ...DEFAULT_DAILY_RESET, cronExpression: DEFAULT_DAILY_RESET.cronExpression ?? '' },
   };
+}
+
+/** Structural deep-equal against the PRD §7 default categories (prefill mode inference). */
+function isDefaultCategories(cats: readonly WizardCategoryDto[]): boolean {
+  if (cats.length !== DEFAULT_CATEGORIES.length) return false;
+  // Compare code+name only — `id` is load-bearing for persistence but irrelevant
+  // to whether the manager chose the default template (a re-edit carries ids the
+  // default preset never had, so an id-aware compare would wrongly infer custom).
+  return cats.every((c, i) => c.code === DEFAULT_CATEGORIES[i].code && c.name === DEFAULT_CATEGORIES[i].name);
+}
+
+/**
+ * The PRD §7 default categories, preserving any existing id from `existing` by
+ * code-match. Callers pass the **prefill pool** (the categories as originally
+ * loaded from the store, with their persisted ids — `loadedCategoriesRef`), NOT
+ * the live `form.categories`: a custom detour that removes a row would
+ * otherwise drop the original id from the editable list, and switching back to
+ * default would mint a fresh UUID — orphaning every `QueueTicket.categoryId`
+ * that referenced it. Drawing from the prefill pool keeps the original ids
+ * across any custom round-trip. Categories whose code is new to the store carry
+ * no `id` and the backend mints one — the wizard's "send existing id for
+ * unchanged, omit for new" rule.
+ */
+function defaultCategoriesWithIds(existing: readonly WizardCategoryDto[]): WizardCategoryDto[] {
+  return DEFAULT_CATEGORIES.map((dc) => {
+    const match = existing.find((c) => c.code === dc.code);
+    return match?.id ? { id: match.id, code: dc.code, name: dc.name } : { code: dc.code, name: dc.name };
+  });
+}
+
+/**
+ * Validate a custom category list, mirroring the backend `Category` value-object
+ * invariants (`core-api` `domain/queue/entities/category.ts`) so the wizard
+ * never submits a list the backend would reject with a 400: code `^[A-Z]+$`,
+ * non-empty name, no duplicate codes. Returns a list of human-readable
+ * (Indonesian) error strings; empty means valid. (Default mode is always valid —
+ * `DEFAULT_CATEGORIES` satisfies the invariants by construction.)
+ */
+function validateCustomCategories(cats: readonly WizardCategoryDto[]): string[] {
+  const errors: string[] = [];
+  // code -> first row it appeared on, so a duplicate points back to the original.
+  const seenCodes = new Map<string, number>();
+  for (let i = 0; i < cats.length; i++) {
+    const c = cats[i];
+    const row = i + 1;
+    if (!c.code || !/^[A-Z]+$/.test(c.code)) {
+      errors.push(`Kategori ${row}: kode harus huruf kapital (A-Z).`);
+    } else if (seenCodes.has(c.code)) {
+      errors.push(`Kategori ${row}: kode '${c.code}' duplikat dengan kategori ${seenCodes.get(c.code)}.`);
+    } else {
+      seenCodes.set(c.code, row);
+    }
+    if (!c.name || !c.name.trim()) errors.push(`Kategori ${row}: nama tidak boleh kosong.`);
+  }
+  // De-duplicate identical messages, but per-row prefixes keep distinct rows
+  // distinguishable (two empty names no longer collapse to one `li`).
+  return [...new Set(errors)];
 }
 
 /** Structural deep-equal against the PRD §7 default graph (prefill mode inference). */
@@ -116,8 +189,14 @@ function referencedStates(form: StateMachineForm): Set<string> {
 
 /**
  * The first-run setup wizard (FR-WZD-02..06). Five steps:
- *  1. Store name (FR-WZD-02).
- *  2. Counters + categories + routing matrix + priority policy (FR-WZD-03).
+ *  1. Store profile + categories — store name, active counter count, and the
+ *     category list with a PRD §7 Default / Custom preset template (FR-WZD-02).
+ *     The counter count drives the routing-rule rows edited on step 2; the
+ *     category preset mirrors the state-machine `mode` pattern (client-only,
+ *     stripped at finalize, with id-preserving force-reset).
+ *  2. Routing matrix — for each counter, the served categories + priority
+ *     policy (FR-WZD-03). Counter count is owned by step 1; this step only
+ *     assigns categories to the counters already created there.
  *  3. State-machine designer — states + transitions + Indonesian action labels,
  *     PRD §7 default graph prefilled (FR-WZD-04).
  *  4. Daily-reset policy — mode/cron/resetTo/archive (FR-WZD-05). The cron field
@@ -140,6 +219,13 @@ export function WizardPage({ api }: { api: IAdminApi }) {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The categories as loaded from the store at prefill (with their persisted
+  // ids). The default-mode force-reset (radio onChange + finalize) draws its id
+  // pool from THIS, not the live `form.categories`, so a custom detour that
+  // removes a row cannot lose the original id — switching back to default still
+  // reuses the persisted UUIDs and never mints new ones (which would orphan
+  // every `QueueTicket.categoryId`). See `defaultCategoriesWithIds`.
+  const loadedCategoriesRef = useRef<WizardCategoryDto[]>([]);
 
   // Prefill from the current config (supports re-edit after initial setup).
   useEffect(() => {
@@ -154,12 +240,18 @@ export function WizardPage({ api }: { api: IAdminApi }) {
         // checkbox matrix reflects the saved assignments instead of resetting
         // to empty (the prior prefill dropped both).
         const idToCode = new Map(config.categories.map((c) => [c.id, c.code]));
+        const loadedCategories: WizardCategoryDto[] =
+          config.categories.length > 0
+            ? config.categories.map((c) => ({ id: c.id, code: c.code, name: c.name }))
+            : DEFAULT_CATEGORIES.map((c) => ({ ...c }));
+        loadedCategoriesRef.current = loadedCategories;
         setForm({
           storeName: config.storeName,
-          categories:
-            config.categories.length > 0
-              ? config.categories.map((c) => ({ id: c.id, code: c.code, name: c.name }))
-              : [{ code: 'A', name: '' }],
+          categories: loadedCategories,
+          // Infer the preset by code+name deep-equal (id-agnostic) so a re-edit
+          // of a store that kept the default template stays in default mode and
+          // re-uses the existing category ids (preserved at finalize).
+          categoriesMode: isDefaultCategories(loadedCategories) ? 'default' : 'custom',
           routingRules:
             config.routingRules.length > 0
               ? config.routingRules.map((r) => ({
@@ -204,6 +296,16 @@ export function WizardPage({ api }: { api: IAdminApi }) {
 
   const categoryCodes = useMemo(() => form.categories.map((c) => c.code), [form.categories]);
 
+  // Step 1 category validation. Default mode is always valid (DEFAULT_CATEGORIES
+  // satisfies the Category invariants by construction); custom mode mirrors the
+  // backend `Category` VO so the wizard never submits a list the backend would
+  // 400. The error list drives both the inline UI and the Lanjut guard.
+  const catErrors = useMemo(
+    () => (form.categoriesMode === 'custom' ? validateCustomCategories(form.categories) : []),
+    [form.categoriesMode, form.categories],
+  );
+  const step1Valid = catErrors.length === 0;
+
   // Step 3 is the only step with structural validation; the others are free-form
   // (the backend validates store name / categories / routing). Compute the
   // custom-state-machine errors once so the UI and the next/finalize guard share
@@ -232,6 +334,10 @@ export function WizardPage({ api }: { api: IAdminApi }) {
   const step4Valid = cronError === null;
 
   const next = () => {
+    // Block advancing past step 1 while the custom category list is invalid so
+    // the manager never reaches the routing matrix with categories the backend
+    // would 400 on save.
+    if (step === 1 && !step1Valid) return;
     // Block advancing past step 3 while the custom state machine is invalid so
     // the manager never reaches finalize with a graph the backend would 400.
     if (step === 3 && !step3Valid) return;
@@ -256,6 +362,15 @@ export function WizardPage({ api }: { api: IAdminApi }) {
               transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
             }
           : { states: form.stateMachine.states, transitions: form.stateMachine.transitions };
+      // `categoriesMode` is likewise a client-only preset. In default mode force
+      // the PRD §7 categories, preserving any existing id by code-match so a
+      // re-save of a store that used the default template reuses its category
+      // UUIDs instead of minting new ones (which would orphan every
+      // `QueueTicket.categoryId`). A half-edited custom list the manager
+      // abandoned cannot leak — same defense as the state-machine force-reset,
+      // adapted for load-bearing ids.
+      const categories =
+        form.categoriesMode === 'default' ? defaultCategoriesWithIds(loadedCategoriesRef.current) : form.categories;
       await api.saveSystemConfig({
         storeName: form.storeName,
         stateMachine: sm,
@@ -265,7 +380,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
           resetTicketNumberTo: form.dailyReset.resetTicketNumberTo,
           archivePreviousDayData: form.dailyReset.archivePreviousDayData,
         },
-        categories: form.categories,
+        categories,
         routingRules: form.routingRules,
         actor: 'admin',
       });
@@ -300,7 +415,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
       <div className="wizard__body">
         {step === 1 && (
           <section className="wizard__step" data-testid="step-1">
-            <h2 className="wizard__step-title">Nama Toko</h2>
+            <h2 className="wizard__step-title">Profil Toko &amp; Kategori</h2>
             <label className="field">
               <span className="field__label">Nama toko / cabang</span>
               <input
@@ -312,60 +427,122 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                 autoFocus
               />
             </label>
+
+            <label className="field">
+              <span className="field__label">Jumlah counter aktif</span>
+              <input
+                className="field__input"
+                type="number"
+                min={1}
+                value={form.routingRules.length}
+                onChange={(e) => setCounterCount(form, setForm, Number(e.target.value))}
+                aria-label="Jumlah counter aktif"
+              />
+            </label>
+
+            <fieldset className="radio-group" data-testid="cat-mode">
+              <legend>Jenis kategori</legend>
+              <label className="radio-group__item">
+                <input
+                  type="radio"
+                  name="cat-mode"
+                  value="default"
+                  checked={form.categoriesMode === 'default'}
+                  onChange={() =>
+                    setForm({
+                      ...form,
+                      categoriesMode: 'default',
+                      categories: defaultCategoriesWithIds(loadedCategoriesRef.current),
+                    })
+                  }
+                />
+                Gunakan kategori default (PRD §7)
+              </label>
+              <label className="radio-group__item">
+                <input
+                  type="radio"
+                  name="cat-mode"
+                  value="custom"
+                  checked={form.categoriesMode === 'custom'}
+                  onChange={() => setForm({ ...form, categoriesMode: 'custom' })}
+                />
+                Susun kategori sendiri
+              </label>
+            </fieldset>
+
+            {form.categoriesMode === 'default' ? (
+              <div className="cat-readonly" data-testid="cat-readonly">
+                <p className="wizard__hint">Kategori default (read-only):</p>
+                <ul className="entry-list">
+                  {form.categories.map((c, i) => (
+                    <li key={i} className="entry-row">
+                      <span className="entry-row__code">{c.code}</span>
+                      <span className="entry-row__name">{c.name}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <div className="cat-editor" data-testid="cat-editor">
+                <ul className="entry-list">
+                  {form.categories.map((cat, i) => (
+                    <li key={i} className="entry-row">
+                      <input
+                        className="field__input entry-row__code"
+                        type="text"
+                        value={cat.code}
+                        onChange={(e) => updateCategory(form, setForm, i, { code: e.target.value.toUpperCase() })}
+                        placeholder="A"
+                        aria-label={`Kategori ${i + 1} kode`}
+                      />
+                      <input
+                        className="field__input entry-row__name"
+                        type="text"
+                        value={cat.name}
+                        onChange={(e) => updateCategory(form, setForm, i, { name: e.target.value })}
+                        placeholder="Nama kategori"
+                        aria-label={`Kategori ${i + 1} nama`}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn--ghost"
+                        onClick={() => removeCategory(form, setForm, i)}
+                        disabled={form.categories.length <= 1}
+                      >
+                        Hapus
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <button type="button" className="btn btn--secondary" onClick={() => addCategory(form, setForm)}>
+                  + Tambah Kategori
+                </button>
+
+                {catErrors.length > 0 && (
+                  <ul className="wizard__errors" data-testid="cat-errors">
+                    {catErrors.map((msg) => (
+                      <li key={msg}>{msg}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
           </section>
         )}
 
         {step === 2 && (
           <section className="wizard__step" data-testid="step-2">
-            <h2 className="wizard__step-title">Kategori, Counter &amp; Routing</h2>
+            <h2 className="wizard__step-title">Matriks Routing Counter</h2>
+            <p className="wizard__hint">
+              Pasang kategori yang dilayani tiap counter. Jumlah counter diatur di Langkah 1.
+            </p>
 
-            <h3 className="wizard__subhead">Kategori</h3>
-            <ul className="entry-list">
-              {form.categories.map((cat, i) => (
-                <li key={i} className="entry-row">
-                  <input
-                    className="field__input entry-row__code"
-                    type="text"
-                    value={cat.code}
-                    onChange={(e) => updateCategory(form, setForm, i, { code: e.target.value.toUpperCase() })}
-                    placeholder="A"
-                    aria-label={`Kategori ${i + 1} kode`}
-                  />
-                  <input
-                    className="field__input entry-row__name"
-                    type="text"
-                    value={cat.name}
-                    onChange={(e) => updateCategory(form, setForm, i, { name: e.target.value })}
-                    placeholder="Nama kategori"
-                    aria-label={`Kategori ${i + 1} nama`}
-                  />
-                  <button
-                    type="button"
-                    className="btn btn--ghost"
-                    onClick={() => removeCategory(form, setForm, i)}
-                    disabled={form.categories.length <= 1}
-                  >
-                    Hapus
-                  </button>
-                </li>
-              ))}
-            </ul>
-            <button type="button" className="btn btn--secondary" onClick={() => addCategory(form, setForm)}>
-              + Tambah Kategori
-            </button>
-
-            <h3 className="wizard__subhead">Counter &amp; Routing</h3>
             <ul className="entry-list">
               {form.routingRules.map((rule, i) => (
                 <li key={i} className="entry-row entry-row--routing">
-                  <input
-                    className="field__input entry-row__counter-id"
-                    type="number"
-                    min={1}
-                    value={rule.counterId}
-                    onChange={(e) => updateRouting(form, setForm, i, { counterId: Number(e.target.value) })}
-                    aria-label={`Counter ${i + 1} id`}
-                  />
+                  <span className="entry-row__counter-label" aria-label={`Counter ${i + 1} id`}>
+                    Counter {rule.counterId}
+                  </span>
                   <input
                     className="field__input entry-row__name"
                     type="text"
@@ -396,20 +573,9 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                       </label>
                     ))}
                   </fieldset>
-                  <button
-                    type="button"
-                    className="btn btn--ghost"
-                    onClick={() => removeRouting(form, setForm, i)}
-                    disabled={form.routingRules.length <= 1}
-                  >
-                    Hapus
-                  </button>
                 </li>
               ))}
             </ul>
-            <button type="button" className="btn btn--secondary" onClick={() => addRouting(form, setForm)}>
-              + Tambah Counter
-            </button>
           </section>
         )}
 
@@ -686,7 +852,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
             type="button"
             className="btn btn--primary"
             onClick={next}
-            disabled={(step === 3 && !step3Valid) || (step === 4 && !step4Valid) || submitting}
+            disabled={(step === 1 && !step1Valid) || (step === 3 && !step3Valid) || (step === 4 && !step4Valid) || submitting}
             data-testid="wizard-next"
           >
             Lanjut
@@ -718,17 +884,34 @@ function updateRouting(form: WizardForm, setForm: (f: WizardForm) => void, i: nu
   const routingRules = form.routingRules.map((r, idx) => (idx === i ? { ...r, ...patch } : r));
   setForm({ ...form, routingRules });
 }
-function addRouting(form: WizardForm, setForm: (f: WizardForm) => void) {
-  setForm({
-    ...form,
-    routingRules: [
-      ...form.routingRules,
-      { counterId: form.routingRules.length + 1, counterName: `Counter ${form.routingRules.length + 1}`, assignedCategoryCodes: [], priorityPolicy: 'FIFO_GLOBAL' },
-    ],
-  });
-}
-function removeRouting(form: WizardForm, setForm: (f: WizardForm) => void, i: number) {
-  setForm({ ...form, routingRules: form.routingRules.filter((_, idx) => idx !== i) });
+/**
+ * Sync the routing-rule rows to the counter count entered on step 1. Growing
+ * appends default-named counters (`Counter N`, auto `counterId`, empty
+ * assignments, `FIFO_GLOBAL`); shrinking truncates. **No renumber** — counter
+ * identity (`counterId`, which `QueueTicket.counterId` references) is preserved
+ * and gaps are not closed, matching the prior add/remove semantics. The count is
+ * clamped `>=1` so the wizard can never construct an empty counter set.
+ */
+function setCounterCount(form: WizardForm, setForm: (f: WizardForm) => void, count: number) {
+  const n = Math.max(1, Math.floor(count) || 1);
+  const rules = [...form.routingRules];
+  if (rules.length > n) rules.length = n;
+  // max(existing counterId)+1, NOT length+1: a re-edit can load a gapped /
+  // non-sequential set of counterIds (e.g. `[1, 3, 5]` from a non-wizard editor),
+  // and length+1 would collide (duplicate `counterId` 5) — the backend
+  // `buildRoutingRules` rejects duplicate counterIds with a 400. No renumber —
+  // existing counter identities are preserved (gaps are not closed).
+  let nextId = rules.reduce((m, r) => Math.max(m, r.counterId), 0) + 1;
+  while (rules.length < n) {
+    rules.push({
+      counterId: nextId,
+      counterName: `Counter ${nextId}`,
+      assignedCategoryCodes: [],
+      priorityPolicy: 'FIFO_GLOBAL' as PriorityPolicy,
+    });
+    nextId++;
+  }
+  setForm({ ...form, routingRules: rules });
 }
 function toggleRoutingCategory(form: WizardForm, setForm: (f: WizardForm) => void, i: number, code: string, checked: boolean) {
   const routingRules = form.routingRules.map((r, idx) => {
