@@ -101,6 +101,18 @@ fieldset {
 .admin-panel__error {
   color: var(--danger);
 }
+.admin-panel__success {
+  color: var(--success);
+}
+.admin-panel__hint {
+  margin: 0.5rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+.admin-panel__actions {
+  display: flex;
+  justify-content: flex-end;
+}
 .config-card {
   background: var(--surface);
   border-radius: var(--radius);

@@ -51,8 +51,15 @@ export interface SystemConfigurationDto {
   readonly routingRules: readonly ConfigRoutingRuleDto[];
 }
 
-/** One category in the wizard payload (`id` optional — generated server-side). */
+/**
+ * One category in the wizard / admin payload. `id` is optional: send the
+ * existing id to preserve it across a re-save (keeps `QueueTicket.categoryId`
+ * valid — the backend reuses it via `Identifier.of(id)`); omit it for a newly
+ * added category so the backend mints one. The backend `WizardCategoryDto`
+ * already accepts this field.
+ */
 export interface WizardCategoryDto {
+  readonly id?: string;
   readonly code: string;
   readonly name: string;
 }
