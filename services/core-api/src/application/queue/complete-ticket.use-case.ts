@@ -1,9 +1,11 @@
 import type {
   IQueueRepository,
   ITransitionPolicy,
+  ITransitionPolicyResolver,
   TicketId,
 } from '../../domain/queue';
 import { EntityNotFoundException } from '../../domain/shared';
+import { QueueEventDispatcher } from './queue-event-dispatcher';
 import { TicketStateDto, projectTicketState } from './ticket-state.dto';
 
 /**
@@ -34,17 +36,21 @@ export type CompleteTicketResult = {
 export class CompleteTicketUseCase {
   constructor(
     private readonly queue: IQueueRepository,
-    private readonly transitionPolicy: ITransitionPolicy,
+    private readonly policyResolver: ITransitionPolicyResolver,
+    private readonly dispatcher: QueueEventDispatcher,
     private readonly clock: () => number = () => Date.now(),
   ) {}
 
   public async execute(command: CompleteTicketCommand): Promise<CompleteTicketResult> {
+    const transitionPolicy = await this.policyResolver.getActivePolicy();
     const ticket = await this.queue.findById(command.ticketId);
     if (!ticket) {
       throw new EntityNotFoundException('QueueTicket', command.ticketId.value);
     }
-    ticket.complete(this.transitionPolicy, this.clock());
+    ticket.complete(transitionPolicy, this.clock());
     await this.queue.save(ticket);
+    // Drain the recorded TicketStatusChangedEvent so it broadcasts (FR-ENG-04).
+    await this.dispatcher.dispatch(ticket);
     return { status: 'completed', ticket: projectTicketState(ticket) };
   }
 }

@@ -147,7 +147,13 @@ with no duplicate/lost ticket numbers.
   (In Review, PR #7) scaffolded `services/kiosk-service/` (Vite + React + TS PWA,
   the visitor touchscreen kiosk, port 3001 at `/kiosk`) and added
   `GET /api/categories` (`ListCategoriesUseCase`) for the kiosk category-select
-  screen. Other services (`tv-display`, `admin`) are not yet scaffolded.
+  screen. QUE-2 wired the queue engine end-to-end: the six command use cases
+  now resolve the active policy per execution via `ITransitionPolicyResolver`
+  and drain/broadcast their lifecycle events, the daily-reset engine
+  (`ResetDailyQueueUseCase` + `POST /api/system/daily-reset` + boot-armed
+  `DailyResetSchedulerService`) emits `SYSTEM_RESET`, and
+  `QueueCommandsApiModule` exposes the caller command REST surface. Other
+  services (`tv-display`, `admin`) are not yet scaffolded.
 - **PRD language:** the Linear PRD is written in **Bahasa Indonesia** with
   English technical terms. UI `action_label` values ("Panggil Berikutnya",
   "Lewati / Absen", "Selesai Layan") are Indonesian — match them verbatim
@@ -181,13 +187,28 @@ with no duplicate/lost ticket numbers.
   confusion.
 - **Use-case conventions** (`src/application/**`): a use case injects only
   domain **ports** (interfaces) — e.g. `IQueueRepository`,
-  `ICounterRoutingRuleRepository`, `ITransitionPolicy` — never infrastructure
-  concretions. It returns a transport-agnostic **DTO** (discriminated-union
-  result), never the aggregate itself, so the interface-adapter layer maps it
-  to HTTP/WS. Command + result DTOs are co-located with the use case. The
-  active `StateMachine` (from `SystemConfiguration`) is supplied to the use
-  case as an `ITransitionPolicy` by the interface-adapter/DI layer, not loaded
-  by the use case.
+  `ICounterRoutingRuleRepository`, `ITransitionPolicyResolver` — never
+  infrastructure concretions. It returns a transport-agnostic **DTO**
+  (discriminated-union result), never the aggregate itself, so the
+  interface-adapter layer maps it to HTTP/WS. Command + result DTOs are
+  co-located with the use case. The active `StateMachine` (from
+  `SystemConfiguration`) is supplied to the use case as an
+  `ITransitionPolicyResolver` (a domain port, `TRANSITION_POLICY_RESOLVER`
+  Symbol token) by the interface-adapter/DI layer — **not** a snapshot
+  `ITransitionPolicy` and **not** loaded by the use case. Each use case
+  resolves the active policy per execution (`const policy = await
+  resolver.getActivePolicy();`) and passes the **synchronous**
+  `ITransitionPolicy` into the aggregate's transition methods. Per-execution
+  resolution is required for two reasons: (1) the app must boot **before** the
+  first-run wizard creates `SystemConfiguration`, so resolving a policy
+  eagerly at boot would throw `SystemNotConfiguredException` and crash startup
+  (and break the wizard itself, which needs the app running to serve
+  `/wizard`); (2) `QueueTicket.transitionTo` is synchronous `void` and calls
+  `policy.isAllowed` inline + throws, so a lazy async proxy is not viable — the
+  use case must hand the aggregate a fully-resolved sync policy. The
+  `StateTransitionValidator` (interface-adapter) implements the resolver port,
+  reading the singleton `SystemConfiguration` and yielding its `StateMachine`;
+  all queue command use cases share this one resolver.
 - **dep-cruiser resolution gotcha:** `arch:check` flags a bare import as
   `not-to-unresolvable` when the package's `package.json` `exports` field has no
   `default` condition (e.g. `ws`). Either add `conditionNames` to
@@ -223,10 +244,20 @@ with no duplicate/lost ticket numbers.
   Mutation endpoints get their own module by concern — the kiosk
   ticket-creation surface is `TicketsApiModule` (`POST /api/tickets`), kept
   separate so the read-only module's purpose stays clean (SRP). Caller command
-  endpoints (call-next, serve, transfer, …) arrive in QUE-20 and should follow
-  the same per-concern module split. A use-case module imports
-  `PersistenceModule` + `RealtimeModule` and provides the framework-free use
-  case via a factory injecting the repo tokens + `QueueEventDispatcher`.
+  endpoints (`POST /api/queue/call-next`, `…/:id/serve|complete|skip|recall`,
+  `…/:id/transfer`) landed in QUE-2 under `QueueCommandsApiModule`
+  (`@Controller('api/queue')`, sharing the `api/queue` prefix with the read-only
+  `QueueController` — reads + commands under one resource prefix, commands as
+  POST sub-paths). The system-admin daily-reset surface
+  (`POST /api/system/daily-reset`) is its own `SystemApiModule` (SRP). The
+  use-case **wiring** for all seven queue/system use cases is factored into one
+  `QueueOperationsModule` (application layer, no controllers) — it imports
+  `PersistenceModule` + `RealtimeModule` + `SystemConfigModule` and provides
+  each framework-free use case via a factory injecting the repo tokens +
+  `QueueEventDispatcher` + `TRANSITION_POLICY_RESOLVER`; the API modules then
+  import it for the use-case class tokens. `SystemConfigModule` binds the
+  `TRANSITION_POLICY_RESOLVER` port to `StateTransitionValidator`
+  (injecting `SYSTEM_CONFIGURATION_REPOSITORY`).
   **Read use cases live in the bounded context that owns the entity they
   read:** `ListCategoriesUseCase` (`GET /api/categories`, QUE-17) lives in
   `application/queue` because `Category` is a Queue-context entity, and it joins
@@ -242,6 +273,47 @@ with no duplicate/lost ticket numbers.
   by the `src/application/queue` barrel — import it via the direct path
   `src/application/queue/queue-event-dispatcher` (as `realtime.module.ts` and
   `tickets-api.module.ts` do), not from the `application/queue` index.
+- **Queue command lifecycle events (QUE-2):** the six command use cases
+  (call-next/serve/complete/skip/recall/transfer) drain the aggregate's domain
+  events by calling `await dispatcher.dispatch(ticket)` after `queue.save(ticket)`
+  — without this the aggregate records `TICKET_CALLED` / `STATUS_UPDATED` /
+  `TICKET_TRANSFERRED` but they never broadcast (FR-ENG-04). `dispatch(aggregate)`
+  pulls events from an `AggregateRoot`; for **non-aggregate system events** (the
+  daily reset rolls the whole sequence, not one ticket) use the sibling
+  `await dispatcher.dispatchEvents(events: readonly DomainEvent[])`, which
+  forwards a free-standing event list to the same `IQueueEventPublisher`.
+  `DailyQueueResetEvent` (type `SYSTEM_RESET`) is the one such event in QUE-2's
+  scope; it carries a sentinel `SYSTEM_AGGREGATE_ID = 'system'` (exported from
+  `daily-queue-reset.event.ts`) since `DomainEvent` requires an `aggregateId`
+  but no `SystemAggregate` exists. **Transfer emits two events:** because
+  transfer ("Pindah Kategori") is a first-class transition, the aggregate
+  records both a `STATUS_UPDATED` (CALLING → WAITING, actionLabel "Pindah
+  Kategori") **and** a `TICKET_TRANSFERRED` — so a realtime test asserting a
+  transfer must collect 2 messages, not 1 (the other single-transition commands
+  emit exactly one `STATUS_UPDATED`).
+- **Daily reset engine (QUE-2, FR-ENG-05):** `ResetDailyQueueUseCase`
+  (`application/queue`) owns only `ISequenceRepository` + `QueueEventDispatcher`
+  + an injected `clock`. It derives `date = toDateKey(clock())` internally (the
+  date-key convention already lives in the application layer, same as
+  `CreateTicketUseCase`), calls `sequences.resetDaily(date, resetTo)`, and
+  emits `DailyQueueResetEvent(SYSTEM_AGGREGATE_ID, resetTo, date, clock())` via
+  `dispatchEvents`. **Anti-corruption boundary:** the use case imports **no**
+  Store-Config type — the interface-adapter layer (`SystemAdminController`,
+  `DailyResetSchedulerService`) reads `DailyResetPolicy.resetTicketNumberTo`
+  from `SystemConfiguration` and passes only the scalar `resetTo` into the
+  command (dep-cruiser's `queue-no-store-config` rule is scoped to
+  `src/domain/queue/`, so the application use case is unaffected, but the
+  boundary is kept by intent, not by rule). The manual trigger is
+  `POST /api/system/daily-reset`; the automatic trigger is
+  `DailyResetSchedulerService` (`infrastructure/scheduler/`), an
+  `@Injectable() OnModuleInit` that reads the config at boot and, if the policy
+  is `AUTOMATIC_CRON` with a cron expression, arms a `@nestjs/schedule`
+  programmatic `CronJob` (`new CronJob(cronExpr, cb)` +
+  `schedulerRegistry.addCronJob(name, job); job.start();`) calling the use
+  case. It is **boot-armed only** — it does not re-arm when the wizard later
+  changes the config (a config change takes effect on next restart); re-arming
+  pairs with the audit-trail work (NFR-SEC-02). `ScheduleModule.forRoot()` is
+  imported in `AppModule` for the `SchedulerRegistry`.
 - Frontends are React-family; `caller-service` is a PWA. Keep them
   offline-capable (bundle + precache all assets — vite-plugin-pwa; relative
   `/api` + `/ws` URLs so they're same-origin behind NGINX with no per-service

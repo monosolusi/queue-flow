@@ -12,8 +12,11 @@ import {
 } from '../../../domain/queue';
 import {
   type ICounterRoutingRuleRepository,
+  type ISystemConfigurationRepository,
   CounterRoutingRule,
   COUNTER_ROUTING_RULE_REPOSITORY,
+  SYSTEM_CONFIGURATION_REPOSITORY,
+  SystemConfiguration,
 } from '../../../domain/store-config';
 import { Identifier } from '../../../domain/shared';
 import { PriorityPolicy } from '../../../domain/shared/priority-policy';
@@ -37,6 +40,12 @@ import { toDateKey } from '../../../application/queue';
  * `CreateTicketUseCase`) would re-issue `A-001` and collide with a seeded
  * ticket. Tickets are still built via `reconstitute` (no domain events) so
  * seeding does not broadcast over the WS gateway.
+ *
+ * Also seeds a default *completed* {@link SystemConfiguration} (the default
+ * state machine + default daily-reset policy) so the active-policy resolver can
+ * return a policy in dev and the caller command endpoints work without the
+ * first-run wizard (QUE-13). Real configuration persistence is the wizard's job;
+ * this exists only so the local runtime is operable before the wizard lands.
  */
 @Injectable()
 export class DevSeedService implements OnModuleInit {
@@ -46,12 +55,25 @@ export class DevSeedService implements OnModuleInit {
     private readonly routingRules: ICounterRoutingRuleRepository,
     @Inject(CATEGORY_REPOSITORY) private readonly categories: ICategoryRepository,
     @Inject(SEQUENCE_REPOSITORY) private readonly sequences: ISequenceRepository,
+    @Inject(SYSTEM_CONFIGURATION_REPOSITORY)
+    private readonly systemConfig: ISystemConfigurationRepository,
   ) {}
 
   async onModuleInit(): Promise<void> {
     if (process.env.QMS_DEV_SEED !== '1') {
       return;
     }
+
+    // Seed the default system configuration first (idempotent) so the
+    // active-policy resolver has a config to read. Done before the routing-rule
+    // guard so a partial seed (rules present, config missing) still backfills
+    // the config.
+    if (!(await this.systemConfig.get())) {
+      const config = SystemConfiguration.create(Identifier.generate(), 'QMS Dev Store');
+      config.completeInitialSetup();
+      await this.systemConfig.save(config);
+    }
+
     if ((await this.routingRules.getAll()).length > 0) {
       return; // already seeded — never clobber existing config
     }

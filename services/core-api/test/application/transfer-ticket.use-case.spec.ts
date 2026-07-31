@@ -21,6 +21,7 @@ import {
   InMemoryQueueRepository,
   InMemorySequenceRepository,
 } from '../../src/infrastructure/persistence/in-memory';
+import { fakePolicyResolver, spyDispatcher } from './test-doubles';
 
 const FIXED_NOW = 1_700_000_000_000;
 const DATE_KEY = '2026-07-30';
@@ -72,6 +73,7 @@ describe('TransferTicketUseCase (pindah kategori — FR-CLR-03)', () => {
   let queue: InMemoryQueueRepository;
   let categories: InMemoryCategoryRepository;
   let sequences: InMemorySequenceRepository;
+  let dispatcher: ReturnType<typeof spyDispatcher>;
   let useCase: TransferTicketUseCase;
 
   beforeEach(() => {
@@ -79,7 +81,15 @@ describe('TransferTicketUseCase (pindah kategori — FR-CLR-03)', () => {
     queue = new InMemoryQueueRepository();
     categories = new InMemoryCategoryRepository();
     sequences = new InMemorySequenceRepository();
-    useCase = new TransferTicketUseCase(queue, categories, sequences, transferPolicy, clock);
+    dispatcher = spyDispatcher();
+    useCase = new TransferTicketUseCase(
+      queue,
+      categories,
+      sequences,
+      fakePolicyResolver(transferPolicy),
+      dispatcher,
+      clock,
+    );
   });
 
   it('reassigns the ticket to the target category, issues a new number, and returns it to WAITING', async () => {
@@ -110,7 +120,7 @@ describe('TransferTicketUseCase (pindah kategori — FR-CLR-03)', () => {
     expect(reloaded?.ticketNumber.formatted()).toBe('B-001');
   });
 
-  it('records STATUS_UPDATED and TICKET_TRANSFERRED events on the aggregate', async () => {
+  it('records STATUS_UPDATED and TICKET_TRANSFERRED events on the aggregate and forwards them to the dispatcher', async () => {
     const ticket = callingTicket();
     await queue.save(ticket);
     ticket.pullDomainEvents(); // drop create/call events to isolate transfer
@@ -124,6 +134,10 @@ describe('TransferTicketUseCase (pindah kategori — FR-CLR-03)', () => {
 
     const events = ticket.pullDomainEvents();
     expect(events.map((e) => e.type)).toEqual(['STATUS_UPDATED', 'TICKET_TRANSFERRED']);
+    // The use case forwarded the aggregate to the dispatcher so the events
+    // broadcast (FR-ENG-04).
+    expect(dispatcher.dispatch).toHaveBeenCalledTimes(1);
+    expect(dispatcher.dispatch).toHaveBeenCalledWith(ticket);
   });
 
   it('throws InvalidStateTransitionException (default machine has no transfer edge) and burns no sequence number', async () => {
@@ -132,7 +146,8 @@ describe('TransferTicketUseCase (pindah kategori — FR-CLR-03)', () => {
       queue,
       categories,
       sequencesSpy,
-      StateMachine.DEFAULT, // no CALLING -> WAITING edge
+      fakePolicyResolver(StateMachine.DEFAULT), // no CALLING -> WAITING edge
+      dispatcher,
       clock,
     );
     const ticket = callingTicket(); // CALLING under the transfer-enabled machine
@@ -152,6 +167,7 @@ describe('TransferTicketUseCase (pindah kategori — FR-CLR-03)', () => {
     expect(await sequencesSpy.currentSequence(catB.id.value, DATE_KEY)).toBe(0);
     expect(ticket.currentStatus).toBe(TicketStatus.CALLING);
     expect(ticket.categoryId).toBe('CAT-A');
+    expect(dispatcher.dispatch).not.toHaveBeenCalled();
   });
 
   it('throws EntityNotFoundException when the target category does not exist', async () => {

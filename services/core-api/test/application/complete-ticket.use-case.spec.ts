@@ -9,6 +9,7 @@ import {
 } from '../../src/domain/queue';
 import { CompleteTicketUseCase } from '../../src/application/queue';
 import { InMemoryQueueRepository } from '../../src/infrastructure/persistence/in-memory';
+import { fakePolicyResolver, spyDispatcher } from './test-doubles';
 
 const FIXED_NOW = 1_700_000_000_000;
 
@@ -26,20 +27,21 @@ function servingTicket(counterId = 1): QueueTicket {
 }
 
 describe('CompleteTicketUseCase (Selesai Layan — FR-CLR-03)', () => {
-  const transitionPolicy = StateMachine.DEFAULT;
   let now = FIXED_NOW;
   const clock = () => (now += 10);
 
   let queue: InMemoryQueueRepository;
+  let dispatcher: ReturnType<typeof spyDispatcher>;
   let useCase: CompleteTicketUseCase;
 
   beforeEach(() => {
     now = FIXED_NOW;
     queue = new InMemoryQueueRepository();
-    useCase = new CompleteTicketUseCase(queue, transitionPolicy, clock);
+    dispatcher = spyDispatcher();
+    useCase = new CompleteTicketUseCase(queue, fakePolicyResolver(), dispatcher, clock);
   });
 
-  it('completes a SERVING ticket (SERVING -> COMPLETED) and persists it', async () => {
+  it('completes a SERVING ticket (SERVING -> COMPLETED), broadcasts STATUS_UPDATED, and persists it', async () => {
     const ticket = servingTicket(1);
     await queue.save(ticket);
 
@@ -47,6 +49,11 @@ describe('CompleteTicketUseCase (Selesai Layan — FR-CLR-03)', () => {
 
     expect(result.status).toBe('completed');
     expect(result.ticket.status).toBe(TicketStatus.COMPLETED);
+
+    // The use case drained the recorded TicketStatusChangedEvent via the
+    // dispatcher so it broadcasts (FR-ENG-04).
+    expect(dispatcher.dispatch).toHaveBeenCalledTimes(1);
+    expect(dispatcher.dispatch).toHaveBeenCalledWith(ticket);
 
     const reloaded = await queue.findById(ticket.id);
     expect(reloaded?.currentStatus).toBe(TicketStatus.COMPLETED);
@@ -56,6 +63,7 @@ describe('CompleteTicketUseCase (Selesai Layan — FR-CLR-03)', () => {
     await expect(useCase.execute({ ticketId: ticketIdGenerate() })).rejects.toBeInstanceOf(
       EntityNotFoundException,
     );
+    expect(dispatcher.dispatch).not.toHaveBeenCalled();
   });
 
   it('throws InvalidStateTransitionException when completing a CALLING ticket', async () => {
@@ -72,5 +80,6 @@ describe('CompleteTicketUseCase (Selesai Layan — FR-CLR-03)', () => {
     await expect(useCase.execute({ ticketId: calling.id })).rejects.toBeInstanceOf(
       InvalidStateTransitionException,
     );
+    expect(dispatcher.dispatch).not.toHaveBeenCalled();
   });
 });
