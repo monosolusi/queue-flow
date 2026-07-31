@@ -1,0 +1,346 @@
+:root {
+  --bg: #0f172a;
+  --surface: #1e293b;
+  --surface-2: #334155;
+  --text: #f1f5f9;
+  --text-muted: #94a3b8;
+  --accent: #2563eb;
+  --accent-contrast: #ffffff;
+  --success: #16a34a;
+  --warn: #d97706;
+  --danger: #dc2626;
+  --radius: 14px;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+input,
+select,
+fieldset {
+  font-family: inherit;
+}
+
+/* Shared buttons --------------------------------------------------------- */
+.btn {
+  border: none;
+  border-radius: var(--radius);
+  padding: 0.9rem 1.4rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+.btn--primary {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+.btn--secondary {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.btn--ghost {
+  background: transparent;
+  color: var(--text-muted);
+  padding: 0.5rem 0.8rem;
+  font-size: 0.95rem;
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* SetupGuard / loading --------------------------------------------------- */
+.guard-loading,
+.admin-panel--loading,
+.wizard--loading {
+  padding: 3rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 1.25rem;
+}
+
+/* Admin panel ------------------------------------------------------------ */
+.admin-panel {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+.admin-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.admin-panel__title {
+  margin: 0;
+  font-size: 1.75rem;
+}
+.admin-panel__subtitle {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 1rem;
+}
+.admin-panel__error {
+  color: var(--danger);
+}
+.config-card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.5rem;
+}
+.config-card__title {
+  margin: 0 0 0.75rem;
+  font-size: 1.25rem;
+}
+.config-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+.config-list__item {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+.config-list__item--routing {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.config-list__code {
+  background: var(--surface-2);
+  border-radius: 6px;
+  padding: 0.15rem 0.6rem;
+  font-weight: 700;
+}
+.config-list__name {
+  color: var(--text);
+}
+.config-list__counter {
+  font-weight: 600;
+}
+.config-list__policy,
+.config-list__cats {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+.transition-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+.transition-list__item {
+  display: grid;
+  grid-template-columns: 7rem 1.5rem 7rem 1fr;
+  gap: 0.5rem;
+  align-items: center;
+}
+.transition-list__state {
+  background: var(--surface-2);
+  border-radius: 6px;
+  padding: 0.2rem 0.5rem;
+  text-align: center;
+  font-weight: 600;
+}
+.transition-list__arrow {
+  text-align: center;
+  color: var(--text-muted);
+}
+.transition-list__label {
+  color: var(--text-muted);
+}
+.kv {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 10rem 1fr;
+  gap: 0.4rem;
+}
+.kv dt {
+  color: var(--text-muted);
+}
+.kv dd {
+  margin: 0;
+}
+
+/* Wizard ----------------------------------------------------------------- */
+.wizard {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+.wizard__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.wizard__title {
+  margin: 0;
+  font-size: 1.75rem;
+}
+.wizard__progress {
+  color: var(--text-muted);
+}
+.wizard__steps-bar {
+  list-style: none;
+  display: flex;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+}
+.wizard__step-dot {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-weight: 700;
+}
+.wizard__step-dot.is-current {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+.wizard__step-dot.is-done {
+  background: var(--success);
+  color: var(--text);
+}
+.wizard__body {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  min-height: 18rem;
+}
+.wizard__step-title {
+  margin: 0 0 1rem;
+  font-size: 1.4rem;
+}
+.wizard__subhead {
+  margin: 1.25rem 0 0.5rem;
+  font-size: 1.05rem;
+  color: var(--text);
+}
+.wizard__hint {
+  color: var(--text-muted);
+  margin-top: -0.5rem;
+  margin-bottom: 1rem;
+}
+.wizard__error {
+  color: var(--danger);
+}
+.wizard__nav {
+  display: flex;
+  justify-content: space-between;
+}
+
+/* Form fields ------------------------------------------------------------ */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+}
+.field--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
+.field__label {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+.field__input {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--surface-2);
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+  font-size: 1rem;
+}
+
+.entry-list {
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  display: grid;
+  gap: 0.6rem;
+}
+.entry-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.entry-row__code {
+  width: 4rem;
+}
+.entry-row__name {
+  flex: 1;
+  min-width: 12rem;
+}
+.entry-row__counter-id {
+  width: 5rem;
+}
+.entry-row--routing {
+  padding: 0.75rem;
+  background: var(--bg);
+  border-radius: 8px;
+  align-items: flex-start;
+}
+.entry-row--transition {
+  display: grid;
+  grid-template-columns: 7rem 1.5rem 7rem 1fr;
+  gap: 0.5rem;
+  align-items: center;
+}
+.entry-row__state {
+  text-align: center;
+}
+.entry-row__arrow {
+  text-align: center;
+  color: var(--text-muted);
+}
+.entry-row__label {
+  min-width: 14rem;
+}
+
+.checkbox-group {
+  border: 1px solid var(--surface-2);
+  border-radius: 8px;
+  padding: 0.4rem 0.6rem;
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin: 0;
+}
+.checkbox-group__item {
+  display: inline-flex;
+  gap: 0.3rem;
+  align-items: center;
+  font-size: 0.95rem;
+}
