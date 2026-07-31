@@ -152,8 +152,21 @@ with no duplicate/lost ticket numbers.
   and drain/broadcast their lifecycle events, the daily-reset engine
   (`ResetDailyQueueUseCase` + `POST /api/system/daily-reset` + boot-armed
   `DailyResetSchedulerService`) emits `SYSTEM_RESET`, and
-  `QueueCommandsApiModule` exposes the caller command REST surface. Other
-  services (`tv-display`, `admin`) are not yet scaffolded.
+  `QueueCommandsApiModule` exposes the caller command REST surface. QUE-30
+  (Hardening & Acceptance, PR #9) landed the rest of the stack: PostgreSQL
+  persistence behind the domain ports + `ITransactionManager` (WAL-durable,
+  NFR-REL-02), the `audit` bounded context (NFR-SEC-02), the system-config REST
+  surface (`GET/PUT /api/system/config`, `GET /api/system/state-machine`,
+  `GET /api/health`) + wizard/state-machine read use cases, `admin-service`
+  (first-run wizard PWA, `/admin`), `tv-display-service` (queue board + audio
+  sequencer, `/tv`), caller dynamic action buttons, kiosk thermal print
+  provider, `docker-compose.yml` + per-service Dockerfiles + the nginx gateway,
+  and the DoD-1..4 acceptance suite (`services/core-api/test/acceptance/`). The
+  in-memory profile stays the dev/test default; `QMS_PERSISTENCE=postgres`
+  activates the Postgres profile (DoD-4 verifies power-cut recovery against a
+  real Postgres). Remaining Hardening work: audit-trail analytics surface,
+  re-arming the daily-reset cron on wizard config change (pairs with audit),
+  and aligning `caller-service` PWA `base` to `/caller/`.
 - **PRD language:** the Linear PRD is written in **Bahasa Indonesia** with
   English technical terms. UI `action_label` values ("Panggil Berikutnya",
   "Lewati / Absen", "Selesai Layan") are Indonesian — match them verbatim
@@ -214,12 +227,32 @@ with no duplicate/lost ticket numbers.
   `default` condition (e.g. `ws`). Either add `conditionNames` to
   `enhancedResolveOptions` in `.dependency-cruiser.cjs`, or don't import the
   package directly in `src/` — depend on `@nestjs/*` wrappers or local
-  structural types instead (the WS gateway does the latter).
+  structural types instead (the WS gateway does the latter). **`to.path` regex
+  anchor:** dep-cruiser resolves a bare specifier to `node_modules/<pkg>/…`, so
+  a `forbidden.to.path` rule anchored `^(@nestjs/.*)` is a **silent no-op** — it
+  never matches the resolved path. Anchor against `node_modules/`, e.g.
+  `^(node:)?(node_modules/)?(@nestjs/.*|pg|typeorm|…)` (the
+  `domain-no-framework-imports` and `application-no-framework-imports` rules
+  both use this form). A rule that "passes" while a known framework import sits
+  in `src/` is a red flag — verify a forbidden rule actually catches by
+  temporarily adding the bad import before trusting it.
 - **NestJS DI for interface ports:** `interface` ports (`IQueueRepository`,
   `IQueueEventPublisher`, …) are erased at runtime, so NestJS can't resolve
   them by type metadata. Inject each via a co-located Symbol token + `@Inject`
   (see `QUEUE_EVENT_PUBLISHER` in `event-publisher.port.ts`), and bind it in the
-  module with `{ provide: <token>, useClass: <impl> }`.
+  module with `{ provide: <token>, useClass: <impl> }`. **`useClass` vs
+  `useFactory` for Symbol-bound deps:** `useClass: X` makes NestJS resolve
+  `X`'s constructor params by their *type token*. If a param is a class whose
+  only provider is bound to a **Symbol** (e.g. the `pg.Pool` bound to
+  `PG_CONNECTION`), there is no class-token provider for `Pool` and DI throws
+  `Nest can't resolve dependencies of X (?)` at boot. Wire such repos through a
+  factory that injects the Symbol: `{ provide: <repo-token>, useFactory: (pool)
+  => new X(pool), inject: [PG_CONNECTION] }`. The in-memory repos have no-arg
+  constructors so `useClass` is fine for them; the Postgres repos (which take
+  `pool: Pool`) all use `useFactory`. This class of failure is invisible when no
+  test boots the profile — the Postgres profile only boots under
+  `QMS_PERSISTENCE=postgres` (DoD-4), so a wiring bug ships silently until CI
+  sets the env var.
 - **Realtime stack (QUE-12):** the WS gateway uses `@nestjs/platform-ws`
   (`WsAdapter`) and shares the HTTP port at path `/ws` (a gateway with no
   explicit port binds `noServer` onto the HTTP server's `upgrade` event). The
@@ -314,6 +347,62 @@ with no duplicate/lost ticket numbers.
   changes the config (a config change takes effect on next restart); re-arming
   pairs with the audit-trail work (NFR-SEC-02). `ScheduleModule.forRoot()` is
   imported in `AppModule` for the `SchedulerRegistry`.
+- **PostgreSQL persistence (QUE-30):** `PersistenceModule.forRoot()` is a
+  `DynamicModule` reading `QMS_PERSISTENCE` (default `in-memory`); the
+  `postgres` profile binds the six repo tokens + `TRANSACTION_MANAGER` +
+  `PG_CONNECTION` (a `pg.Pool` factory) to Postgres concretions and **excludes
+  `DevSeedService`** (the wizard is the real seed; a dev seed would write a
+  config and block the first-run redirect). The migration runner
+  (`PostgresMigrationRunner`, `OnModuleInit`) is the only schema authority —
+  no Prisma/TypeORM — applying `migrations/*.sql` idempotently into a
+  `_migrations` table (SHA-256 checksums). **Build asset gotcha:** `tsc` does
+  not copy `.sql` (or any non-TS asset) to `dist`, so the runner's
+  `readdirSync(migrationsDir)` throws and is caught, making it **silently
+  no-op** — no tables are created and the scheduler's `onModuleInit` query then
+  fails with `42P01`. The `postbuild` script copies
+  `src/infrastructure/persistence/postgres/migrations` into
+  `dist/…/migrations`; any new non-TS runtime asset needs the same treatment.
+  Gap-free sequence reservation (NFR-REL-02) is via the `ITransactionManager`
+  port (domain): `PostgresTransactionManager` wraps `BEGIN`/`COMMIT` with an
+  `AsyncLocalStorage` ambient client (confined to the postgres impl); the
+  in-memory impl is a pure pass-through (`return work()`). Use cases that
+  reserve-then-save (`CreateTicketUseCase`, `CallNextTicketUseCase`,
+  `ResetDailyQueueUseCase`, `SaveSystemConfigurationUseCase`) take an
+  **optional** `txManager` constructor param defaulting to
+  `new NoOpTransactionManager()` so the unit specs' direct construction stays
+  unbroken — the wired profile injects the real manager.
+- **No-op default-param impls live in the domain, not infrastructure.**
+  `NoOpTransactionManager` (and any sibling null-object default) is co-located
+  with its port in `src/domain/shared/` because the application use cases
+  reference it as a default constructor param (`new NoOpTransactionManager()`).
+  Moving it to `src/infrastructure/` would make the application layer import
+  infrastructure — a direct `application-no-infrastructure` dep-cruiser
+  violation. The no-op is pure (no framework deps), so domain purity
+  (NFR-MNT-01) holds. Do not "fix" this by relocating no-op defaults to
+  infrastructure. (A `NoOpAuditLogRepository` was removed instead — it was dead
+  code; audit repos are always wired via the `AUDIT_LOG_REPOSITORY` token, never
+  defaulted in a use case.)
+- **Acceptance suite (QUE-30):** the DoD-1..4 acceptance specs live in
+  `services/core-api/test/acceptance/*.acceptance.spec.ts` (co-located in
+  core-api — not a separate project — to reuse its jest config + ts-jest +
+  `@core-api/*` aliases + direct `AppModule` imports). They run via
+  `npm run test:acceptance` (`jest --testMatch '**/*.acceptance.spec.ts'`).
+  **Jest `testMatch` vs `testPathIgnorePatterns`:** to keep acceptance specs out
+  of the default `npm test` unit gate, use `testMatch` **negation** in
+  `jest.config.js` (`['**/*.spec.ts', '!**/*.acceptance.spec.ts']`), NOT
+  `testPathIgnorePatterns`. The CLI `--testMatch` overrides config `testMatch`
+  (replacing it entirely) but does **not** override `testPathIgnorePatterns` —
+  so an ignore-pattern entry excluding `*.acceptance.spec.ts` also excludes
+  them from the `test:acceptance` run, yielding "No tests found" exit 1. DoD-4
+  (`power-cut-recovery`) self-skips (`describe.skip`) when
+  `QMS_ACCEPTANCE_DB_URL` is unset or `dist/main.js` is absent, so the gate
+  stays green without a DB; CI sets the env var (and `scripts/run-acceptance.mjs`
+  builds core-api first). It spawns `node dist/main.js` with
+  `QMS_PERSISTENCE=postgres`, drives a ticket to `SERVING`, `SIGKILL`s it,
+  respawns against the same DB, and asserts state + sequence recover exactly.
+  Its `resetDb()` drops+recreates the `public` schema (not `TRUNCATE`, which
+  fails on a cold DB with "relation does not exist") so the next boot re-applies
+  all migrations from pristine.
 - Frontends are React-family; `caller-service` is a PWA. Keep them
   offline-capable (bundle + precache all assets — vite-plugin-pwa; relative
   `/api` + `/ws` URLs so they're same-origin behind NGINX with no per-service
