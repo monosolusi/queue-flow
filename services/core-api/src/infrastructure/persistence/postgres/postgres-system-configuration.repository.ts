@@ -24,10 +24,14 @@ interface ConfigRow {
 
 /**
  * PostgreSQL implementation of {@link ISystemConfigurationRepository} (QUE-30).
- * Stores the singleton {@link SystemConfiguration} as one row; the state machine
- * and daily-reset policy are serialized to JSONB. `save` replaces the single row
- * (TRUNCATE + INSERT) within the ambient transaction so wizard finalization is
- * atomic with its audit entry.
+ * Stores the singleton {@link SystemConfiguration} as one row (PK `id`); the
+ * state machine and daily-reset policy are serialized to JSONB. `save` is a
+ * single-statement upsert (`INSERT ... ON CONFLICT (id) DO UPDATE`), so it is
+ * atomic on its own even when called outside a transaction — a crash between
+ * the (nonexistent) truncate and insert cannot leave the table empty. When
+ * enlisted on an ambient transaction (wizard finalization), it commits
+ * atomically with the audit entry. The singleton id is preserved across saves
+ * by the use case, so the upsert always targets the one existing row.
  */
 export class PostgresSystemConfigurationRepository implements ISystemConfigurationRepository {
   constructor(private readonly pool: Pool) {}
@@ -41,10 +45,14 @@ export class PostgresSystemConfigurationRepository implements ISystemConfigurati
 
   async save(config: SystemConfiguration): Promise<void> {
     await withDbClient(this.pool, async (client) => {
-      await client.query('TRUNCATE system_configuration');
       await client.query(
         `INSERT INTO system_configuration (id, store_name, is_initial_setup_completed, state_machine, daily_reset_policy)
-         VALUES ($1, $2, $3, $4, $5)`,
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (id) DO UPDATE SET
+           store_name                = EXCLUDED.store_name,
+           is_initial_setup_completed = EXCLUDED.is_initial_setup_completed,
+           state_machine             = EXCLUDED.state_machine,
+           daily_reset_policy        = EXCLUDED.daily_reset_policy`,
         [
           config.id.value,
           config.storeName,

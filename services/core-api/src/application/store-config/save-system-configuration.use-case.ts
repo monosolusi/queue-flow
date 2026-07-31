@@ -117,7 +117,8 @@ export class SaveSystemConfigurationUseCase {
     command: SaveSystemConfigurationCommand,
   ): Promise<SaveSystemConfigurationResult> {
     // 1. Build + validate the domain objects (throws InvalidValueObjectException
-    //    on bad input — the controller maps that to 400).
+    //    on bad input — the controller maps that to 400). Done BEFORE opening the
+    //    transaction so a malformed payload fails fast without acquiring a tx.
     const stateMachine = this.buildStateMachine(command.stateMachine);
     const dailyResetPolicy = DailyResetPolicy.of(
       command.dailyReset.mode,
@@ -129,29 +130,34 @@ export class SaveSystemConfigurationUseCase {
     const codeToId = new Map(newCategories.map((c) => [c.code, c.id.value]));
     const newRules = this.buildRoutingRules(command.routingRules, codeToId);
 
-    // 2. Capture the pre-mutation state for audit before-snapshots.
-    const oldConfig = await this.config.get();
-    const oldStateMachine: StateMachineDto | null = oldConfig
-      ? projectStateMachine(oldConfig.stateMachine)
-      : null;
-    const oldCategorySnapshots = (await this.categories.getAll()).map(categorySnapshot);
-    const oldRoutingSnapshots = (await this.routingRules.getAll()).map(routingSnapshot);
+    // 2. Persist everything in one tx. The pre-mutation reads (for the audit
+    //    before-snapshots and for preserving the singleton id + setup flag) are
+    //    done INSIDE the transaction so they observe the same DB state being
+    //    mutated — a concurrent writer cannot interleave between the snapshot
+    //    read and the write (NFR-REL-02 / NFR-SEC-02).
+    return this.txManager.runInTransaction(async () => {
+      // Capture pre-mutation state for audit before-snapshots + id preservation.
+      const oldConfig = await this.config.get();
+      const oldStateMachine: StateMachineDto | null = oldConfig
+        ? projectStateMachine(oldConfig.stateMachine)
+        : null;
+      const oldCategorySnapshots = (await this.categories.getAll()).map(categorySnapshot);
+      const oldRoutingSnapshots = (await this.routingRules.getAll()).map(routingSnapshot);
 
-    // 3. Reconstitute the singleton config with the new values, preserving the
-    //    existing id (or minting one on first run) and the setup flag.
-    const id = oldConfig ? oldConfig.id : Identifier.generate();
-    const wasCompleted = oldConfig ? oldConfig.isInitialSetupCompleted : false;
-    const system = SystemConfiguration.reconstitute({
-      id,
-      storeName: command.storeName,
-      isInitialSetupCompleted: wasCompleted,
-      stateMachine,
-      dailyResetPolicy,
-    });
-    system.completeInitialSetup(); // idempotent — validates store name, flips the flag
+      // Reconstitute the singleton config with the new values, preserving the
+      // existing id (or minting one on first run) and the setup flag.
+      const id = oldConfig ? oldConfig.id : Identifier.generate();
+      const wasCompleted = oldConfig ? oldConfig.isInitialSetupCompleted : false;
+      const system = SystemConfiguration.reconstitute({
+        id,
+        storeName: command.storeName,
+        isInitialSetupCompleted: wasCompleted,
+        stateMachine,
+        dailyResetPolicy,
+      });
+      system.completeInitialSetup(); // idempotent — validates store name, flips the flag
 
-    // 4. Persist everything in one tx; append audit inside the same tx.
-    await this.txManager.runInTransaction(async () => {
+      // Persist: fully replace categories + routings, upsert the singleton config.
       await this.categories.deleteAll();
       for (const category of newCategories) {
         await this.categories.save(category);
@@ -179,9 +185,12 @@ export class SaveSystemConfigurationUseCase {
           },
         });
       }
-    });
 
-    return { isInitialSetupCompleted: system.isInitialSetupCompleted, storeName: system.storeName };
+      return {
+        isInitialSetupCompleted: system.isInitialSetupCompleted,
+        storeName: system.storeName,
+      };
+    });
   }
 
   private buildStateMachine(dto: WizardStateMachineDto): StateMachine {

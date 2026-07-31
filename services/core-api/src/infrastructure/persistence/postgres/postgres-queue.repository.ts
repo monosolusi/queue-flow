@@ -50,8 +50,8 @@ export class PostgresQueueRepository implements IQueueRepository {
           ticket.categoryId,
           ticket.currentStatus,
           ticket.counterId,
-          String(ticket.createdAt),
-          String(ticket.updatedAt),
+          ticket.createdAt,
+          ticket.updatedAt,
         ],
       );
     });
