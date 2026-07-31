@@ -1,6 +1,7 @@
-import { Body, Controller, Get, Put } from '@nestjs/common';
+import { Body, Controller, Get, HttpException, Put } from '@nestjs/common';
 import {
   GetActiveStateMachineUseCase,
+  GetSetupStatusUseCase,
   GetSystemConfigurationUseCase,
   SaveSystemConfigurationUseCase,
   type SaveSystemConfigurationCommand,
@@ -31,6 +32,7 @@ export class SystemConfigController {
     private readonly getConfig: GetSystemConfigurationUseCase,
     private readonly saveConfig: SaveSystemConfigurationUseCase,
     private readonly getActiveStateMachine: GetActiveStateMachineUseCase,
+    private readonly getSetupStatus: GetSetupStatusUseCase,
   ) {}
 
   /** `GET /api/system/config` → full config (default-shaped when not yet set up). */
@@ -57,5 +59,33 @@ export class SystemConfigController {
   @Get('state-machine')
   async stateMachine() {
     return this.getActiveStateMachine.execute();
+  }
+
+  /**
+   * `GET /api/system/setup-status` → the gateway first-run guard probe
+   * (FR-WZD-01 / QUE-13). nginx `auth_request` only distinguishes 2xx (allow)
+   * from 401/403 (deny) — a domain `SystemNotConfiguredException` would map to
+   * 409, which `auth_request` treats as a hard error, not a deny — so this
+   * route maps the boolean to the HTTP status itself (an interface-adapter
+   * concern, kept out of the pure use case). 200 when setup is complete, 403
+   * `{ code: 'SETUP_REQUIRED' }` when not. Never throws on a clean store
+   * so the wizard (which runs before any config exists) can still boot and the
+   * gateway can serve `/admin` + `/wizard` to perform the setup. `HttpException`
+   * is used (not `@Res`) to stay platform-agnostic at the Nest layer. The 403
+   * uses a distinct `SETUP_REQUIRED` code (not the domain
+   * `SYSTEM_NOT_CONFIGURED` that {@link DomainExceptionFilter} maps to 409) so
+   * the gateway-guard deny is unambiguous and not confused with a 409 domain
+   * error from the queue command surface.
+   */
+  @Get('setup-status')
+  async setupStatus() {
+    const { isInitialSetupCompleted } = await this.getSetupStatus.execute();
+    if (isInitialSetupCompleted) {
+      return { isInitialSetupCompleted: true };
+    }
+    throw new HttpException(
+      { code: 'SETUP_REQUIRED', isInitialSetupCompleted: false },
+      403,
+    );
   }
 }

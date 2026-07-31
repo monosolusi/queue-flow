@@ -428,6 +428,44 @@ with no duplicate/lost ticket numbers.
   not strict equality — and use Node's `http` module, not `fetch`
   (`redirect: 'manual'` returns an opaqueredirect response with status 0 and
   filtered headers, hiding the 301).
+- **Gateway first-run guard (QUE-13, FR-WZD-01):** while
+  `isInitialSetupCompleted == false` the gateway must redirect **all** HTTP
+  access to `/wizard` — the PRD is strict here ("semua akses HTTP"), and PRD wins
+  over any client-side-only approach. nginx can't read the DB, so the guard is
+  an `auth_request` subrequest to core-api's `GET /api/system/setup-status`
+  (the `auth_request` module ships in `nginx:alpine` — no Lua needed). That
+  probe maps the boolean to the HTTP status itself: `200` when setup is
+  complete, `403 { code: 'SETUP_REQUIRED' }` when not. It **must never throw**
+  on a clean store — `auth_request` treats 2xx as allow, 401/403 as deny, but
+  any other status (a 409 `SystemNotConfiguredException`, a 500) is a hard
+  error, not a deny, so the deny has to be a real 403. That mapping is an
+  interface-adapter concern done with `HttpException` (not `@Res`, to stay
+  platform-agnostic at the Nest layer), kept out of the pure use case; the 403
+  uses a **distinct** `SETUP_REQUIRED` code so the gateway deny isn't confused
+  with the 409 `SYSTEM_NOT_CONFIGURED` the queue command surface throws. The
+  `auth_request` is scoped to the **document request only** (`location =
+  /kiosk/` etc.) — an unconfigured client is redirected before its HTML loads
+  so it never fetches assets, and once setup is complete assets stream
+  unguarded (no per-asset subrequest in the steady state). **Exempt** from the
+  guard (no `auth_request`): `/api/` (the wizard must PUT config + read
+  setup-status), `/admin/` (wizard SPA host — must load to perform setup),
+  `/wizard`, `/ws`, and `/`. The `/admin/` client-side `SetupGuard` stays as
+  progressive enhancement; the gateway guard covers the operational routes
+  the SPA guard can't reach. The guard's end-to-end proof is tier-2 of
+  `scripts/verify-topology.mjs` (pre-setup `/kiosk/ /tv/ /caller/` → 302
+  `/admin/wizard`, then `PUT /api/system/config`, then 200). **`nginx -t`
+  standalone gotcha:** nginx resolves `upstream` hostnames (`core-api-service`)
+  at config-load time against the container network's DNS; running `nginx -t`
+  outside the compose network fails with "host not found in upstream" even
+  when the config is valid. Validate syntax by `sed`-replacing the upstream
+  hostnames with `127.0.0.1:3000` into a temp conf and running `docker run --rm
+  -v /tmp/nginx.conf:/etc/nginx/nginx.conf:ro nginx:alpine nginx -t` — that
+  exercises the real `auth_request` module load without needing the compose
+  network. `BootstrapService` (`infrastructure/bootstrap/`, `OnModuleInit`)
+  formalizes AC#2 ("config re-readable at startup") — an eager, observable
+  startup read of `SystemConfiguration` that logs the outcome across profiles;
+  it does not cache or publish (per-execution policy resolution + the
+  setup-status probe still read the repo directly).
 - Frontends are React-family; `caller-service` is a PWA. Keep them
   offline-capable (bundle + precache all assets — vite-plugin-pwa; relative
   `/api` + `/ws` URLs so they're same-origin behind NGINX with no per-service

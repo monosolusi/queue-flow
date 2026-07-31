@@ -8,6 +8,7 @@ import { SystemApiModule } from './interface-adapters/rest/system-api.module';
 import { SystemConfigApiModule } from './interface-adapters/rest/system-config-api.module';
 import { HealthModule } from './interface-adapters/rest/health.module';
 import { SchedulerModule } from './infrastructure/scheduler/scheduler.module';
+import { BootstrapModule } from './infrastructure/bootstrap/bootstrap.module';
 
 /**
  * Root module. The realtime broadcaster (QUE-12) is imported so the WebSocket
@@ -19,7 +20,9 @@ import { SchedulerModule } from './infrastructure/scheduler/scheduler.module';
  * health probe, the system-config / wizard REST surface
  * (`GET|PUT /api/system/config`, `GET /api/system/state-machine`), and wires
  * persistence via `PersistenceModule.forRoot()` inside each feature module
- * (env-driven in-memory ↔ PostgreSQL).
+ * (env-driven in-memory ↔ PostgreSQL). QUE-13 adds the gateway first-run guard
+ * probe (`GET /api/system/setup-status`) and the eager `BootstrapModule`
+ * checker that re-reads + logs the persisted setup status at boot.
  */
 @Module({
   imports: [
@@ -32,6 +35,7 @@ import { SchedulerModule } from './infrastructure/scheduler/scheduler.module';
     SystemConfigApiModule,
     HealthModule,
     SchedulerModule,
+    BootstrapModule,
   ],
 })
 export class AppModule {}
