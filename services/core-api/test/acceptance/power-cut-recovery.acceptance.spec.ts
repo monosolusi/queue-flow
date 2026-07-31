@@ -35,13 +35,20 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const READY = DB_URL && existsSync(DIST_MAIN);
 const describeOrSkip = READY ? describe : describe.skip;
 
-/** Truncate all data tables (keep `_migrations` so the runner is idempotent). */
+/**
+ * Resets the DB to a pristine schema. Drops and recreates `public` (cascading
+ * every data table AND `_migrations`), so the next core-api boot re-applies all
+ * migrations from scratch via the idempotent {@link PostgresMigrationRunner}.
+ * This works on a cold DB (no tables yet) — a `TRUNCATE` would fail there with
+ * "relation does not exist" — and gives each run a truly clean slate.
+ */
 async function resetDb(): Promise<void> {
   const pool = new Pool({ connectionString: DB_URL });
   try {
-    await pool.query(
-      'TRUNCATE TABLE tickets, categories, counter_routing_rules, system_configuration, sequence_counters, audit_log RESTART IDENTITY CASCADE',
-    );
+    await pool.query('DROP SCHEMA public CASCADE');
+    await pool.query('CREATE SCHEMA public');
+    await pool.query('GRANT ALL ON SCHEMA public TO qms');
+    await pool.query('GRANT ALL ON SCHEMA public TO public');
   } finally {
     await pool.end();
   }

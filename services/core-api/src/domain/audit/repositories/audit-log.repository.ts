@@ -20,21 +20,3 @@ export interface IAuditLogRepository {
   append(entry: AuditLogEntry): Promise<void>;
   list(): Promise<AuditLogEntry[]>;
 }
-
-/**
- * Pure no-op {@link IAuditLogRepository}. Lives in the domain (no framework
- * deps) so application use cases can default to it — keeping the optional
- * constructor parameter pattern that lets the existing unit specs construct use
- * cases directly without wiring a real audit sink (mirrors
- * {@link NoOpTransactionManager}). A no-op `append` means "no audit recorded",
- * which is exactly the semantics of the automatic (cron-driven) daily reset —
- * only the manual, human-triggered reset is audited (NFR-SEC-02).
- */
-export class NoOpAuditLogRepository implements IAuditLogRepository {
-  public async append(_entry: AuditLogEntry): Promise<void> {
-    // intentionally no-op
-  }
-  public async list(): Promise<AuditLogEntry[]> {
-    return [];
-  }
-}

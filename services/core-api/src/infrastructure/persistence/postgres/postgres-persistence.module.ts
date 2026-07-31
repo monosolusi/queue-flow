@@ -34,15 +34,43 @@ import { PostgresMigrationRunner } from './migration-runner';
 @Module({
   providers: [
     { provide: PG_CONNECTION, useFactory: createPgPool },
-    { provide: QUEUE_REPOSITORY, useClass: PostgresQueueRepository },
-    { provide: SEQUENCE_REPOSITORY, useClass: PostgresSequenceRepository },
-    { provide: CATEGORY_REPOSITORY, useClass: PostgresCategoryRepository },
-    { provide: COUNTER_ROUTING_RULE_REPOSITORY, useClass: PostgresCounterRoutingRuleRepository },
+    // Each Postgres repo is a plain class whose constructor takes the shared
+    // `pg.Pool`. `useClass` would have NestJS resolve that param by the `Pool`
+    // *class* token — which is not bound (the pool is bound to the PG_CONNECTION
+    // Symbol below). Wire each repo through a factory injecting the Symbol so
+    // DI resolution succeeds (LSP: the Postgres concretions are actually
+    // substitutable for the in-memory ones at runtime). Same pattern the
+    // transaction manager already uses.
+    {
+      provide: QUEUE_REPOSITORY,
+      useFactory: (pool) => new PostgresQueueRepository(pool),
+      inject: [PG_CONNECTION],
+    },
+    {
+      provide: SEQUENCE_REPOSITORY,
+      useFactory: (pool) => new PostgresSequenceRepository(pool),
+      inject: [PG_CONNECTION],
+    },
+    {
+      provide: CATEGORY_REPOSITORY,
+      useFactory: (pool) => new PostgresCategoryRepository(pool),
+      inject: [PG_CONNECTION],
+    },
+    {
+      provide: COUNTER_ROUTING_RULE_REPOSITORY,
+      useFactory: (pool) => new PostgresCounterRoutingRuleRepository(pool),
+      inject: [PG_CONNECTION],
+    },
     {
       provide: SYSTEM_CONFIGURATION_REPOSITORY,
-      useClass: PostgresSystemConfigurationRepository,
+      useFactory: (pool) => new PostgresSystemConfigurationRepository(pool),
+      inject: [PG_CONNECTION],
     },
-    { provide: AUDIT_LOG_REPOSITORY, useClass: PostgresAuditLogRepository },
+    {
+      provide: AUDIT_LOG_REPOSITORY,
+      useFactory: (pool) => new PostgresAuditLogRepository(pool),
+      inject: [PG_CONNECTION],
+    },
     {
       provide: TRANSACTION_MANAGER,
       useFactory: (pool) => new PostgresTransactionManager(pool),

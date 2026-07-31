@@ -9,7 +9,10 @@ module.exports = {
       severity: 'error',
       from: { path: '^src/domain/' },
       to: {
-        path: '^(node:)?(@nestjs/.*|typeorm|@prisma/.*|pg|express|ws|reflect-metadata|mikro-orm|knex|sequelize|mongoose|fastify)',
+        // dep-cruiser resolves bare specifiers to `node_modules/<pkg>/...`, so the
+        // anchor must allow that prefix (without it the regex never matches and
+        // the rule is a silent no-op). `node:` covers built-in modules.
+        path: '^(node:)?(node_modules/)?(@nestjs/.*|typeorm|@prisma/.*|pg|express|ws|reflect-metadata|mikro-orm|knex|sequelize|mongoose|fastify)',
       },
     },
     {
@@ -59,7 +62,11 @@ module.exports = {
       severity: 'error',
       from: { path: '^src/application/' },
       to: {
-        path: '^(node:)?(@nestjs/.*|typeorm|@prisma/.*|pg|express|ws|reflect-metadata|mikro-orm|knex|sequelize|mongoose|fastify)',
+        // dep-cruiser resolves bare specifiers to `node_modules/<pkg>/...`, so the
+        // anchor must allow that prefix (without it the regex never matches and
+        // the rule is a silent no-op — it previously passed a real `@nestjs/common`
+        // import in queue-event-dispatcher). `node:` covers built-in modules.
+        path: '^(node:)?(node_modules/)?(@nestjs/.*|typeorm|@prisma/.*|pg|express|ws|reflect-metadata|mikro-orm|knex|sequelize|mongoose|fastify)',
       },
     },
   ],

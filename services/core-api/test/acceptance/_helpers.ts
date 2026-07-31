@@ -53,7 +53,6 @@ export function prdWizardPayload() {
   return {
     storeName: PRD_STORE_NAME,
     stateMachine: {
-      initial_state: 'WAITING',
       states: ['WAITING', 'CALLING', 'SERVING', 'SKIPPED', 'COMPLETED'],
       transitions: [
         { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' },

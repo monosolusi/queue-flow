@@ -6,6 +6,7 @@
   "license": "UNLICENSED",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "postbuild": "node -e \"require('node:fs').cpSync('src/infrastructure/persistence/postgres/migrations','dist/infrastructure/persistence/postgres/migrations',{recursive:true})\"",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:acceptance": "jest --testMatch '**/*.acceptance.spec.ts'",
