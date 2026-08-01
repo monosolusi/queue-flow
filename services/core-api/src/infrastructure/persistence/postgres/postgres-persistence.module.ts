@@ -20,13 +20,17 @@ import { PostgresSystemConfigurationRepository } from './postgres-system-configu
 import { PostgresAuditLogRepository } from './postgres-audit-log.repository';
 import { PostgresTransactionManager } from './postgres-transaction-manager';
 import { PostgresMigrationRunner } from './migration-runner';
+import { PostgresDurabilityProbe } from './durability-probe';
 
 /**
- * PostgreSQL profile of persistence (QUE-30). Binds the domain repository ports
- * to their PostgreSQL concretions (DIP: the application layer depends on the
- * tokens, this module supplies the impls), provides the shared `pg.Pool` and the
- * {@link PostgresTransactionManager} for atomic reserve+save (NFR-REL-02), and
- * runs the idempotent schema migrations at boot. Activated by
+ * PostgreSQL profile of persistence (QUE-30 / QUE-28). Binds the domain
+ * repository ports to their PostgreSQL concretions (DIP: the application layer
+ * depends on the tokens, this module supplies the impls), provides the shared
+ * `pg.Pool` (with `synchronous_commit=on` enforced per-connection via its
+ * `onConnect` hook) and the {@link PostgresTransactionManager} for atomic
+ * reserve+save (NFR-REL-02), runs the idempotent schema migrations at boot, and
+ * verifies the durability contract (`fsync=on`) via {@link
+ * PostgresDurabilityProbe} as the startup recovery flow. Activated by
  * {@link PersistenceModule.forRoot} when `QMS_PERSISTENCE=postgres`.
  *
  * The audit-log repository token is bound separately (the audit context lands
@@ -82,6 +86,12 @@ import { PostgresMigrationRunner } from './migration-runner';
       inject: [PG_CONNECTION],
     },
     PostgresMigrationRunner,
+    // Boot-time durability contract probe (QUE-28 / NFR-REL-02): verifies
+    // `fsync=on` (a server-level GUC that the per-connection `onConnect` hook in
+    // createPgPool cannot set) and fails fast if the server would not survive a
+    // power cut. Schema-independent (needs only the pool), so no OnModuleInit
+    // ordering constraint vs. PostgresMigrationRunner.
+    PostgresDurabilityProbe,
   ],
   exports: [
     QUEUE_REPOSITORY,
