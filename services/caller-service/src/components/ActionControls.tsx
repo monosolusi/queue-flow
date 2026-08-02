@@ -1,14 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ICallerApi } from '../api/caller-api';
 import type { StateMachineDto, StateTransitionDto, TicketStateDto } from '../api/types';
 import type { BoundCounter } from '../state/counter-binding';
 
 /** Maps a transition's target state to the caller command that drives it.
  *  The default PRD §7 graph covers SERVING/SKIPPED/COMPLETED/CALLING; WAITING
- *  is the configurable "Pindah Kategori" (transfer) target (FR-CLR-03). Edges to
- *  states outside this set are not backed by a core-api command endpoint and are
- *  not rendered (a documented limitation of the fixed command surface — custom
- *  transitions beyond these five are not endpoint-wired). */
+ *  is the configurable "Pindah Kategori" (transfer) target (FR-CLR-03). Edges
+ *  to states outside this set are not backed by a core-api command endpoint:
+ *  they render as a disabled "unsupported" affordance (so every configured
+ *  transition still produces a button, per the PRD) rather than vanishing. A
+ *  generic apply-transition endpoint that makes them functional is tracked by
+ *  a follow-up ticket. */
 const COMMAND_BY_TARGET: Readonly<Record<string, 'serve' | 'complete' | 'skip' | 'recall' | 'transfer'>> = {
   SERVING: 'serve',
   COMPLETED: 'complete',
@@ -43,6 +45,15 @@ export function ActionControls({ api, bound, active, stateMachine }: ActionContr
   const [sm, setSm] = useState<StateMachineDto | null>(stateMachine ?? null);
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Transfer chooser: when the active ticket has a "Pindah Kategori" edge and
+  // the counter serves ≥2 *other* categories, the transfer button expands an
+  // inline chooser so staff pick the destination (FR-CLR-03).
+  const [transferOpen, setTransferOpen] = useState(false);
+  // Synchronous in-flight guard. `pending` (state) only updates after a
+  // re-render, so two taps in the same tick both see `pending === null` and
+  // both fire — the trap CLAUDE.md calls out for touch surfaces. The ref is
+  // flipped before the first `await` so the second tap is blocked synchronously.
+  const inFlightRef = useRef(false);
 
   // Load the active state machine once (or use the injected test seam).
   useEffect(() => {
@@ -71,8 +82,31 @@ export function ActionControls({ api, bound, active, stateMachine }: ActionContr
     return sm.transitions.filter((t) => t.from === active.status);
   }, [sm, active]);
 
+  /** Categories the active ticket could be transferred to (i.e. the bound
+   *  counter's assigned categories minus the ticket's own). Used by the
+   *  transfer chooser (FR-CLR-03). Falls back to id-only labels for a binding
+   *  persisted before `assignedCategories` existed. */
+  const otherCategories = useMemo<readonly { readonly id: string; readonly name: string }[]>(() => {
+    if (!active) return [];
+    if (bound.assignedCategories.length > 0) {
+      return bound.assignedCategories
+        .filter((c) => c.id !== active.categoryId)
+        .map((c) => ({ id: c.id, name: c.name }));
+    }
+    return bound.assignedCategoryIds
+      .filter((id) => id !== active.categoryId)
+      .map((id) => ({ id, name: id }));
+  }, [bound.assignedCategories, bound.assignedCategoryIds, active]);
+
+  // Collapse the chooser when the active ticket changes (different ticket or
+  // it leaves the active slot after the transfer's STATUS_UPDATED).
+  useEffect(() => {
+    setTransferOpen(false);
+  }, [active?.ticketId]);
+
   async function run(command: string, invoker: () => Promise<void>) {
-    if (pending) return;
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     setPending(command);
     setError(null);
     try {
@@ -81,6 +115,7 @@ export function ActionControls({ api, bound, active, stateMachine }: ActionContr
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Perintah gagal');
     } finally {
+      inFlightRef.current = false;
       setPending(null);
     }
   }
@@ -98,7 +133,93 @@ export function ActionControls({ api, bound, active, stateMachine }: ActionContr
 
       {edges.map((edge) => {
         const command = COMMAND_BY_TARGET[edge.to];
-        if (!command) return null;
+        if (!command) {
+          // No backend command endpoint backs this transition (a custom target
+          // state). Render a disabled affordance so the configured transition
+          // is still visible — a generic apply-transition endpoint (follow-up
+          // ticket) will make it functional.
+          return (
+            <button
+              key={`${edge.from}-${edge.to}`}
+              type="button"
+              className="btn btn--secondary action-controls__edge action-controls__unsupported"
+              data-testid={`action-unsupported-${edge.to}`}
+              disabled
+              title="Aksi belum didukung (perlu endpoint transisi generik)"
+            >
+              {edge.actionLabel} (belum didukung)
+            </button>
+          );
+        }
+        if (command === 'transfer') {
+          if (otherCategories.length === 0) {
+            return (
+              <button
+                key={`${edge.from}-${edge.to}`}
+                type="button"
+                className="btn btn--secondary action-controls__edge action-controls__unsupported"
+                data-testid="action-transfer"
+                disabled
+                title="Tidak ada kategori lain untuk dituju"
+              >
+                {edge.actionLabel} (tidak ada kategori lain)
+              </button>
+            );
+          }
+          if (otherCategories.length === 1) {
+            const only = otherCategories[0];
+            const busy = pending === 'transfer';
+            return (
+              <button
+                key={`${edge.from}-${edge.to}`}
+                type="button"
+                className="btn btn--secondary action-controls__edge"
+                data-testid="action-transfer"
+                onClick={() => void run('transfer', () => api.transfer(active!.ticketId, only.id))}
+                disabled={busy}
+              >
+                {busy ? '…' : edge.actionLabel}
+              </button>
+            );
+          }
+          // ≥2 candidate categories: expand an inline chooser so staff pick the
+          // destination (FR-CLR-03).
+          const busy = pending === 'transfer';
+          return (
+            <div key={`${edge.from}-${edge.to}`} className="action-controls__transfer">
+              <button
+                type="button"
+                className="btn btn--secondary action-controls__edge"
+                data-testid="action-transfer"
+                aria-expanded={transferOpen}
+                onClick={() => setTransferOpen((o) => !o)}
+                disabled={busy}
+              >
+                {busy ? '…' : edge.actionLabel}
+              </button>
+              {transferOpen && (
+                <div className="action-controls__transfer-chooser" data-testid="transfer-chooser">
+                  {otherCategories.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      className="btn action-controls__transfer-option"
+                      data-testid={`transfer-target-${c.id}`}
+                      onClick={() => {
+                        void run('transfer', () => api.transfer(active!.ticketId, c.id)).finally(() =>
+                          setTransferOpen(false),
+                        );
+                      }}
+                      disabled={busy}
+                    >
+                      {c.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        }
         const busy = pending === command;
         return (
           <button
@@ -106,22 +227,7 @@ export function ActionControls({ api, bound, active, stateMachine }: ActionContr
             type="button"
             className="btn btn--secondary action-controls__edge"
             data-testid={`action-${command}`}
-            onClick={() => {
-              if (command === 'transfer') {
-                // Transfer needs a target category — use the first assigned
-                // category that differs from the active ticket's own category
-                // (falling back to the first assigned). The default graph has
-                // no transfer edge, so this only renders when the wizard
-                // configures a CALLING→WAITING transition (FR-CLR-03).
-                const target =
-                  bound.assignedCategoryIds.find((id) => id !== active?.categoryId) ??
-                  bound.assignedCategoryIds[0];
-                if (!target) return;
-                void run('transfer', () => api.transfer(active!.ticketId, target));
-              } else {
-                void run(command, () => api[command](active!.ticketId));
-              }
-            }}
+            onClick={() => void run(command, () => api[command](active!.ticketId))}
             disabled={busy}
           >
             {busy ? '…' : edge.actionLabel}

@@ -94,6 +94,10 @@ describe('queueReducer — TICKET_CALLED', () => {
     );
     next = reducer(next, event('TICKET_CALLED', 't1', { ticketNumber: 'A-001', counterId: COUNTER }));
     expect(next.active.map((t) => t.ticketNumber)).toEqual(['A-001']);
+    // The TICKET_CALLED payload carries no categoryId; the promoted active
+    // ticket reuses the categoryId from its prior waiting entry (FR-CLR-03
+    // transfer-chooser correctness), not a blank.
+    expect(next.active[0].categoryId).toBe('cat-a');
     expect(next.waiting).toHaveLength(0);
   });
 

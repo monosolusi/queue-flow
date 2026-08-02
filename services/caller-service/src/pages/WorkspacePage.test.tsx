@@ -38,6 +38,7 @@ const bound: BoundCounter = {
   counterId: 1,
   counterName: 'Loket 1',
   assignedCategoryIds: ['cat-a'],
+  assignedCategories: [{ id: 'cat-a', code: 'A', name: 'Customer Service' }],
 };
 
 const snapshot: QueueSnapshotDto = {
@@ -121,7 +122,7 @@ describe('WorkspacePage', () => {
     expect(screen.getByText(/Belum ada tiket aktif/i)).toBeInTheDocument();
   });
 
-  it('renders the QUE-20 action placeholder slot', async () => {
+  it('renders the QUE-20 action controls slot', async () => {
     renderWorkspace();
     await screen.findByText('A-001');
     expect(screen.getByLabelText('Aksi')).toBeInTheDocument();

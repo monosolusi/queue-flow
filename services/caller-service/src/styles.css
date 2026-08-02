@@ -274,3 +274,32 @@ button {
   font-size: 0.95rem;
   margin: 0;
 }
+
+/* A configured transition whose target state has no backing command endpoint
+ * (a custom target like PREPARING). Visible but non-interactive until a
+ * generic apply-transition endpoint lands. */
+.action-controls__unsupported {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Transfer ("Pindah Kategori") with ≥2 candidate destinations: the button
+ * toggles an inline chooser so staff pick the destination category. */
+.action-controls__transfer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+.action-controls__transfer-chooser {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  border: 1px solid var(--surface-2);
+  border-radius: 0.5rem;
+  background: var(--surface);
+}
+.action-controls__transfer-option {
+  min-width: 8rem;
+}
