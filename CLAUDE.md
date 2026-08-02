@@ -202,6 +202,33 @@ with no duplicate/lost ticket numbers.
   cleanup) was the last QUE-6 child before QUE-32.
   The frontend PWA `base`/`start_url`/`scope` alignment (`/kiosk/`, `/tv/`,
   `/caller/`, `/admin/`) is complete across all four services (QUE-27).
+  QUE-20 (Operational Interfaces, parent QUE-5, FR-CLR-02/03) is the caller
+  dynamic action controls ticket. Its stated AC was already met by the
+  `ActionControls` component landed under QUE-30 (fetches
+  `GET /api/system/state-machine`, renders one button per outgoing edge for
+  the active ticket's status, fire-and-forgets commands whose WS events update
+  the store). QUE-20 (In Review, PR #22) is a focused **polish** PR closing the
+  two genuine residual PRD gaps QUE-30 left: (1) the "Pindah Kategori"
+  transfer (FR-CLR-03) silently auto-picked a destination — and when the
+  counter served only the active ticket's category it fell back to
+  `assignedCategoryIds[0]`, i.e. transferred to the *same* category; the
+  chooser now lists the bound counter's *other* categories by name (≥2 →
+  inline chooser, 1 → direct fire, 0 → disabled "tidak ada kategori lain"),
+  with a legacy id-only fallback for a stale binding; (2) a custom-target
+  transition (an edge to a state outside the 5-state command map, e.g.
+  `PREPARING`) was silently `return null`'d — it now renders a visible
+  disabled "(belum didukung)" affordance so every configured transition still
+  produces a button (the PRD says each transition's `actionLabel` becomes a
+  Caller UI button). An enabling micro-fix preserved `categoryId` on the
+  `TICKET_CALLED` projection (the wire payload carries only
+  `{ ticketNumber, counterId }`; the store now recovers it from the prior
+  waiting entry) so the chooser's "exclude current category" works on the live
+  call-next path. **No core-api/domain change** — caller-service only.
+  **QUE-33** (Core Queue Workflow, parent QUE-5, relatedTo QUE-20 + QUE-10) is
+  the follow-up: a generic `apply-transition` core-api endpoint + use case so
+  custom-target transitions fire a real command instead of rendering
+  disabled (not blocked by QUE-20; it supersedes the disabled affordance
+  independently).
 - **PRD language:** the Linear PRD is written in **Bahasa Indonesia** with
   English technical terms. UI `action_label` values ("Panggil Berikutnya",
   "Lewati / Absen", "Selesai Layan") are Indonesian — match them verbatim
@@ -927,12 +954,29 @@ with no duplicate/lost ticket numbers.
     Add a per-service `.gitignore` excluding them so the tree doesn't churn on
     each build — `caller-service` predates this rule and tracks them; new
     frontends (`kiosk-service` onward) gitignore them.
-  - **Public-touchscreen mutations need a synchronous double-tap guard.**
-    `disabled` only takes effect after a re-render, so two clicks landing in the
-    same tick both pass a state-based guard. For a kiosk "issue ticket" tap,
-    flip a `useRef<boolean>` in-flight flag *before* the first `await` and reset
-    it in `finally`; keep `disabled` as the visible affordance. Two taps must
-    produce exactly one mutation (asserted in the kiosk tests).
+  - **Touch-surface mutations need a synchronous double-tap guard — kiosk AND
+    caller.** `disabled` only takes effect after a re-render, so two clicks
+    landing in the same tick both pass a state-based guard. This applies to the
+    public kiosk ("issue ticket") **and** the staff-facing caller touch PWA
+    (the caller panel runs on a touchscreen at the counter; its `ActionControls`
+    `run()` uses the same `useRef<boolean>` in-flight guard). Flip the ref
+    *before* the first `await` and reset it in `finally`; keep `disabled` as the
+    visible affordance. Two taps must produce exactly one mutation (asserted in
+    the kiosk + caller tests). A state-only `pending` guard is NOT enough — it
+    updates after a re-render, so two same-tick taps both see `pending === null`
+    and both fire (the trap the arch-reviewer flagged on QUE-20's first pass).
+  - **Caller WS projections recover missing fields from local state, never
+    blank.** The wire event payloads are lossy by design: `TICKET_CALLED`
+    carries only `{ ticketNumber, counterId }` (no `categoryId`), and
+    `STATUS_UPDATED` carries only `{ from, to }` (no `ticketNumber`/`counterId`
+    — see the QUE-21 recall-restore trap). When the projection needs a field the
+    payload omits, recover it from the existing local entry (the prior
+    `state.waiting` record for `TICKET_CALLED`) rather than blanking it to `''`/`null`.
+    The `TICKET_CALLED` `categoryId` preservation (QUE-20) is the instance: a
+    freshly-called ticket had `categoryId === ''` so the transfer chooser's
+    "exclude current category" excluded nothing; reusing the waiting entry's
+    `categoryId` makes the chooser correct on the live call-next path. Fallback
+    to `''` only if the prior entry is genuinely absent (defensive).
   - **Step-form RTL tests: re-query DOM nodes after step re-entry, and use
     `fireEvent.change` for controlled numeric inputs bound to derived state.**
     The wizard renders each step with `{step === N && <section>…}`, so navigating
