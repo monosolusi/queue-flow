@@ -173,7 +173,10 @@ with no duplicate/lost ticket numbers.
   (`GET /api/audit/log`), and the `admin-service` analytics dashboard
   (`/analytics`) with offline SheetJS `.xlsx` export (DoD-5 acceptance spec).
   Remaining Hardening work: re-arming the daily-reset cron on wizard config
-  change (pairs with audit).
+  change, backend cron-format enforcement, and a `DAILY_RESET_POLICY_CHANGE`
+  audit action — tracked as QUE-32 (Hardening, parent QUE-6, blockedBy QUE-25;
+  pairs with audit). QUE-25 (manual reset admin button + transaction-log
+  cleanup) is the last QUE-6 child.
   The frontend PWA `base`/`start_url`/`scope` alignment (`/kiosk/`, `/tv/`,
   `/caller/`, `/admin/`) is complete across all four services (QUE-27).
 - **PRD language:** the Linear PRD is written in **Bahasa Indonesia** with
@@ -679,6 +682,58 @@ with no duplicate/lost ticket numbers.
   class as `w3.org`). They surface in a `grep https?:// dist/assets` and must
   be whitelisted in the `offline-assets.acceptance.spec.ts` `ALLOWED_HOSTS`
   with a rationale comment, not treated as a runtime network call.
+- **Transaction-log cleanup + manual reset (QUE-25, FR-ADM-02 / NFR-SEC-02,
+  parent QUE-6, Hardening):** the eviction step that keeps `archived_tickets`
+  from growing unbounded as each daily reset relocates prior-day tickets into
+  it. **`purgeArchivedBefore(thresholdMs)`** is added to the existing
+  `ITicketArchivePort` (ISP — the cleanup use case needs only purge, not the
+  full `IQueueRepository` write surface; the concrete queue repos already
+  implement both ports and `TICKET_ARCHIVE_PORT` is bound via the existing
+  `useExisting: QUEUE_REPOSITORY` alias, so no new binding). It purges
+  `archived_tickets` ONLY — **`audit_log` is never touched** (the audit trail
+  is the compliance record, NFR-SEC-02, preserved indefinitely). **Domain
+  guardrail floor:** `MIN_RETENTION_DAYS` (7) lives in the **application layer**
+  (`cleanup-transaction-log.use-case.ts`) — a use-case-level business
+  guardrail, not a `SystemConfiguration` field — and an under-floor /
+  non-integer `retentionDays` throws `InvalidArgumentException` **before** the
+  tx opens so an illegal cleanup burns no rows (NFR-REL-02 pattern). **Atomicity
+  (NFR-REL-02):** the purge + the `TRANSACTION_LOG_CLEANUP` audit append run
+  inside one `ITransactionManager.runInTransaction`; repos enlist on the ambient
+  client (`withDbClient`). The cleanup is **actor-gated** like `MANUAL_RESET`:
+  the audit entry is written only when `actor` is present (there is no
+  automatic/cron path). `CleanupTransactionLogUseCase` reuses `startOfLocalDay`
+  from `application/shared/date` (QUE-26) — **no queue-local date copy**.
+  `POST /api/system/cleanup-transaction-log` on `SystemAdminController` threads
+  only scalars (`retentionDays`, `actor`); wired in `QueueOperationsModule` via
+  a factory composing `RecordAuditEntryUseCase` inline (canonical pattern). The
+  manual daily-reset **button** is the admin UI surface for the pre-existing
+  `POST /api/system/daily-reset` (QUE-2/QUE-16); the cleanup form + reset button
+  both use synchronous `useRef` double-tap guards + `window.confirm`.
+  **`InvalidArgumentException` is a domain error for use-case-level business
+  guardrails** (`domain/shared/errors.ts`), distinct from
+  `InvalidValueObjectException` (a malformed value object) and
+  `InvalidStateTransitionException` (a forbidden state move): the value is
+  well-formed, just not permitted by a use-case rule. The exception carries no
+  business rule itself (the floor value lives in the application layer); it is
+  transport-agnostic, mapped to 400 by `DomainExceptionFilter`. This mirrors
+  `SystemNotConfiguredException` (also a domain error thrown from use cases /
+  controllers, not aggregates). **Audit READ surface is deliberately NOT
+  duplicated here** — QUE-26 (PR #17, merged) already ships
+  `ListAuditEntriesUseCase` + `GET /api/audit/log` + the `AnalyticsPage` audit
+  viewer + `application/shared/date`; QUE-25 reuses those and adds **no** read
+  surface (only the WRITE via `RecordAuditEntryUseCase` inside the tx). When a
+  sibling PR merges first and absorbs an in-flight branch's planned scope,
+  rebase onto the new base and drop the duplicate, deferring to the merged
+  canonical surface (don't ship a second, conflicting implementation of the
+  same surface — e.g. a newest-first/filtered `GET /api/audit` colliding with
+  QUE-26's oldest-first `GET /api/audit/log`). **`actor: 'admin'` is a
+  hardcoded string literal** on both the reset + cleanup endpoints (pre-existing
+  pattern from QUE-2) — the audit trail cannot distinguish which manager
+  performed a destructive op; out of scope until an auth/identity layer lands
+  (could later thread a gateway-injected `X-Manager-Id` header). **Deferred to
+  QUE-32** (Hardening, blockedBy QUE-25): scheduler re-arm on daily-reset-policy
+  change, backend cron-format enforcement, and a `DAILY_RESET_POLICY_CHANGE`
+  audit action.
 - **Compose boot-order (QUE-27):** the `gateway` must `depends_on
   core-api-service` with `condition: service_healthy`, and `core-api-service`
   must carry a healthcheck (`/api/health` via `wget`, which ships in
