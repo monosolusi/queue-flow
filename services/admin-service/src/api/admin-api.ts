@@ -1,4 +1,7 @@
 import type {
+  AuditLogEntryDto,
+  CounterPerformanceDto,
+  DailyReportDto,
   SaveSystemConfigurationPayload,
   SaveSystemConfigurationResult,
   StateMachineDto,
@@ -6,15 +9,21 @@ import type {
 } from './types';
 
 /**
- * The slice of core-api the admin panel consumes (ISP — only config read/save
- * and the active state-machine read; never leaks caller/kiosk/tv DTOs).
- * Implementations live behind this interface so tests can substitute a fake
- * without touching the network.
+ * The slice of core-api the admin panel consumes (ISP — only config read/save,
+ * the active state-machine read, and the reporting / audit-trail read surface;
+ * never leaks caller/kiosk/tv DTOs). Implementations live behind this interface
+ * so tests can substitute a fake without touching the network.
  */
 export interface IAdminApi {
   getSystemConfig(): Promise<SystemConfigurationDto>;
   saveSystemConfig(payload: SaveSystemConfigurationPayload): Promise<SaveSystemConfigurationResult>;
   getActiveStateMachine(): Promise<StateMachineDto>;
+  /** Daily queue analytics (total visitors, avg wait/service time, per-category). */
+  getDailyReport(date: string): Promise<DailyReportDto>;
+  /** One counter's served count + avg service time for a date. */
+  getCounterPerformance(counterId: number, date: string): Promise<CounterPerformanceDto>;
+  /** The local audit trail (human-initiated mutations), oldest-first. */
+  getAuditLog(): Promise<readonly AuditLogEntryDto[]>;
 }
 
 const API_BASE = '/api';
@@ -67,5 +76,16 @@ export class AdminApi implements IAdminApi {
   }
   getActiveStateMachine(): Promise<StateMachineDto> {
     return getJson<StateMachineDto>('/system/state-machine');
+  }
+  getDailyReport(date: string): Promise<DailyReportDto> {
+    return getJson<DailyReportDto>(`/reports/daily?date=${encodeURIComponent(date)}`);
+  }
+  getCounterPerformance(counterId: number, date: string): Promise<CounterPerformanceDto> {
+    return getJson<CounterPerformanceDto>(
+      `/reports/counters/${encodeURIComponent(counterId)}?date=${encodeURIComponent(date)}`,
+    );
+  }
+  getAuditLog(): Promise<readonly AuditLogEntryDto[]> {
+    return getJson<readonly AuditLogEntryDto[]>('/audit/log');
   }
 }

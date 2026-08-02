@@ -25,6 +25,9 @@ function makeApi(config: SystemConfigurationDto): IAdminApi {
     getSystemConfig: vi.fn(() => Promise.resolve(config)),
     saveSystemConfig: vi.fn(() => Promise.resolve({ isInitialSetupCompleted: true, storeName: config.storeName })),
     getActiveStateMachine: vi.fn(() => Promise.resolve(config.stateMachine)),
+    getDailyReport: vi.fn(),
+    getCounterPerformance: vi.fn(),
+    getAuditLog: vi.fn(),
   };
 }
 
@@ -66,6 +69,9 @@ describe('SetupGuard (FR-WZD-01)', () => {
       getSystemConfig: vi.fn(() => Promise.reject(new Error('core-api down'))),
       saveSystemConfig: vi.fn(),
       getActiveStateMachine: vi.fn(),
+      getDailyReport: vi.fn(),
+      getCounterPerformance: vi.fn(),
+      getAuditLog: vi.fn(),
     };
     renderGuard(api);
     expect(await screen.findByText('Wizard Page')).toBeInTheDocument();

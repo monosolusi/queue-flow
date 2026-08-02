@@ -164,8 +164,16 @@ with no duplicate/lost ticket numbers.
   and the DoD-1..4 acceptance suite (`services/core-api/test/acceptance/`). The
   in-memory profile stays the dev/test default; `QMS_PERSISTENCE=postgres`
   activates the Postgres profile (DoD-4 verifies power-cut recovery against a
-  real Postgres). Remaining Hardening work: audit-trail analytics surface and
-  re-arming the daily-reset cron on wizard config change (pairs with audit).
+  real Postgres). QUE-26 (Hardening & Acceptance, FR-ADM-03) landed the
+  daily-analytics + local-export reporting read side: lifecycle timestamp
+  columns on `tickets`/`archived_tickets` (`called_at`/`served_at`/
+  `completed_at`), the Reporting CQRS read side (`IReportQueryPort` +
+  in-memory/Postgres impls) with `GET /api/reports/daily` +
+  `GET /api/reports/counters/:id`, the audit-trail read surface
+  (`GET /api/audit/log`), and the `admin-service` analytics dashboard
+  (`/analytics`) with offline SheetJS `.xlsx` export (DoD-5 acceptance spec).
+  Remaining Hardening work: re-arming the daily-reset cron on wizard config
+  change (pairs with audit).
   The frontend PWA `base`/`start_url`/`scope` alignment (`/kiosk/`, `/tv/`,
   `/caller/`, `/admin/`) is complete across all four services (QUE-27).
 - **PRD language:** the Linear PRD is written in **Bahasa Indonesia** with
@@ -593,6 +601,84 @@ with no duplicate/lost ticket numbers.
   drops+recreates `public` then runs `PostgresMigrationRunner.onModuleInit()` for
   a pristine schema (the runner's `__dirname/migrations` resolves to
   `src/…/migrations` under ts-jest, no build needed).
+- **Daily analytics + local export (QUE-26, FR-ADM-03):** the Reporting read
+  side is now wired end-to-end and the audit-trail read surface (left open by
+  QUE-30) is folded in. New REST surface: `GET /api/reports/daily?date=`,
+  `GET /api/reports/counters/:id?date=` (`ReportingController`, `api/reports`),
+  `GET /api/audit/log` (`AuditLogController`, `api/audit`), each backed by a
+  framework-free use case (`GetDailyReportUseCase`,
+  `GetCounterPerformanceUseCase`, `ListAuditEntriesUseCase`) injected with a
+  port (`REPORT_QUERY_PORT` Symbol token, `AUDIT_LOG_REPOSITORY`). **CQRS read
+  side:** the report repos (`InMemoryReportQueryRepository`,
+  `PostgresReportQueryRepository`) implement `IReportQueryPort` and compute
+  metrics by scanning `tickets` `UNION ALL` `archived_tickets` within the local
+  day window — raw SQL aggregation, no aggregate reconstitution. A read returns
+  `null` when no tickets exist for the date; the controller maps that to an
+  empty-shape DTO (total 0, avgs 0, empty `perCategory`) so the analytics
+  dashboard has a clean zero state (never a 404). `ListAuditEntriesUseCase`
+  lives in the **audit** bounded context (owns `AuditLogEntry`), mirroring the
+  `ListCategoriesUseCase`-in-owning-context precedent.
+  **Lifecycle timestamp columns (the analytics data model):** the
+  `tickets`/`archived_tickets` schema and `QueueTicket` aggregate previously
+  carried only `created_at`/`updated_at`, so wait-time (WAITING→CALLING) and
+  service-time (SERVING→COMPLETED) were not computable. Migration
+  `0003_ticket_lifecycle_timestamps.sql` adds `called_at`/`served_at`/
+  `completed_at BIGINT` (idempotent `IF NOT EXISTS`) to both tables; the
+  aggregate sets them on the named transitions — `markCalling` sets
+  `calledAt`, `startServing` sets `servedAt`, `complete` sets `completedAt`;
+  `recall` (SKIPPED→CALLING) re-sets `calledAt` (re-announce); `transferTo`
+  clears all three to `null` (transfer re-enters the queue as a fresh ticket
+  under the new category — new lifecycle). `reconstitute` gains 3 params →
+  every call site (in-memory repo, Postgres repo, dev-seed, integration specs)
+  must pass them. Postgres `AVG(...) FILTER (WHERE ...)` skips tickets that
+  never reached the transition; `COALESCE(..., 0)` keeps the metric at 0 when no
+  ticket reached it; pre-existing rows get NULL (acceptable — `FILTER` drops
+  them).
+  **Shared date util + anti-corruption:** the local-date helpers
+  (`toDateKey`, `startOfLocalDay`, `startOfLocalDayFromKey`) live in
+  `src/application/shared/date.ts` — owned once in the application layer so the
+  date convention stays out of the pure domain (NFR-MNT-01) AND so a reporting
+  or audit consumer does **not** reach across into the queue bounded context
+  for a date utility (anti-corruption). Queue-context consumers re-export
+  `toDateKey`/`startOfLocalDay` from `application/queue/create-ticket.use-case`
+  for backward compat; new non-queue consumers
+  (`reporting.controller.ts`, `queue-commands.controller.ts`,
+  `dev-seed.service.ts`, both report repos, `reset-daily-queue.use-case.ts`)
+  import from `application/shared/date` directly.
+  **TS re-export gotcha:** `export { foo } from './x'` **re-exports but does
+  NOT bind `foo` in the module body** — to *use* the helper inside the same
+  file you need a separate `import { foo } from './x'` alongside the
+  `export … from`. `create-ticket.use-case.ts` carries both: the `import` for
+  its own `toDateKey(now)` call and the `export … from` for queue-context
+  consumers. Forgetting the `import` compiles the re-export fine but TS2552s
+  on the call site.
+  **In-memory CQRS read-side seam:** the in-memory report repo needs live
+  ticket-store access, but `allActive()` is a **reporting-only seam on the
+  concrete `InMemoryQueueRepository`**, NOT a new method on the write-side
+  `IQueueRepository` port (the write port stays free of list-all read methods
+  — SRP/ISP). It is wired via `useFactory` injecting the `QUEUE_REPOSITORY`
+  singleton (same instance the rest of the in-memory profile shares) plus
+  `CATEGORY_REPOSITORY`, so it reads live data. The Postgres read side needs
+  no such seam (it queries the tables directly via `withDbClient`).
+  **Acceptance-test timing gotcha:** in-process supertest calls are
+  sub-millisecond, so `completedAt === servedAt` and the service-time delta
+  rounds to 0. The DoD-5 `analytics-export` acceptance spec inserts real
+  `setTimeout` sleeps (`await sleep(2)`, jest real timers) between lifecycle
+  steps (create → call → serve → complete) for deterministic ≥1ms deltas so
+  `avgWaitTimeMs`/`avgServiceTimeMs` are non-zero. Use the same pattern for any
+  acceptance spec asserting a positive time delta.
+  **SheetJS offline bundling (NFR-REL-01):** the admin-service xlsx export
+  vendors `xlsx@0.18.5` (SheetJS), generated client-side via
+  `XLSX.writeFile(wb, 'qms-report-<date>.xlsx')` (Blob download, fully
+  offline). SheetJS bundles OOXML/ODF **XML namespace identifier URLs**
+  (`http://schemas.openxmlformats.org/…`, `http://purl.org/…`,
+  `http://purl.oclc.org/…`, `http://openoffice.org/…`,
+  `http://docs.oasis-open.org/…`, `http://schemas.microsoft.com/…`,
+  `http://sheetjs.com`, `http://macVmlSchemaUri`) — these are XML namespace
+  URIs / metadata written into the `.xlsx`, **never fetched at runtime** (same
+  class as `w3.org`). They surface in a `grep https?:// dist/assets` and must
+  be whitelisted in the `offline-assets.acceptance.spec.ts` `ALLOWED_HOSTS`
+  with a rationale comment, not treated as a runtime network call.
 - **Compose boot-order (QUE-27):** the `gateway` must `depends_on
   core-api-service` with `condition: service_healthy`, and `core-api-service`
   must carry a healthcheck (`/api/health` via `wget`, which ships in

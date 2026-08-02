@@ -52,6 +52,9 @@ function makeApi(
     getSystemConfig: getConfig,
     saveSystemConfig: save,
     getActiveStateMachine: vi.fn(() => Promise.resolve(config.stateMachine)),
+    getDailyReport: vi.fn(),
+    getCounterPerformance: vi.fn(),
+    getAuditLog: vi.fn(),
   };
   return { api, save, getConfig };
 }

@@ -245,6 +245,9 @@ describe('System daily-reset REST surface (integration — QUE-2)', () => {
       counterId: null,
       createdAt: yesterdayEnd,
       updatedAt: yesterdayEnd,
+      calledAt: null,
+      servedAt: null,
+      completedAt: null,
     });
     await queue.save(priorDay);
 

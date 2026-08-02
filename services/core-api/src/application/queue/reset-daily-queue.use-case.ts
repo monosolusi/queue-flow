@@ -7,7 +7,7 @@ import {
 } from '../../domain/shared';
 import { type RecordAuditEntryUseCase } from '../audit/record-audit-entry.use-case';
 import { QueueEventDispatcher } from './queue-event-dispatcher';
-import { toDateKey, startOfLocalDay } from './create-ticket.use-case';
+import { toDateKey, startOfLocalDay } from '../shared/date';
 
 /**
  * Command for the daily reset operation (FR-ENG-05). Rolls the per-category

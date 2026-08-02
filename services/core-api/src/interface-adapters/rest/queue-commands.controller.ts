@@ -7,7 +7,7 @@ import {
   SkipTicketUseCase,
   TransferTicketUseCase,
 } from '../../application/queue';
-import { toDateKey } from '../../application/queue';
+import { toDateKey } from '../../application/shared/date';
 import { ticketIdOf } from '../../domain/queue';
 
 /**

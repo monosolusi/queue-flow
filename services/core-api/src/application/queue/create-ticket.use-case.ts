@@ -38,35 +38,20 @@ export type CreateTicketResult = {
 };
 
 /**
- * Formats an epoch-ms timestamp as a local `YYYY-MM-DD` date key. The system is
- * a single-store on-premise box (NFR-SEC-01), so the daily sequence boundary is
- * the store's *local* date — not UTC. Kept here in the application layer (not
- * the domain) so the date convention stays out of the pure domain model and is
- * unit-testable via an injected clock. `Date` is a language builtin, not an
- * I/O library, so it does not compromise layer purity.
+ * Local-date helpers (re-exported from `application/shared/date` — QUE-26).
+ * The date convention is shared across bounded contexts (queue sequence key,
+ * daily-reset archive threshold, reporting day window), so it lives in
+ * `application/shared` and is re-exported here for the queue-context consumers
+ * and tests that already import it from `application/queue`. See
+ * {@link toDateKey} / {@link startOfLocalDay} for the single-store on-premise
+ * local-date rationale (NFR-SEC-01).
+ *
+ * The `import` (in addition to the `export … from`) is required because a
+ * re-export does not bring the names into this module's local scope — the
+ * use-case body below calls `toDateKey(now)`, so it needs a local binding.
  */
-export function toDateKey(epochMs: number): string {
-  const d = new Date(epochMs);
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-/**
- * The epoch-ms timestamp of local midnight (00:00:00.000) on the day that
- * contains `epochMs`. Used by the daily-reset archive step (QUE-16) as the
- * threshold that separates "today" (kept in the active tickets store) from
- * "previous days" (relocated to the archive store). The boundary is the
- * store's *local* date, like {@link toDateKey} (single on-premise box,
- * NFR-SEC-01), and is derived from the injected clock in the application
- * layer so the date convention stays out of the pure domain. `Date` is a
- * language builtin, not an I/O library, so layer purity holds.
- */
-export function startOfLocalDay(epochMs: number): number {
-  const d = new Date(epochMs);
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).getTime();
-}
+import { toDateKey } from '../shared/date';
+export { toDateKey, startOfLocalDay } from '../shared/date';
 
 /**
  * The ticket-generation use case (FR-ENG-01 / FR-ENG-05). Orchestrates taking a

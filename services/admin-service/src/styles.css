@@ -113,6 +113,11 @@ fieldset {
   display: flex;
   justify-content: flex-end;
 }
+.admin-panel__nav {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
 .config-card {
   background: var(--surface);
   border-radius: var(--radius);
@@ -429,4 +434,86 @@ fieldset {
 }
 .wizard__review-list {
   list-style: disc inside;
+}
+
+/* Analytics dashboard (FR-ADM-03 / QUE-26) -------------------------------- */
+.analytics {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+.analytics__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.analytics__title {
+  margin: 0;
+  font-size: 1.75rem;
+}
+.analytics__subtitle {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 1rem;
+}
+.analytics__controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.analytics__empty {
+  color: var(--text-muted);
+}
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.75rem;
+}
+.metric-tile {
+  background: var(--bg);
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.metric-tile__label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+.metric-tile__value {
+  font-size: 1.6rem;
+  font-weight: 700;
+}
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+.data-table th,
+.data-table td {
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--surface-2);
+}
+.data-table th {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.data-table td {
+  color: var(--text);
+}
+.data-table--audit td.data-table__snapshot {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  word-break: break-all;
+  max-width: 18rem;
 }

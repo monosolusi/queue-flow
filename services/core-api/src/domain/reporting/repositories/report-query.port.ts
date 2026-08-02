@@ -2,13 +2,22 @@ import type { DailyQueueReport } from '../daily-queue-report';
 import type { CounterPerformance } from '../counter-performance';
 
 /**
+ * NestJS DI token for {@link IReportQueryPort}. Interface ports are erased at
+ * runtime, so NestJS can't resolve them by type metadata — each port carries a
+ * co-located Symbol token and is bound with `{ provide: <token>, … }` in the
+ * persistence profile modules (mirrors `AUDIT_LOG_REPOSITORY` /
+ * `QUEUE_REPOSITORY`).
+ */
+export const REPORT_QUERY_PORT = Symbol('REPORT_QUERY_PORT');
+
+/**
  * Query port for the Reporting bounded context (CQRS read side). Use cases and
  * the admin analytics module depend on this abstraction, not on a concrete
  * query implementation.
  *
- * Note: the in-memory implementation and contract test for this port are
- * intentionally deferred to QUE-26 (daily analytics & local export reporting),
- * which owns the Reporting read models end-to-end. Defining the port here lets
+ * The implementations (in-memory + PostgreSQL) and the audit-trail read surface
+ * are delivered by QUE-26 (daily analytics & local export reporting), which
+ * owns the Reporting read models end-to-end. Defining the port here lets
  * downstream use cases depend on the abstraction now.
  */
 export interface IReportQueryPort {

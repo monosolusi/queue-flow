@@ -28,6 +28,15 @@ export class QueueTicket extends AggregateRoot<TicketId> {
   private _counterId: number | null;
   private _createdAt: number;
   private _updatedAt: number;
+  // Lifecycle timestamps (QUE-26). The wait-time metric (WAITING → CALLING)
+  // is `calledAt - createdAt`; the service-time metric (SERVING → COMPLETED) is
+  // `completedAt - servedAt`. `null` until the transition fires, and the
+  // analytics query FILTERs NULLs out. They are part of the ticket's lifecycle
+  // state — set by the same transition methods that own status — not a
+  // reporting concern bolted on after the fact.
+  private _calledAt: number | null;
+  private _servedAt: number | null;
+  private _completedAt: number | null;
 
   private constructor(
     id: TicketId,
@@ -37,6 +46,9 @@ export class QueueTicket extends AggregateRoot<TicketId> {
     counterId: number | null,
     createdAt: number,
     updatedAt: number,
+    calledAt: number | null,
+    servedAt: number | null,
+    completedAt: number | null,
   ) {
     super(id);
     this._ticketNumber = ticketNumber;
@@ -45,6 +57,9 @@ export class QueueTicket extends AggregateRoot<TicketId> {
     this._counterId = counterId;
     this._createdAt = createdAt;
     this._updatedAt = updatedAt;
+    this._calledAt = calledAt;
+    this._servedAt = servedAt;
+    this._completedAt = completedAt;
   }
 
   /**
@@ -65,6 +80,9 @@ export class QueueTicket extends AggregateRoot<TicketId> {
       null,
       now,
       now,
+      null,
+      null,
+      null,
     );
     ticket.record(
       new TicketCreatedEvent(id.value, ticketNumber.formatted(), categoryId, now),
@@ -84,6 +102,9 @@ export class QueueTicket extends AggregateRoot<TicketId> {
     counterId: number | null;
     createdAt: number;
     updatedAt: number;
+    calledAt: number | null;
+    servedAt: number | null;
+    completedAt: number | null;
   }): QueueTicket {
     return new QueueTicket(
       params.id,
@@ -93,6 +114,9 @@ export class QueueTicket extends AggregateRoot<TicketId> {
       params.counterId,
       params.createdAt,
       params.updatedAt,
+      params.calledAt,
+      params.servedAt,
+      params.completedAt,
     );
   }
 
@@ -120,6 +144,21 @@ export class QueueTicket extends AggregateRoot<TicketId> {
     return this._updatedAt;
   }
 
+  /** Epoch-ms the ticket was first called to a counter, or `null` if never called. */
+  public get calledAt(): number | null {
+    return this._calledAt;
+  }
+
+  /** Epoch-ms service started (CALLING → SERVING), or `null` if not yet served. */
+  public get servedAt(): number | null {
+    return this._servedAt;
+  }
+
+  /** Epoch-ms service completed (SERVING → COMPLETED), or `null` if not done. */
+  public get completedAt(): number | null {
+    return this._completedAt;
+  }
+
   /**
    * Call this ticket to a counter. WAITING -> CALLING ("Panggil Berikutnya").
    * Idempotent: calling a ticket that is already in CALLING is a no-op (no
@@ -132,6 +171,7 @@ export class QueueTicket extends AggregateRoot<TicketId> {
     }
     this.transitionTo(TicketStatus.CALLING, policy, now);
     this._counterId = counterId;
+    this._calledAt = now;
     this.record(
       new TicketCalledEvent(this.id.value, this._ticketNumber.formatted(), counterId, now),
     );
@@ -147,16 +187,22 @@ export class QueueTicket extends AggregateRoot<TicketId> {
       throw new InvalidStateTransitionException(this._currentStatus, TicketStatus.CALLING);
     }
     this.transitionTo(TicketStatus.CALLING, policy, now);
+    // A re-call is a fresh call attempt — reset the called-at timestamp so the
+    // wait-time metric reflects the time from creation (or re-queue) to the
+    // *latest* call, not the original (now-stale) one.
+    this._calledAt = now;
   }
 
   /** Begin serving. CALLING -> SERVING ("Mulai Melayani"). */
   public startServing(policy: ITransitionPolicy, now = Date.now()): void {
     this.transitionTo(TicketStatus.SERVING, policy, now);
+    this._servedAt = now;
   }
 
   /** Mark service complete. SERVING -> COMPLETED ("Selesai Layan"). */
   public complete(policy: ITransitionPolicy, now = Date.now()): void {
     this.transitionTo(TicketStatus.COMPLETED, policy, now);
+    this._completedAt = now;
   }
 
   /** Skip / mark absent. CALLING -> SKIPPED ("Lewati / Absen"). */
@@ -198,6 +244,12 @@ export class QueueTicket extends AggregateRoot<TicketId> {
     this._categoryId = newCategoryId;
     this._ticketNumber = newTicketNumber;
     this._counterId = null;
+    // Transfer re-enters the queue as a fresh ticket under the new category
+    // (new number, WAITING). The prior lifecycle timestamps no longer describe
+    // this ticket — clear them so wait/service-time metrics start over.
+    this._calledAt = null;
+    this._servedAt = null;
+    this._completedAt = null;
     this._updatedAt = now;
     this.record(
       new TicketStatusChangedEvent(

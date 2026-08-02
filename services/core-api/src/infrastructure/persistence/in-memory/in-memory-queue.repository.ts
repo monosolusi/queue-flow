@@ -105,4 +105,18 @@ export class InMemoryQueueRepository implements IQueueRepository, ITicketArchive
   archivedTickets(): readonly QueueTicket[] {
     return [...this.archivedTicketsList];
   }
+
+  /**
+   * Read-side accessor for the in-memory {@link IReportQueryPort} impl (QUE-26):
+   * every ticket still in the active store. Not on the port interface — the
+   * write-side `IQueueRepository` exposes only the query methods the caller / use
+   * cases need, so listing all tickets is a reporting-only seam. The in-memory
+   * report repo combines this with {@link archivedTickets} to compute a daily
+   * report over the same store the live queue uses (CQRS read side sharing the
+   * in-memory write side, dev/test only). The Postgres report repo needs no such
+   * seam — it reads `tickets` + `archived_tickets` directly via SQL.
+   */
+  allActive(): readonly QueueTicket[] {
+    return [...this.tickets.values()];
+  }
 }

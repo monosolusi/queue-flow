@@ -119,3 +119,64 @@ export const DEFAULT_DAILY_RESET: DailyResetPolicyDto = {
   resetTicketNumberTo: 1,
   archivePreviousDayData: true,
 };
+
+// --- Analytics & audit-trail read surface (FR-ADM-03 / QUE-26) ----------------
+
+/**
+ * Per-category breakdown row in a {@link DailyReportDto}. Mirrors core-api's
+ * `CategoryBreakdownDto` (`application/reporting/get-daily-report.use-case`).
+ */
+export interface CategoryBreakdownDto {
+  readonly categoryId: string;
+  readonly code: string;
+  readonly totalTickets: number;
+  readonly avgWaitTimeMs: number;
+  readonly avgServiceTimeMs: number;
+}
+
+/**
+ * Daily queue analytics report from `GET /api/reports/daily?date=YYYY-MM-DD`.
+ * Mirrors core-api's `DailyReportDto`. The controller returns a zero-shape
+ * (`totalTickets: 0`, empty `perCategory`) when no tickets exist for the date,
+ * so this DTO is never null over the wire.
+ */
+export interface DailyReportDto {
+  readonly date: string;
+  readonly totalTickets: number;
+  readonly avgWaitTimeMs: number;
+  readonly avgServiceTimeMs: number;
+  readonly perCategory: readonly CategoryBreakdownDto[];
+}
+
+/**
+ * One counter's performance from `GET /api/reports/counters/:id?date=YYYY-MM-DD`.
+ * Mirrors core-api's `CounterPerformanceDto`. Zero-shape when the counter served
+ * nothing that day.
+ */
+export interface CounterPerformanceDto {
+  readonly counterId: number;
+  readonly date: string;
+  readonly ticketsServed: number;
+  readonly avgServiceTimeMs: number;
+}
+
+/**
+ * Opaque before/after snapshot recorded with an audit entry (an arbitrary JSON
+ * object on the server). Mirrors core-api's `AuditSnapshot`
+ * (`Record<string, unknown>`); kept loose so the client never assumes a shape.
+ */
+export type AuditSnapshot = Record<string, unknown>;
+
+/**
+ * One audit-trail entry from `GET /api/audit/log`. Mirrors core-api's
+ * `AuditLogEntryDto`. `action` is the serialized enum string (e.g.
+ * `'MANUAL_RESET'`, `'STATE_SCHEMA_CHANGE'`, `'ARCHIVE_PREVIOUS_DAY'`).
+ */
+export interface AuditLogEntryDto {
+  readonly id: string;
+  readonly actor: string;
+  readonly action: string;
+  readonly before: AuditSnapshot | null;
+  readonly after: AuditSnapshot;
+  readonly occurredAt: number;
+}
