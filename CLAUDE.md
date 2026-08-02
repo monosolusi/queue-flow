@@ -550,6 +550,57 @@ with no duplicate/lost ticket numbers.
   `toHaveBeenCalledBefore` (TS2551 at compile). Assert mock call order with
   numeric `mock.invocationCallOrder[i]` comparisons instead — e.g.
   `expect(mockA.mock.invocationCallOrder[0]).toBeLessThan(mockB.mock.invocationCallOrder[0])`.
+  **Jest spy accumulation:** `jest.spyOn(obj, method)` on the same prototype
+  across tests returns the *same* spy — call counts accumulate and are NOT reset
+  by re-spying in `beforeEach` (the jest config has no `restoreMocks`). A
+  `expect(Logger.prototype.log).not.toHaveBeenCalled()` in test N sees test
+  N-1's calls. Add `afterEach(() => jest.restoreAllMocks())` (restores the spied
+  method, so the next `spyOn` mints a fresh spy) whenever a spec asserts call
+  counts. The bootstrap-service spec dodges this only because it asserts
+  `resolves.toBeUndefined()`, not call counts.
+- **DB durability contract + startup recovery (QUE-28, NFR-REL-02):** QUE-30
+  delivered the durability *mechanism* (tx manager, atomic sequence upsert, WAL
+  reliance) but only *assumed* PG defaults — nothing enforced or verified them,
+  so a misconfigured PG (`fsync=off`, `synchronous_commit=off`) would silently
+  gap/lose ticket numbers. QUE-28 closes the *contract*: enforce
+  `synchronous_commit=on` **per connection** via the pool `onConnect` **config
+  option** in `createPgPool` (a `user`-context GUC — `SET` persists for the
+  connection session, so commits wait for WAL flush regardless of the server
+  default), and verify `fsync=on` at boot via `PostgresDurabilityProbe`
+  (`@Injectable() OnModuleInit`, postgres profile only — `fsync` is
+  `postmaster`-context, settable only at server restart, so it cannot be set
+  per-session; the probe `SHOW fsync` and throws
+  `DurabilityDegradedException` if not `on` — **fail-fast**, not warn; a queue
+  that could lose numbers must not boot). The probe is the "startup recovery
+  flow" alongside the migration runner; schema-independent (needs only the
+  pool), so no `OnModuleInit` ordering constraint vs. `PostgresMigrationRunner`.
+  No audit entry for boot recovery (NFR-SEC-02 scopes audit to manual reset /
+  state-schema / routing); no startup state reconciliation/mutation (PRD says
+  "recover exactly" — auto-rewinding CALLING→WAITING would violate it). The
+  probe/exception live in `infrastructure/persistence/postgres/` (own boot I/O
+  + `pg`); no domain port — a speculative `IDurabilityProbe` with no in-memory
+  impl would be over-abstraction (consistent with `PostgresMigrationRunner`,
+  which also injects the concrete `Pool` and throws a bare `Error`).
+  **`onConnect` vs `pool.on('connect')` gotcha:** the `pool.on('connect',
+  client)` **event** does NOT await promises/async setup, so a `SET` there
+  races the client handout. Use the `onConnect` **config option** (`new Pool({
+  onConnect: async (client) => { await client.query('SET …') } })`) — `pg-pool`
+  wraps it in `_promiseTry(...).then()` (`index.js:288`) and awaits before
+  handing the client out, destroying it on rejection. `@types/pg` types
+  `onConnect` as `(client) => void` (sync), but an `async` fn is assignable
+  (a `Promise<void>` return is allowed where `void` is expected) and is awaited
+  at runtime — the typed signature understates the runtime. Verified via
+  Context7 + the `pg-pool` source.
+  **Acceptance-spec gating — direct-repo variant:** an acceptance spec that
+  exercises repos/tx-manager directly via ts-jest (no `node dist/main.js` spawn)
+  gates on `QMS_ACCEPTANCE_DB_URL` only — NOT `dist/main.js` (it needs no
+  build). `sequence-durability.acceptance.spec.ts` proves the atomic-upsert
+  contract: N parallel `nextTicketNumber` → exactly 1..N (no dupe/gap), and a
+  `runInTransaction` that reserves then throws rolls the increment back so the
+  next reservation reuses the number (gap-free on mid-tx failure). `beforeAll`
+  drops+recreates `public` then runs `PostgresMigrationRunner.onModuleInit()` for
+  a pristine schema (the runner's `__dirname/migrations` resolves to
+  `src/…/migrations` under ts-jest, no build needed).
 - **Daily analytics + local export (QUE-26, FR-ADM-03):** the Reporting read
   side is now wired end-to-end and the audit-trail read surface (left open by
   QUE-30) is folded in. New REST surface: `GET /api/reports/daily?date=`,

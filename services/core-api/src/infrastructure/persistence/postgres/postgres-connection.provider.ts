@@ -22,15 +22,27 @@ export function createPgPool(): Pool {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { Pool } = require('pg') as typeof import('pg');
   const connectionString = process.env.QMS_DB_URL;
-  return new Pool(
-    connectionString
-      ? { connectionString }
-      : {
-          host: process.env.PGHOST ?? 'db-service',
-          port: Number(process.env.PGPORT ?? 5432),
-          user: process.env.PGUSER ?? 'postgres',
-          password: process.env.PGPASSWORD ?? 'postgres',
-          database: process.env.PGDATABASE ?? 'qms',
-        },
-  );
+  const base = connectionString
+    ? { connectionString }
+    : {
+        host: process.env.PGHOST ?? 'db-service',
+        port: Number(process.env.PGPORT ?? 5432),
+        user: process.env.PGUSER ?? 'postgres',
+        password: process.env.PGPASSWORD ?? 'postgres',
+        database: process.env.PGDATABASE ?? 'qms',
+      };
+  return new Pool({
+    ...base,
+    // Enforce commit durability per connection (QUE-28 / NFR-REL-02).
+    // `synchronous_commit` is a `user`-context GUC, so `SET` persists for the
+    // connection session — every pooled commit waits for WAL flush regardless
+    // of the server default. `pg-pool` awaits `onConnect` before handing the
+    // client out (and destroys it on rejection), so no checkout sees a
+    // connection without the GUC applied. `fsync` is `postmaster`-context and
+    // cannot be set per-session — it is verified at boot by
+    // {@link PostgresDurabilityProbe}.
+    onConnect: async (client) => {
+      await client.query('SET synchronous_commit=on');
+    },
+  });
 }
