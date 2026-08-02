@@ -174,9 +174,9 @@ with no duplicate/lost ticket numbers.
   (`/analytics`) with offline SheetJS `.xlsx` export (DoD-5 acceptance spec).
   Remaining Hardening work: re-arming the daily-reset cron on wizard config
   change, backend cron-format enforcement, and a `DAILY_RESET_POLICY_CHANGE`
-  audit action — tracked as QUE-32 (Hardening, parent QUE-6, blockedBy QUE-25;
-  pairs with audit). QUE-25 (manual reset admin button + transaction-log
-  cleanup) is the last QUE-6 child.
+  audit action — landed as QUE-32 (Hardening, parent QUE-6; was blockedBy
+  QUE-25, pairs with audit). QUE-25 (manual reset admin button + transaction-log
+  cleanup) was the last QUE-6 child before QUE-32.
   The frontend PWA `base`/`start_url`/`scope` alignment (`/kiosk/`, `/tv/`,
   `/caller/`, `/admin/`) is complete across all four services (QUE-27).
 - **PRD language:** the Linear PRD is written in **Bahasa Indonesia** with
@@ -730,10 +730,78 @@ with no duplicate/lost ticket numbers.
   hardcoded string literal** on both the reset + cleanup endpoints (pre-existing
   pattern from QUE-2) — the audit trail cannot distinguish which manager
   performed a destructive op; out of scope until an auth/identity layer lands
-  (could later thread a gateway-injected `X-Manager-Id` header). **Deferred to
-  QUE-32** (Hardening, blockedBy QUE-25): scheduler re-arm on daily-reset-policy
-  change, backend cron-format enforcement, and a `DAILY_RESET_POLICY_CHANGE`
+  (could later thread a gateway-injected `X-Manager-Id` header). **Landed in
+  QUE-32** (Hardening, was blockedBy QUE-25): scheduler re-arm on daily-reset-
+  policy change, backend cron-format enforcement, and a `DAILY_RESET_POLICY_CHANGE`
   audit action.
+- **Scheduler re-arm + cron enforcement + policy-change audit (QUE-32,
+  FR-ADM-01 / NFR-SEC-02, parent QUE-6, Hardening):** the daily-reset scheduler
+  is no longer boot-armed-only. `DailyResetSchedulerService` implements a new
+  non-repository domain port `IDailyResetSchedulerPort` (`domain/store-config/
+  scheduler.port.ts`, `DAILY_RESET_SCHEDULER` Symbol token — same shape as the
+  `ITransitionPolicyResolver` precedent: a non-repository port in the domain,
+  implemented in infrastructure). Its single method `reArm()` re-reads the
+  persisted `SystemConfiguration` and **idempotently reconciles** the armed cron:
+  arm / disarm (MANUAL or unconfigured) / no-op (desired cron already matches the
+  tracked `armedCron` field, so a categories-only save does not churn the running
+  cron). `onModuleInit` now just calls `reArm()`. `SaveSystemConfigurationUseCase`
+  gets an optional `scheduler: IDailyResetSchedulerPort | null = null` constructor
+  param (the `recordAudit: null` precedent — null = skip, no no-op class needed,
+  distinct from `NoOpTransactionManager` which is a called-every-time default) and
+  calls `await this.scheduler.reArm()` **post-commit** (after `runInTransaction`
+  resolves), gated on the policy actually having changed (or the initial setup) —
+  so a rolled-back save never re-arms to an un-persisted policy (NFR-REL-02, the
+  same dispatch-after-commit pattern as `SYSTEM_RESET`). Wiring: `SchedulerModule`
+  binds `{ provide: DAILY_RESET_SCHEDULER, useExisting: DailyResetSchedulerService }`
+  + exports it; `SystemConfigApiModule` imports `SchedulerModule` and injects the
+  token into the `SaveSystemConfigurationUseCase` factory (6th arg). **No circular
+  dep:** `SystemConfigApiModule → SchedulerModule → QueueOperationsModule →
+  SystemConfigModule`-the-resolver; none import `SystemConfigApiModule`. The
+  concrete `armedCronExpression` getter stays on the service (not the port) as an
+  integration-test observability seam — not leaked to the use case (ISP).
+  **Construct-before-delete robustness (NFR-REL-02):** `reArm()` builds the new
+  `CronJob` **before** deleting the old registered one — the `cron` library parses
+  + validates the expression in the constructor (the realistic throw site), so a
+  throw leaves the previously-armed cron intact instead of leaving the store with
+  no automatic daily reset while the DB has already committed the new policy. The
+  VO's `isValidCronExpression` guard makes that throw near-impossible, but the
+  ordering keeps `reArm` self-safe regardless. Apply the same
+  construct-validate-before-destroy pattern to any future re-arm/replace of a
+  long-lived resource whose destruction is not auto-recovered.
+  **Backend cron-format enforcement:** `DailyResetPolicy.of` now validates the
+  5-field cron **format** (not just non-emptiness) for `AUTOMATIC_CRON` via a pure
+  domain helper `isValidCronExpression` (`domain/store-config/value-objects/
+  cron-expression.ts`) that **mirrors** `admin-service/src/lib/cron.ts` exactly
+  (5 fields; ranges menit 0-59 / jam 0-23 / tanggal 1-31 / bulan 1-12 / hari 0-7
+  with 0 and 7 = Sunday; `*`, comma lists, ranges `a-b`, steps `*/n` / `a-b/n` /
+  `a/n`; no named months/days, no `@macros` / `L` / `W` / `#`). Localized
+  duplication across the backend-domain / frontend-bundle boundary is intentional
+  (separate build trees; a shared package for one pure function would
+  cross-couple them) — the two grammars MUST stay in lock-step; a divergence is a
+  bug. **Exception choice:** a malformed cron throws `InvalidValueObjectException`
+  (code `INVALID_VALUE_OBJECT`, → 400), NOT `InvalidArgumentException` — a
+  malformed cron is a malformed value object (the VO's existing non-empty check
+  already throws `InvalidValueObjectException`), and `InvalidArgumentException`
+  is reserved for use-case-level business guardrails where the value is
+  well-formed but not permitted (e.g. the QUE-25 retention floor). An AC that
+  loosely says `INVALID_ARGUMENT` for a VO-format rejection is satisfied at the
+  HTTP level (400); keep one VO's construction failures uniform under
+  `InvalidValueObjectException`. **MANUAL mode may carry a stale cron unchecked**
+  (it is never armed), so the VO does not 400 on a stale value when a manager
+  switches mode — the admin/wizard client nulls the cron field on MANUAL
+  (`finalize`, QUE-16) so this only matters for a direct API call.
+  **`DAILY_RESET_POLICY_CHANGE` audit action** (new `AuditAction` enum value) is
+  recorded by `SaveSystemConfigurationUseCase` inside the same tx as
+  `STATE_SCHEMA_CHANGE` / `ROUTING_CHANGE`, but **change-gated** (unlike those
+  two, which are recorded on every save): only when `!oldPolicy.equals(newPolicy)`
+  (`ValueObject.equals` structural deep-equal over the four policy props), with
+  before/after snapshots (`dailyResetPolicySnapshot` helper, mirroring the
+  `categorySnapshot` / `routingSnapshot` pattern). On initial setup `oldPolicy`
+  is null → recorded with `before: null`. The gate is **structural, not
+  operational** equality — a MANUAL→MANUAL save whose stored cron string differs
+  would count as a change even though no cron is armed either way; acceptable
+  (the snapshot accurately reflects the stored VO, and the client nulls cron on
+  MANUAL so it only arises from a direct API call).
 - **Compose boot-order (QUE-27):** the `gateway` must `depends_on
   core-api-service` with `condition: service_healthy`, and `core-api-service`
   must carry a healthcheck (`/api/health` via `wget`, which ships in
