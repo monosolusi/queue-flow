@@ -53,8 +53,11 @@ abstractions (interfaces), never concrete infrastructure — see SOLID/DIP below
 
 - **SRP** — each UI service owns one concern: `tv-display-service` renders +
   audio only; `kiosk-service` owns ticket printing only.
-- **OCP** — `AudioProvider` is an interface; add providers (MP3 files, offline
-  TTS) without touching use cases.
+- **OCP** — `AudioProvider` (in `tv-display-service`) is an interface; add
+  providers (MP3 fragment sequencer, offline TTS) without touching the TV
+  store. `QueuedAudioProvider` decorates any `AudioProvider` to serialize whole
+  announcements one-at-a-time FIFO so back-to-back `TICKET_CALLED` events never
+  overlap (FR-TV-02).
 - **LSP** — `IQueueRepository` is implemented by `PostgreSQLQueueRepository` and
   `InMemoryQueueRepository` (tests); they must be interchangeable.
 - **ISP** — `caller-service` consumes only `ICallerApi`; never leak admin/reporting DTOs to it.
@@ -62,7 +65,7 @@ abstractions (interfaces), never concrete infrastructure — see SOLID/DIP below
 
 ## Domain model (DDD bounded contexts)
 
-Four bounded contexts:
+Three bounded contexts:
 
 - **Queue** — `QueueTicket` aggregate (`TicketId` UUID, `ticketNumber` e.g.
   "A-001", `categoryId`, `currentStatus`, `counterId`, timestamps). Events:
@@ -72,7 +75,13 @@ Four bounded contexts:
   `StateTransitionRule`, `DailyResetPolicy`) and `CounterRoutingRule`
   aggregate (`counterId`, `assignedCategoryIds`, `priorityPolicy` ∈
   {`FIFO_GLOBAL`, `CATEGORY_PRIORITY`}).
-- **Notification** — `Audio Queue Engine`, `Display Event Sync`.
+- **Notification** — handled entirely in `tv-display-service` (no `core-api`
+  domain model): the audio playback queue (`QueuedAudioProvider` over
+  `SequencerAudioProvider`) and the display state projection in `tv-store`.
+  Audio is a pure client concern — the backend never plays sound — so no
+  domain `AudioProvider`/`AudioQueueItem` is warranted (no speculative ports;
+  an earlier `domain/notification` stub was removed as dead code). Adding a
+  server-side audio model would be over-abstraction.
 - **Reporting** — `DailyQueueReport`, `CounterPerformance`.
 
 Default state machine: `WAITING → CALLING → SERVING → COMPLETED`, plus
@@ -164,7 +173,21 @@ with no duplicate/lost ticket numbers.
   and the DoD-1..4 acceptance suite (`services/core-api/test/acceptance/`). The
   in-memory profile stays the dev/test default; `QMS_PERSISTENCE=postgres`
   activates the Postgres profile (DoD-4 verifies power-cut recovery against a
-  real Postgres). QUE-26 (Hardening & Acceptance, FR-ADM-03) landed the
+  real Postgres). QUE-22 (Operational Interfaces, parent QUE-4, FR-TV-02 /
+  NFR-REL-01) hardened the TV audio path: the fragment sequencer
+  (`SequencerAudioProvider`, landed under QUE-30) is now wrapped in a
+  `QueuedAudioProvider` — an announcement-level FIFO queue (decorator over the
+  `AudioProvider` interface) so back-to-back `TICKET_CALLED` events play
+  strictly one-at-a-time with no inter-call overlap (the QUE-30 scaffold only
+  serialized fragments *within* one announcement and fire-and-forgot each
+  call, so two rapid calls overlapped). `buildCallFragments` now decomposes the
+  counter id digit-by-digit too, so a counter ≥ 10 reuses the existing
+  `0-9.mp3` assets instead of silently dropping (there is no `10.mp3`).
+  `tv-store` calls `audio.stop()` on `SYSTEM_RESET` and on unmount to drain
+  stale queued announcements. The orphaned `core-api` `domain/notification`
+  stub (a second, divergent `AudioProvider`/`AudioQueueItem` with no use case
+  or importer) was removed — audio is a pure client concern, no domain model
+  is warranted. QUE-26 (Hardening & Acceptance, FR-ADM-03) landed the
   daily-analytics + local-export reporting read side: lifecycle timestamp
   columns on `tickets`/`archived_tickets` (`called_at`/`served_at`/
   `completed_at`), the Reporting CQRS read side (`IReportQueryPort` +
@@ -528,6 +551,16 @@ with no duplicate/lost ticket numbers.
   infrastructure. (A `NoOpAuditLogRepository` was removed instead — it was dead
   code; audit repos are always wired via the `AUDIT_LOG_REPOSITORY` token, never
   defaulted in a use case.)
+- **Relocate invariants when deleting a guardrail VO.** When a domain value
+  object that enforced an invariant (e.g. the deleted `AudioQueueItem` required
+  `counterId` to be a positive integer) is removed as dead code, its invariant
+  must not silently vanish — surface it at the new enforcement site. Either
+  re-guard at the replacement (a one-line `Number.isInteger(x) && x >= 1` throw)
+  or document the precondition on the successor's signature (`@pre …`), naming
+  the upstream guarantee that makes it safe. Deleting the VO without relocating
+  the invariant lets bad input silently degrade (e.g. `buildCallFragments` would
+  emit a `-.mp3` fragment for a negative id) instead of failing fast. The
+  QUE-22 arch-reviewer surfaced exactly this: the guard died with the VO.
 - **Acceptance suite (QUE-30):** the DoD-1..4 acceptance specs live in
   `services/core-api/test/acceptance/*.acceptance.spec.ts` (co-located in
   core-api — not a separate project — to reuse its jest config + ts-jest +
@@ -917,6 +950,29 @@ with no duplicate/lost ticket numbers.
     the gateway root, not the service, breaking offline launch. Set them when
     scaffolding a new frontend. (All four existing frontends — admin, kiosk, tv,
     caller — are already aligned to their `/svc/` prefix; QUE-27.)
+  - **TV audio queue (QUE-22, FR-TV-02):** announcement-level serialization is a
+    **decorator** (`QueuedAudioProvider` in `tv-display-service/src/audio/`)
+    over the fragment sequencer (`SequencerAudioProvider`), not a god-class.
+    SRP split: the inner serializes fragments *within* one announcement; the
+    decorator serializes whole announcements *between* calls. The decorator
+    implements the same `AudioProvider` (`playSequence`/`stop`) interface, so
+    it is a drop-in — the store keeps depending on the abstraction (`App.tsx`
+    wires the concrete `QueuedAudioProvider(SequencerAudioProvider)`). **The
+    drain single-flight guard is load-bearing:** in `drain()`,
+    `if (this.running) return; this.running = true;` must run synchronously
+    *before the first `await`* so a second `playSequence` arriving while the
+    inner is mid-fragment only enqueues — never starts a second concurrent
+    drain (which would reintroduce overlap). Do not reorder those two lines or
+    push the assignment behind an `await`. The queue is **FIFO, not
+    interrupt-on-new-call** — a half-announced ticket number is worse UX than a
+    brief lag. `buildCallFragments` decomposes **both** the ticket number and
+    the counter id digit-by-digit so every fragment maps to an existing
+    `/tv/audio/<digit>.mp3` (NFR-REL-01 — there is no `10.mp3`); a single
+    `'10'` counter fragment would be silently dropped by the sequencer's
+    error-skip. There is **no `domain/notification` bounded context in
+    core-api** — audio is a pure client concern (the backend never plays
+    sound); the earlier domain `AudioProvider`/`AudioQueueItem` stub was
+    removed as dead code (zero importers, no use case).
 - When adding a feature, map it to the relevant FR-* / NFR-* requirement in the
   PRD and the bounded context it belongs to. Preserve the interface boundaries
   (e.g. don't leak admin DTOs into `ICallerApi`).

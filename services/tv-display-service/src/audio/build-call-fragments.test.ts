@@ -17,7 +17,10 @@ describe('buildCallFragments (FR-TV-02)', () => {
     ]);
   });
 
-  it('announces multi-digit numbers and double-digit counters one digit at a time for the number, whole for the counter', () => {
+  it('announces multi-digit ticket numbers and multi-digit counters each digit at a time', () => {
+    // Counter id ≥ 10 is decomposed into digits so it reuses the existing
+    // 0-9.mp3 assets (NFR-REL-01) — there is no `10.mp3`, and a single `'10'`
+    // fragment would be silently dropped by the sequencer's error-skip.
     expect(buildCallFragments('B-013', 10)).toEqual([
       'bell',
       'nomor-antrian',
@@ -26,7 +29,8 @@ describe('buildCallFragments (FR-TV-02)', () => {
       '1',
       '3',
       'silakan-ke-counter',
-      '10',
+      '1',
+      '0',
     ]);
   });
 
