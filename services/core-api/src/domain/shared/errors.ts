@@ -62,3 +62,18 @@ export class SystemNotConfiguredException extends DomainError {
     );
   }
 }
+
+/**
+ * Thrown when a command carries an argument that is structurally valid but
+ * violates a business guardrail — e.g. a transaction-log cleanup retention
+ * window below the enforced floor (QUE-25 / FR-ADM-02). Distinct from
+ * {@link InvalidValueObjectException} (a malformed value object) and
+ * {@link InvalidStateTransitionException} (a forbidden state move): the value
+ * is well-formed, just not permitted by a use-case-level business rule. Maps to
+ * 400 Bad Request — the caller can fix the argument and retry.
+ */
+export class InvalidArgumentException extends DomainError {
+  constructor(detail: string) {
+    super(`Invalid argument: ${detail}`, 'INVALID_ARGUMENT');
+  }
+}

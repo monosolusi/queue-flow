@@ -11,6 +11,7 @@ import { AUDIT_LOG_REPOSITORY } from '../domain/audit';
 import { TRANSACTION_MANAGER } from '../domain/shared';
 import {
   CallNextTicketUseCase,
+  CleanupTransactionLogUseCase,
   CompleteTicketUseCase,
   RecallTicketUseCase,
   ResetDailyQueueUseCase,
@@ -111,6 +112,23 @@ import { SystemConfigModule } from './config/system-config.module';
           ticketArchive,
         ),
     },
+    {
+      // QUE-25 / FR-ADM-02: transaction-log cleanup override. The use case is a
+      // pure framework-free class provided via a factory receiving its ports:
+      // the ticket-archive port (purge), the audit-log repo (composed into a
+      // RecordAuditEntryUseCase for the TRANSACTION_LOG_CLEANUP audit record),
+      // and the ambient transaction manager (atomic purge + audit, NFR-REL-02).
+      // `clock` keeps its () => Date.now default.
+      provide: CleanupTransactionLogUseCase,
+      inject: [TICKET_ARCHIVE_PORT, AUDIT_LOG_REPOSITORY, TRANSACTION_MANAGER],
+      useFactory: (ticketArchive, auditLog, txManager) =>
+        new CleanupTransactionLogUseCase(
+          ticketArchive,
+          undefined, // clock — keep the () => Date.now default
+          new RecordAuditEntryUseCase(auditLog),
+          txManager,
+        ),
+    },
   ],
   exports: [
     CallNextTicketUseCase,
@@ -120,6 +138,7 @@ import { SystemConfigModule } from './config/system-config.module';
     RecallTicketUseCase,
     TransferTicketUseCase,
     ResetDailyQueueUseCase,
+    CleanupTransactionLogUseCase,
   ],
 })
 export class QueueOperationsModule {}

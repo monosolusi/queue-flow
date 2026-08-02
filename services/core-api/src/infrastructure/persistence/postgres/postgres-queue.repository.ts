@@ -141,6 +141,21 @@ export class PostgresQueueRepository implements IQueueRepository, ITicketArchive
       return rowCount ?? 0;
     });
   }
+
+  async purgeArchivedBefore(thresholdMs: number): Promise<number> {
+    return withDbClient(this.pool, async (client) => {
+      // Permanently delete archived tickets older than the threshold (QUE-25 /
+      // FR-ADM-02). The active `tickets` table and `audit_log` are never touched
+      // — only `archived_tickets`. Enlists on the ambient cleanup transaction
+      // via withDbClient so the purge + the TRANSACTION_LOG_CLEANUP audit record
+      // commit atomically (NFR-REL-02).
+      const { rowCount } = await client.query(
+        'DELETE FROM archived_tickets WHERE created_at < $1',
+        [thresholdMs],
+      );
+      return rowCount ?? 0;
+    });
+  }
 }
 
 function toTicket(row: TicketRow): QueueTicket {

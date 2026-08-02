@@ -180,3 +180,30 @@ export interface AuditLogEntryDto {
   readonly after: AuditSnapshot;
   readonly occurredAt: number;
 }
+
+// --- Manual override operations (FR-ADM-02 / QUE-25) -------------------------
+
+/**
+ * Result of `POST /api/system/daily-reset` (the manual daily-reset override).
+ * Mirrors core-api's `ResetDailyQueueResult`. `archivedCount` is present when
+ * the active policy archives prior-day tickets (the default policy does, so it
+ * is usually present — 0 when no prior-day tickets existed).
+ */
+export interface ManualResetResultDto {
+  readonly status: 'reset';
+  readonly date: string;
+  readonly resetTo: number;
+  readonly archivedCount?: number;
+}
+
+/**
+ * Result of `POST /api/system/cleanup-transaction-log` (the transaction-log
+ * cleanup override). Mirrors core-api's `CleanupTransactionLogResult`.
+ * `deletedCount` is how many archived transactions older than the retention
+ * window were permanently removed.
+ */
+export interface CleanupTransactionLogResultDto {
+  readonly status: 'cleaned';
+  readonly retentionDays: number;
+  readonly deletedCount: number;
+}

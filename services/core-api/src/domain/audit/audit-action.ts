@@ -13,6 +13,11 @@
  *   archive store during a daily reset (honors `DailyResetPolicy.archivePrevi-
  *   ousDayData`). Audited on the manual path only, like `MANUAL_RESET`: the
  *   automatic cron-driven reset/archive is not audited.
+ * - `TRANSACTION_LOG_CLEANUP` — permanently deleting archived queue
+ *   transactions older than a manager-chosen retention window (QUE-25 /
+ *   FR-ADM-02). There is no automatic/cron path, so the presence of `actor` is
+ *   the manual marker — mirroring `MANUAL_RESET`. The `audit_log` table itself
+ *   is never purged; only `archived_tickets` is.
  *
  * Keeping this as a closed enum (rather than a free string) makes the audit
  * surface auditable itself: every recorded action is one of these known kinds.
@@ -22,4 +27,5 @@ export enum AuditAction {
   STATE_SCHEMA_CHANGE = 'STATE_SCHEMA_CHANGE',
   ROUTING_CHANGE = 'ROUTING_CHANGE',
   ARCHIVE_PREVIOUS_DAY = 'ARCHIVE_PREVIOUS_DAY',
+  TRANSACTION_LOG_CLEANUP = 'TRANSACTION_LOG_CLEANUP',
 }

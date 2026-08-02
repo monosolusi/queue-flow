@@ -32,4 +32,18 @@ export interface ITicketArchivePort {
    * sequence-reset commit atomically (NFR-REL-02).
    */
   archiveTicketsBefore(thresholdMs: number): Promise<number>;
+
+  /**
+   * Permanently delete every archived ticket whose `createdAt` (epoch-ms) is
+   * strictly before `thresholdMs`, and return the number deleted (QUE-25 /
+   * FR-ADM-02). This is the eviction step that keeps `archived_tickets` from
+   * growing unbounded as each daily reset relocates prior-day tickets into it.
+   * It operates on the **archive store only** — the active tickets table and
+   * the `audit_log` table are never touched (the audit trail is the compliance
+   * record, NFR-SEC-02, and is preserved indefinitely). The threshold is a
+   * scalar epoch-ms computed by the application layer so the date convention
+   * stays out of the domain. Must enlist on any ambient transaction so the
+   * purge + the cleanup audit record commit atomically (NFR-REL-02).
+   */
+  purgeArchivedBefore(thresholdMs: number): Promise<number>;
 }

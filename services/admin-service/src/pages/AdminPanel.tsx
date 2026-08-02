@@ -8,6 +8,7 @@ import type {
   SystemConfigurationDto,
 } from '../api/types';
 import { validateCronExpression } from '../lib/cron';
+import { validateRetentionDays } from '../lib/retention';
 
 /**
  * One editable category row. `id` is carried for categories that already exist
@@ -79,6 +80,23 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
   // one save (mirrors the kiosk double-tap guard; `disabled` alone lags a
   // re-render).
   const submittingRef = useRef(false);
+
+  // --- Manual override operations (FR-ADM-02 / QUE-25) ---
+  // Manual daily-reset state + the synchronous in-flight guard (double-tap).
+  const [resetting, setResetting] = useState(false);
+  const [resetResult, setResetResult] = useState<string | null>(null);
+  const [resetError, setResetError] = useState<string | null>(null);
+  const resetInFlight = useRef(false);
+  // Transaction-log cleanup state + its own in-flight guard. retentionDays
+  // defaults to 90 (the UI default); the backend-enforced 7-day floor is
+  // mirrored client-side via validateRetentionDays so the button stays disabled
+  // on an invalid value.
+  const [retentionDays, setRetentionDays] = useState(90);
+  const [cleaning, setCleaning] = useState(false);
+  const [cleanupResult, setCleanupResult] = useState<string | null>(null);
+  const [cleanupError, setCleanupError] = useState<string | null>(null);
+  const cleanupInFlight = useRef(false);
+  const retentionError = validateRetentionDays(retentionDays);
 
   useEffect(() => {
     let cancelled = false;
@@ -162,6 +180,60 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
+    }
+  }
+
+  // Manual daily-reset override (FR-ADM-02). Confirms before triggering — a
+  // reset rolls the per-category sequence back to its start value and archives
+  // prior-day tickets, so it is a destructive operational action. The
+  // synchronous in-flight guard ensures two taps produce exactly one reset.
+  async function triggerReset() {
+    if (resetInFlight.current) return;
+    if (!window.confirm('Reset antrian harian sekarang? Nomor antrian akan dikembalikan ke awal.')) return;
+    resetInFlight.current = true;
+    setResetting(true);
+    setResetError(null);
+    setResetResult(null);
+    try {
+      const result = await api.triggerManualReset();
+      setResetResult(
+        `Reset berhasil — nomor kembali ke ${result.resetTo} (${result.date})${
+          result.archivedCount !== undefined ? `, ${result.archivedCount} tiket diarsipkan` : ''
+        }.`,
+      );
+    } catch (err) {
+      setResetError(err instanceof Error ? err.message : String(err));
+    } finally {
+      resetInFlight.current = false;
+      setResetting(false);
+    }
+  }
+
+  // Transaction-log cleanup override (FR-ADM-02). Confirms before triggering —
+  // the purge permanently deletes archived transactions older than the
+  // retention window. The synchronous in-flight guard ensures two taps produce
+  // exactly one cleanup. The audit log itself is never purged (server-side).
+  async function runCleanup() {
+    if (cleanupInFlight.current) return;
+    if (retentionError) return;
+    if (
+      !window.confirm(
+        `Hapus permanen transaksi arsip yang lebih lama dari ${retentionDays} hari?`,
+      )
+    )
+      return;
+    cleanupInFlight.current = true;
+    setCleaning(true);
+    setCleanupError(null);
+    setCleanupResult(null);
+    try {
+      const result = await api.cleanupTransactionLogs(retentionDays);
+      setCleanupResult(`${result.deletedCount} transaksi arsip dihapus (retensi ${result.retentionDays} hari).`);
+    } catch (err) {
+      setCleanupError(err instanceof Error ? err.message : String(err));
+    } finally {
+      cleanupInFlight.current = false;
+      setCleaning(false);
     }
   }
 
@@ -370,6 +442,84 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
             </li>
           ))}
         </ul>
+      </section>
+
+      {/* Manual override operations (FR-ADM-02 / QUE-25). */}
+      <section className="config-card" data-testid="manual-operations">
+        <h2 className="config-card__title">Operasi Manual</h2>
+
+        <div className="entry-row entry-row--override">
+          <div className="entry-row__label">
+            <span className="field__label">Reset Antrian Harian</span>
+            <span className="admin-panel__hint">
+              Kembalikan nomor antrian ke awal &amp; arsipkan tiket hari sebelumnya.
+            </span>
+          </div>
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={triggerReset}
+            disabled={resetting}
+            data-testid="manual-reset"
+          >
+            {resetting ? 'Meriset…' : 'Reset Harian Sekarang'}
+          </button>
+        </div>
+        {resetResult && (
+          <p className="admin-panel__success" role="status" data-testid="reset-result">
+            {resetResult}
+          </p>
+        )}
+        {resetError && (
+          <p className="admin-panel__error" data-testid="reset-error">
+            Gagal meriset: {resetError}
+          </p>
+        )}
+
+        <div className="entry-row entry-row--override">
+          <div className="entry-row__label">
+            <span className="field__label">Bersihkan Log Transaksi</span>
+            <span className="admin-panel__hint">
+              Hapus permanen transaksi arsip yang lebih lama dari retensi (audit log tidak dihapus).
+            </span>
+          </div>
+          <label className="field field--inline">
+            <span className="field__label">Retensi (hari)</span>
+            <input
+              className="field__input"
+              type="number"
+              min={7}
+              value={retentionDays}
+              onChange={(e) => setRetentionDays(Number(e.target.value))}
+              aria-label="Retensi hari"
+              data-testid="retention-days"
+            />
+          </label>
+          <button
+            type="button"
+            className="btn btn--secondary"
+            onClick={runCleanup}
+            disabled={cleaning || retentionError !== null}
+            data-testid="cleanup-run"
+          >
+            {cleaning ? 'Membersihkan…' : 'Bersihkan Sekarang'}
+          </button>
+        </div>
+        {retentionError && (
+          <p className="admin-panel__error" data-testid="retention-error">
+            {retentionError}
+          </p>
+        )}
+        {cleanupResult && (
+          <p className="admin-panel__success" role="status" data-testid="cleanup-result">
+            {cleanupResult}
+          </p>
+        )}
+        {cleanupError && (
+          <p className="admin-panel__error" data-testid="cleanup-error">
+            Gagal membersihkan: {cleanupError}
+          </p>
+        )}
       </section>
 
       <footer className="admin-panel__actions">
