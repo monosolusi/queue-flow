@@ -10,12 +10,14 @@ import {
   SYSTEM_CONFIGURATION_REPOSITORY,
 } from '../../../domain/store-config';
 import { AUDIT_LOG_REPOSITORY } from '../../../domain/audit';
+import { REPORT_QUERY_PORT } from '../../../domain/reporting';
 import { TRANSACTION_MANAGER, NoOpTransactionManager } from '../../../domain/shared';
 import {
   InMemoryAuditLogRepository,
   InMemoryCategoryRepository,
   InMemoryCounterRoutingRuleRepository,
   InMemoryQueueRepository,
+  InMemoryReportQueryRepository,
   InMemorySequenceRepository,
   InMemorySystemConfigurationRepository,
 } from '.';
@@ -47,6 +49,20 @@ import { DevSeedService } from '../seed/dev-seed.service';
       useClass: InMemorySystemConfigurationRepository,
     },
     { provide: AUDIT_LOG_REPOSITORY, useClass: InMemoryAuditLogRepository },
+    // QUE-26 reporting read side. The in-memory report query scans the SAME
+    // queue store the live queue uses (active tickets via allActive() + archived
+    // via archivedTickets()), so it must share the QUEUE_REPOSITORY singleton —
+    // wire it through a factory injecting that token (+ CATEGORY_REPOSITORY for
+    // code mapping). The report repo depends on the concrete InMemoryQueueRepo
+    // for its reporting-only read accessors (infrastructure → infrastructure;
+    // the write-side port stays free of list-all methods), so the token-bound
+    // IQueueRepository is narrowed to the concrete class here (dev/test only).
+    {
+      provide: REPORT_QUERY_PORT,
+      inject: [QUEUE_REPOSITORY, CATEGORY_REPOSITORY],
+      useFactory: (queue, categories) =>
+        new InMemoryReportQueryRepository(queue as InMemoryQueueRepository, categories),
+    },
     { provide: TRANSACTION_MANAGER, useClass: NoOpTransactionManager },
     DevSeedService,
   ],
@@ -58,6 +74,7 @@ import { DevSeedService } from '../seed/dev-seed.service';
     SEQUENCE_REPOSITORY,
     SYSTEM_CONFIGURATION_REPOSITORY,
     AUDIT_LOG_REPOSITORY,
+    REPORT_QUERY_PORT,
     TRANSACTION_MANAGER,
   ],
 })

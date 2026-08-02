@@ -126,6 +126,63 @@ describe('QueueTicket aggregate', () => {
     expect(ticket.pullDomainEvents()).toHaveLength(0);
   });
 
+  describe('lifecycle timestamps (QUE-26 — wait-time / service-time metrics)', () => {
+    it('starts with null called/served/completed timestamps', () => {
+      const ticket = newTicket();
+      expect(ticket.calledAt).toBeNull();
+      expect(ticket.servedAt).toBeNull();
+      expect(ticket.completedAt).toBeNull();
+    });
+
+    it('sets calledAt on markCalling, servedAt on startServing, completedAt on complete', () => {
+      const ticket = newTicket();
+      ticket.markCalling(1, policy, FIXED_NOW);
+      expect(ticket.calledAt).toBe(FIXED_NOW);
+      ticket.startServing(policy, FIXED_NOW + 10);
+      expect(ticket.servedAt).toBe(FIXED_NOW + 10);
+      ticket.complete(policy, FIXED_NOW + 30);
+      expect(ticket.completedAt).toBe(FIXED_NOW + 30);
+    });
+
+    it('recall re-sets calledAt to the recall time (fresh call attempt)', () => {
+      const ticket = newTicket();
+      ticket.markCalling(1, policy, FIXED_NOW);
+      ticket.skip(policy, FIXED_NOW + 5);
+      ticket.recall(policy, FIXED_NOW + 20);
+      expect(ticket.calledAt).toBe(FIXED_NOW + 20);
+    });
+
+    it('transfer clears all three timestamps (fresh lifecycle under new category)', () => {
+      const transferPolicy = new StateMachine(
+        StateSchema.of(['WAITING', 'CALLING', 'SERVING', 'SKIPPED', 'COMPLETED']),
+        [
+          ['WAITING', 'CALLING', 'Panggil Berikutnya'],
+          ['CALLING', 'SERVING', 'Mulai melayani'],
+          ['CALLING', 'SKIPPED', 'Lewati / Absen'],
+          ['SERVING', 'COMPLETED', 'Selesai Layan'],
+          ['CALLING', 'WAITING', 'Pindah Kategori'],
+        ].map(([from, to, actionLabel]) => StateTransitionRule.of(from, to, actionLabel)),
+      );
+      const ticket = newTicket('CAT-A');
+      ticket.markCalling(3, transferPolicy, FIXED_NOW); // sets calledAt
+      ticket.pullDomainEvents();
+
+      ticket.transferTo(
+        'CAT-B',
+        TicketNumber.of('B', 7),
+        TicketStatus.WAITING,
+        transferPolicy,
+        FIXED_NOW + 40,
+      );
+
+      // Transfer re-enters the queue as a fresh ticket — the prior lifecycle
+      // timestamps are cleared (served/completed were never set; called is reset).
+      expect(ticket.calledAt).toBeNull();
+      expect(ticket.servedAt).toBeNull();
+      expect(ticket.completedAt).toBeNull();
+    });
+  });
+
   describe('transferTo (pindah kategori — FR-CLR-03)', () => {
     /**
      * The default state machine has no transfer edge. A transfer is a

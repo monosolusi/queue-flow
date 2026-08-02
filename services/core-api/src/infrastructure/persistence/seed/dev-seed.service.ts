@@ -20,7 +20,7 @@ import {
 } from '../../../domain/store-config';
 import { Identifier } from '../../../domain/shared';
 import { PriorityPolicy } from '../../../domain/shared/priority-policy';
-import { toDateKey } from '../../../application/queue';
+import { toDateKey } from '../../../application/shared/date';
 
 /**
  * DEV-ONLY seed. Populates the in-memory repositories with the PRD §7 reference
@@ -130,6 +130,9 @@ export class DevSeedService implements OnModuleInit {
         counterId: null,
         createdAt: t.createdAt,
         updatedAt: t.createdAt,
+        calledAt: null,
+        servedAt: null,
+        completedAt: null,
       });
       await this.queue.save(ticket);
     }

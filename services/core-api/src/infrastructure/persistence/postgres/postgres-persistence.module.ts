@@ -10,6 +10,7 @@ import {
   SYSTEM_CONFIGURATION_REPOSITORY,
 } from '../../../domain/store-config';
 import { AUDIT_LOG_REPOSITORY } from '../../../domain/audit';
+import { REPORT_QUERY_PORT } from '../../../domain/reporting';
 import { TRANSACTION_MANAGER } from '../../../domain/shared';
 import { PG_CONNECTION, createPgPool } from './postgres-connection.provider';
 import { PostgresQueueRepository } from './postgres-queue.repository';
@@ -18,6 +19,7 @@ import { PostgresCategoryRepository } from './postgres-category.repository';
 import { PostgresCounterRoutingRuleRepository } from './postgres-counter-routing-rule.repository';
 import { PostgresSystemConfigurationRepository } from './postgres-system-configuration.repository';
 import { PostgresAuditLogRepository } from './postgres-audit-log.repository';
+import { PostgresReportQueryRepository } from './postgres-report-query.repository';
 import { PostgresTransactionManager } from './postgres-transaction-manager';
 import { PostgresMigrationRunner } from './migration-runner';
 
@@ -76,6 +78,12 @@ import { PostgresMigrationRunner } from './migration-runner';
       useFactory: (pool) => new PostgresAuditLogRepository(pool),
       inject: [PG_CONNECTION],
     },
+    // QUE-26 reporting read side — raw-SQL CQRS read over tickets + archived_tickets.
+    {
+      provide: REPORT_QUERY_PORT,
+      useFactory: (pool) => new PostgresReportQueryRepository(pool),
+      inject: [PG_CONNECTION],
+    },
     {
       provide: TRANSACTION_MANAGER,
       useFactory: (pool) => new PostgresTransactionManager(pool),
@@ -91,6 +99,7 @@ import { PostgresMigrationRunner } from './migration-runner';
     COUNTER_ROUTING_RULE_REPOSITORY,
     SYSTEM_CONFIGURATION_REPOSITORY,
     AUDIT_LOG_REPOSITORY,
+    REPORT_QUERY_PORT,
     TRANSACTION_MANAGER,
   ],
 })

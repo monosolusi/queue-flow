@@ -104,6 +104,9 @@ describe('Read-only REST surface (integration — QUE-19 + QUE-17)', () => {
         counterId: 1,
         createdAt: 50,
         updatedAt: 50,
+        calledAt: 50,
+        servedAt: null,
+        completedAt: null,
       }),
     );
   });

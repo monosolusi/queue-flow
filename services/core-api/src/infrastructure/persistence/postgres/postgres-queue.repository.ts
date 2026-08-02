@@ -20,6 +20,9 @@ interface TicketRow {
   counter_id: number | null;
   created_at: string;
   updated_at: string;
+  called_at: string | null;
+  served_at: string | null;
+  completed_at: string | null;
 }
 
 /**
@@ -37,14 +40,17 @@ export class PostgresQueueRepository implements IQueueRepository, ITicketArchive
   async save(ticket: QueueTicket): Promise<void> {
     await withDbClient(this.pool, async (client) => {
       await client.query(
-        `INSERT INTO tickets (id, ticket_number, category_id, status, counter_id, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO tickets (id, ticket_number, category_id, status, counter_id, created_at, updated_at, called_at, served_at, completed_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT (id) DO UPDATE SET
            ticket_number = EXCLUDED.ticket_number,
            category_id   = EXCLUDED.category_id,
            status        = EXCLUDED.status,
            counter_id    = EXCLUDED.counter_id,
-           updated_at    = EXCLUDED.updated_at`,
+           updated_at    = EXCLUDED.updated_at,
+           called_at     = EXCLUDED.called_at,
+           served_at     = EXCLUDED.served_at,
+           completed_at  = EXCLUDED.completed_at`,
         [
           ticket.id.value,
           ticket.ticketNumber.formatted(),
@@ -53,6 +59,9 @@ export class PostgresQueueRepository implements IQueueRepository, ITicketArchive
           ticket.counterId,
           ticket.createdAt,
           ticket.updatedAt,
+          ticket.calledAt,
+          ticket.servedAt,
+          ticket.completedAt,
         ],
       );
     });
@@ -123,10 +132,10 @@ export class PostgresQueueRepository implements IQueueRepository, ITicketArchive
       const { rowCount } = await client.query(
         `WITH moved AS (
            DELETE FROM tickets WHERE created_at < $1
-           RETURNING id, ticket_number, category_id, status, counter_id, created_at, updated_at
+           RETURNING id, ticket_number, category_id, status, counter_id, created_at, updated_at, called_at, served_at, completed_at
          )
-         INSERT INTO archived_tickets (id, ticket_number, category_id, status, counter_id, created_at, updated_at)
-         SELECT id, ticket_number, category_id, status, counter_id, created_at, updated_at FROM moved`,
+         INSERT INTO archived_tickets (id, ticket_number, category_id, status, counter_id, created_at, updated_at, called_at, served_at, completed_at)
+         SELECT id, ticket_number, category_id, status, counter_id, created_at, updated_at, called_at, served_at, completed_at FROM moved`,
         [thresholdMs],
       );
       return rowCount ?? 0;
@@ -143,5 +152,8 @@ function toTicket(row: TicketRow): QueueTicket {
     counterId: row.counter_id,
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
+    calledAt: row.called_at === null ? null : Number(row.called_at),
+    servedAt: row.served_at === null ? null : Number(row.served_at),
+    completedAt: row.completed_at === null ? null : Number(row.completed_at),
   });
 }

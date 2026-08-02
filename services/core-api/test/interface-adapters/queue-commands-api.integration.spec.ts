@@ -252,6 +252,9 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
       counterId: 1,
       createdAt: 50,
       updatedAt: 50,
+      calledAt: 50,
+      servedAt: null,
+      completedAt: null,
     });
     await queue.save(calling);
 
