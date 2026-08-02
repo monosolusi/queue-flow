@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
@@ -6,6 +6,8 @@ import { AdminPanel } from './AdminPanel';
 import type { IAdminApi } from '../api/admin-api';
 import {
   DEFAULT_STATE_MACHINE,
+  type CleanupTransactionLogResultDto,
+  type ManualResetResultDto,
   type SaveSystemConfigurationPayload,
   type SystemConfigurationDto,
 } from '../api/types';
@@ -39,6 +41,10 @@ function configuredStore(): SystemConfigurationDto {
 function makeApi(
   config: SystemConfigurationDto = configuredStore(),
   saveImpl?: (payload: SaveSystemConfigurationPayload) => Promise<{ isInitialSetupCompleted: boolean; storeName: string }>,
+  overrides?: {
+    manualReset?: () => Promise<ManualResetResultDto>;
+    cleanup?: (retentionDays: number) => Promise<CleanupTransactionLogResultDto>;
+  },
 ) {
   const save = vi.fn(
     saveImpl ??
@@ -48,6 +54,25 @@ function makeApi(
   // The panel reloads the config after a successful save; default to returning
   // the same config (with ids preserved) so the post-save repopulate succeeds.
   const getConfig = vi.fn(() => Promise.resolve(config));
+  const triggerManualReset = vi.fn(
+    overrides?.manualReset ??
+      (() =>
+        Promise.resolve<ManualResetResultDto>({
+          status: 'reset',
+          date: '2026-01-15',
+          resetTo: 1,
+          archivedCount: 0,
+        })),
+  );
+  const cleanupTransactionLogs = vi.fn(
+    overrides?.cleanup ??
+      ((_retentionDays: number) =>
+        Promise.resolve<CleanupTransactionLogResultDto>({
+          status: 'cleaned',
+          retentionDays: 90,
+          deletedCount: 5,
+        })),
+  );
   const api: IAdminApi = {
     getSystemConfig: getConfig,
     saveSystemConfig: save,
@@ -55,8 +80,10 @@ function makeApi(
     getDailyReport: vi.fn(),
     getCounterPerformance: vi.fn(),
     getAuditLog: vi.fn(),
+    triggerManualReset,
+    cleanupTransactionLogs,
   };
-  return { api, save, getConfig };
+  return { api, save, getConfig, triggerManualReset, cleanupTransactionLogs };
 }
 
 function renderPanel(api: IAdminApi) {
@@ -244,5 +271,104 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     await userEvent.type(screen.getByLabelText('Cron expression'), '0 0 * * *');
     expect(screen.queryByTestId('cron-error')).not.toBeInTheDocument();
     expect(screen.getByTestId('admin-save')).not.toBeDisabled();
+  });
+});
+
+describe('AdminPanel manual override operations (QUE-25 / FR-ADM-02)', () => {
+  beforeEach(() => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function renderOverridePanel() {
+    const made = makeApi();
+    renderPanel(made.api);
+    return made;
+  }
+
+  it('manual-reset button triggers triggerManualReset and shows the result', async () => {
+    const { triggerManualReset } = renderOverridePanel();
+    await screen.findByText('Apotek Sehat');
+
+    await userEvent.click(screen.getByTestId('manual-reset'));
+
+    expect(triggerManualReset).toHaveBeenCalledTimes(1);
+    expect(await screen.findByTestId('reset-result')).toBeInTheDocument();
+    expect(screen.getByTestId('reset-result').textContent).toContain('kembali ke 1');
+  });
+
+  it('two rapid manual-reset taps produce exactly one call (synchronous double-tap guard)', async () => {
+    const { triggerManualReset } = renderOverridePanel();
+    await screen.findByText('Apotek Sehat');
+
+    // Two clicks land in the same tick — the in-flight ref guard drops the
+    // second so only one reset is sent (mirrors the kiosk double-tap guard).
+    fireEvent.click(screen.getByTestId('manual-reset'));
+    fireEvent.click(screen.getByTestId('manual-reset'));
+
+    await screen.findByTestId('reset-result');
+    expect(triggerManualReset).toHaveBeenCalledTimes(1);
+  });
+
+  it('manual-reset does not fire when the confirm dialog is cancelled', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const { triggerManualReset } = renderOverridePanel();
+    await screen.findByText('Apotek Sehat');
+
+    await userEvent.click(screen.getByTestId('manual-reset'));
+
+    expect(triggerManualReset).not.toHaveBeenCalled();
+  });
+
+  it('manual-reset surfaces an error when the call rejects', async () => {
+    const { api, triggerManualReset } = makeApi(configuredStore(), undefined, {
+      manualReset: () => Promise.reject(new Error('core-api down')),
+    });
+    renderPanel(api);
+    await screen.findByText('Apotek Sehat');
+
+    await userEvent.click(screen.getByTestId('manual-reset'));
+
+    expect(await screen.findByTestId('reset-error')).toBeInTheDocument();
+    expect(screen.getByTestId('reset-error').textContent).toContain('core-api down');
+    expect(triggerManualReset).toHaveBeenCalledTimes(1);
+  });
+
+  it('cleanup button calls cleanupTransactionLogs with the retention value and shows the result', async () => {
+    const { cleanupTransactionLogs } = renderOverridePanel();
+    await screen.findByText('Apotek Sehat');
+
+    await userEvent.click(screen.getByTestId('cleanup-run'));
+
+    expect(cleanupTransactionLogs).toHaveBeenCalledWith(90);
+    expect(await screen.findByTestId('cleanup-result')).toBeInTheDocument();
+    expect(screen.getByTestId('cleanup-result').textContent).toContain('5 transaksi');
+  });
+
+  it('cleanup button is disabled and shows an error when retentionDays is below the 7-day floor', async () => {
+    const { cleanupTransactionLogs } = renderOverridePanel();
+    await screen.findByText('Apotek Sehat');
+
+    // Controlled numeric input bound to state — set via fireEvent.change per
+    // the CLAUDE.md controlled-numeric-input gotcha.
+    fireEvent.change(screen.getByTestId('retention-days'), { target: { value: '1' } });
+
+    expect(screen.getByTestId('retention-error')).toBeInTheDocument();
+    expect(screen.getByTestId('cleanup-run')).toBeDisabled();
+
+    await userEvent.click(screen.getByTestId('cleanup-run'));
+    expect(cleanupTransactionLogs).not.toHaveBeenCalled();
+  });
+
+  it('cleanup does not fire when the confirm dialog is cancelled', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const { cleanupTransactionLogs } = renderOverridePanel();
+    await screen.findByText('Apotek Sehat');
+
+    await userEvent.click(screen.getByTestId('cleanup-run'));
+
+    expect(cleanupTransactionLogs).not.toHaveBeenCalled();
   });
 });

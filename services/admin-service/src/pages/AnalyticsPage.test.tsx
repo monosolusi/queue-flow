@@ -105,6 +105,8 @@ function makeApi(
     getDailyReport,
     getCounterPerformance,
     getAuditLog,
+    triggerManualReset: vi.fn(),
+    cleanupTransactionLogs: vi.fn(),
   };
   return { api, stubs: { getDailyReport, getCounterPerformance, getAuditLog } };
 }

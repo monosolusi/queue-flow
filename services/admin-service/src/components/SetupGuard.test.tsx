@@ -28,6 +28,8 @@ function makeApi(config: SystemConfigurationDto): IAdminApi {
     getDailyReport: vi.fn(),
     getCounterPerformance: vi.fn(),
     getAuditLog: vi.fn(),
+    triggerManualReset: vi.fn(),
+    cleanupTransactionLogs: vi.fn(),
   };
 }
 
@@ -72,6 +74,8 @@ describe('SetupGuard (FR-WZD-01)', () => {
       getDailyReport: vi.fn(),
       getCounterPerformance: vi.fn(),
       getAuditLog: vi.fn(),
+      triggerManualReset: vi.fn(),
+      cleanupTransactionLogs: vi.fn(),
     };
     renderGuard(api);
     expect(await screen.findByText('Wizard Page')).toBeInTheDocument();

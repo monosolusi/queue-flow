@@ -35,6 +35,8 @@ function makeApi(
     getDailyReport: vi.fn(),
     getCounterPerformance: vi.fn(),
     getAuditLog: vi.fn(),
+    triggerManualReset: vi.fn(),
+    cleanupTransactionLogs: vi.fn(),
   };
   return { api, save };
 }

@@ -7,6 +7,7 @@ import {
 import {
   DomainError,
   EntityNotFoundException,
+  InvalidArgumentException,
   InvalidStateTransitionException,
   InvalidValueObjectException,
   SystemNotConfiguredException,
@@ -47,6 +48,9 @@ export class DomainExceptionFilter implements ExceptionFilter {
       return HttpStatus.CONFLICT;
     }
     if (exception instanceof InvalidValueObjectException) {
+      return HttpStatus.BAD_REQUEST;
+    }
+    if (exception instanceof InvalidArgumentException) {
       return HttpStatus.BAD_REQUEST;
     }
     return HttpStatus.INTERNAL_SERVER_ERROR;

@@ -89,6 +89,24 @@ export class InMemoryQueueRepository implements IQueueRepository, ITicketArchive
     return toMove.length;
   }
 
+  async purgeArchivedBefore(thresholdMs: number): Promise<number> {
+    // Permanently delete archived tickets older than the threshold (QUE-25 /
+    // FR-ADM-02). The active store + audit log are never touched. NOTE: like
+    // archiveTicketsBefore, this mutation is NOT rolled back on a transaction
+    // failure — the in-memory NoOpTransactionManager is a pure pass-through, so
+    // a cleanup throw after the purge leaves rows deleted-but-not-audited. This
+    // is the documented dev-only limitation (gap-free durability is the
+    // Postgres repo's job); do not treat the in-memory impl as a true LSP
+    // substitute for the Postgres impl on the purge+audit failure path.
+    const before = this.archivedTicketsList.length;
+    for (let i = this.archivedTicketsList.length - 1; i >= 0; i--) {
+      if (this.archivedTicketsList[i].createdAt < thresholdMs) {
+        this.archivedTicketsList.splice(i, 1);
+      }
+    }
+    return before - this.archivedTicketsList.length;
+  }
+
   private waiting(): QueueTicket[] {
     return [...this.tickets.values()].filter(
       (t) => t.currentStatus === TicketStatus.WAITING,

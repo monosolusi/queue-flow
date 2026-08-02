@@ -1,7 +1,9 @@
 import type {
   AuditLogEntryDto,
+  CleanupTransactionLogResultDto,
   CounterPerformanceDto,
   DailyReportDto,
+  ManualResetResultDto,
   SaveSystemConfigurationPayload,
   SaveSystemConfigurationResult,
   StateMachineDto,
@@ -10,9 +12,10 @@ import type {
 
 /**
  * The slice of core-api the admin panel consumes (ISP — only config read/save,
- * the active state-machine read, and the reporting / audit-trail read surface;
- * never leaks caller/kiosk/tv DTOs). Implementations live behind this interface
- * so tests can substitute a fake without touching the network.
+ * the active state-machine read, the reporting / audit-trail read surface, and
+ * the two manual override operations; never leaks caller/kiosk/tv DTOs).
+ * Implementations live behind this interface so tests can substitute a fake
+ * without touching the network.
  */
 export interface IAdminApi {
   getSystemConfig(): Promise<SystemConfigurationDto>;
@@ -24,6 +27,10 @@ export interface IAdminApi {
   getCounterPerformance(counterId: number, date: string): Promise<CounterPerformanceDto>;
   /** The local audit trail (human-initiated mutations), oldest-first. */
   getAuditLog(): Promise<readonly AuditLogEntryDto[]>;
+  /** Manual daily-reset override — `POST /api/system/daily-reset` (FR-ADM-02). */
+  triggerManualReset(): Promise<ManualResetResultDto>;
+  /** Transaction-log cleanup override — `POST /api/system/cleanup-transaction-log` (FR-ADM-02). */
+  cleanupTransactionLogs(retentionDays: number): Promise<CleanupTransactionLogResultDto>;
 }
 
 const API_BASE = '/api';
@@ -62,6 +69,25 @@ async function putJson<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/** Generic POST helper that throws on non-2xx so callers can try/catch. */
+async function postJson<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let detail = '';
+    try {
+      detail = (await res.json())?.message ?? '';
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new Error(`POST ${path} -> ${res.status}${detail ? `: ${detail}` : ''}`);
+  }
+  return res.json() as Promise<T>;
+}
+
 /**
  * Fetch-based {@link IAdminApi} using relative `/api` URLs — same-origin behind
  * NGINX in production, proxied to core-api:3000 by Vite in dev. No remote calls
@@ -87,5 +113,13 @@ export class AdminApi implements IAdminApi {
   }
   getAuditLog(): Promise<readonly AuditLogEntryDto[]> {
     return getJson<readonly AuditLogEntryDto[]>('/audit/log');
+  }
+  triggerManualReset(): Promise<ManualResetResultDto> {
+    return postJson<ManualResetResultDto>('/system/daily-reset');
+  }
+  cleanupTransactionLogs(retentionDays: number): Promise<CleanupTransactionLogResultDto> {
+    return postJson<CleanupTransactionLogResultDto>('/system/cleanup-transaction-log', {
+      retentionDays,
+    });
   }
 }
