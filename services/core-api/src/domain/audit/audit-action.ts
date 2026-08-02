@@ -18,6 +18,13 @@
  *   FR-ADM-02). There is no automatic/cron path, so the presence of `actor` is
  *   the manual marker — mirroring `MANUAL_RESET`. The `audit_log` table itself
  *   is never purged; only `archived_tickets` is.
+ * - `DAILY_RESET_POLICY_CHANGE` — editing the daily-reset policy (mode, cron
+ *   expression, reset target, or archive flag) via the wizard / admin panel
+ *   (QUE-32 / NFR-SEC-02). Recorded inside the same tx as the config save, but
+ *   **only when the policy actually changed** (before/after scalar snapshot) —
+ *   unlike `STATE_SCHEMA_CHANGE` / `ROUTING_CHANGE`, which are recorded on
+ *   every save. Pairs with the dynamic scheduler re-arm so a policy edit is
+ *   both observable (audit) and immediately effective (re-arm) without restart.
  *
  * Keeping this as a closed enum (rather than a free string) makes the audit
  * surface auditable itself: every recorded action is one of these known kinds.
@@ -28,4 +35,5 @@ export enum AuditAction {
   ROUTING_CHANGE = 'ROUTING_CHANGE',
   ARCHIVE_PREVIOUS_DAY = 'ARCHIVE_PREVIOUS_DAY',
   TRANSACTION_LOG_CLEANUP = 'TRANSACTION_LOG_CLEANUP',
+  DAILY_RESET_POLICY_CHANGE = 'DAILY_RESET_POLICY_CHANGE',
 }

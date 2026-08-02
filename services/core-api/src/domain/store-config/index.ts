@@ -1,6 +1,7 @@
 export * from './counter-routing-rule.aggregate';
 export * from './repositories/counter-routing-rule.repository';
 export * from './repositories/system-configuration.repository';
+export * from './scheduler.port';
 export * from './state-machine';
 export * from './system-configuration.aggregate';
 export * from './value-objects/daily-reset-policy';

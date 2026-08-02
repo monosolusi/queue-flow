@@ -1,14 +1,16 @@
 /**
  * Client-side cron expression validation (FR-WZD-05 / QUE-16). Mirrors what the
  * `cron` library's `CronJob` accepts at boot so the wizard / admin panel never
- * submits an expression the scheduler would reject. The backend
- * `DailyResetPolicy` value object only checks the string is **non-empty** when
- * `mode === AUTOMATIC_CRON`; backend cron-*format* enforcement is deferred to
- * the Hardening milestone (it pairs with scheduler re-arm, where an invalid cron
- * surfaces as a boot error). Until then this client check is what keeps an
- * invalid cron unconstructable — following the CLAUDE.md rule: mirror the VO
- * invariant in client validation AND use a constrained check so invalid states
- * cannot be submitted, rather than relying on a backend 400 round-trip.
+ * submits an expression the scheduler would reject. Since QUE-32 the backend
+ * `DailyResetPolicy` value object **also** enforces this same 5-field grammar at
+ * construction (via `isValidCronExpression` in `core-api`'s
+ * `domain/store-config/value-objects/cron-expression.ts`) — defense-in-depth so
+ * a direct API call bypassing this client guard cannot persist an unrunnable
+ * cron. The two grammars MUST stay in lock-step; a divergence is a bug. This
+ * client check stays the first line of defense — following the CLAUDE.md rule:
+ * mirror the VO invariant in client validation AND use a constrained check so
+ * invalid states cannot be submitted, rather than relying on a backend 400
+ * round-trip.
  *
  * Validates the standard 5-field expression (minute hour day-of-month month
  * day-of-week). Each field accepts star, plain numbers, comma lists, ranges
