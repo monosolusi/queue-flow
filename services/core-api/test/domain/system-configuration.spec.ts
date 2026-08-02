@@ -88,6 +88,49 @@ describe('DailyResetPolicy', () => {
       InvalidValueObjectException,
     );
   });
+
+  // QUE-32: backend cron-format enforcement — mirrors the client
+  // `validateCronExpression` guard so a direct API call cannot persist a cron
+  // the boot-time / re-arm `CronJob` would reject.
+  it.each([
+    '0 0 * * *',
+    '*/5 * * * *',
+    '0 1-6 * * *',
+    '0 0 1,15 * *',
+    '0 0 1 */2 *',
+    '0 0 * * 7', // 7 = Sunday, accepted alongside 0
+  ])('accepts a valid 5-field cron expression (%s)', (cron) => {
+    expect(() => DailyResetPolicy.of(DailyResetMode.AUTOMATIC_CRON, cron)).not.toThrow();
+  });
+
+  it.each([
+    ['0 99 * * *', 'minute out of range'],
+    ['0 24 * * *', 'hour out of range'],
+    ['* *', 'too few fields'],
+    ['0 0 * *', 'too few fields'],
+    ['0 0 * * * *', 'too many fields'],
+    ['0 0 0 * *', 'day-of-month below range'],
+    ['0 0 * 13 *', 'month out of range'],
+    ['0 0 * * 8', 'day-of-week out of range (8 > 7)'],
+    ['a b c d e', 'non-numeric'],
+    ['0-99 * * * *', 'range high out of range'],
+    ['*/0 * * * *', 'zero step'],
+    ['0 0 * jan *', 'named month not supported'],
+    ['0 0 * * mon', 'named day not supported'],
+    ['', 'empty'],
+    ['   ', 'whitespace only'],
+  ])('rejects a malformed cron expression %j (%s) for AUTOMATIC_CRON', (cron) => {
+    expect(() => DailyResetPolicy.of(DailyResetMode.AUTOMATIC_CRON, cron)).toThrow(
+      InvalidValueObjectException,
+    );
+  });
+
+  it('does not validate the cron format for MANUAL mode (cron is ignored)', () => {
+    // MANUAL mode may carry a null or even an ill-formed cron unchecked — it is
+    // never armed, so format is moot. (The admin/wizard client clears the cron
+    // field when switching to MANUAL; the VO must not 400 on a stale value.)
+    expect(() => DailyResetPolicy.of(DailyResetMode.MANUAL, 'not a cron')).not.toThrow();
+  });
 });
 
 describe('SystemConfiguration aggregate', () => {

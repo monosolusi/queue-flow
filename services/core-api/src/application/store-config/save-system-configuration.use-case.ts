@@ -8,6 +8,7 @@ import { StateMachine } from '../../domain/store-config';
 import { StateSchema } from '../../domain/store-config';
 import { StateTransitionRule } from '../../domain/store-config';
 import { DailyResetPolicy, DailyResetMode } from '../../domain/store-config';
+import { type IDailyResetSchedulerPort } from '../../domain/store-config';
 import {
   Identifier,
   InvalidValueObjectException,
@@ -86,6 +87,25 @@ function routingSnapshot(r: CounterRoutingRule): ConfigRoutingRuleDto {
     priorityPolicy: r.priorityPolicy,
   };
 }
+/**
+ * Minimal projection of a {@link DailyResetPolicy} for the
+ * `DAILY_RESET_POLICY_CHANGE` audit before/after snapshot (QUE-32). Carries
+ * the four policy scalars as a plain object so the audit row is self-describing
+ * without serializing the value object.
+ */
+function dailyResetPolicySnapshot(p: DailyResetPolicy): {
+  mode: DailyResetMode;
+  cronExpression: string | null;
+  resetTicketNumberTo: number;
+  archivePreviousDayData: boolean;
+} {
+  return {
+    mode: p.mode,
+    cronExpression: p.cronExpression,
+    resetTicketNumberTo: p.resetTicketNumberTo,
+    archivePreviousDayData: p.archivePreviousDayData,
+  };
+}
 
 /**
  * The wizard / admin save (FR-WZD-02..06). Validates and persists the full
@@ -97,12 +117,24 @@ function routingSnapshot(r: CounterRoutingRule): ConfigRoutingRuleDto {
  * the same tx — `STATE_SCHEMA_CHANGE` (state-machine before/after) and
  * `ROUTING_CHANGE` (categories + routings before/after) — so a power cut leaves
  * either the whole configuration committed or nothing (NFR-REL-02 / NFR-SEC-02).
+ * A third entry, `DAILY_RESET_POLICY_CHANGE`, is appended **only when the
+ * daily-reset policy actually changed** (before/after scalar snapshot) — so a
+ * policy-only edit has its own audit action, and an edit that leaves the policy
+ * untouched records nothing spurious (QUE-32 / NFR-SEC-02).
  *
- * `recordAudit` and `txManager` are optional with no-op defaults, so unit tests
- * can construct the use case directly with just the three repository ports.
- * Depends only on ports + the application-layer audit seam (DIP): no ORM, HTTP
- * framework, or I/O library (NFR-MNT-01). The controller is the anti-corruption
- * translation point that turns the HTTP wizard payload into this command.
+ * After the tx commits, when the daily-reset policy changed (or this is the
+ * initial setup), the use case calls {@link IDailyResetSchedulerPort.reArm} so
+ * the running cron reflects the new policy without a process restart (QUE-32 /
+ * FR-ADM-01). Re-arm is post-commit by design: a rolled-back save never re-arms
+ * to an un-persisted policy (NFR-REL-02), the same dispatch-after-commit pattern
+ * the daily-reset engine uses for `SYSTEM_RESET`.
+ *
+ * `recordAudit`, `txManager`, and `scheduler` are optional with no-op/null
+ * defaults, so unit tests can construct the use case directly with just the
+ * three repository ports. Depends only on ports + the application-layer audit
+ * seam (DIP): no ORM, HTTP framework, or I/O library (NFR-MNT-01). The
+ * controller is the anti-corruption translation point that turns the HTTP
+ * wizard payload into this command.
  */
 export class SaveSystemConfigurationUseCase {
   constructor(
@@ -111,6 +143,7 @@ export class SaveSystemConfigurationUseCase {
     private readonly routingRules: ICounterRoutingRuleRepository,
     private readonly txManager: ITransactionManager = new NoOpTransactionManager(),
     private readonly recordAudit: RecordAuditEntryUseCase | null = null,
+    private readonly scheduler: IDailyResetSchedulerPort | null = null,
   ) {}
 
   public async execute(
@@ -130,14 +163,29 @@ export class SaveSystemConfigurationUseCase {
     const codeToId = new Map(newCategories.map((c) => [c.code, c.id.value]));
     const newRules = this.buildRoutingRules(command.routingRules, codeToId);
 
+    // Whether the daily-reset policy changed (or this is the initial setup).
+    // Hoisted out of the tx so the post-commit re-arm (below) can read it
+    // without re-reading the config. Default `true` covers the initial-setup
+    // case (oldConfig null → policy goes from nonexistent to set, must arm).
+    let dailyResetPolicyChanged = true;
+
     // 2. Persist everything in one tx. The pre-mutation reads (for the audit
     //    before-snapshots and for preserving the singleton id + setup flag) are
     //    done INSIDE the transaction so they observe the same DB state being
     //    mutated — a concurrent writer cannot interleave between the snapshot
     //    read and the write (NFR-REL-02 / NFR-SEC-02).
-    return this.txManager.runInTransaction(async () => {
+    const result = await this.txManager.runInTransaction(async () => {
       // Capture pre-mutation state for audit before-snapshots + id preservation.
       const oldConfig = await this.config.get();
+      const oldPolicy = oldConfig ? oldConfig.dailyResetPolicy : null;
+      // Structural equality over the four policy props (mode, cron, resetTo,
+      // archive). This is *structural*, not *operational*: e.g. a MANUAL→MANUAL
+      // save whose persisted cron string differs would count as a change even
+      // though no cron is armed either way. In practice the admin/wizard client
+      // nulls the cron field on MANUAL mode (QUE-16 finalize), so a stale cron
+      // only reaches here via a direct API call — acceptable, and the audit
+      // before/after snapshot accurately reflects the stored VO either way.
+      dailyResetPolicyChanged = oldPolicy ? !oldPolicy.equals(dailyResetPolicy) : true;
       const oldStateMachine: StateMachineDto | null = oldConfig
         ? projectStateMachine(oldConfig.stateMachine)
         : null;
@@ -184,6 +232,18 @@ export class SaveSystemConfigurationUseCase {
             routingRules: newRules.map(routingSnapshot),
           },
         });
+        // QUE-32: a policy-only edit has its own audit action — recorded ONLY
+        // when the daily-reset policy actually changed (unlike the two entries
+        // above, which are recorded on every save). On initial setup `oldPolicy`
+        // is null and the before-snapshot is null.
+        if (dailyResetPolicyChanged) {
+          await this.recordAudit.execute({
+            actor: command.actor,
+            action: AuditAction.DAILY_RESET_POLICY_CHANGE,
+            before: oldPolicy ? toSnapshot(dailyResetPolicySnapshot(oldPolicy)) : null,
+            after: toSnapshot(dailyResetPolicySnapshot(dailyResetPolicy)),
+          });
+        }
       }
 
       return {
@@ -191,6 +251,18 @@ export class SaveSystemConfigurationUseCase {
         storeName: system.storeName,
       };
     });
+
+    // 3. Post-commit: re-arm the daily-reset cron when the policy changed (or
+    //    this was the initial setup) so the edit takes effect without a restart
+    //    (QUE-32 / FR-ADM-01). Post-commit by design — a rolled-back save (the
+    //    tx above would have thrown) never reaches here, so the scheduler is
+    //    never re-armed to an un-persisted policy (NFR-REL-02). `scheduler` is
+    //    null in unit tests that don't care about the cron.
+    if (this.scheduler && dailyResetPolicyChanged) {
+      await this.scheduler.reArm();
+    }
+
+    return result;
   }
 
   private buildStateMachine(dto: WizardStateMachineDto): StateMachine {

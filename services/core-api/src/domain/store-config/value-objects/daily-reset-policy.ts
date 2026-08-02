@@ -1,5 +1,6 @@
 import { InvalidValueObjectException } from '../../shared/errors';
 import { ValueObject } from '../../shared/value-object';
+import { isValidCronExpression } from './cron-expression';
 
 export enum DailyResetMode {
   AUTOMATIC_CRON = 'AUTOMATIC_CRON',
@@ -28,10 +29,23 @@ export class DailyResetPolicy extends ValueObject<DailyResetPolicyProps> {
     resetTicketNumberTo = 1,
     archivePreviousDayData = true,
   ): DailyResetPolicy {
-    if (mode === DailyResetMode.AUTOMATIC_CRON && !cronExpression) {
-      throw new InvalidValueObjectException(
-        'AUTOMATIC_CRON mode requires a cron expression',
-      );
+    if (mode === DailyResetMode.AUTOMATIC_CRON) {
+      if (!cronExpression) {
+        throw new InvalidValueObjectException(
+          'AUTOMATIC_CRON mode requires a cron expression',
+        );
+      }
+      // Format enforcement (QUE-32): a non-empty cron for AUTOMATIC_CRON must
+      // also be a syntactically valid 5-field expression — otherwise it would
+      // crash the boot-time / re-arm `CronJob`. Mirrors the client
+      // `validateCronExpression` guard (defense-in-depth: a direct API call
+      // bypassing the client must not persist an unrunnable cron). MANUAL mode
+      // may carry a null/stale cron unchecked — it is never armed.
+      if (!isValidCronExpression(cronExpression)) {
+        throw new InvalidValueObjectException(
+          `AUTOMATIC_CRON mode requires a valid 5-field cron expression, got '${cronExpression}'`,
+        );
+      }
     }
     if (!Number.isInteger(resetTicketNumberTo) || resetTicketNumberTo < 1) {
       throw new InvalidValueObjectException(
