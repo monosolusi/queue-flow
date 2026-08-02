@@ -166,10 +166,15 @@ export function TvStoreProvider({ api, audio, children, socketOptions }: TvStore
           dispatch({ type: 'EVENT', event });
           if (event.type === 'TICKET_CALLED') {
             const p = event.payload as Extract<QueueLifecycleWireEvent['payload'], { ticketNumber: string; counterId: number }>;
-            // Fire-and-forget; the sequencer serializes fragments and never
-            // rejects (errors skip a fragment). Don't let a bad announcement
-            // crash the board.
+            // Fire-and-forget; the audio provider serializes announcements and
+            // never rejects (errors skip a fragment). Don't let a bad
+            // announcement crash the board.
             void audioRef.current.playSequence(buildCallFragments(p.ticketNumber, p.counterId));
+          }
+          if (event.type === 'SYSTEM_RESET') {
+            // A reset starts a fresh day; drop any queued announcements for
+            // already-called tickets so they don't play after the board clears.
+            audioRef.current.stop();
           }
         },
         onStatus: (status) => dispatch({ type: 'CONNECTION', status }),
@@ -179,6 +184,8 @@ export function TvStoreProvider({ api, audio, children, socketOptions }: TvStore
     sock.connect();
     return () => {
       sock.close();
+      // No orphaned audio if the provider unmounts mid-announcement.
+      audioRef.current.stop();
     };
   }, []);
 
