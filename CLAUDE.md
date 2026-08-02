@@ -973,6 +973,26 @@ with no duplicate/lost ticket numbers.
     core-api** — audio is a pure client concern (the backend never plays
     sound); the earlier domain `AudioProvider`/`AudioQueueItem` stub was
     removed as dead code (zero importers, no use case).
+  - **TV board history projection (QUE-21, FR-TV-01):** the `tv-store`
+    `history` ("Riwayat Panggilan", up to 5) retains a ticket when it
+    **concludes**, not merely when the next call displaces it. `projectEvent`'s
+    `STATUS_UPDATED` case pushes the outgoing `nowServing` into `history` on a
+    `COMPLETED` transition (then nulls it) — without this the common
+    single-counter flow (call → serve → complete → call next) left history
+    empty: the completed ticket was null'd and the next `TICKET_CALLED` found
+    `nowServing` already null and pushed nothing. `SKIPPED` (recallable via
+    "Panggil Ulang") and `WAITING` (transfer, re-enters the queue) are
+    deliberately **not** retained — neither is a concluded call. **Known
+    deferred gap:** recalling a skipped ticket (`STATUS_UPDATED`
+    `SKIPPED → CALLING`) does **not** restore `nowServing`, because the wire
+    `STATUS_UPDATED` payload carries only `{from, to}` (no `ticketNumber` /
+    `counterId`), so the board cannot reconstruct the entry from the event
+    alone. Do not "complete" history by pushing `SKIPPED` into it without also
+    implementing recall-restore (pull the ticket back out of history by
+    `aggregateId`), or a recalled ticket would appear in history but not on the
+    now-serving board. No double-push: the `aggregateId` guard skips a
+    `STATUS_UPDATED` for a ticket no longer `nowServing`, and a `TICKET_CALLED`
+    after a `COMPLETED` finds `nowServing` null so pushes nothing.
 - When adding a feature, map it to the relevant FR-* / NFR-* requirement in the
   PRD and the bounded context it belongs to. Preserve the interface boundaries
   (e.g. don't leak admin DTOs into `ICallerApi`).

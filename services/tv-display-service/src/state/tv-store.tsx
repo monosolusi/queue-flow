@@ -88,9 +88,25 @@ function projectEvent(state: TvState, e: QueueLifecycleWireEvent): TvState {
     case 'STATUS_UPDATED': {
       const p = e.payload as Extract<QueueLifecycleWireEvent['payload'], { from: string; to: string }>;
       if (state.nowServing?.ticketId !== e.aggregateId) return state;
-      // The ticket leaves the board when it completes, is skipped, or is sent
-      // back to WAITING (e.g. by a transfer). CALLING/SERVING keep it shown.
-      if (p.to === 'COMPLETED' || p.to === 'SKIPPED' || p.to === 'WAITING') {
+      // A completed ticket conclusively leaves the board, so retain it in the
+      // call history (FR-TV-01). Without this, the common single-counter flow
+      // (call → serve → complete → call next) never populates history: the
+      // completed ticket is null'd here, and the next TICKET_CALLED finds
+      // nowServing already null and pushes nothing — "Riwayat Panggilan" stays
+      // empty on a quiet store even though tickets were served.
+      if (p.to === 'COMPLETED') {
+        const history = state.nowServing
+          ? [state.nowServing, ...state.history].slice(0, HISTORY_LIMIT)
+          : state.history;
+        return { ...state, nowServing: null, history };
+      }
+      // SKIPPED (recallable via "Panggil Ulang") and WAITING (transfer, re-enters
+      // the queue as a fresh ticket) leave the board without entering history:
+      // neither is a concluded call. (Recalling a skipped ticket would need its
+      // ticketNumber/counter restored from history — a STATUS_UPDATED only
+      // carries {from,to}, so that restore is a separate concern, not in scope
+      // for the call-history retention fix.)
+      if (p.to === 'SKIPPED' || p.to === 'WAITING') {
         return { ...state, nowServing: null };
       }
       return state;
