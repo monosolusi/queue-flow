@@ -25,7 +25,14 @@ export function WorkspacePage({ bound, onUnbind }: WorkspacePageProps) {
   return (
     <main className="workspace">
       <CounterHeader bound={bound} connection={state.connection} onUnbind={onUnbind} />
-      {state.loadStatus === 'loading' && <p className="workspace__hint">Memuat antrian…</p>}
+      {state.loadStatus === 'loading' && (
+        <div className="workspace__body" role="status" aria-busy="true" data-testid="workspace-loading">
+          <span className="sr-only">Memuat antrian…</span>
+          <div className="skeleton skeleton--block skeleton--wide" aria-hidden="true" />
+          <div className="skeleton skeleton--row skeleton--wide" aria-hidden="true" />
+          <div className="skeleton skeleton--row skeleton--wide" aria-hidden="true" />
+        </div>
+      )}
       {state.loadStatus === 'error' && (
         <p className="workspace__hint workspace__hint--error">
           {state.loadError ?? 'Gagal memuat antrian.'}

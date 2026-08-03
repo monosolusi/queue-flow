@@ -33,12 +33,14 @@ type ViewState =
 
 /** The seam the page uses to write the .xlsx export. Injected so tests can
  *  assert the export wiring without invoking SheetJS in jsdom. Defaults to the
- *  real SheetJS-backed {@link exportDailyReport} (offline, no network). */
+ *  real SheetJS-backed {@link exportDailyReport} (offline, no network).
+ *  `Promise<void>` — SheetJS is lazily `import()`-ed so the heavy dependency
+ *  splits into its own chunk and never enters the main bundle (QUE-41 AC9). */
 export type DailyReportExporter = (
   report: DailyReportDto,
   audit: readonly AuditLogEntryDto[],
   fileName: string,
-) => void;
+) => Promise<void>;
 
 /** Today's date as the store's local `YYYY-MM-DD` (single on-premise box, NFR-SEC-01). */
 function todayLocalKey(): string {
@@ -104,7 +106,7 @@ export function AnalyticsPage({
     if (exporting) return;
     setExporting(true);
     try {
-      exporter(state.data.report, state.data.audit, `qms-report-${state.data.date}.xlsx`);
+      await exporter(state.data.report, state.data.audit, `qms-report-${state.data.date}.xlsx`);
     } finally {
       setExporting(false);
     }
@@ -152,8 +154,8 @@ export function AnalyticsPage({
         exporting={exporting}
       />
 
-      <section className="config-card" aria-label="Ringkasan harian">
-        <h2 className="config-card__title">Ringkasan — {report.date}</h2>
+      <section className="analytics__summary" aria-label="Ringkasan harian">
+        <h2 className="analytics__section-title">Ringkasan — {report.date}</h2>
         <div className="metric-grid">
           <div className="metric-tile">
             <span className="metric-tile__label">Total Pengunjung</span>
@@ -235,28 +237,33 @@ export function AnalyticsPage({
         {audit.length === 0 ? (
           <p className="analytics__empty">Belum ada entri audit.</p>
         ) : (
-          <table className="data-table data-table--audit">
-            <thead>
-              <tr>
-                <th>Waktu</th>
-                <th>Aktor</th>
-                <th>Aksi</th>
-                <th>Sebelum</th>
-                <th>Sesudah</th>
-              </tr>
-            </thead>
-            <tbody>
-              {audit.map((a) => (
-                <tr key={a.id}>
-                  <td>{new Date(a.occurredAt).toLocaleString()}</td>
-                  <td>{a.actor}</td>
-                  <td>{a.action}</td>
-                  <td className="data-table__snapshot">{formatSnapshot(a.before)}</td>
-                  <td className="data-table__snapshot">{formatSnapshot(a.after)}</td>
+          // AC4 — the 5-column audit table overflows on narrow viewports; wrap it
+          // in a horizontal-scroll container (the per-category/counter tables
+          // stay unwrapped — they are narrow enough).
+          <div className="data-table-scroll">
+            <table className="data-table data-table--audit">
+              <thead>
+                <tr>
+                  <th>Waktu</th>
+                  <th>Aktor</th>
+                  <th>Aksi</th>
+                  <th>Sebelum</th>
+                  <th>Sesudah</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {audit.map((a) => (
+                  <tr key={a.id}>
+                    <td>{new Date(a.occurredAt).toLocaleString()}</td>
+                    <td>{a.actor}</td>
+                    <td>{a.action}</td>
+                    <td className="data-table__snapshot">{formatSnapshot(a.before)}</td>
+                    <td className="data-table__snapshot">{formatSnapshot(a.after)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
     </div>

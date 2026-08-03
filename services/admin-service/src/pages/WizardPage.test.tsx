@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { WizardPage } from './WizardPage';
@@ -609,5 +609,71 @@ describe('WizardPage (FR-WZD-02..06)', () => {
       { id: idA, code: 'A', name: 'Customer Service' },
       { id: idB, code: 'B', name: 'Kasir & Pembayaran' },
     ]);
+  });
+
+  it('marks the active step dot with aria-current="step" and clears it on advance (QUE-41 AC14)', async () => {
+    const { api } = makeApi();
+    renderWizard(api);
+
+    await screen.findByTestId('step-1');
+    // Scope to the step bar so category-list <li>s don't pollute the query.
+    const stepsBar = screen.getByRole('list', { name: 'Langkah wizard' });
+    const dots = within(stepsBar).getAllByRole('listitem');
+    // The step bar carries exactly 5 dots.
+    expect(dots).toHaveLength(5);
+    // Exactly one dot carries aria-current="step", and it is the first (step 1).
+    const current = dots.filter((d) => d.getAttribute('aria-current') === 'step');
+    expect(current).toHaveLength(1);
+    expect(current[0]).toHaveTextContent('1');
+
+    // Advance to step 2 → aria-current moves to the second dot.
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-2');
+    const dots2 = within(screen.getByRole('list', { name: 'Langkah wizard' })).getAllByRole('listitem');
+    const current2 = dots2.filter((d) => d.getAttribute('aria-current') === 'step');
+    expect(current2).toHaveLength(1);
+    expect(current2[0]).toHaveTextContent('2');
+  });
+
+  it('wires the brand-color hex error to its input via aria-invalid + aria-describedby (QUE-41 AC6)', async () => {
+    const { api } = makeApi();
+    renderWizard(api);
+
+    await screen.findByTestId('step-1');
+    const hexInput = screen.getByLabelText('Kode hex warna brand');
+    // Happy path — no error attributes.
+    expect(hexInput).not.toHaveAttribute('aria-invalid');
+    expect(hexInput).not.toHaveAttribute('aria-describedby');
+
+    // Type a malformed hex → the error list renders and the input is wired to it.
+    fireEvent.change(hexInput, { target: { value: 'not-a-color' } });
+    expect(hexInput).toHaveAttribute('aria-invalid', 'true');
+    expect(hexInput).toHaveAttribute('aria-describedby', 'brand-color-errors');
+    expect(screen.getByTestId('brand-color-errors')).toHaveAttribute('id', 'brand-color-errors');
+  });
+
+  it('marks the step-1 store-name input as required (QUE-41 AC6)', async () => {
+    const { api } = makeApi();
+    renderWizard(api);
+
+    await screen.findByTestId('step-1');
+    const storeNameInput = screen.getByPlaceholderText('mis. Apotek Sehat Sentosa');
+    expect(storeNameInput).toHaveAttribute('required');
+  });
+
+  it('marks custom-mode category inputs with aria-required (QUE-41 AC6)', async () => {
+    const { api } = makeApi();
+    renderWizard(api);
+
+    await screen.findByTestId('step-1');
+    await userEvent.click(screen.getByLabelText(/Susun kategori sendiri/));
+    expect(screen.getByTestId('cat-editor')).toBeInTheDocument();
+    // The category editor group exposes a labelled region for AT.
+    expect(screen.getByRole('group', { name: 'Daftar kategori' })).toBeInTheDocument();
+
+    const codeInputs = screen.getAllByLabelText(/^Kategori \d+ kode$/);
+    expect(codeInputs[0]).toHaveAttribute('aria-required', 'true');
+    const nameInputs = screen.getAllByLabelText(/^Kategori \d+ nama$/);
+    expect(nameInputs[0]).toHaveAttribute('aria-required', 'true');
   });
 });

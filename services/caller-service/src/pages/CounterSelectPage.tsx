@@ -40,7 +40,14 @@ export function CounterSelectPage({ api, onChoose }: CounterSelectPageProps) {
   return (
     <main className="counter-select">
       <h1 className="counter-select__title">Pilih Loket</h1>
-      {state.status === 'loading' && <p className="counter-select__hint">Memuat daftar loket…</p>}
+      {state.status === 'loading' && (
+        <div className="counter-select__list" role="status" aria-busy="true" data-testid="counter-select-loading">
+          <span className="sr-only">Memuat daftar loket…</span>
+          <div className="skeleton skeleton--row" aria-hidden="true" />
+          <div className="skeleton skeleton--row" aria-hidden="true" />
+          <div className="skeleton skeleton--row" aria-hidden="true" />
+        </div>
+      )}
       {state.status === 'error' && (
         <p className="counter-select__hint counter-select__hint--error">{state.message}</p>
       )}

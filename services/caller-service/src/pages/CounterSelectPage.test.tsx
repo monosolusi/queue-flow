@@ -62,4 +62,15 @@ describe('CounterSelectPage', () => {
     render(<CounterSelectPage api={makeApi(counters, new Error('jaringan terputus'))} onChoose={vi.fn()} />);
     expect(await screen.findByText(/jaringan terputus/i)).toBeInTheDocument();
   });
+
+  it('shows skeleton placeholders (not text-only Memuat) while counters are loading', async () => {
+    const api = makeApi(counters);
+    api.listCounters = () => new Promise<CounterDto[]>(() => {});
+    render(<CounterSelectPage api={api} onChoose={vi.fn()} />);
+    const loading = await screen.findByTestId('counter-select-loading');
+    expect(loading).toHaveAttribute('aria-busy', 'true');
+    expect(loading.querySelectorAll('.skeleton').length).toBeGreaterThan(0);
+    expect(loading.querySelector('.sr-only')).toHaveTextContent('Memuat daftar loket…');
+    expect(screen.queryByText('Loket 1')).not.toBeInTheDocument();
+  });
 });

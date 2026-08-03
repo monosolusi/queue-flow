@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ICallerApi } from '../api/caller-api';
 import type { StateMachineDto, StateTransitionDto, TicketStateDto } from '../api/types';
 import type { BoundCounter } from '../state/counter-binding';
@@ -47,6 +47,9 @@ export function ActionControls({ api, bound, active, stateMachine }: ActionContr
   // the counter serves ≥2 *other* categories, the transfer button expands an
   // inline chooser so staff pick the destination (FR-CLR-03).
   const [transferOpen, setTransferOpen] = useState(false);
+  // Stable id linking the transfer toggle (`aria-controls`) to its chooser, so AT
+  // can associate the expanded options with the toggle (FR-CLR-03 a11y, QUE-40 AC4).
+  const chooserId = useId();
   // Synchronous in-flight guard. `pending` (state) only updates after a
   // re-render, so two taps in the same tick both see `pending === null` and
   // both fire — the trap CLAUDE.md calls out for touch surfaces. The ref is
@@ -191,13 +194,20 @@ export function ActionControls({ api, bound, active, stateMachine }: ActionContr
                 className="btn btn--secondary action-controls__edge"
                 data-testid="action-transfer"
                 aria-expanded={transferOpen}
+                aria-controls={chooserId}
                 onClick={() => setTransferOpen((o) => !o)}
                 disabled={busy}
               >
                 {busy ? '…' : edge.actionLabel}
               </button>
               {transferOpen && (
-                <div className="action-controls__transfer-chooser" data-testid="transfer-chooser">
+                <div
+                  id={chooserId}
+                  className="action-controls__transfer-chooser"
+                  data-testid="transfer-chooser"
+                  role="group"
+                  aria-label="Kategori tujuan"
+                >
                   {otherCategories.map((c) => (
                     <button
                       key={c.id}
