@@ -83,6 +83,7 @@ export function prdWizardPayload() {
         priorityPolicy: PriorityPolicy.CATEGORY_PRIORITY,
       },
     ],
+    brandColor: '#2563eb',
     actor: 'admin',
   };
 }

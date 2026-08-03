@@ -9,7 +9,7 @@ import type {
   DailyReportDto,
   SystemConfigurationDto,
 } from '../api/types';
-import { DEFAULT_STATE_MACHINE } from '../api/types';
+import { DEFAULT_STATE_MACHINE, DEFAULT_BRAND_COLOR } from '../api/types';
 
 /** A configured store with two categories + two counters (mirrors AdminPanel fixtures). */
 function configuredStore(): SystemConfigurationDto {
@@ -31,6 +31,7 @@ function configuredStore(): SystemConfigurationDto {
       { counterId: 1, counterName: 'Counter 1', assignedCategoryIds: ['cat-a'], priorityPolicy: 'FIFO_GLOBAL' },
       { counterId: 2, counterName: 'Counter 2', assignedCategoryIds: ['cat-a', 'cat-b'], priorityPolicy: 'CATEGORY_PRIORITY' },
     ],
+    brandColor: DEFAULT_BRAND_COLOR,
   };
 }
 

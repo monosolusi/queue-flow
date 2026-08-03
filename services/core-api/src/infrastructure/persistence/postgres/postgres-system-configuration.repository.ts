@@ -3,6 +3,7 @@ import {
   type ISystemConfigurationRepository,
   SystemConfiguration,
 } from '../../../domain/store-config';
+import { BrandColor } from '../../../domain/store-config/value-objects/brand-color';
 import {
   DailyResetMode,
   DailyResetPolicy,
@@ -20,6 +21,7 @@ interface ConfigRow {
   is_initial_setup_completed: boolean;
   state_machine: { states: string[]; transitions: { from: string; to: string; actionLabel: string }[] };
   daily_reset_policy: DailyResetPolicyProps;
+  brand_color: string;
 }
 
 /**
@@ -46,13 +48,14 @@ export class PostgresSystemConfigurationRepository implements ISystemConfigurati
   async save(config: SystemConfiguration): Promise<void> {
     await withDbClient(this.pool, async (client) => {
       await client.query(
-        `INSERT INTO system_configuration (id, store_name, is_initial_setup_completed, state_machine, daily_reset_policy)
-         VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO system_configuration (id, store_name, is_initial_setup_completed, state_machine, daily_reset_policy, brand_color)
+         VALUES ($1, $2, $3, $4, $5, $6)
          ON CONFLICT (id) DO UPDATE SET
            store_name                = EXCLUDED.store_name,
            is_initial_setup_completed = EXCLUDED.is_initial_setup_completed,
            state_machine             = EXCLUDED.state_machine,
-           daily_reset_policy        = EXCLUDED.daily_reset_policy`,
+           daily_reset_policy        = EXCLUDED.daily_reset_policy,
+           brand_color               = EXCLUDED.brand_color`,
         [
           config.id.value,
           config.storeName,
@@ -64,6 +67,7 @@ export class PostgresSystemConfigurationRepository implements ISystemConfigurati
             resetTicketNumberTo: config.dailyResetPolicy.resetTicketNumberTo,
             archivePreviousDayData: config.dailyResetPolicy.archivePreviousDayData,
           }),
+          config.brandColor.value,
         ],
       );
     });
@@ -88,6 +92,13 @@ function toConfig(row: ConfigRow): SystemConfiguration {
       sm.transitions.map((t) => StateTransitionRule.of(t.from, t.to, t.actionLabel)),
     ),
     dailyResetPolicy: deserializePolicy(row.daily_reset_policy),
+    // Defensive `?? BrandColor.DEFAULT.value` for the boot window between a code
+    // deploy and the 0004 migration applying (the runner auto-runs on boot before
+    // serving, but a SELECT * on a pre-migration row has no brand_color column).
+    // The `NOT NULL DEFAULT '#2563eb'` migration backfills existing rows, so the
+    // fallback is belt-and-suspenders — it prevents a 500 instead of surfacing a
+    // malformed (missing) column value.
+    brandColor: BrandColor.of(row.brand_color ?? BrandColor.DEFAULT.value),
   });
 }
 

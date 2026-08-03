@@ -8,6 +8,7 @@ import { StateMachine } from '../../domain/store-config';
 import { StateSchema } from '../../domain/store-config';
 import { StateTransitionRule } from '../../domain/store-config';
 import { DailyResetPolicy, DailyResetMode } from '../../domain/store-config';
+import { BrandColor } from '../../domain/store-config';
 import { type IDailyResetSchedulerPort } from '../../domain/store-config';
 import {
   Identifier,
@@ -67,12 +68,14 @@ export interface SaveSystemConfigurationCommand {
   readonly dailyReset: WizardDailyResetDto;
   readonly categories: readonly WizardCategoryDto[];
   readonly routingRules: readonly WizardRoutingRuleDto[];
+  readonly brandColor: string;
   readonly actor: string;
 }
 
 export interface SaveSystemConfigurationResult {
   readonly isInitialSetupCompleted: boolean;
   readonly storeName: string;
+  readonly brandColor: string;
 }
 
 /** Minimal projection used only for audit before/after snapshots. */
@@ -159,6 +162,10 @@ export class SaveSystemConfigurationUseCase {
       command.dailyReset.resetTicketNumberTo,
       command.dailyReset.archivePreviousDayData,
     );
+    // Brand color is a pure config field — no scheduler/audit side-effect, so no
+    // change-gating flag or post-commit re-arm (unlike the daily-reset policy).
+    // Validated here (fail-fast, pre-tx) so a malformed color never acquires a tx.
+    const brandColor = BrandColor.of(command.brandColor);
     const newCategories = this.buildCategories(command.categories);
     const codeToId = new Map(newCategories.map((c) => [c.code, c.id.value]));
     const newRules = this.buildRoutingRules(command.routingRules, codeToId);
@@ -202,6 +209,7 @@ export class SaveSystemConfigurationUseCase {
         isInitialSetupCompleted: wasCompleted,
         stateMachine,
         dailyResetPolicy,
+        brandColor,
       });
       system.completeInitialSetup(); // idempotent — validates store name, flips the flag
 
@@ -249,6 +257,7 @@ export class SaveSystemConfigurationUseCase {
       return {
         isInitialSetupCompleted: system.isInitialSetupCompleted,
         storeName: system.storeName,
+        brandColor: system.brandColor.value,
       };
     });
 

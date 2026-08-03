@@ -4,6 +4,7 @@ import {
   type SaveSystemConfigurationCommand,
 } from '../../src/application/store-config';
 import { StateMachine, DailyResetMode } from '../../src/domain/store-config';
+import { InvalidValueObjectException } from '../../src/domain/shared/errors';
 import { PriorityPolicy, NoOpTransactionManager } from '../../src/domain/shared';
 import {
   InMemoryCategoryRepository,
@@ -53,6 +54,7 @@ describe('SaveSystemConfigurationUseCase — category id preservation (QUE-24)',
           priorityPolicy: PriorityPolicy.FIFO_GLOBAL,
         },
       ],
+      brandColor: '#2563eb',
       actor: 'admin',
     };
   }
@@ -126,5 +128,79 @@ describe('SaveSystemConfigurationUseCase — category id preservation (QUE-24)',
 
     expect((await repos.categories.getById(CAT_A))?.name).toBe('Loket 1');
     expect((await repos.categories.getById(CAT_A))?.id.value).toBe(idA);
+  });
+});
+
+/**
+ * Brand-color persistence (QUE-36). `brandColor` is a required field on the
+ * save command; the use case validates it pre-tx (fail-fast — a malformed color
+ * never acquires a transaction) and the persisted aggregate carries it through.
+ * The result echoes the stored brand color back to the caller.
+ */
+describe('SaveSystemConfigurationUseCase — brandColor (QUE-36)', () => {
+  function buildUseCase() {
+    return {
+      config: new InMemorySystemConfigurationRepository(),
+      categories: new InMemoryCategoryRepository(),
+      routingRules: new InMemoryCounterRoutingRuleRepository(),
+    };
+  }
+
+  function command(brandColor: string): SaveSystemConfigurationCommand {
+    return {
+      storeName: 'Toko Brand',
+      stateMachine: projectStateMachine(StateMachine.DEFAULT),
+      dailyReset: {
+        mode: DailyResetMode.MANUAL,
+        cronExpression: null,
+        resetTicketNumberTo: 1,
+        archivePreviousDayData: true,
+      },
+      categories: [{ code: 'A', name: 'Customer Service' }],
+      routingRules: [
+        {
+          counterId: 1,
+          counterName: 'Loket 1',
+          assignedCategoryCodes: ['A'],
+          priorityPolicy: PriorityPolicy.FIFO_GLOBAL,
+        },
+      ],
+      brandColor,
+      actor: 'admin',
+    };
+  }
+
+  it('persists a custom brand color and echoes it in the result', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    const result = await useCase.execute(command('#aabbcc'));
+
+    expect(result.brandColor).toBe('#aabbcc');
+    const saved = await repos.config.get();
+    expect(saved!.brandColor.value).toBe('#aabbcc');
+  });
+
+  it('rejects a malformed brand color pre-tx with InvalidValueObjectException', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    await expect(useCase.execute(command('not-a-color'))).rejects.toThrow(
+      InvalidValueObjectException,
+    );
+    // Nothing persisted — fail-fast happened before the tx opened.
+    expect(await repos.config.get()).toBeNull();
   });
 });

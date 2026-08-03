@@ -50,6 +50,7 @@ export class SystemConfigController {
       dailyReset: body.dailyReset,
       categories: body.categories,
       routingRules: body.routingRules,
+      brandColor: body.brandColor,
       actor: body.actor ?? 'admin',
     };
     return this.saveConfig.execute(command);

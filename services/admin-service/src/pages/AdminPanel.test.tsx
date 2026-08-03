@@ -6,6 +6,7 @@ import { AdminPanel } from './AdminPanel';
 import type { IAdminApi } from '../api/admin-api';
 import {
   DEFAULT_STATE_MACHINE,
+  DEFAULT_BRAND_COLOR,
   type CleanupTransactionLogResultDto,
   type ManualResetResultDto,
   type SaveSystemConfigurationPayload,
@@ -35,12 +36,13 @@ function configuredStore(): SystemConfigurationDto {
     routingRules: [
       { counterId: 1, counterName: 'Counter 1', assignedCategoryIds: ['cat-a'], priorityPolicy: 'FIFO_GLOBAL' },
     ],
+    brandColor: DEFAULT_BRAND_COLOR,
   };
 }
 
 function makeApi(
   config: SystemConfigurationDto = configuredStore(),
-  saveImpl?: (payload: SaveSystemConfigurationPayload) => Promise<{ isInitialSetupCompleted: boolean; storeName: string }>,
+  saveImpl?: (payload: SaveSystemConfigurationPayload) => Promise<{ isInitialSetupCompleted: boolean; storeName: string; brandColor: string }>,
   overrides?: {
     manualReset?: () => Promise<ManualResetResultDto>;
     cleanup?: (retentionDays: number) => Promise<CleanupTransactionLogResultDto>;
@@ -49,7 +51,7 @@ function makeApi(
   const save = vi.fn(
     saveImpl ??
       ((payload: SaveSystemConfigurationPayload) =>
-        Promise.resolve({ isInitialSetupCompleted: true, storeName: payload.storeName })),
+        Promise.resolve({ isInitialSetupCompleted: true, storeName: payload.storeName, brandColor: payload.brandColor })),
   );
   // The panel reloads the config after a successful save; default to returning
   // the same config (with ids preserved) so the post-save repopulate succeeds.
@@ -198,6 +200,39 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     expect(payload.storeName).toBe('Apotek Sehat');
     expect(payload.stateMachine.transitions).toHaveLength(5);
     expect(payload.stateMachine.transitions[0].actionLabel).toBe('Panggil Berikutnya');
+    // brandColor is editable (AC3) and prefilled from the loaded config.
+    expect(payload.brandColor).toBe(DEFAULT_BRAND_COLOR);
+  });
+
+  it('edits the brand color and the new color reaches the save payload (QUE-36)', async () => {
+    const { api, save } = makeApi();
+    renderPanel(api);
+    await screen.findByText('Apotek Sehat');
+
+    const hexInput = screen.getByLabelText('Kode hex warna brand');
+    await userEvent.clear(hexInput);
+    fireEvent.change(hexInput, { target: { value: '#abcdef' } });
+
+    await userEvent.click(screen.getByTestId('admin-save'));
+    await screen.findByText('Konfigurasi tersimpan.');
+
+    const payload = save.mock.calls[0][0] as SaveSystemConfigurationPayload;
+    expect(payload.brandColor).toBe('#abcdef');
+  });
+
+  it('disables save and shows an error for a malformed brand color (QUE-36)', async () => {
+    const { api, save } = makeApi();
+    renderPanel(api);
+    await screen.findByText('Apotek Sehat');
+
+    const hexInput = screen.getByLabelText('Kode hex warna brand');
+    await userEvent.clear(hexInput);
+    fireEvent.change(hexInput, { target: { value: 'not-a-color' } });
+
+    // The save button is disabled and an inline error appears.
+    expect(screen.getByTestId('admin-save')).toBeDisabled();
+    expect(screen.getByTestId('brand-color-errors')).toBeInTheDocument();
+    expect(save).not.toHaveBeenCalled();
   });
 
   it('fires exactly one save on a rapid double click (double-tap guard)', async () => {
