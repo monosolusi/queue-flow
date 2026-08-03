@@ -125,6 +125,12 @@ categories, routings) lives in PRD §7 — read it before touching config code.
   changes must be written to the local audit log.
 - **Clean architecture layering (NFR-MNT-01).** Domain has no framework/ORM/IO
   imports — enforce this; a static-analysis check is an acceptance criterion.
+- **Single-host deployment readiness (NFR-MNT-02).** The whole stack — every
+  service, the DB, and the gateway — comes up with one command,
+  `docker compose up -d`. Any new service must be declared in
+  `docker-compose.yml` (with `restart: always` per NFR-REL-03) and routed by the
+  `gateway` so it is reachable through the single LAN entry point; do not add a
+  service that requires a separate bring-up step.
 
 ## Project status / milestones
 
@@ -1098,7 +1104,14 @@ with no duplicate/lost ticket numbers.
     `vite.config.js`, `vite.config.d.ts`, and `*.tsbuildinfo` on every build.
     Add a per-service `.gitignore` excluding them so the tree doesn't churn on
     each build — `caller-service` predates this rule and tracks them; new
-    frontends (`kiosk-service` onward) gitignore them.
+    frontends (`kiosk-service` onward) gitignore them. Because `caller-service`
+    still tracks `tsconfig.tsbuildinfo`, running `npm run build` / `npm run
+    acceptance` regenerates it and `git add -A` sweeps the churn into an
+    unrelated PR — when staging a cross-service (esp. comment-only) PR after a
+    gate run, stage the intended path(s) explicitly or `git checkout --` the
+    `caller-service/tsconfig.tsbuildinfo` churn before committing. The durable
+    fix is to `git rm --cached` it + add it to `caller-service/.gitignore` in
+    the next caller-service-touching PR (don't open a standalone ticket for it).
   - **Touch-surface mutations need a synchronous double-tap guard — kiosk AND
     caller.** `disabled` only takes effect after a re-render, so two clicks
     landing in the same tick both pass a state-based guard. This applies to the
