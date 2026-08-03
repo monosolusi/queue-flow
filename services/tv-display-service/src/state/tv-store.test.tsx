@@ -143,7 +143,7 @@ describe('TvStoreProvider realtime projection + audio (FR-TV-01/02)', () => {
     expect(screen.getAllByText('A-005')).toHaveLength(1); // history item only
   });
 
-  it('clears now-serving on SYSTEM_RESET', async () => {
+  it('clears now-serving on SYSTEM_RESET and returns to the idle standby', async () => {
     const api = makeApi();
     const audio = makeAudio();
     renderBoard(api, audio);
@@ -160,10 +160,13 @@ describe('TvStoreProvider realtime projection + audio (FR-TV-01/02)', () => {
       version: 3,
       payload: { resetTo: 1, date: '2026-07-31' },
     });
-    expect(await screen.findByText(/Menunggu panggilan berikutnya/i)).toBeInTheDocument();
+    // nowServing clears → the idle standby panel returns (FR-TV-03) and the
+    // now-serving number leaves the board.
+    expect(await screen.findByTestId('standby')).toBeInTheDocument();
+    expect(screen.queryByText('A-005')).not.toBeInTheDocument();
   });
 
-  it('clears now-serving when the ticket completes', async () => {
+  it('clears now-serving when the ticket completes and returns to idle standby', async () => {
     const api = makeApi();
     const audio = makeAudio();
     renderBoard(api, audio);
@@ -174,14 +177,17 @@ describe('TvStoreProvider realtime projection + audio (FR-TV-01/02)', () => {
     await screen.findByText('A-005');
 
     fire(ws, statusEvent('t1', 'CALLING', 'COMPLETED'));
-    expect(await screen.findByText(/Menunggu panggilan berikutnya/i)).toBeInTheDocument();
+    expect(await screen.findByTestId('standby')).toBeInTheDocument();
+    expect(screen.queryByText('A-005')).not.toBeInTheDocument();
   });
 
   it('retains a completed ticket in history on the quiet-store path (FR-TV-01)', async () => {
     // The common single-counter flow is call → serve → complete → call next.
     // The completed ticket must enter "Riwayat Panggilan" even though no other
     // call displaced it while it was on the board (the quiet-store case that
-    // left history empty before the retention fix).
+    // left history empty before the retention fix). The retention is observed
+    // when the next call brings the active board back; while idle the board is
+    // replaced by the standby panel (FR-TV-03).
     const api = makeApi();
     const audio = makeAudio();
     renderBoard(api, audio);
@@ -191,18 +197,20 @@ describe('TvStoreProvider realtime projection + audio (FR-TV-01/02)', () => {
     fire(ws, calledEvent('t1', 'A-005', 2));
     await screen.findByText('A-005');
 
-    // Serve → complete. nowServing clears, but A-005 is retained in history.
+    // Serve → complete. nowServing clears → idle standby; A-005 leaves the
+    // board but is retained in history.
     fire(ws, statusEvent('t1', 'CALLING', 'SERVING'));
     fire(ws, statusEvent('t1', 'SERVING', 'COMPLETED'));
-    expect(await screen.findByText(/Menunggu panggilan berikutnya/i)).toBeInTheDocument();
-    expect(screen.getByText('Riwayat Panggilan')).toBeInTheDocument();
-    expect(screen.getAllByText('A-005')).toHaveLength(1); // history item, not now-serving
+    expect(await screen.findByTestId('standby')).toBeInTheDocument();
+    expect(screen.queryByText('A-005')).not.toBeInTheDocument();
 
-    // The next call does not double-push A-005 (nowServing was null at the
-    // COMPLETED transition, so the TICKET_CALLED has nothing to displace).
+    // The next call brings the active board back; A-005 must appear exactly
+    // once (history), not double-pushed (nowServing was null at COMPLETED, so
+    // the TICKET_CALLED had nothing to displace).
     fire(ws, calledEvent('t2', 'B-013', 1));
     expect(await screen.findByText('B-013')).toBeInTheDocument();
-    expect(screen.getAllByText('A-005')).toHaveLength(1); // still exactly one history entry
+    expect(screen.getByText('Riwayat Panggilan')).toBeInTheDocument();
+    expect(screen.getAllByText('A-005')).toHaveLength(1); // exactly one history entry
   });
 
   it('does not retain a skipped ticket in history (recallable, not concluded)', async () => {
@@ -216,10 +224,17 @@ describe('TvStoreProvider realtime projection + audio (FR-TV-01/02)', () => {
     await screen.findByText('A-005');
 
     fire(ws, statusEvent('t1', 'CALLING', 'SKIPPED'));
-    expect(await screen.findByText(/Menunggu panggilan berikutnya/i)).toBeInTheDocument();
-    // A skipped ticket leaves the board without entering history (it may be
-    // recalled via "Panggil Ulang"); only COMPLETED tickets are retained.
+    // nowServing clears → idle standby; a skipped ticket is recallable via
+    // "Panggil Ulang" and is not retained in history (only COMPLETED tickets are).
+    expect(await screen.findByTestId('standby')).toBeInTheDocument();
+    expect(screen.queryByText('A-005')).not.toBeInTheDocument();
+
+    // Bring the active board back with a new call; the skipped ticket must not
+    // appear in history.
+    fire(ws, calledEvent('t2', 'B-001', 1));
+    expect(await screen.findByText('B-001')).toBeInTheDocument();
     expect(screen.getByText('Belum ada riwayat.')).toBeInTheDocument();
+    expect(screen.queryByText('A-005')).not.toBeInTheDocument();
   });
 
   it('re-numbers the now-serving ticket on TICKET_TRANSFERRED', async () => {
@@ -248,5 +263,38 @@ describe('TvStoreProvider realtime projection + audio (FR-TV-01/02)', () => {
     // re-number must still be observable on the board before the clear, so we
     // assert the new number appeared at least once via findByText.
     expect(await screen.findByText('B-010')).toBeInTheDocument();
+  });
+});
+
+describe('TvBoardPage idle/active switching (FR-TV-03)', () => {
+  it('shows the standby media + running text when idle, switches to the active board on a call, and returns to standby when the call completes', async () => {
+    const api = makeApi();
+    const audio = makeAudio();
+    renderBoard(api, audio);
+    await screen.findByText('Apotek Sehat');
+    const ws = FakeWebSocket.instances[0];
+
+    // Idle: the standby panel renders the promo media + the running-text
+    // greeting (the {storeName} placeholder resolved against the boot-loaded
+    // store name). The active board is not rendered while idle.
+    const standby = await screen.findByTestId('standby');
+    expect(standby).toBeInTheDocument();
+    expect(
+      screen.getByText(/Selamat datang di Apotek Sehat/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Riwayat Panggilan')).not.toBeInTheDocument();
+    // The standby media <img> is present (bundled placeholder banner).
+    expect(standby.querySelector('img, video')).not.toBeNull();
+
+    // A call arrives → the standby disappears and the now-serving board appears.
+    fire(ws, calledEvent('t1', 'A-005', 2));
+    expect(await screen.findByText('A-005')).toBeInTheDocument();
+    expect(screen.queryByTestId('standby')).not.toBeInTheDocument();
+    expect(screen.getByText('Riwayat Panggilan')).toBeInTheDocument();
+
+    // Complete the ticket → nowServing clears → the idle standby returns.
+    fire(ws, statusEvent('t1', 'CALLING', 'COMPLETED'));
+    expect(await screen.findByTestId('standby')).toBeInTheDocument();
+    expect(screen.queryByText('A-005')).not.toBeInTheDocument();
   });
 });
