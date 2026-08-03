@@ -9,6 +9,8 @@ import type {
 } from '../api/types';
 import { validateCronExpression } from '../lib/cron';
 import { validateRetentionDays } from '../lib/retention';
+import { PRIORITY_POLICY_LABELS, DAILY_RESET_MODE_LABELS } from '../lib/labels';
+import { timeToCron, cronToTime } from '../lib/daily-reset';
 
 /**
  * One editable category row. `id` is carried for categories that already exist
@@ -325,10 +327,13 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
                 className="field__input"
                 value={rule.priorityPolicy}
                 onChange={(e) => updateRouting(form, setState, i, { priorityPolicy: e.target.value as PriorityPolicy })}
-                aria-label={`Counter ${i + 1} priority policy`}
+                aria-label={`Counter ${i + 1} kebijakan prioritas`}
               >
-                <option value="FIFO_GLOBAL">FIFO_GLOBAL</option>
-                <option value="CATEGORY_PRIORITY">CATEGORY_PRIORITY</option>
+                {(Object.keys(PRIORITY_POLICY_LABELS) as PriorityPolicy[]).map((p) => (
+                  <option key={p} value={p}>
+                    {PRIORITY_POLICY_LABELS[p]}
+                  </option>
+                ))}
               </select>
               <fieldset className="checkbox-group">
                 <legend>Kategori dilayani</legend>
@@ -371,22 +376,24 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
               setState({ status: 'ready', form: { ...form, dailyReset: { ...form.dailyReset, mode: e.target.value as DailyResetMode } } })
             }
           >
-            <option value="AUTOMATIC_CRON">Otomatis (cron)</option>
-            <option value="MANUAL">Manual</option>
+            {(Object.keys(DAILY_RESET_MODE_LABELS) as DailyResetMode[]).map((m) => (
+              <option key={m} value={m}>
+                {DAILY_RESET_MODE_LABELS[m]}
+              </option>
+            ))}
           </select>
         </label>
         {form.dailyReset.mode === 'AUTOMATIC_CRON' && (
           <label className="field">
-            <span className="field__label">Cron expression</span>
+            <span className="field__label">Waktu reset harian</span>
             <input
               className="field__input"
-              type="text"
-              value={form.dailyReset.cronExpression}
+              type="time"
+              value={cronToTime(form.dailyReset.cronExpression) ?? '00:00'}
               onChange={(e) =>
-                setState({ status: 'ready', form: { ...form, dailyReset: { ...form.dailyReset, cronExpression: e.target.value } } })
+                setState({ status: 'ready', form: { ...form, dailyReset: { ...form.dailyReset, cronExpression: timeToCron(e.target.value) } } })
               }
-              placeholder="0 0 * * *"
-              aria-label="Cron expression"
+              aria-label="Waktu reset harian"
             />
             {cronError && (
               <span className="field__error" data-testid="cron-error">
@@ -425,13 +432,13 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
         </label>
         <p className="admin-panel__hint">
           Saat diaktifkan, data antrian hari sebelumnya dipindahkan ke arsip saat reset berikutnya berjalan.
-          Perubahan cron/mode berlaku setelah restart layanan (scheduler di-armed saat boot).
+          Perubahan jadwal reset harian berlaku segera setelah disimpan.
         </p>
       </section>
 
       {/* Read-only state machine — the wizard owns editing (out of QUE-24 scope). */}
       <section className="config-card">
-        <h2 className="config-card__title">State Machine (read-only)</h2>
+        <h2 className="config-card__title">Alur Status Tiket (hanya lihat)</h2>
         <ul className="transition-list">
           {form.stateMachine.transitions.map((t, i) => (
             <li key={i} className="transition-list__item">

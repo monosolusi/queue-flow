@@ -327,7 +327,12 @@ fieldset {
   padding: 0.75rem;
   background: var(--bg);
   border-radius: 8px;
-  align-items: flex-start;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.6rem;
+}
+.entry-row__counter-title {
+  font-weight: 600;
 }
 .entry-row--transition {
   display: grid;
@@ -415,8 +420,8 @@ fieldset {
 }
 .wizard__review-block {
   padding: 0.75rem 1rem;
-  background: var(--surface-alt, #f7f8fa);
-  border: 1px solid var(--border, #e3e6ea);
+  background: var(--surface);
+  border: 1px solid var(--surface-2);
   border-radius: 8px;
 }
 .wizard__review-label {
@@ -424,7 +429,7 @@ fieldset {
   font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--muted, #6b7280);
+  color: var(--text-muted);
 }
 .wizard__review-value,
 .wizard__review-list {
