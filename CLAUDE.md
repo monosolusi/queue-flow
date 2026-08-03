@@ -1325,6 +1325,21 @@ with no duplicate/lost ticket numbers.
     `await act(async () => { await vi.advanceTimersByTimeAsync(n) })` to flush the
     re-render without an act warning — `vi.advanceTimersByTime` alone leaves the
     `setIndex` un-wrapped (surfaced building the QUE-23 `StandbyMedia` cycler).
+  - **RTL under `vi.useFakeTimers()`: query sync, click with `fireEvent`.** Two
+    hangs that cost real debugging time (surfaced building the QUE-38 kiosk
+    auto-return tests): (1) `screen.findByText(...)` / any `waitFor`-based query
+    polls via `setTimeout`, which fake timers do not auto-advance → it never
+    polls and times out. After an `act`-wrapped `advanceTimersByTimeAsync` the
+    re-render is already flushed, so read the DOM with the **synchronous**
+    `screen.getByText(...)` (or `queryByText` for absence) instead. (2)
+    `userEvent.click(...)` awaits internal pointer-event timers that fake timers
+    do not auto-advance → it hangs. Use **`fireEvent.click(...)`** (synchronous,
+    no internal timers) for fake-timer tests; reserve `userEvent` for real-timer
+    tests. Separately, a **sync test that asserts only the initial render** (e.g.
+    a loading hint's `aria-live` attr) but mounts a component that kicks off an
+    async fetch on mount leaks an "update not wrapped in act" warning when the
+    unresolved promise settles after the test body — stub the mount-fetch to
+    `new Promise(() => {})` (never resolves) so no background state churn occurs.
   - **Static CSS guards + both-mounted overlays under `css: false`.** jsdom
     (`css: false` in every frontend vitest config) does NOT apply stylesheets,
     so computed visibility/opacity/contrast are not testable. Two patterns:

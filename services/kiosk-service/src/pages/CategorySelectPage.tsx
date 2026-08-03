@@ -134,9 +134,15 @@ export function CategorySelectPage({ api, printProvider }: CategorySelectPagePro
     <main className="kiosk-select">
       <h1 className="kiosk-select__title">Pilih Layanan</h1>
 
-      {load.status === 'loading' && <p className="kiosk-select__hint">Memuat kategori…</p>}
+      {load.status === 'loading' && (
+        <p className="kiosk-select__hint" aria-live="polite">
+          Memuat kategori…
+        </p>
+      )}
       {load.status === 'error' && (
-        <p className="kiosk-select__hint kiosk-select__hint--error">{load.message}</p>
+        <p className="kiosk-select__hint kiosk-select__hint--error" role="alert">
+          {load.message}
+        </p>
       )}
       {load.status === 'loaded' && load.categories.length === 0 && (
         <p className="kiosk-select__hint">Belum ada kategori yang dikonfigurasi.</p>
@@ -162,9 +168,15 @@ export function CategorySelectPage({ api, printProvider }: CategorySelectPagePro
       )}
 
       {issue.status === 'failed' && (
-        <p className="kiosk-select__hint kiosk-select__hint--error">{issue.message}</p>
+        <p className="kiosk-select__hint kiosk-select__hint--error" role="alert">
+          {issue.message}
+        </p>
       )}
-      {issuing && <p className="kiosk-select__hint">Membuat tiket…</p>}
+      {issuing && (
+        <p className="kiosk-select__hint" aria-live="polite">
+          Membuat tiket…
+        </p>
+      )}
     </main>
   );
 }

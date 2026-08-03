@@ -116,6 +116,9 @@ button {
 }
 .kiosk-result__label {
   font-size: 1.5rem;
+  font-weight: 400; /* QUE-38 AC4: this is an <h1> (semantic page heading) but
+     stays a muted, letter-spaced caption — pin non-bold so the h1 default does
+     not change the muted-label appearance. The ticket number below is the hero. */
   letter-spacing: 0.2em;
   color: var(--text-muted);
   margin: 0;
@@ -143,4 +146,19 @@ button {
   padding: 1.2rem 2.5rem;
   font-size: 1.4rem;
   font-weight: 700;
+}
+
+/* QUE-38 AC7 — respect reduced-motion: disable the non-essential color /
+   brightness transitions on the category cards and buttons. The `:active`
+   press (scale) is user-triggered and instant by design, not auto-animation,
+   so it is left in place; only the animated `background` / `filter` /
+   `transform` transitions are neutralized. Scoped to the kiosk stylesheet
+   (source order after the @import lets this win over the shared `.btn`
+   transition) — not promoted to the shared `_interactions.css` baseline, to
+   keep this ticket kiosk-scoped. */
+@media (prefers-reduced-motion: reduce) {
+  .category-card,
+  .btn {
+    transition: none;
+  }
 }

@@ -72,6 +72,29 @@ describe('CategorySelectPage (kiosk — FR-KSK-01 / QUE-17)', () => {
     expect(await screen.findByText(/jaringan terputus/i)).toBeInTheDocument();
   });
 
+  it('announces a load error via role=alert (QUE-38 AC3)', async () => {
+    renderSelect({
+      listCategories: () => Promise.reject(new Error('jaringan terputus')),
+      createTicket: () => Promise.resolve(ticket('cat-a')),
+      getStoreProfile: () => Promise.resolve({ storeName: '', brandColor: '' }),
+    });
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/jaringan terputus/i);
+  });
+
+  it('marks the loading hint as an aria-live polite region (QUE-38 AC3)', () => {
+    // Never-resolving listCategories keeps the page in the initial loading
+    // state (the assertion target) with no async resolution leaking an act
+    // warning out of this sync test. getStoreProfile resolves harmlessly.
+    renderSelect({
+      listCategories: () => new Promise<CategoryDto[]>(() => {}),
+      createTicket: () => Promise.resolve(ticket('cat-a')),
+      getStoreProfile: () => Promise.resolve({ storeName: '', brandColor: '' }),
+    });
+    const hint = screen.getByText('Memuat kategori…');
+    expect(hint).toHaveAttribute('aria-live', 'polite');
+  });
+
   it('creates a ticket on tap and navigates to the result page', async () => {
     const createTicket = vi.fn((id: string) => Promise.resolve(ticket(id, 'B-001')));
     renderSelect(makeApi(categories, createTicket));
@@ -116,6 +139,17 @@ describe('CategorySelectPage (kiosk — FR-KSK-01 / QUE-17)', () => {
 
     expect(await screen.findByText(/gagal membuat tiket/i)).toBeInTheDocument();
     expect(button).not.toBeDisabled();
+  });
+
+  it('announces an issuing error via role=alert (QUE-38 AC3)', async () => {
+    const createTicket = vi.fn(() => Promise.reject(new Error('gagal membuat tiket')));
+    renderSelect(makeApi(categories, createTicket));
+
+    await screen.findByText('Customer Service');
+    await userEvent.click(screen.getByText('Customer Service').closest('button')!);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/gagal membuat tiket/i);
   });
 
   it('fires the thermal print within 1.5s of ticket creation (FR-KSK-02/03, NFR-PERF-03)', async () => {
