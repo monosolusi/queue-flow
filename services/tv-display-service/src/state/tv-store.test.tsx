@@ -237,6 +237,35 @@ describe('TvStoreProvider realtime projection + audio (FR-TV-01/02)', () => {
     expect(screen.queryByText('A-005')).not.toBeInTheDocument();
   });
 
+  it('recall ("Panggil Ulang") re-shows the skipped ticket on the board and re-announces it (FR-TV-01/02)', async () => {
+    // The domain (QueueTicket.recall) emits STATUS_UPDATED (SKIPPED -> CALLING)
+    // followed by TICKET_CALLED carrying {ticketNumber, counterId} — a recall is
+    // a re-call to the same counter. The TV's existing TICKET_CALLED path re-shows
+    // the ticket + re-announces audio with no TV-side retained state. The prior
+    // STATUS_UPDATED is a no-op here (nowServing was null'd on skip, so the
+    // `nowServing?.ticketId !== aggregateId` guard returns state unchanged).
+    const api = makeApi();
+    const audio = makeAudio();
+    renderBoard(api, audio);
+    await screen.findByText('Apotek Sehat');
+    const ws = FakeWebSocket.instances[0];
+
+    fire(ws, calledEvent('t1', 'A-005', 2));
+    await screen.findByText('A-005');
+    expect(audio.sequences).toHaveLength(1); // announced on the first call
+
+    fire(ws, statusEvent('t1', 'CALLING', 'SKIPPED'));
+    expect(await screen.findByTestId('standby')).toBeInTheDocument();
+    expect(screen.queryByText('A-005')).not.toBeInTheDocument();
+
+    // Recall: STATUS_UPDATED (SKIPPED -> CALLING) then TICKET_CALLED for the SAME
+    // ticket (not a new ticket) — the real recall flow the previous test masked.
+    fire(ws, statusEvent('t1', 'SKIPPED', 'CALLING'));
+    fire(ws, calledEvent('t1', 'A-005', 2));
+    expect(await screen.findByText('A-005')).toBeInTheDocument();
+    expect(audio.sequences).toHaveLength(2); // re-announced on recall
+  });
+
   it('re-numbers the now-serving ticket on TICKET_TRANSFERRED', async () => {
     const api = makeApi();
     const audio = makeAudio();

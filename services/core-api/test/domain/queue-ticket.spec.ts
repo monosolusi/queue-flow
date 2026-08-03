@@ -64,13 +64,25 @@ describe('QueueTicket aggregate', () => {
     expect(ticket.currentStatus).toBe(TicketStatus.COMPLETED);
   });
 
-  it('supports skip then recall (Panggil Ulang)', () => {
+  it('supports skip then recall (Panggil Ulang) and re-emits TICKET_CALLED', () => {
     const ticket = newTicket();
     ticket.markCalling(1, policy, FIXED_NOW);
+    ticket.pullDomainEvents(); // drop the call events to isolate the recall
     ticket.skip(policy, FIXED_NOW + 1);
+    ticket.pullDomainEvents(); // drop the skip STATUS_UPDATED
     expect(ticket.currentStatus).toBe(TicketStatus.SKIPPED);
     ticket.recall(policy, FIXED_NOW + 2);
     expect(ticket.currentStatus).toBe(TicketStatus.CALLING);
+    // A recall is a re-call to the same counter, so it mirrors markCalling's
+    // two-event shape: STATUS_UPDATED (SKIPPED -> CALLING) then TICKET_CALLED
+    // carrying the retained counterId + ticket number (FR-TV-01/02).
+    const events = ticket.pullDomainEvents();
+    expect(events.map((e) => e.type)).toEqual(['STATUS_UPDATED', 'TICKET_CALLED']);
+    expect(events[0]).toBeInstanceOf(TicketStatusChangedEvent);
+    expect((events[0] as TicketStatusChangedEvent).actionLabel).toBe('Panggil Ulang');
+    expect(events[1]).toBeInstanceOf(TicketCalledEvent);
+    expect((events[1] as TicketCalledEvent).counterId).toBe(1);
+    expect((events[1] as TicketCalledEvent).ticketNumber).toBe('A-001');
   });
 
   it('throws InvalidStateTransitionException on illegal transitions', () => {

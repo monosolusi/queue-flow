@@ -102,10 +102,16 @@ function projectEvent(state: TvState, e: QueueLifecycleWireEvent): TvState {
       }
       // SKIPPED (recallable via "Panggil Ulang") and WAITING (transfer, re-enters
       // the queue as a fresh ticket) leave the board without entering history:
-      // neither is a concluded call. (Recalling a skipped ticket would need its
-      // ticketNumber/counter restored from history — a STATUS_UPDATED only
-      // carries {from,to}, so that restore is a separate concern, not in scope
-      // for the call-history retention fix.)
+      // neither is a concluded call.
+      //
+      // Recall-restore: a recalled ticket (SKIPPED -> CALLING) re-shows on the
+      // board and re-announces audio via the TICKET_CALLED event the domain now
+      // emits on recall (QueueTicket.recall records a TicketCalledEvent, mirroring
+      // markCalling) — no TV-side retained state is needed. The STATUS_UPDATED
+      // for the recall reaches the TV while nowServing is null (SKIPPED cleared
+      // it above), so this `nowServing?.ticketId !== aggregateId` guard returns
+      // state unchanged and the follow-on TICKET_CALLED does the restore. The TV
+      // needs no recall-specific projection here.
       if (p.to === 'SKIPPED' || p.to === 'WAITING') {
         return { ...state, nowServing: null };
       }

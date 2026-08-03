@@ -191,6 +191,18 @@ export class QueueTicket extends AggregateRoot<TicketId> {
     // wait-time metric reflects the time from creation (or re-queue) to the
     // *latest* call, not the original (now-stale) one.
     this._calledAt = now;
+    // A recall is a re-call to the same counter: re-emit TICKET_CALLED so the TV
+    // board re-shows the ticket and the audio queue re-announces it (FR-TV-01/02).
+    // Recall is only reachable from SKIPPED, which (per the PRD §7 default machine)
+    // follows a prior {@link markCalling} that set `_counterId`, so it is non-null
+    // here. The guard is defensive against a degenerate custom machine that reached
+    // SKIPPED without a prior call (no counter to re-call to) — the status transition
+    // still proceeds, but no re-announce fires for that edge.
+    if (this._counterId !== null) {
+      this.record(
+        new TicketCalledEvent(this.id.value, this._ticketNumber.formatted(), this._counterId, now),
+      );
+    }
   }
 
   /** Begin serving. CALLING -> SERVING ("Mulai Melayani"). */

@@ -172,8 +172,16 @@ describe('DoD-3 — Offline End-to-End realtime flow', () => {
     expect(tvEvents[2].payload.to).toBe('SKIPPED');
 
     await http(booted.app).post(`/api/queue/${ticketId}/recall`).expect(201);
-    await waitForLength(tvEvents, 4);
+    // Recall is a re-call to the same counter: it emits STATUS_UPDATED
+    // (SKIPPED -> CALLING) then TICKET_CALLED carrying {ticketNumber, counterId}
+    // so the TV board re-shows the ticket and the audio queue re-announces it
+    // (FR-TV-01/02). The TICKET_CALLED is the recall-restore signal the TV
+    // consumes with no TV-side change.
+    await waitForLength(tvEvents, 5);
     expect(tvEvents[3].payload.to).toBe('CALLING');
+    expect(tvEvents[4].type).toBe('TICKET_CALLED');
+    expect(tvEvents[4].payload.ticketNumber).toBe('A-001');
+    expect(tvEvents[4].payload.counterId).toBe(1);
 
     tv.close();
   });
