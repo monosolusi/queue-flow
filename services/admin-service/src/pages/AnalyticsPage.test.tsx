@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AnalyticsPage, type DailyReportExporter } from './AnalyticsPage';
 import type { IAdminApi } from '../api/admin-api';
@@ -130,14 +130,40 @@ describe('AnalyticsPage (FR-ADM-03 / QUE-26)', () => {
     expect(screen.getByTestId('metric-wait')).toHaveTextContent('12.0 s');
     expect(screen.getByTestId('metric-service')).toHaveTextContent('30.0 s');
     // Per-category rows — the breakdown carries the category code, not the name.
-    expect(screen.getByText('A')).toBeInTheDocument();
-    expect(screen.getByText('B')).toBeInTheDocument();
+    // Scoped to the "Per kategori" region so the recap-chart code labels (also A/B)
+    // don't make `getByText` match multiple nodes.
+    const perCategory = screen.getByRole('region', { name: 'Per kategori' });
+    expect(within(perCategory).getByText('A')).toBeInTheDocument();
+    expect(within(perCategory).getByText('B')).toBeInTheDocument();
     // Counter performance rows are labelled by name + #id.
     expect(screen.getByText(/Counter 1 \(#1\)/)).toBeInTheDocument();
     expect(screen.getByText(/Counter 2 \(#2\)/)).toBeInTheDocument();
     // Audit trail rows — the action strings render.
     expect(screen.getByText('MANUAL_RESET')).toBeInTheDocument();
     expect(screen.getByText('STATE_SCHEMA_CHANGE')).toBeInTheDocument();
+  });
+
+  it('renders a per-category bar chart for each FR-ADM-03 metric (Total/Wait/Service)', async () => {
+    const { api } = makeApi();
+    renderPage(api);
+
+    // The recap section renders one bar per category per metric (3 metrics x 2
+    // categories = 6 bars). Each bar carries its metric + category code in the
+    // testid so the chart is assertable without SheetJS or a pixel diff.
+    await screen.findByTestId('recap-charts');
+    for (const metric of ['total', 'wait', 'service'] as const) {
+      expect(screen.getByTestId(`recap-bar-${metric}-A`)).toBeInTheDocument();
+      expect(screen.getByTestId(`recap-bar-${metric}-B`)).toBeInTheDocument();
+    }
+    // The accessible summary carries the formatted values, so a chart that
+    // rendered six zero-width bars for any input would fail this — it verifies
+    // the value-formatting wiring (count vs `formatSeconds`) without a pixel diff.
+    expect(
+      screen.getByRole('img', { name: /Total Pengunjung per kategori: A 3, B 1/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('img', { name: /Rata-rata Waktu Tunggu per kategori: A 10\.0 s, B 2\.0 s/ }),
+    ).toBeInTheDocument();
   });
 
   it('renders the empty state when there is no data for the date and disables export', async () => {
@@ -150,6 +176,8 @@ describe('AnalyticsPage (FR-ADM-03 / QUE-26)', () => {
 
     expect(await screen.findByTestId('analytics-empty')).toBeInTheDocument();
     expect(screen.getByTestId('analytics-export')).toBeDisabled();
+    // No recap charts in the empty state (the page short-circuits before them).
+    expect(screen.queryByTestId('recap-charts')).not.toBeInTheDocument();
   });
 
   it('surfaces an error and a back-to-admin link when the load fails', async () => {

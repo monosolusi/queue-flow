@@ -517,3 +517,38 @@ fieldset {
   word-break: break-all;
   max-width: 18rem;
 }
+
+/* Recap charts — "Grafik Rekapitulasi Harian" (FR-ADM-03 / QUE-6) -------------
+ * Hand-rolled offline SVG bar charts (no chart library, NFR-REL-01). One accent
+ * hue per single-series magnitude chart; text never wears the data color. */
+.recap-charts {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.recap-chart {
+  margin: 0;
+}
+.recap-chart__title {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.recap-chart__svg {
+  width: 100%;
+  max-width: 420px;
+  height: auto;
+  display: block;
+}
+.recap-chart__label {
+  fill: var(--text-muted);
+  font-size: 11px;
+}
+.recap-chart__bar {
+  fill: var(--accent);
+}
+.recap-chart__value {
+  fill: var(--text);
+  font-size: 11px;
+}
