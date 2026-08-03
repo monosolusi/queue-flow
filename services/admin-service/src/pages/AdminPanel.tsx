@@ -61,6 +61,20 @@ type PanelState =
   | { status: 'ready'; form: AdminForm };
 
 /**
+ * AC6 — wire a field error message to its input via `aria-describedby` +
+ * `aria-invalid`. Returns a spreadable props object (empty when there is no
+ * error) so the happy-path markup stays clean. Duplicated from WizardPage
+ * rather than shared: the repo has no shared UI lib and the error shapes are
+ * heterogeneous (mirrors the `theme.ts` duplication precedent).
+ */
+function describedBy(
+  errorId: string,
+  hasError: boolean,
+): { 'aria-describedby': string; 'aria-invalid': boolean } | Record<string, never> {
+  return hasError ? { 'aria-describedby': errorId, 'aria-invalid': true } : {};
+}
+
+/**
  * The operational configuration panel (FR-ADM-01 / QUE-24). After first-run
  * setup the manager edits the operational areas here — categories,
  * counter routing, the daily-reset policy, and the brand color — without
@@ -287,6 +301,7 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
                 onChange={(e) => updateCategory(form, setState, i, { code: e.target.value.toUpperCase() })}
                 placeholder="A"
                 aria-label={`Kategori ${i + 1} kode`}
+                aria-required="true"
               />
               <input
                 className="field__input entry-row__name"
@@ -295,6 +310,7 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
                 onChange={(e) => updateCategory(form, setState, i, { name: e.target.value })}
                 placeholder="Nama kategori"
                 aria-label={`Kategori ${i + 1} nama`}
+                aria-required="true"
               />
               <button
                 type="button"
@@ -330,10 +346,16 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
             onChange={(e) => setState({ status: 'ready', form: { ...form, brandColor: e.target.value } })}
             placeholder="#2563eb"
             aria-label="Kode hex warna brand"
+            {...describedBy('brand-color-errors', brandColorErrors.length > 0)}
           />
         </div>
         {brandColorErrors.length > 0 && (
-          <ul className="wizard__errors" data-testid="brand-color-errors" style={{ marginTop: '0.75rem' }}>
+          <ul
+            className="wizard__errors"
+            id="brand-color-errors"
+            data-testid="brand-color-errors"
+            style={{ marginTop: '0.75rem' }}
+          >
             {brandColorErrors.map((msg) => (
               <li key={msg}>{msg}</li>
             ))}
@@ -354,6 +376,7 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
                 value={rule.counterId}
                 onChange={(e) => updateRouting(form, setState, i, { counterId: Number(e.target.value) })}
                 aria-label={`Counter ${i + 1} id`}
+                aria-required="true"
               />
               <input
                 className="field__input entry-row__name"
@@ -362,12 +385,14 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
                 onChange={(e) => updateRouting(form, setState, i, { counterName: e.target.value })}
                 placeholder="Nama counter"
                 aria-label={`Counter ${i + 1} nama`}
+                aria-required="true"
               />
               <select
                 className="field__input"
                 value={rule.priorityPolicy}
                 onChange={(e) => updateRouting(form, setState, i, { priorityPolicy: e.target.value as PriorityPolicy })}
                 aria-label={`Counter ${i + 1} kebijakan prioritas`}
+                aria-required="true"
               >
                 {(Object.keys(PRIORITY_POLICY_LABELS) as PriorityPolicy[]).map((p) => (
                   <option key={p} value={p}>
@@ -425,7 +450,9 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
         </label>
         {form.dailyReset.mode === 'AUTOMATIC_CRON' && (
           <label className="field">
-            <span className="field__label">Waktu reset harian</span>
+            <span className="field__label">
+              Waktu reset harian<span aria-hidden="true"> *</span>
+            </span>
             <input
               className="field__input"
               type="time"
@@ -434,16 +461,20 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
                 setState({ status: 'ready', form: { ...form, dailyReset: { ...form.dailyReset, cronExpression: timeToCron(e.target.value) } } })
               }
               aria-label="Waktu reset harian"
+              required
+              {...describedBy('cron-error', Boolean(cronError))}
             />
             {cronError && (
-              <span className="field__error" data-testid="cron-error">
+              <span className="field__error" id="cron-error" data-testid="cron-error">
                 {cronError}
               </span>
             )}
           </label>
         )}
         <label className="field">
-          <span className="field__label">Reset nomor antrian ke</span>
+          <span className="field__label">
+            Reset nomor antrian ke<span aria-hidden="true"> *</span>
+          </span>
           <input
             className="field__input"
             type="number"
@@ -455,6 +486,7 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
                 form: { ...form, dailyReset: { ...form.dailyReset, resetTicketNumberTo: Number(e.target.value) } },
               })
             }
+            required
           />
         </label>
         <label className="field field--inline">
@@ -531,7 +563,9 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
             </span>
           </div>
           <label className="field field--inline">
-            <span className="field__label">Retensi (hari)</span>
+            <span className="field__label">
+              Retensi (hari)<span aria-hidden="true"> *</span>
+            </span>
             <input
               className="field__input"
               type="number"
@@ -540,6 +574,8 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
               onChange={(e) => setRetentionDays(Number(e.target.value))}
               aria-label="Retensi hari"
               data-testid="retention-days"
+              required
+              {...describedBy('retention-error', retentionError !== null)}
             />
           </label>
           <button
@@ -553,7 +589,7 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
           </button>
         </div>
         {retentionError && (
-          <p className="admin-panel__error" data-testid="retention-error">
+          <p className="admin-panel__error" id="retention-error" data-testid="retention-error">
             {retentionError}
           </p>
         )}

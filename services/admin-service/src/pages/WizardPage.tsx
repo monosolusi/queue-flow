@@ -194,6 +194,21 @@ function referencedStates(form: StateMachineForm): Set<string> {
 }
 
 /**
+ * AC6 — wire a field error message to its input via `aria-describedby` +
+ * `aria-invalid`. Returns a spreadable props object (empty when there is no
+ * error) so the happy-path markup stays clean. Inline per-page rather than a
+ * shared `<Field>` component: the repo has no shared UI lib and the error
+ * shapes are heterogeneous (list vs single string) across the wizard/admin
+ * surfaces (mirrors the `theme.ts` duplication precedent).
+ */
+function describedBy(
+  errorId: string,
+  hasError: boolean,
+): { 'aria-describedby': string; 'aria-invalid': boolean } | Record<string, never> {
+  return hasError ? { 'aria-describedby': errorId, 'aria-invalid': true } : {};
+}
+
+/**
  * The first-run setup wizard (FR-WZD-02..06). Five steps:
  *  1. Store profile + categories — store name, active counter count, and the
  *     category list with a PRD §7 Default / Custom preset template (FR-WZD-02).
@@ -417,9 +432,13 @@ export function WizardPage({ api }: { api: IAdminApi }) {
         </p>
       </header>
 
-      <ol className="wizard__steps-bar">
+      <ol className="wizard__steps-bar" aria-label="Langkah wizard">
         {[1, 2, 3, 4, 5].map((n) => (
-          <li key={n} className={`wizard__step-dot ${n === step ? 'is-current' : ''} ${n < step ? 'is-done' : ''}`}>
+          <li
+            key={n}
+            className={`wizard__step-dot ${n === step ? 'is-current' : ''} ${n < step ? 'is-done' : ''}`}
+            aria-current={n === step ? 'step' : undefined}
+          >
             {n}
           </li>
         ))}
@@ -430,19 +449,24 @@ export function WizardPage({ api }: { api: IAdminApi }) {
           <section className="wizard__step" data-testid="step-1">
             <h2 className="wizard__step-title">Profil Toko &amp; Kategori</h2>
             <label className="field">
-              <span className="field__label">Nama toko / cabang</span>
+              <span className="field__label">
+                Nama toko / cabang<span aria-hidden="true"> *</span>
+              </span>
               <input
                 className="field__input"
                 type="text"
                 value={form.storeName}
                 onChange={(e) => setForm({ ...form, storeName: e.target.value })}
                 placeholder="mis. Apotek Sehat Sentosa"
+                required
                 autoFocus
               />
             </label>
 
             <label className="field">
-              <span className="field__label">Jumlah counter aktif</span>
+              <span className="field__label">
+                Jumlah counter aktif<span aria-hidden="true"> *</span>
+              </span>
               <input
                 className="field__input"
                 type="number"
@@ -450,6 +474,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                 value={form.routingRules.length}
                 onChange={(e) => setCounterCount(form, setForm, Number(e.target.value))}
                 aria-label="Jumlah counter aktif"
+                required
               />
             </label>
 
@@ -475,10 +500,11 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                   onChange={(e) => setForm({ ...form, brandColor: e.target.value })}
                   placeholder="#2563eb"
                   aria-label="Kode hex warna brand"
+                  {...describedBy('brand-color-errors', brandColorErrors.length > 0)}
                 />
               </div>
               {brandColorErrors.length > 0 && (
-                <ul className="wizard__errors" data-testid="brand-color-errors">
+                <ul className="wizard__errors" id="brand-color-errors" data-testid="brand-color-errors">
                   {brandColorErrors.map((msg) => (
                     <li key={msg}>{msg}</li>
                   ))}
@@ -517,7 +543,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
             </fieldset>
 
             {form.categoriesMode === 'default' ? (
-              <div className="cat-readonly" data-testid="cat-readonly">
+              <div data-testid="cat-readonly">
                 <p className="wizard__hint">Kategori standar (hanya lihat):</p>
                 <ul className="entry-list">
                   {form.categories.map((c, i) => (
@@ -529,7 +555,12 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                 </ul>
               </div>
             ) : (
-              <div className="cat-editor" data-testid="cat-editor">
+              <div
+                data-testid="cat-editor"
+                role="group"
+                aria-label="Daftar kategori"
+                aria-describedby={catErrors.length > 0 ? 'cat-errors' : undefined}
+              >
                 <ul className="entry-list">
                   {form.categories.map((cat, i) => (
                     <li key={i} className="entry-row">
@@ -540,6 +571,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                         onChange={(e) => updateCategory(form, setForm, i, { code: e.target.value.toUpperCase() })}
                         placeholder="A"
                         aria-label={`Kategori ${i + 1} kode`}
+                        aria-required="true"
                       />
                       <input
                         className="field__input entry-row__name"
@@ -548,6 +580,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                         onChange={(e) => updateCategory(form, setForm, i, { name: e.target.value })}
                         placeholder="Nama kategori"
                         aria-label={`Kategori ${i + 1} nama`}
+                        aria-required="true"
                       />
                       <button
                         type="button"
@@ -565,7 +598,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                 </button>
 
                 {catErrors.length > 0 && (
-                  <ul className="wizard__errors" data-testid="cat-errors">
+                  <ul className="wizard__errors" id="cat-errors" data-testid="cat-errors">
                     {catErrors.map((msg) => (
                       <li key={msg}>{msg}</li>
                     ))}
@@ -680,7 +713,12 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                 </ul>
               </div>
             ) : (
-              <div className="sm-editor" data-testid="sm-editor">
+              <div
+                data-testid="sm-editor"
+                role="group"
+                aria-label="Editor alur status"
+                aria-describedby={smErrors.length > 0 ? 'sm-errors' : undefined}
+              >
                 <h3 className="wizard__subhead">States</h3>
                 <ul className="entry-list">
                   {form.stateMachine.states.map((s, i) => {
@@ -693,6 +731,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                           value={s}
                           onChange={(e) => updateState(form, setForm, i, e.target.value.toUpperCase())}
                           aria-label={`State ${i + 1}`}
+                          aria-required="true"
                         />
                         <button
                           type="button"
@@ -720,6 +759,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                         value={t.from}
                         onChange={(e) => updateTransition(form, setForm, i, { from: e.target.value })}
                         aria-label={`Transisi ${i + 1} from`}
+                        aria-required="true"
                       >
                         {form.stateMachine.states.map((s, si) => (
                           <option key={`${si}-${s}`} value={s}>
@@ -733,6 +773,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                         value={t.to}
                         onChange={(e) => updateTransition(form, setForm, i, { to: e.target.value })}
                         aria-label={`Transisi ${i + 1} to`}
+                        aria-required="true"
                       >
                         {form.stateMachine.states.map((s, si) => (
                           <option key={`${si}-${s}`} value={s}>
@@ -747,6 +788,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                         onChange={(e) => updateTransition(form, setForm, i, { actionLabel: e.target.value })}
                         placeholder="Label aksi (Indonesia)"
                         aria-label={`Transisi ${i + 1} label aksi`}
+                        aria-required="true"
                       />
                       <button
                         type="button"
@@ -764,7 +806,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                 </button>
 
                 {smErrors.length > 0 && (
-                  <ul className="wizard__errors" data-testid="sm-errors">
+                  <ul className="wizard__errors" id="sm-errors" data-testid="sm-errors">
                     {smErrors.map((msg) => (
                       <li key={msg}>{msg}</li>
                     ))}
@@ -794,7 +836,9 @@ export function WizardPage({ api }: { api: IAdminApi }) {
             </label>
             {form.dailyReset.mode === 'AUTOMATIC_CRON' && (
               <label className="field">
-                <span className="field__label">Waktu reset harian</span>
+                <span className="field__label">
+                  Waktu reset harian<span aria-hidden="true"> *</span>
+                </span>
                 <input
                   className="field__input"
                   type="time"
@@ -803,16 +847,20 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                     setForm({ ...form, dailyReset: { ...form.dailyReset, cronExpression: timeToCron(e.target.value) } })
                   }
                   aria-label="Waktu reset harian"
+                  required
+                  {...describedBy('cron-error', Boolean(cronError))}
                 />
                 {cronError && (
-                  <span className="field__error" data-testid="cron-error">
+                  <span className="field__error" id="cron-error" data-testid="cron-error">
                     {cronError}
                   </span>
                 )}
               </label>
             )}
             <label className="field">
-              <span className="field__label">Reset nomor antrian ke</span>
+              <span className="field__label">
+                Reset nomor antrian ke<span aria-hidden="true"> *</span>
+              </span>
               <input
                 className="field__input"
                 type="number"
@@ -821,6 +869,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                 onChange={(e) =>
                   setForm({ ...form, dailyReset: { ...form.dailyReset, resetTicketNumberTo: Number(e.target.value) } })
                 }
+                required
               />
             </label>
             <label className="field field--inline">

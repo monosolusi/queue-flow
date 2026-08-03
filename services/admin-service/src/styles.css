@@ -28,6 +28,32 @@ button {
   cursor: pointer;
 }
 
+/* AC8 — visually-hidden skip link, revealed on focus. */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  padding: 0.75rem 1rem;
+  border-radius: 0 0 var(--radius) 0;
+  font-weight: 600;
+}
+.skip-link:focus {
+  left: 0;
+}
+
+/* AC5 — admin-local ≥44px touch target for the ghost "Hapus" buttons. The shared
+   baseline's .btn--ghost is 0.5rem 0.8rem; this override lifts it without
+   touching the shared canonical interactions.css (admin-scoped). */
+.btn--ghost {
+  min-height: 2.75rem;
+  padding: 0.6rem 0.9rem;
+  display: inline-flex;
+  align-items: center;
+}
+
 input,
 select,
 fieldset {
@@ -41,7 +67,8 @@ fieldset {
 /* SetupGuard / loading --------------------------------------------------- */
 .guard-loading,
 .admin-panel--loading,
-.wizard--loading {
+.wizard--loading,
+.analytics--loading {
   padding: 3rem;
   text-align: center;
   color: var(--text-muted);
@@ -337,6 +364,18 @@ fieldset {
   align-items: stretch;
   gap: 0.6rem;
 }
+/* AC12 — manual-ops override rows: separator + stretch alignment the base
+   .entry-row (flex-wrap) doesn't give (AdminPanel Operasi Manual). */
+.entry-row--override {
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--surface-2);
+}
+.entry-row--override:first-of-type {
+  border-top: none;
+}
 .entry-row__counter-title {
   font-weight: 600;
 }
@@ -362,6 +401,18 @@ fieldset {
   min-width: 14rem;
 }
 
+/* AC4 — the 5-column transition grid overflows on narrow viewports; stack the
+   label + remove button onto full-width rows below the from → to row. */
+@media (max-width: 640px) {
+  .entry-row--transition {
+    grid-template-columns: 1fr 1.5rem 1fr;
+  }
+  .entry-row--transition > .entry-row__label,
+  .entry-row--transition > .btn {
+    grid-column: 1 / -1;
+  }
+}
+
 .checkbox-group {
   border: 1px solid var(--surface-2);
   border-radius: 8px;
@@ -376,6 +427,8 @@ fieldset {
   gap: 0.3rem;
   align-items: center;
   font-size: 0.95rem;
+  padding: 0.4rem 0.5rem;
+  min-height: 2.75rem; /* ≥44px touch target via the wrapping <label> (AC5) */
 }
 
 .radio-group {
@@ -392,6 +445,8 @@ fieldset {
   gap: 0.3rem;
   align-items: center;
   font-size: 0.95rem;
+  padding: 0.4rem 0.5rem;
+  min-height: 2.75rem; /* ≥44px touch target via the wrapping <label> (AC5) */
 }
 
 .sm-readonly .entry-row__state,
@@ -405,8 +460,8 @@ fieldset {
   padding: 0.6rem 0.9rem;
   list-style: disc inside;
   color: var(--danger-on-dark);
-  background: rgba(192, 57, 43, 0.06);
-  border: 1px solid rgba(192, 57, 43, 0.25);
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
   border-radius: 8px;
 }
 
@@ -432,10 +487,10 @@ fieldset {
 }
 .wizard__review-label {
   margin: 0 0 0.35rem;
-  font-size: 0.78rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: 0.85rem;
+  letter-spacing: 0.01em;
   color: var(--text-muted);
+  /* normal-case small label, one cadence (AC11) — uppercase eyebrow removed */
 }
 .wizard__review-value,
 .wizard__review-list {
@@ -480,6 +535,17 @@ fieldset {
 }
 .analytics__empty {
   color: var(--text-muted);
+}
+/* AC10 — de-cardified Ringkasan: section heading on the page surface (no nested
+   config-card wrapper; metric tiles sit on the page surface). */
+.analytics__summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.analytics__section-title {
+  margin: 0;
+  font-size: 1.25rem;
 }
 .metric-grid {
   display: grid;
@@ -528,6 +594,11 @@ fieldset {
   word-break: break-all;
   max-width: 18rem;
 }
+/* AC4 — horizontal scroll for the wide 5-column audit table on narrow viewports. */
+.data-table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
 
 /* Recap charts — "Grafik Rekapitulasi Harian" (FR-ADM-03 / QUE-6) -------------
  * Hand-rolled offline SVG bar charts (no chart library, NFR-REL-01). One accent
@@ -562,4 +633,10 @@ fieldset {
 .recap-chart__value {
   fill: var(--text);
   font-size: 11px;
+}
+
+/* AC13 — placeholder text contrast on dark inputs. */
+::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
 }

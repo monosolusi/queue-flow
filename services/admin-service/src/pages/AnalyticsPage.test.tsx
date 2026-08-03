@@ -115,7 +115,7 @@ function makeApi(
 function renderPage(api: IAdminApi, exporter?: DailyReportExporter) {
   return render(
     <MemoryRouter>
-      <AnalyticsPage api={api} exporter={exporter ?? (() => {})} />
+      <AnalyticsPage api={api} exporter={exporter ?? (async () => {})} />
     </MemoryRouter>,
   );
 }
