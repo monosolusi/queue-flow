@@ -342,6 +342,42 @@ with no duplicate/lost ticket numbers.
   (no tight loop). The old hardcoded "FR-TV-03 minimal" marquee footer became
   the sourced `RunningText` (prominent when idle, decorative footer when
   active).
+  **QUE-4 closure (Operational Interfaces umbrella, FR-TV-01/02/03 +
+  NFR-REL-01):** all three QUE-4 children (QUE-21 board+history, QUE-22 audio FIFO,
+  QUE-23 standby) merged, gates green (tv-display 33 tests + build, no external
+  URLs in `dist/assets`). The mandatory arch-reviewer pass surfaced one genuine
+  residual PRD gap — the PRD-default **"Panggil Ulang" recall** (`SKIPPED →
+  CALLING`) neither re-showed the ticket on the TV board nor re-announced audio
+  (the documented "Known deferred gap") — and the existing test masked it by
+  recalling a *new* ticket instead of the same one. Per the residual-gap-polish
+  pattern, QUE-4 ships a focused fix PR closing its own gap rather than
+  closure-only. **Root cause + fix:** `QueueTicket.recall` recorded only
+  `STATUS_UPDATED` (wire payload `{from,to}` — no `ticketNumber`/`counterId`), so
+  the TV `STATUS_UPDATED` projection could not reconstruct `nowServing` and audio
+  (dispatched only on `TICKET_CALLED`) never fired. Recall is semantically a
+  **re-call to the same counter** (the ticket retains its `_counterId` from the
+  prior `markCalling`; `RecallTicketUseCase` takes no `counterId`), so the fix is
+  at the domain source: `recall()` now also records a `TicketCalledEvent`
+  (guarded on `_counterId !== null`), mirroring `markCalling`'s two-event shape.
+  The TV's existing `TICKET_CALLED` path re-shows + re-announces with **no TV
+  code change** (doc-only comment update at `tv-store.tsx`). **Spans core-api +
+  tv-display-service (doc only).** Gates: core-api `arch:check` clean + 263
+  tests + 20 acceptance (5 skipped) — the `offline-e2e` recall round-trip now
+  asserts 5 wire events + the `TICKET_CALLED` re-show/re-announce; tv-display 33
+  tests (new recall-restore test asserts the *same* ticket re-shows + audio
+  re-announces, closing the masked-test gap); caller-service 46 tests green (no
+  breakage). **General rule — fix a missing realtime projection at the domain
+  event source, not per-consumer:** when a default-flow operation is invisible to
+  a realtime consumer because the aggregate omits the event the consumer
+  projects, emit the semantically-correct event from the aggregate (here recall
+  emits `TICKET_CALLED` — a re-call is a call) so every consumer's existing path
+  handles it with no per-consumer retained-state patch. This mirrors the
+  "no speculative ports / fix root cause" precedent; a TV-side "recallable" map
+  (Option B) would have left the root cause and added retained state the project
+  is cautious about. **Caller side-effect deferred to QUE-5** (a recalled ticket
+  now re-shows in the caller `active` list, an improvement, but with
+  `categoryId: ''` since it is in neither `waiting` nor `active` — proper
+  `categoryId` recovery belongs to the caller umbrella).
 - **PRD language:** the Linear PRD is written in **Bahasa Indonesia** with
   English technical terms. UI `action_label` values ("Panggil Berikutnya",
   "Lewati / Absen", "Selesai Layan") are Indonesian — match them verbatim
@@ -674,8 +710,19 @@ with no duplicate/lost ticket numbers.
   transfer ("Pindah Kategori") is a first-class transition, the aggregate
   records both a `STATUS_UPDATED` (CALLING → WAITING, actionLabel "Pindah
   Kategori") **and** a `TICKET_TRANSFERRED` — so a realtime test asserting a
-  transfer must collect 2 messages, not 1 (the other single-transition commands
-  emit exactly one `STATUS_UPDATED`).
+  transfer must collect 2 messages, not 1. **Recall emits two events (QUE-4):**
+  recall ("Panggil Ulang", `SKIPPED → CALLING`) is a re-call to the same counter,
+  so `QueueTicket.recall` records a `STATUS_UPDATED` (actionLabel "Panggil
+  Ulang") **and** a `TICKET_CALLED` carrying the retained `counterId` +
+  `ticketNumber` — mirroring `markCalling`. This is the recall-restore fix: the
+  TV board re-shows the ticket + re-announces audio via the existing
+  `TICKET_CALLED` path with no TV-side change (a realtime/acceptance test
+  asserting recall must collect 2 messages, not 1). The `TICKET_CALLED` is
+  guarded on `_counterId !== null` (defensive against a degenerate custom
+  machine that reached `SKIPPED` without a prior call); recall is only reachable
+  from `SKIPPED`, which follows a prior `markCalling` that set it, so the guard
+  never trips on the PRD default machine. The other single-transition commands
+  (serve/complete/skip) emit exactly one `STATUS_UPDATED`.
 - **Daily reset engine (QUE-2, FR-ENG-05):** `ResetDailyQueueUseCase`
   (`application/queue`) owns only `ISequenceRepository` + `QueueEventDispatcher`
   + an injected `clock`. It derives `date = toDateKey(clock())` internally (the
@@ -1218,17 +1265,29 @@ with no duplicate/lost ticket numbers.
     empty: the completed ticket was null'd and the next `TICKET_CALLED` found
     `nowServing` already null and pushed nothing. `SKIPPED` (recallable via
     "Panggil Ulang") and `WAITING` (transfer, re-enters the queue) are
-    deliberately **not** retained — neither is a concluded call. **Known
-    deferred gap:** recalling a skipped ticket (`STATUS_UPDATED`
-    `SKIPPED → CALLING`) does **not** restore `nowServing`, because the wire
-    `STATUS_UPDATED` payload carries only `{from, to}` (no `ticketNumber` /
-    `counterId`), so the board cannot reconstruct the entry from the event
-    alone. Do not "complete" history by pushing `SKIPPED` into it without also
-    implementing recall-restore (pull the ticket back out of history by
-    `aggregateId`), or a recalled ticket would appear in history but not on the
-    now-serving board. No double-push: the `aggregateId` guard skips a
-    `STATUS_UPDATED` for a ticket no longer `nowServing`, and a `TICKET_CALLED`
-    after a `COMPLETED` finds `nowServing` null so pushes nothing.
+    deliberately **not** retained — neither is a concluded call. **Recall-restore
+    (QUE-4, resolved):** recalling a skipped ticket ("Panggil Ulang",
+    `SKIPPED → CALLING`) re-shows it on the board and re-announces audio via the
+    `TICKET_CALLED` event the domain now emits on recall (`QueueTicket.recall`
+    records a `TicketCalledEvent` after the `STATUS_UPDATED`, mirroring
+    `markCalling` — a recall is a re-call to the same counter). The TV's existing
+    `TICKET_CALLED` path re-shows + re-announces with **no TV-side retained state**;
+    the prior `STATUS_UPDATED` is a no-op (nowServing was null'd on skip, so the
+    `nowServing?.ticketId !== aggregateId` guard returns state unchanged). Do not
+    "complete" history by pushing `SKIPPED` into it — `SKIPPED` is recallable, not
+    concluded, so it stays out of history (a recalled ticket re-appears as
+    `nowServing` via `TICKET_CALLED`, not via history restore). No double-push: the
+    `aggregateId` guard skips a `STATUS_UPDATED` for a ticket no longer
+    `nowServing`, and a `TICKET_CALLED` after a `COMPLETED` finds `nowServing`
+    null so pushes nothing. **Caller side-effect (deferred to QUE-5):** the caller
+    also consumes `TICKET_CALLED`, so a recalled ticket now re-appears in the
+    caller's `active` list (an improvement — today the `STATUS_UPDATED`
+    `idx === -1` guard dropped it, so a recalled ticket was invisible to staff).
+    But the caller's `TICKET_CALLED` handler recovers `categoryId` from `waiting`
+    (a recalled ticket is in neither `waiting` nor `active`), so it re-shows with
+    `categoryId: ''` — degrading the QUE-20 transfer chooser's "exclude current
+    category" for a recalled ticket. Proper caller `categoryId` recovery on recall
+    belongs to the QUE-5 caller umbrella, not QUE-4.
 - When adding a feature, map it to the relevant FR-* / NFR-* requirement in the
   PRD and the bounded context it belongs to. Preserve the interface boundaries
   (e.g. don't leak admin DTOs into `ICallerApi`).

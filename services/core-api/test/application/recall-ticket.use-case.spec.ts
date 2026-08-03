@@ -56,8 +56,10 @@ describe('RecallTicketUseCase (Panggil Ulang — FR-CLR-03)', () => {
     expect(result.ticket.status).toBe(TicketStatus.CALLING);
     expect(result.ticket.ticketId).toBe(ticket.id.value);
 
-    // The use case drained the recorded TicketStatusChangedEvent via the
-    // dispatcher so it broadcasts (FR-ENG-04).
+    // The use case drained the recorded events (STATUS_UPDATED +
+    // TICKET_CALLED — recall is a re-call) via the dispatcher so they broadcast
+    // (FR-ENG-04). Dispatch is one call with the aggregate regardless of event
+    // count.
     expect(dispatcher.dispatch).toHaveBeenCalledTimes(1);
     expect(dispatcher.dispatch).toHaveBeenCalledWith(ticket);
 
