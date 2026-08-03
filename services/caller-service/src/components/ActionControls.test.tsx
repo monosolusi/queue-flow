@@ -21,6 +21,10 @@ const bound: BoundCounter = {
   counterId: 1,
   counterName: 'Loket 1',
   assignedCategoryIds: ['cat-a', 'cat-b'],
+  assignedCategories: [
+    { id: 'cat-a', code: 'A', name: 'Customer Service' },
+    { id: 'cat-b', code: 'B', name: 'Kasir' },
+  ],
 };
 
 function ticket(status: string, categoryId = 'cat-a'): TicketStateDto {
@@ -138,5 +142,74 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
     );
     await userEvent.click(screen.getByTestId('action-serve'));
     expect(await screen.findByText(/transisi ilegal/i)).toBeInTheDocument();
+  });
+
+  it('shows a chooser for transfer when ≥2 other categories and fires the chosen one', async () => {
+    const multiBound: BoundCounter = {
+      counterId: 2,
+      counterName: 'Loket 2',
+      assignedCategoryIds: ['cat-a', 'cat-b', 'cat-c'],
+      assignedCategories: [
+        { id: 'cat-a', code: 'A', name: 'Customer Service' },
+        { id: 'cat-b', code: 'B', name: 'Kasir' },
+        { id: 'cat-c', code: 'C', name: 'Informasi' },
+      ],
+    };
+    const graph: StateMachineDto = {
+      states: ['WAITING', 'CALLING', 'SERVING', 'SKIPPED', 'COMPLETED'],
+      transitions: [{ from: 'CALLING', to: 'WAITING', actionLabel: 'Pindah Kategori' }],
+    };
+    const api = makeApi();
+    render(<ActionControls api={api} bound={multiBound} active={ticket('CALLING', 'cat-a')} stateMachine={graph} />);
+    const transferBtn = screen.getByTestId('action-transfer');
+    expect(transferBtn).toHaveTextContent('Pindah Kategori');
+    // No chooser until toggled open.
+    expect(screen.queryByTestId('transfer-chooser')).not.toBeInTheDocument();
+    await userEvent.click(transferBtn);
+    const chooser = await screen.findByTestId('transfer-chooser');
+    // Both other categories are listed by name; the active category is excluded.
+    expect(chooser).toHaveTextContent('Kasir');
+    expect(chooser).toHaveTextContent('Informasi');
+    expect(chooser).not.toHaveTextContent('Customer Service');
+    await userEvent.click(screen.getByTestId('transfer-target-cat-c'));
+    expect(api.transfer).toHaveBeenCalledWith('t1', 'cat-c');
+  });
+
+  it('disables transfer and fires nothing when no other category is available', async () => {
+    const singleBound: BoundCounter = {
+      counterId: 3,
+      counterName: 'Loket 3',
+      assignedCategoryIds: ['cat-a'],
+      assignedCategories: [{ id: 'cat-a', code: 'A', name: 'Customer Service' }],
+    };
+    const graph: StateMachineDto = {
+      states: ['WAITING', 'CALLING'],
+      transitions: [{ from: 'CALLING', to: 'WAITING', actionLabel: 'Pindah Kategori' }],
+    };
+    const api = makeApi();
+    render(<ActionControls api={api} bound={singleBound} active={ticket('CALLING', 'cat-a')} stateMachine={graph} />);
+    const transferBtn = screen.getByTestId('action-transfer');
+    expect(transferBtn).toBeDisabled();
+    await userEvent.click(transferBtn);
+    expect(api.transfer).not.toHaveBeenCalled();
+  });
+
+  it('renders a disabled unsupported affordance for a custom-target transition', () => {
+    const graph: StateMachineDto = {
+      states: ['WAITING', 'CALLING', 'SERVING', 'PREPARING', 'COMPLETED'],
+      transitions: [
+        { from: 'SERVING', to: 'PREPARING', actionLabel: 'Siapkan Dokumen' },
+        { from: 'SERVING', to: 'COMPLETED', actionLabel: 'Selesai Layan' },
+      ],
+    };
+    const api = makeApi();
+    render(<ActionControls api={api} bound={bound} active={ticket('SERVING')} stateMachine={graph} />);
+    // The custom target (PREPARING) has no backing command endpoint → disabled,
+    // labeled with the transition's actionLabel.
+    const unsupported = screen.getByTestId('action-unsupported-PREPARING');
+    expect(unsupported).toHaveTextContent('Siapkan Dokumen');
+    expect(unsupported).toBeDisabled();
+    // The known target (COMPLETED) still renders a functional button.
+    expect(screen.getByTestId('action-complete')).not.toBeDisabled();
   });
 });

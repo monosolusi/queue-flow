@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { CounterDto } from '../api/types';
+import type { AssignedCategoryDto, CounterDto } from '../api/types';
 
 /**
  * The counter a staff member is bound to for this session. Persisted in
@@ -13,6 +13,15 @@ export interface BoundCounter {
   readonly counterName: string;
   /** Assigned-category ids, used to filter the realtime queue to this counter. */
   readonly assignedCategoryIds: readonly string[];
+  /** Assigned categories with display data (id/code/name), used by the transfer
+   *  chooser so staff pick a destination by name (FR-CLR-03). Captured at bind
+   *  time from `CounterDto.assignedCategories`. Defaults to `[]` for a binding
+   *  persisted before this field existed, in which case the chooser falls back
+   *  to the legacy id-only auto-pick. Staleness window: this is a localStorage
+   *  snapshot — if the admin renames/reassigns categories post-bind (QUE-24),
+   *  the chooser shows stale names until the staff re-binds; an illegal
+   *  transfer to a since-removed category is rejected server-side (404). */
+  readonly assignedCategories: readonly AssignedCategoryDto[];
 }
 
 const STORAGE_KEY = 'qms.caller.counterBinding';
@@ -31,6 +40,7 @@ function read(): BoundCounter | null {
       counterId: parsed.counterId,
       counterName: parsed.counterName,
       assignedCategoryIds: Array.isArray(parsed.assignedCategoryIds) ? parsed.assignedCategoryIds : [],
+      assignedCategories: Array.isArray(parsed.assignedCategories) ? parsed.assignedCategories : [],
     };
   } catch {
     return null;
@@ -81,6 +91,7 @@ export function useCounterBinding(): CounterBinding {
       counterId: counter.counterId,
       counterName: counter.counterName,
       assignedCategoryIds: counter.assignedCategories.map((c) => c.id),
+      assignedCategories: counter.assignedCategories,
     };
     write(next);
     setBound(next);

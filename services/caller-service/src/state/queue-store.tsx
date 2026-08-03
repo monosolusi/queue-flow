@@ -121,7 +121,10 @@ function projectEvent(state: QueueState, e: QueueLifecycleWireEvent, ctx: QueueC
       const called: TicketStateDto = {
         ticketId: e.aggregateId,
         ticketNumber: p.ticketNumber,
-        categoryId: '',
+        // The TICKET_CALLED payload carries no categoryId. The ticket was in
+        // our waiting list with a real categoryId — reuse it so the transfer
+        // chooser can exclude the active ticket's own category (FR-CLR-03).
+        categoryId: state.waiting.find((t) => t.ticketId === e.aggregateId)?.categoryId ?? '',
         status: 'CALLING',
         counterId: ctx.counterId,
       };
