@@ -165,10 +165,18 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
     render(<ActionControls api={api} bound={multiBound} active={ticket('CALLING', 'cat-a')} stateMachine={graph} />);
     const transferBtn = screen.getByTestId('action-transfer');
     expect(transferBtn).toHaveTextContent('Pindah Kategori');
+    // The toggle programmatically points at the chooser it controls (QUE-40 AC4).
+    expect(transferBtn).toHaveAttribute('aria-expanded', 'false');
+    expect(transferBtn).toHaveAttribute('aria-controls');
+    const controlsId = transferBtn.getAttribute('aria-controls')!;
     // No chooser until toggled open.
     expect(screen.queryByTestId('transfer-chooser')).not.toBeInTheDocument();
     await userEvent.click(transferBtn);
     const chooser = await screen.findByTestId('transfer-chooser');
+    // The chooser's id matches the toggle's aria-controls, and it is a labelled group.
+    expect(chooser).toHaveAttribute('id', controlsId);
+    expect(chooser).toHaveAttribute('role', 'group');
+    expect(chooser).toHaveAttribute('aria-label', 'Kategori tujuan');
     // Both other categories are listed by name; the active category is excluded.
     expect(chooser).toHaveTextContent('Kasir');
     expect(chooser).toHaveTextContent('Informasi');

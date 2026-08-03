@@ -1340,6 +1340,37 @@ with no duplicate/lost ticket numbers.
     async fetch on mount leaks an "update not wrapped in act" warning when the
     unresolved promise settles after the test body — stub the mount-fetch to
     `new Promise(() => {})` (never resolves) so no background state churn occurs.
+  - **ARIA: a labelled cluster of immediate-action buttons is `role="group"` +
+    `aria-label`, never `role="option"`.** `role="option"` implies a `listbox`
+    parent + `aria-selected` semantics; it is wrong for buttons that fire a
+    command on click (the QUE-40 transfer-chooser destination buttons). Wire a
+    toggle→chooser with `useId()`: the toggle carries `aria-expanded` +
+    `aria-controls={chooserId}`, the chooser `<div>` carries `id={chooserId}` +
+    `role="group"` + `aria-label="…"`. The destination buttons already get
+    `:focus-visible` from the native `button` selector in the QUE-37 baseline, so
+    no extra focus wiring is needed. Apply to any "pick one of N, then fire"
+    affordance (the QUE-20 transfer chooser is the instance).
+  - **Skeleton loading-state a11y recipe.** A loading region is
+    `role="status" aria-busy="true"` carrying a visually-hidden (`.sr-only`)
+    text label for AT (e.g. "Memuat antrian…"); the placeholder shapes are
+    decorative `<div className="skeleton …" aria-hidden="true" />`. The visible
+    tree must NOT repeat the "Memuat…" text (no text-only loading state — the
+    audit's point), so the label lives only in the `.sr-only` span. A skeleton
+    shimmer is a pure opacity pulse (`@keyframes` 1↔.55), guarded by
+    `@media (prefers-reduced-motion: reduce) { animation: none }` — no
+    `background-position` gradient (GPU-cheap, one color stop). `.skeleton`
+    styles live in the service's own `styles.css`, NOT the vendored `_*.css`
+    copies (no shared-token change → the QUE-37 drift gate stays green). Test
+    the loading state with a fetch that never resolves
+    (`() => new Promise(() => {})`) so `loadStatus` stays `'loading'`; assert
+    `aria-busy`, `.skeleton` children, the `.sr-only` label text, AND that no
+    ticket number / `workspace__hint` leaks before the snapshot resolves.
+  - **`--radius` is a per-service override in the service's own `styles.css`,
+    NOT a shared token in `_tokens.css`.** Don't mint a `--radius-sm` (or any
+    new shared token) for a single use — that would be a shared-token change +
+    a re-sync across all four frontends for one site. Use `var(--radius)` (the
+    per-service value, e.g. caller-service `14px`) directly; sibling elements
+    already use it, so the chooser matches. (QUE-40 AC8 instance.)
   - **PWA `base`/`start_url`/`scope` must match the NGINX route** (e.g.
     `/kiosk/`, `/caller/`) — otherwise an installed PWA's `start_url` resolves to
     the gateway root, not the service, breaking offline launch. Set them when

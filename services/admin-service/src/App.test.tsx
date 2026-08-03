@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { App } from './App';
 import type { IAdminApi } from './api/admin-api';
@@ -68,5 +68,20 @@ describe('App (admin — runtime brand color, QUE-37 AC6)', () => {
     await waitFor(() =>
       expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#2563eb'),
     );
+  });
+});
+
+describe('App (admin — landmark + skip link, QUE-41 AC8)', () => {
+  it('renders a single <main> landmark with id="main-content"', () => {
+    renderApp(makeApi(makeConfig()));
+    const main = screen.getByRole('main');
+    expect(main).toHaveAttribute('id', 'main-content');
+  });
+
+  it('renders a skip link pointing at #main-content', () => {
+    renderApp(makeApi(makeConfig()));
+    const skip = screen.getByRole('link', { name: /Lewati ke konten/i });
+    expect(skip).toHaveAttribute('href', '#main-content');
+    expect(skip).toHaveClass('skip-link');
   });
 });

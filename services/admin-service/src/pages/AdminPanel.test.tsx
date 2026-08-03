@@ -177,8 +177,10 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     await screen.findByText('Apotek Sehat');
 
     await userEvent.selectOptions(screen.getByLabelText('Mode'), 'MANUAL');
-    await userEvent.clear(screen.getByLabelText('Reset nomor antrian ke'));
-    await userEvent.type(screen.getByLabelText('Reset nomor antrian ke'), '10');
+    // The label now carries a decorative ` *` (required marker), so match by
+    // regex rather than the exact pre-QUE-41 label string.
+    await userEvent.clear(screen.getByLabelText(/Reset nomor antrian ke/));
+    await userEvent.type(screen.getByLabelText(/Reset nomor antrian ke/), '10');
     await userEvent.click(screen.getByTestId('admin-save'));
     await screen.findByText('Konfigurasi tersimpan.');
 
@@ -233,6 +235,34 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     expect(screen.getByTestId('admin-save')).toBeDisabled();
     expect(screen.getByTestId('brand-color-errors')).toBeInTheDocument();
     expect(save).not.toHaveBeenCalled();
+  });
+
+  it('wires the brand-color error to its input via aria-invalid + aria-describedby (QUE-41 AC6)', async () => {
+    const { api } = makeApi();
+    renderPanel(api);
+    await screen.findByText('Apotek Sehat');
+
+    const hexInput = screen.getByLabelText('Kode hex warna brand');
+    // Happy path — no error attributes.
+    expect(hexInput).not.toHaveAttribute('aria-invalid');
+    expect(hexInput).not.toHaveAttribute('aria-describedby');
+
+    fireEvent.change(hexInput, { target: { value: 'not-a-color' } });
+    expect(hexInput).toHaveAttribute('aria-invalid', 'true');
+    expect(hexInput).toHaveAttribute('aria-describedby', 'brand-color-errors');
+    expect(screen.getByTestId('brand-color-errors')).toHaveAttribute('id', 'brand-color-errors');
+  });
+
+  it('marks the category + counter row inputs with aria-required (QUE-41 AC6)', async () => {
+    const { api } = makeApi();
+    renderPanel(api);
+    await screen.findByText('Apotek Sehat');
+
+    expect(screen.getByLabelText('Kategori 1 kode')).toHaveAttribute('aria-required', 'true');
+    expect(screen.getByLabelText('Kategori 1 nama')).toHaveAttribute('aria-required', 'true');
+    expect(screen.getByLabelText('Counter 1 id')).toHaveAttribute('aria-required', 'true');
+    expect(screen.getByLabelText('Counter 1 nama')).toHaveAttribute('aria-required', 'true');
+    expect(screen.getByLabelText('Counter 1 kebijakan prioritas')).toHaveAttribute('aria-required', 'true');
   });
 
   it('fires exactly one save on a rapid double click (double-tap guard)', async () => {
@@ -392,6 +422,22 @@ describe('AdminPanel manual override operations (QUE-25 / FR-ADM-02)', () => {
 
     await userEvent.click(screen.getByTestId('cleanup-run'));
     expect(cleanupTransactionLogs).not.toHaveBeenCalled();
+  });
+
+  it('wires the retention error to its input via aria-invalid + aria-describedby (QUE-41 AC6)', async () => {
+    renderOverridePanel();
+    await screen.findByText('Apotek Sehat');
+
+    const retentionInput = screen.getByTestId('retention-days');
+    // Default 90 is valid — no error attributes.
+    expect(retentionInput).not.toHaveAttribute('aria-invalid');
+    expect(retentionInput).not.toHaveAttribute('aria-describedby');
+
+    // Below the 7-day floor → the error <p> renders and the input is wired to it.
+    fireEvent.change(retentionInput, { target: { value: '1' } });
+    expect(retentionInput).toHaveAttribute('aria-invalid', 'true');
+    expect(retentionInput).toHaveAttribute('aria-describedby', 'retention-error');
+    expect(screen.getByTestId('retention-error')).toHaveAttribute('id', 'retention-error');
   });
 
   it('cleanup does not fire when the confirm dialog is cancelled', async () => {

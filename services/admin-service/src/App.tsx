@@ -44,25 +44,34 @@ export function App({ api }: { api?: IAdminApi } = {}) {
   }, [adminApi]);
 
   return (
-    <Routes>
-      <Route
-        path="/"
-        element={
-          <SetupGuard api={adminApi}>
-            <AdminPanel api={adminApi} />
-          </SetupGuard>
-        }
-      />
-      <Route
-        path="/analytics"
-        element={
-          <SetupGuard api={adminApi}>
-            <AnalyticsPage api={adminApi} />
-          </SetupGuard>
-        }
-      />
-      <Route path="/wizard" element={<WizardPage api={adminApi} />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <>
+      {/* AC8 — skip link for keyboard users; visually hidden until focused. */}
+      <a href="#main-content" className="skip-link">
+        Lewati ke konten
+      </a>
+      {/* AC8 — single <main> landmark per route (the routed page owns the h1). */}
+      <main id="main-content">
+        <Routes>
+          <Route
+            path="/"
+            element={
+              <SetupGuard api={adminApi}>
+                <AdminPanel api={adminApi} />
+              </SetupGuard>
+            }
+          />
+          <Route
+            path="/analytics"
+            element={
+              <SetupGuard api={adminApi}>
+                <AnalyticsPage api={adminApi} />
+              </SetupGuard>
+            }
+          />
+          <Route path="/wizard" element={<WizardPage api={adminApi} />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </main>
+    </>
   );
 }
