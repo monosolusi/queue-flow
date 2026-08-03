@@ -1,15 +1,12 @@
+/* Design tokens + a11y/interaction baseline are vendored from
+   shared/design-tokens/*.css (single source of truth) — do not edit the
+   _*.css copies directly; edit the canonical files and re-run
+   `node scripts/sync-design-tokens.mjs`. */
+@import './styles/_tokens.css';
+@import './styles/_interactions.css';
+
 :root {
-  --bg: #0f172a;
-  --surface: #1e293b;
-  --surface-2: #334155;
-  --text: #f1f5f9;
-  --text-muted: #94a3b8;
-  --accent: #2563eb;
-  --accent-contrast: #ffffff;
-  --success: #16a34a;
-  --danger: #dc2626;
-  --radius: 18px;
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --radius: 18px; /* per-service override; tokens.css owns the rest */
 }
 
 * {
@@ -61,7 +58,7 @@ button {
   text-align: center;
 }
 .kiosk-select__hint--error {
-  color: var(--danger);
+  color: var(--danger-on-dark);
 }
 .kiosk-select__list {
   list-style: none;
@@ -131,22 +128,19 @@ button {
 }
 .kiosk-result__category {
   font-size: 2rem;
-  color: var(--accent);
+  color: var(--accent-on-dark);
   font-weight: 600;
   margin: 0 0 2rem;
 }
 
+/* Kiosk buttons are oversized for a public touchscreen; the base .btn and
+   the .btn--primary color/hover/active/focus vocabulary come from the shared
+   interactions baseline (vendored above) — this override only widens the
+   sizing. Source order (after the @import) lets these win. */
 .btn {
   border: none;
   border-radius: var(--radius);
   padding: 1.2rem 2.5rem;
   font-size: 1.4rem;
   font-weight: 700;
-}
-.btn--primary {
-  background: var(--accent);
-  color: var(--accent-contrast);
-}
-.btn--primary:hover {
-  filter: brightness(1.1);
 }

@@ -73,6 +73,7 @@ function makeApi(snap: QueueSnapshotDto = snapshot): ICallerApi {
     recall: vi.fn(() => Promise.resolve()),
     transfer: vi.fn(() => Promise.resolve()),
     applyTransition: vi.fn(() => Promise.resolve()),
+    getBrandColor: () => Promise.resolve({ brandColor: '' }),
   };
 }
 

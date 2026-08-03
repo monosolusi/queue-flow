@@ -11,6 +11,7 @@ import type { CategoryDto, QueueLifecycleWireEvent } from '../api/types';
 import type { ITvApi } from '../api/tv-api';
 import { type AudioProvider } from '../audio/audio-provider';
 import { buildCallFragments } from '../audio/audio-provider';
+import { applyBrandColor } from '../lib/theme';
 import { QueueSocket, type ConnectionStatus, type QueueSocketOptions } from '../realtime/queue-socket';
 
 export interface NowServing {
@@ -162,11 +163,16 @@ export function TvStoreProvider({ api, audio, children, socketOptions }: TvStore
 
   // Boot: load store name (running text) + categories. The TV degrades gracefully
   // if the config read fails (store-not-configured) — it still shows the board.
+  // The same config read carries the brand color (QUE-37 AC6), applied to the
+  // runtime `--accent` here as a side effect (a DOM mutation, not board state, so
+  // it stays out of the reducer). The static `#2563eb` default stays in place on
+  // failure (no flash — it IS the default).
   useEffect(() => {
     let cancelled = false;
     Promise.all([api.getSystemConfig(), api.getCategories()])
       .then(([config, categories]) => {
         if (cancelled) return;
+        applyBrandColor(config.brandColor);
         dispatch({ type: 'BOOT_LOADED', storeName: config.storeName, categories });
       })
       .catch((err) => {

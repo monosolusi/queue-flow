@@ -9,8 +9,8 @@ import type { CategoryDto, CreatedTicketDto, StoreProfileSlice } from './types';
 export interface IKioskApi {
   listCategories(): Promise<CategoryDto[]>;
   createTicket(categoryId: string): Promise<CreatedTicketDto>;
-  /** The store name for the receipt header (FR-KSK-03 "Nama Toko"). */
-  getStoreName(): Promise<string>;
+  /** Store profile for the receipt header + runtime accent (FR-KSK-03 / QUE-37 AC6). */
+  getStoreProfile(): Promise<StoreProfileSlice>;
 }
 
 const API_BASE = '/api';
@@ -61,10 +61,11 @@ export class KioskApi implements IKioskApi {
   createTicket(categoryId: string): Promise<CreatedTicketDto> {
     return postJson<CreatedTicketDto>('/tickets', { categoryId });
   }
-  getStoreName(): Promise<string> {
+  getStoreProfile(): Promise<StoreProfileSlice> {
     // Reuses the existing `GET /api/system/config` read surface (QUE-30 — it
-    // returns `storeName` even pre-setup as `''`) rather than adding a dedicated
-    // endpoint (DRY). The kiosk consumes only the `{ storeName }` slice (ISP).
-    return getJson<StoreProfileSlice>('/system/config').then((c) => c.storeName ?? '');
+    // returns `storeName`/`brandColor` even pre-setup as `''`) rather than adding
+    // a dedicated endpoint (DRY). The kiosk consumes only the store-profile
+    // slice (ISP): store name + brand color.
+    return getJson<StoreProfileSlice>('/system/config');
   }
 }

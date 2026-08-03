@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { CategoryDto, CreatedTicketDto } from '../api/types';
 import type { IKioskApi } from '../api/kiosk-api';
+import { applyBrandColor } from '../lib/theme';
 import type { IPrintProvider, PrintPayload } from '../print/print-provider';
 
 export interface CategorySelectPageProps {
@@ -52,7 +53,8 @@ export function CategorySelectPage({ api, printProvider }: CategorySelectPagePro
   // Store name for the receipt header (FR-KSK-03 "Nama Toko"). Fetched once on
   // mount — off the touch→print hot path, so it adds no latency to the 1.5 s
   // budget (NFR-PERF-03). A fetch failure leaves the name empty (the receipt
-  // header is optional); the store-name line is omitted when blank.
+  // header is optional); the store-name line is omitted when blank. The same
+  // fetch also carries the brand color (QUE-37 AC6) applied to `--accent`.
   const [storeName, setStoreName] = useState('');
   // Synchronous in-flight flag: set before any await so a second click in the
   // same tick (before the disabled re-render flushes) is rejected.
@@ -60,14 +62,16 @@ export function CategorySelectPage({ api, printProvider }: CategorySelectPagePro
 
   useEffect(() => {
     let cancelled = false;
-    // Await categories + store name together (both off the touch→print hot
+    // Await categories + store profile together (both off the touch→print hot
     // path) so the store name is resolved before the category buttons become
-    // interactive — otherwise a fast tap before `getStoreName()` settled would
-    // print a receipt with no store-name header (FR-KSK-03). A store-name
+    // interactive — otherwise a fast tap before `getStoreProfile()` settled
+    // would print a receipt with no store-name header (FR-KSK-03). A store-name
     // *failure* never blocks the kiosk flow: the receipt just omits the header
-    // line (it is optional in PrintPayload). `allSettled` so a store-name
-    // rejection does not delay the categories.
-    Promise.allSettled([api.listCategories(), api.getStoreName()]).then(([catRes, nameRes]) => {
+    // line (it is optional in PrintPayload). `allSettled` so a store-profile
+    // rejection does not delay the categories. The brand color is applied to
+    // `--accent` on the same settle (QUE-37 AC6); the static `#2563eb` default
+    // stays in place on rejection (no flash — it IS the default).
+    Promise.allSettled([api.listCategories(), api.getStoreProfile()]).then(([catRes, profileRes]) => {
       if (cancelled) return;
       if (catRes.status === 'fulfilled') {
         setLoad({ status: 'loaded', categories: catRes.value });
@@ -78,8 +82,9 @@ export function CategorySelectPage({ api, printProvider }: CategorySelectPagePro
             catRes.reason instanceof Error ? catRes.reason.message : 'Gagal memuat daftar kategori',
         });
       }
-      if (nameRes.status === 'fulfilled') {
-        setStoreName(nameRes.value);
+      if (profileRes.status === 'fulfilled') {
+        setStoreName(profileRes.value.storeName ?? '');
+        applyBrandColor(profileRes.value.brandColor);
       }
     });
     return () => {
@@ -143,7 +148,7 @@ export function CategorySelectPage({ api, printProvider }: CategorySelectPagePro
             <li key={c.id}>
               <button
                 type="button"
-                className="category-card"
+                className="category-card pressable"
                 disabled={issuing}
                 aria-busy={issue.status === 'issuing' && issue.categoryId === c.id}
                 onClick={() => choose(c)}

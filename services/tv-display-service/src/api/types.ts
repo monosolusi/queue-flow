@@ -16,10 +16,13 @@ export interface CategoryDto {
   readonly name: string;
 }
 
-/** Store profile, returned by `GET /api/system/config`. The TV only needs the store name. */
+/** Store profile, returned by `GET /api/system/config`. The TV needs the store
+ * name (running text) + the manager-configured brand color (QUE-36) applied to
+ * the runtime `--accent` (QUE-37 AC6). */
 export interface SystemConfigurationDto {
   readonly isInitialSetupCompleted: boolean;
   readonly storeName: string;
+  readonly brandColor: string;
 }
 
 /** WebSocket lifecycle event types broadcast by core-api (FR-ENG-04). */

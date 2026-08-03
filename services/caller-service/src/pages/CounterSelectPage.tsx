@@ -51,7 +51,7 @@ export function CounterSelectPage({ api, onChoose }: CounterSelectPageProps) {
         <ul className="counter-select__list">
           {state.counters.map((c) => (
             <li key={c.counterId}>
-              <button type="button" className="counter-card" onClick={() => onChoose(c)}>
+              <button type="button" className="counter-card pressable" onClick={() => onChoose(c)}>
                 <span className="counter-card__name">{c.counterName}</span>
                 <span className="counter-card__categories">
                   {c.assignedCategories.map((cat) => cat.name).join(' · ') || 'Tanpa kategori'}

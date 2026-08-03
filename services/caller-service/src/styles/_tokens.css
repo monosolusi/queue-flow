@@ -1,0 +1,40 @@
+/*
+ * shared/design-tokens/tokens.css — single source of truth for the 4 frontend
+ * services (kiosk / tv-display / caller / admin). Vendored into each service
+ * by `scripts/sync-design-tokens.mjs` as `src/styles/_tokens.css` (generated;
+ * do not edit the per-service copy — edit THIS file and re-run sync).
+ *
+ * OKLCH color space (AC1) for perceptual uniformity, EXCEPT:
+ *   - `--accent` stays hex `#2563eb` so a JS-injected hex/oklch brandColor
+ *     (SystemConfiguration.brandColor, QUE-36) overrides it cleanly at runtime
+ *     via document.documentElement.style.setProperty. The static value is the
+ *     deliberate fixed-brand-palette fallback (AC6) — it equals BrandColor.DEFAULT
+ *     so a pre-fetch / fetch-failure produces no flash of the wrong color.
+ *   - `--text-muted` stays hex `#94a3b8` (AC5: verified 5.71:1, passes — do not touch).
+ *   - `--accent-contrast` stays hex `#ffffff` (white-on-accent). Documented
+ *     limitation: a manager-picked light brandColor could fail WCAG contrast
+ *     with white button text; a runtime contrast algorithm is intentionally
+ *     out of scope for QUE-37 (no over-engineering).
+ *
+ * `--radius` is intentionally NOT defined here — it is a per-service override
+ * (kiosk/tv 18px, caller/admin 14px) kept in each service's own `styles.css`.
+ * OKLCH values are exact sRGB→OKLCH conversions of the original Tailwind slate
+ * palette so the refactor introduces zero visual regression.
+ */
+:root {
+  --bg:             oklch(0.208 0.040 265.8);  /* #0f172a slate-900 */
+  --surface:        oklch(0.279 0.037 260.0);  /* #1e293b slate-800 */
+  --surface-2:      oklch(0.372 0.039 257.3);  /* #334155 slate-700 */
+  --text:           oklch(0.968 0.007 247.9);  /* #f1f5f9 slate-100 */
+  --text-muted:     #94a3b8;                   /* AC5: verified 5.71:1 — unchanged */
+  --accent:         #2563eb;                  /* runtime override target (brandColor) */
+  --accent-contrast:#ffffff;                  /* white-on-accent; fixed (AC4) */
+  --success:        oklch(0.627 0.170 149.2); /* #16a34a green-600 */
+  --warn:           oklch(0.666 0.157 58.3);   /* #d97706 amber-600 (also fixes kiosk drift) */
+  --danger:         oklch(0.577 0.215 27.3);   /* #dc2626 red-600 */
+  /* AC5 — accent / danger TEXT on the dark surface (≥4.5:1). Use these for any
+     accent/danger text rendered on --bg / --surface / --surface-2. */
+  --accent-on-dark: oklch(0.714 0.143 254.6);  /* #60a5fa blue-400 → 5.75:1 */
+  --danger-on-dark: oklch(0.711 0.166 22.2);   /* #f87171 red-400  → 6.45:1 */
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}

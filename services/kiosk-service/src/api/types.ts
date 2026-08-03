@@ -28,12 +28,14 @@ export interface CreatedTicketDto {
 }
 
 /**
- * The minimal slice of `GET /api/system/config` the kiosk consumes — just the
- * store name for the receipt header (FR-KSK-03 "Nama Toko"). The kiosk depends
- * on this slice only (ISP — it never types the full admin
+ * The minimal slice of `GET /api/system/config` the kiosk consumes — the store
+ * name for the receipt header (FR-KSK-03 "Nama Toko") + the manager-configured
+ * brand color (QUE-36) applied to the runtime `--accent` (QUE-37 AC6). The kiosk
+ * depends on this slice only (ISP — it never types the full admin
  * `SystemConfigurationDto`), reusing the existing config read surface rather
  * than a dedicated endpoint (DRY, matching the QUE-24 reuse precedent).
  */
 export interface StoreProfileSlice {
   readonly storeName: string;
+  readonly brandColor: string;
 }

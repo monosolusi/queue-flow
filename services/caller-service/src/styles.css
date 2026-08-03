@@ -1,16 +1,12 @@
+/* Design tokens + a11y/interaction baseline vendored from
+   shared/design-tokens/*.css (single source of truth). Do not edit the _*.css
+   copies directly; edit the canonical files and re-run
+   `node scripts/sync-design-tokens.mjs`. */
+@import './styles/_tokens.css';
+@import './styles/_interactions.css';
+
 :root {
-  --bg: #0f172a;
-  --surface: #1e293b;
-  --surface-2: #334155;
-  --text: #f1f5f9;
-  --text-muted: #94a3b8;
-  --accent: #2563eb;
-  --accent-contrast: #ffffff;
-  --success: #16a34a;
-  --warn: #d97706;
-  --danger: #dc2626;
-  --radius: 14px;
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --radius: 14px; /* per-service override; tokens.css owns the rest */
 }
 
 * {
@@ -46,7 +42,7 @@ button {
   font-size: 1.25rem;
 }
 .counter-select__hint--error {
-  color: var(--danger);
+  color: var(--danger-on-dark);
 }
 .counter-select__list {
   list-style: none;
@@ -99,7 +95,7 @@ button {
   color: var(--text-muted);
 }
 .workspace__hint--error {
-  color: var(--danger);
+  color: var(--danger-on-dark);
 }
 .workspace__body {
   display: flex;
@@ -135,17 +131,10 @@ button {
   gap: 1rem;
 }
 
-.btn {
-  border: none;
-  border-radius: var(--radius);
-  padding: 0.9rem 1.4rem;
-  font-size: 1.05rem;
-  font-weight: 600;
-}
-.btn--secondary {
-  background: var(--surface-2);
-  color: var(--text);
-}
+/* .btn / .btn--primary / .btn--secondary / :hover / :active / :focus-visible /
+   :disabled / aria-busy all come from the shared interactions baseline
+   (vendored above). The caller previously lacked .btn--primary, so its primary
+   action rendered browser-default — now fixed by the shared vocabulary. */
 
 .connection-status {
   display: inline-flex;
@@ -173,7 +162,7 @@ button {
   color: var(--success);
 }
 .connection-status--closed {
-  color: var(--danger);
+  color: var(--danger-on-dark);
 }
 
 .active-ticket {
@@ -201,7 +190,7 @@ button {
   letter-spacing: 0.05em;
 }
 .active-ticket__status {
-  color: var(--accent);
+  color: var(--accent-on-dark);
   font-weight: 600;
 }
 .active-ticket__empty-text {
@@ -270,7 +259,7 @@ button {
 }
 .action-controls__error {
   flex-basis: 100%;
-  color: var(--danger);
+  color: var(--danger-on-dark);
   font-size: 0.95rem;
   margin: 0;
 }

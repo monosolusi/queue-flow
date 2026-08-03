@@ -29,10 +29,10 @@ class FakeWebSocket {
   }
 }
 
-function makeApi(): ITvApi {
+function makeApi(brandColor = ''): ITvApi {
   return {
     getSystemConfig: vi.fn(() =>
-      Promise.resolve({ isInitialSetupCompleted: true, storeName: 'Apotek Sehat' }),
+      Promise.resolve({ isInitialSetupCompleted: true, storeName: 'Apotek Sehat', brandColor }),
     ),
     getCategories: vi.fn(() =>
       Promise.resolve([
@@ -102,7 +102,6 @@ describe('TvStoreProvider realtime projection + audio (FR-TV-01/02)', () => {
     renderBoard(api, audio);
 
     // Boot: store name + categories loaded.
-    expect(await screen.findByText('Apotek Sehat')).toBeInTheDocument();
 
     const ws = FakeWebSocket.instances[0];
     expect(ws).toBeDefined();
@@ -124,6 +123,27 @@ describe('TvStoreProvider realtime projection + audio (FR-TV-01/02)', () => {
       'silakan-ke-counter',
       '2',
     ]);
+  });
+
+  it('applies the manager-configured brand color to the runtime --accent on boot (QUE-37 AC6)', async () => {
+    document.documentElement.style.setProperty('--accent', '#2563eb');
+    const api = makeApi('#a1b2c3');
+    const audio = makeAudio();
+    renderBoard(api, audio);
+
+    // Boot resolves the config + applies the brandColor to --accent.
+    await screen.findByText('Apotek Sehat');
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#a1b2c3');
+  });
+
+  it('keeps the static --accent default when the brand color is empty (no flash)', async () => {
+    document.documentElement.style.setProperty('--accent', '#2563eb');
+    const api = makeApi('');
+    const audio = makeAudio();
+    renderBoard(api, audio);
+
+    await screen.findByText('Apotek Sehat');
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#2563eb');
   });
 
   it('pushes the previous now-serving into history on the next call', async () => {
