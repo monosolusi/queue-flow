@@ -17,7 +17,13 @@ function renderResult(state: IssuedTicket | null) {
 }
 
 const issued: IssuedTicket = {
-  ticket: { ticketId: 't-1', ticketNumber: 'A-001', categoryId: 'cat-a', status: 'WAITING' },
+  ticket: {
+    ticketId: 't-1',
+    ticketNumber: 'A-001',
+    categoryId: 'cat-a',
+    status: 'WAITING',
+    waitingAhead: 0,
+  },
   categoryName: 'Customer Service',
 };
 

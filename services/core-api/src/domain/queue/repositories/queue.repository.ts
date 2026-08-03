@@ -47,4 +47,13 @@ export interface IQueueRepository {
    * waiting queue for a counter's assigned categories.
    */
   findWaitingByCategories(categoryIds: readonly string[]): Promise<QueueTicket[]>;
+  /**
+   * Count of tickets currently WAITING in `categoryId` (FR-KSK-03 — the kiosk
+   * receipt prints the visitor's queue position). A dedicated COUNT read is
+   * cheaper than loading aggregates via {@link findWaitingByCategory} and keeps
+   * the count read distinct (SRP). When called inside a transaction it sees the
+   * just-inserted row (the same Postgres tx) and excludes concurrent uncommitted
+   * inserts, so the count is deterministic.
+   */
+  countWaitingByCategory(categoryId: string): Promise<number>;
 }

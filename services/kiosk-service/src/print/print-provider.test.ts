@@ -7,6 +7,7 @@ const payload: PrintPayload = {
   categoryName: 'Customer Service',
   storeName: 'Toko Contoh',
   issuedAt: 1_700_000_000_000,
+  waitingAhead: 2,
 };
 
 /** A minimal fake iframe/document capturing written HTML and print() calls. */
@@ -58,6 +59,9 @@ describe('BrowserPrintProvider (FR-KSK-02/03)', () => {
     // The ticket number and store name land in the printed HTML.
     expect(state.written).toContain('A-001');
     expect(state.written).toContain('Toko Contoh');
+    // FR-KSK-03: the queue-position line ("Anda antrian ke-N dari N") renders —
+    // at issuance position == total == waitingAhead + 1.
+    expect(state.written).toContain('Anda antrian ke-3 dari 3');
     expect(focusCall).toHaveBeenCalledTimes(1);
     expect(printCall).toHaveBeenCalledTimes(1);
     // The iframe is removed after printing (no stale content between tickets).
@@ -72,10 +76,17 @@ describe('BrowserPrintProvider (FR-KSK-02/03)', () => {
     vi.spyOn(document.body, 'appendChild').mockImplementation(() => iframe);
 
     const provider = new BrowserPrintProvider(createIframe);
-    await provider.print({ ticketNumber: 'B-002', categoryName: 'Kasir', issuedAt: 1 });
+    await provider.print({
+      ticketNumber: 'B-002',
+      categoryName: 'Kasir',
+      issuedAt: 1,
+      waitingAhead: 0,
+    });
 
     expect(state.written).toContain('B-002');
     expect(state.written).not.toContain('class="store"');
+    // The queue-position line still renders (first in queue → "ke-1 dari 1").
+    expect(state.written).toContain('Anda antrian ke-1 dari 1');
   });
 
   it('resolves (does not reject) when the print dialog throws', async () => {

@@ -93,6 +93,33 @@ describe('CreateTicketUseCase (ticket generation — FR-ENG-01 / QUE-9)', () => 
     expect(rb.ticket.ticketNumber).toBe('B-001');
   });
 
+  it('reports waitingAhead = people already waiting in the category (FR-KSK-03)', async () => {
+    const catA = await seedCategory(categories, 'A', 'Customer Service');
+
+    const r1 = await useCase.execute({ categoryId: catA.id.value });
+    const r2 = await useCase.execute({ categoryId: catA.id.value });
+    const r3 = await useCase.execute({ categoryId: catA.id.value });
+
+    // Each new ticket is the newest WAITING ticket, so people already ahead of
+    // it = the prior WAITING count: 0, 1, 2.
+    expect(r1.ticket.waitingAhead).toBe(0);
+    expect(r2.ticket.waitingAhead).toBe(1);
+    expect(r3.ticket.waitingAhead).toBe(2);
+  });
+
+  it('isolates waitingAhead per category (A-001 and B-001 both 0)', async () => {
+    const catA = await seedCategory(categories, 'A', 'Customer Service');
+    const catB = await seedCategory(categories, 'B', 'Kasir & Pembayaran');
+
+    await useCase.execute({ categoryId: catA.id.value });
+    const ra2 = await useCase.execute({ categoryId: catA.id.value });
+    // A different category's queue does not inflate this ticket's ahead count.
+    const rb = await useCase.execute({ categoryId: catB.id.value });
+
+    expect(ra2.ticket.waitingAhead).toBe(1);
+    expect(rb.ticket.waitingAhead).toBe(0);
+  });
+
   it('isolates the sequence per day (a new local day restarts at A-001)', async () => {
     const catA = await seedCategory(categories, 'A', 'Customer Service');
 

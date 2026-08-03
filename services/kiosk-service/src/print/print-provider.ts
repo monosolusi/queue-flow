@@ -11,12 +11,17 @@
  */
 
 /** The data printed on the physical ticket. `storeName` is optional (the kiosk
- * may not have fetched the store config when it prints). */
+ * may not have fetched the store config when it prints). `waitingAhead` is the
+ * number of people already WAITING in this category when the ticket was issued
+ * (FR-KSK-03 "Jumlah Antrian Di Belakang"); the visitor is the newest waiting
+ * ticket, so their position and the total waiting count are both
+ * `waitingAhead + 1` (e.g. "Anda antrian ke-3 dari 3"). */
 export interface PrintPayload {
   readonly ticketNumber: string;
   readonly categoryName: string;
   readonly storeName?: string;
   readonly issuedAt: number;
+  readonly waitingAhead: number;
 }
 
 /** Extension point for ticket printing (OCP — new providers don't touch the page). */
@@ -81,6 +86,9 @@ function renderTicketHtml(payload: PrintPayload): string {
     ? `<h2 class="store">${escapeHtml(payload.storeName)}</h2>`
     : '';
   const when = new Date(payload.issuedAt).toLocaleString();
+  // FR-KSK-03 "Jumlah Antrian Di Belakang": at issuance the visitor is the
+  // newest waiting ticket, so position == total == waitingAhead + 1.
+  const position = payload.waitingAhead + 1;
   return (
     '<!doctype html><html><head><meta charset="utf-8"><title>Tiket</title>' +
     '<style>body{font-family:monospace;text-align:center;padding:1rem}' +
@@ -90,6 +98,7 @@ function renderTicketHtml(payload: PrintPayload): string {
     `<p class="muted">${escapeHtml(when)}</p>` +
     `<p>${escapeHtml(payload.categoryName)}</p>` +
     `<h1>${escapeHtml(payload.ticketNumber)}</h1>` +
+    `<p class="muted">Anda antrian ke-${position} dari ${position}</p>` +
     '</body></html>'
   );
 }

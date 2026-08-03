@@ -16,10 +16,24 @@ export interface CategoryDto {
 /**
  * The newly issued ticket, returned by `POST /api/tickets` (FR-ENG-01 / QUE-9).
  * The kiosk displays `ticketNumber` (e.g. `A-001`); `status` is `WAITING`.
+ * `waitingAhead` (people already WAITING in this category when the ticket was
+ * issued) drives the receipt's queue-position line (FR-KSK-03).
  */
 export interface CreatedTicketDto {
   readonly ticketId: string;
   readonly ticketNumber: string;
   readonly categoryId: string;
   readonly status: string;
+  readonly waitingAhead: number;
+}
+
+/**
+ * The minimal slice of `GET /api/system/config` the kiosk consumes — just the
+ * store name for the receipt header (FR-KSK-03 "Nama Toko"). The kiosk depends
+ * on this slice only (ISP — it never types the full admin
+ * `SystemConfigurationDto`), reusing the existing config read surface rather
+ * than a dedicated endpoint (DRY, matching the QUE-24 reuse precedent).
+ */
+export interface StoreProfileSlice {
+  readonly storeName: string;
 }

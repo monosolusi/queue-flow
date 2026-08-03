@@ -43,25 +43,39 @@ export function CategorySelectPage({ api, printProvider }: CategorySelectPagePro
   const navigate = useNavigate();
   const [load, setLoad] = useState<LoadState>({ status: 'loading' });
   const [issue, setIssue] = useState<IssueState>({ status: 'idle' });
+  // Store name for the receipt header (FR-KSK-03 "Nama Toko"). Fetched once on
+  // mount — off the touch→print hot path, so it adds no latency to the 1.5 s
+  // budget (NFR-PERF-03). A fetch failure leaves the name empty (the receipt
+  // header is optional); the store-name line is omitted when blank.
+  const [storeName, setStoreName] = useState('');
   // Synchronous in-flight flag: set before any await so a second click in the
   // same tick (before the disabled re-render flushes) is rejected.
   const inFlight = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
-    api
-      .listCategories()
-      .then((categories) => {
-        if (!cancelled) setLoad({ status: 'loaded', categories });
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setLoad({
-            status: 'error',
-            message: err instanceof Error ? err.message : 'Gagal memuat daftar kategori',
-          });
-        }
-      });
+    // Await categories + store name together (both off the touch→print hot
+    // path) so the store name is resolved before the category buttons become
+    // interactive — otherwise a fast tap before `getStoreName()` settled would
+    // print a receipt with no store-name header (FR-KSK-03). A store-name
+    // *failure* never blocks the kiosk flow: the receipt just omits the header
+    // line (it is optional in PrintPayload). `allSettled` so a store-name
+    // rejection does not delay the categories.
+    Promise.allSettled([api.listCategories(), api.getStoreName()]).then(([catRes, nameRes]) => {
+      if (cancelled) return;
+      if (catRes.status === 'fulfilled') {
+        setLoad({ status: 'loaded', categories: catRes.value });
+      } else {
+        setLoad({
+          status: 'error',
+          message:
+            catRes.reason instanceof Error ? catRes.reason.message : 'Gagal memuat daftar kategori',
+        });
+      }
+      if (nameRes.status === 'fulfilled') {
+        setStoreName(nameRes.value);
+      }
+    });
     return () => {
       cancelled = true;
     };
@@ -83,7 +97,9 @@ export function CategorySelectPage({ api, printProvider }: CategorySelectPagePro
         const payload: PrintPayload = {
           ticketNumber: ticket.ticketNumber,
           categoryName: category.name,
+          storeName: storeName || undefined,
           issuedAt: Date.now(),
+          waitingAhead: ticket.waitingAhead,
         };
         void printProvider.print(payload).catch(() => {
           /* print failure is non-fatal — the result screen shows the ticket */

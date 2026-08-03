@@ -22,13 +22,16 @@ export interface CreateTicketCommand {
  * Projection of the newly created ticket returned to the interface-adapter
  * layer. Use cases never return the aggregate itself — only this
  * transport-agnostic DTO, which the controller/presenter maps to HTTP (DIP /
- * no domain leakage). The kiosk prints `ticketNumber` and displays `status`.
+ * no domain leakage). The kiosk prints `ticketNumber` and displays `status`;
+ * `waitingAhead` (people already WAITING in this category when the ticket was
+ * issued) drives the receipt's queue-position line (FR-KSK-03).
  */
 export interface CreatedTicketDto {
   readonly ticketId: string;
   readonly ticketNumber: string;
   readonly categoryId: string;
   readonly status: string;
+  readonly waitingAhead: number;
 }
 
 /** Outcome of "create ticket": the ticket is enqueued in WAITING. */
@@ -102,7 +105,7 @@ export class CreateTicketUseCase {
     // commits the sequence reservation and ticket insert atomically (NFR-REL-
     // 02). The realtime broadcast is drained *after* the commit so we never
     // announce a state change that rolled back.
-    const ticket = await this.txManager.runInTransaction(async () => {
+    const { ticket, waitingAhead } = await this.txManager.runInTransaction(async () => {
       const now = this.clock();
       const dateKey = toDateKey(now);
       const ticketNumber = await this.sequences.nextTicketNumber(
@@ -112,7 +115,13 @@ export class CreateTicketUseCase {
       );
       const created = QueueTicket.create(ticketIdGenerate(), ticketNumber, category.id.value, now);
       await this.queue.save(created);
-      return created;
+      // Count the WAITING tickets in this category *inside* the tx so the
+      // just-inserted row is visible (Postgres) and concurrent uncommitted
+      // inserts are excluded — the count is deterministic. The just-issued
+      // ticket is the newest WAITING ticket, so people already ahead of it =
+      // count - 1 (FR-KSK-03 queue-position line on the kiosk receipt).
+      const waiting = await this.queue.countWaitingByCategory(category.id.value);
+      return { ticket: created, waitingAhead: Math.max(0, waiting - 1) };
     });
 
     await this.dispatcher.dispatch(ticket);
@@ -124,6 +133,7 @@ export class CreateTicketUseCase {
         ticketNumber: ticket.ticketNumber.formatted(),
         categoryId: ticket.categoryId,
         status: ticket.currentStatus,
+        waitingAhead,
       },
     };
   }
