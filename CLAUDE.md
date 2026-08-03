@@ -260,6 +260,31 @@ with no duplicate/lost ticket numbers.
   custom-target transitions fire a real command instead of rendering
   disabled (not blocked by QUE-20; it supersedes the disabled affordance
   independently).
+  **QUE-23** (Operational Interfaces, parent QUE-4, FR-TV-03, In Review PR #27)
+  closed the last tv-display PRD gap: the idle **standby mode**. When the queue
+  is idle (`nowServing == null`) the board shows a standby panel that cycles
+  bundled local banner/video promo media plus a prominent running-text
+  announcement, and crossfades back to the active now-serving board on the first
+  `TICKET_CALLED`. **tv-display-service only — no core-api/domain/admin/wizard
+  change:** standby media is a pure client concern (the backend never displays
+  media), mirroring the QUE-22 audio precedent, and the PRD §7 config schema
+  carries no `runningText`/`media`/`standby` field while FR-ADM-01's
+  reconfigurable list (routing, categories, reset) excludes standby content, so
+  manager-configurability is out of scope. Idle content is a client-owned
+  default + bundled local assets (`public/media/`, precached by Workbox),
+  exactly like the audio MP3s in `public/audio/`. **No speculative
+  `StandbyMediaProvider` interface** — there is exactly one media renderer and
+  a speculative port would be over-abstraction (the same "no speculative ports"
+  guidance that removed the `domain/notification` stub); the test seam is the
+  `baseURL`/`assets` props. `src/standby/standby-content.ts` is the single
+  source of truth for idle content (`MediaAsset` with explicit
+  `kind: 'image' | 'video'`, `DEFAULT_STANDBY_CONTENT`, `resolveRunningText`
+  with a `{storeName}` placeholder resolved at render time); `StandbyMedia`
+  cycles image (timer) / video (`ended`, single loops), error-skips missing
+  assets (mirrors the audio sequencer), and holds once every asset has errored
+  (no tight loop). The old hardcoded "FR-TV-03 minimal" marquee footer became
+  the sourced `RunningText` (prominent when idle, decorative footer when
+  active).
 - **PRD language:** the Linear PRD is written in **Bahasa Indonesia** with
   English technical terms. UI `action_label` values ("Panggil Berikutnya",
   "Lewati / Absen", "Selesai Layan") are Indonesian — match them verbatim
@@ -1083,6 +1108,15 @@ with no duplicate/lost ticket numbers.
     `clear` fires `onChange('')` → clamps back to the current length, so the
     field snaps back and `type` appends to the stale value. Use
     `fireEvent.change(input, { target: { value: '3' } })` to set it cleanly.
+  - **RTL: decorative media + fake-timer state updates.** An `<img alt="">`
+    has the `presentation`/`none` ARIA role, not `img`, so
+    `screen.getByRole('img', { hidden: true })` will not find it — query by tag
+    (`container.querySelector('img')`, matching the video-element convention
+    `container.querySelector('video')`) or give it a non-empty `alt`. Separately,
+    a React 18 state update fired from a fake-timer callback needs
+    `await act(async () => { await vi.advanceTimersByTimeAsync(n) })` to flush the
+    re-render without an act warning — `vi.advanceTimersByTime` alone leaves the
+    `setIndex` un-wrapped (surfaced building the QUE-23 `StandbyMedia` cycler).
   - **PWA `base`/`start_url`/`scope` must match the NGINX route** (e.g.
     `/kiosk/`, `/caller/`) — otherwise an installed PWA's `start_url` resolves to
     the gateway root, not the service, breaking offline launch. Set them when
