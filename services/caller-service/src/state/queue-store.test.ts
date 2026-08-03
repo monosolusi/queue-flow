@@ -191,6 +191,55 @@ describe('queueReducer — TICKET_TRANSFERRED', () => {
     );
     expect(next.waiting).toHaveLength(0);
   });
+
+  it('evicts the active ticket when transferred away (STATUS_UPDATED + TICKET_TRANSFERRED, FR-CLR-03)', () => {
+    // The aggregate emits STATUS_UPDATED (CALLING -> WAITING) then
+    // TICKET_TRANSFERRED for a transfer of the active ticket. STATUS_UPDATED
+    // keeps the ticket on the board (WAITING is not terminal); TICKET_TRANSFERRED
+    // must evict it from `active` so the board does not show a stale transferred-
+    // away ticket as the active call.
+    let next = reducer(
+      baseState,
+      event('TICKET_CALLED', 't1', { ticketNumber: 'A-001', counterId: COUNTER }),
+    );
+    next = reducer(next, event('STATUS_UPDATED', 't1', { from: 'CALLING', to: 'WAITING' }));
+    // Mid-flight: STATUS_UPDATED leaves the active ticket in place (now WAITING).
+    expect(next.active).toHaveLength(1);
+    expect(next.active[0].status).toBe('WAITING');
+    next = reducer(
+      next,
+      event('TICKET_TRANSFERRED', 't1', {
+        fromCategoryId: 'cat-a',
+        toCategoryId: 'cat-b',
+        fromTicketNumber: 'A-001',
+        toTicketNumber: 'B-009',
+      }),
+    );
+    expect(next.active).toHaveLength(0);
+    expect(next.waiting).toHaveLength(0);
+  });
+
+  it('evicts from active and re-adds to waiting when the active ticket is transferred into my categories (FR-CLR-03)', () => {
+    let next = reducer(
+      baseState,
+      event('TICKET_CALLED', 't1', { ticketNumber: 'A-001', counterId: COUNTER }),
+    );
+    next = reducer(next, event('STATUS_UPDATED', 't1', { from: 'CALLING', to: 'WAITING' }));
+    next = reducer(
+      next,
+      event('TICKET_TRANSFERRED', 't1', {
+        fromCategoryId: 'cat-b',
+        toCategoryId: 'cat-a',
+        fromTicketNumber: 'B-001',
+        toTicketNumber: 'A-009',
+      }),
+    );
+    // The ticket must appear in waiting (new number) and NOT in active — not both.
+    expect(next.active).toHaveLength(0);
+    expect(next.waiting.map((t) => t.ticketNumber)).toEqual(['A-009']);
+    expect(next.waiting[0].categoryId).toBe('cat-a');
+    expect(next.waitingCount).toBe(1);
+  });
 });
 
 describe('queueReducer — SYSTEM_RESET', () => {
