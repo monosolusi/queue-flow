@@ -41,11 +41,47 @@ body,
   font-size: 2rem;
 }
 .tv-board__main {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+/* The idle (standby) and active board layers are both always mounted and
+   crossfade via opacity + visibility (AC6). Each overlays the whole main
+   area; the inactive one carries a `--hidden` modifier. visibility:hidden
+   hides the inactive layer from AT as well as visually — no aria-hidden is
+   needed on the wrappers. */
+.tv-board__active,
+.standby {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  transition: opacity 0.3s ease;
+}
+.tv-board__active {
+  gap: 1.25rem;
+}
+.tv-board__active-grid {
   flex: 1;
   display: grid;
   grid-template-columns: 2fr 1fr;
   gap: 1.5rem;
   min-height: 0;
+}
+/* The active-mode footer marquee sits below the grid and does not stretch. */
+.tv-board__active > .tv-board__marquee {
+  flex: 0 0 auto;
+}
+/* Hidden layer: fade opacity out, then drop visibility after the fade so it is
+   non-interactive and removed from the a11y tree. The show direction snaps
+   visibility back immediately (visibility is not in its transition). */
+.tv-board__active--hidden,
+.standby--hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.3s ease, visibility 0s 0.3s;
 }
 
 /* Now serving ------------------------------------------------------------- */
@@ -58,6 +94,10 @@ body,
   background: var(--surface);
   border-radius: var(--radius);
   padding: 2rem;
+  /* Grid-cell containment (AC3): let the column shrink below the number's
+     intrinsic width and clip overflow instead of pushing the grid wider. */
+  min-width: 0;
+  overflow: hidden;
 }
 .now-serving--empty {
   color: var(--text-muted);
@@ -67,19 +107,21 @@ body,
   margin: 0;
 }
 .now-serving__label {
+  margin: 0; /* h2 reset */
   font-size: 1.5rem;
-  letter-spacing: 0.25em;
+  font-weight: 600;
+  letter-spacing: 0.05em; /* AC8: ≤0.08em (was 0.25em) */
   color: var(--text-muted);
 }
 .now-serving__number {
-  font-size: 14rem;
+  font-size: clamp(8rem, 22vw, 22rem); /* AC3: fluid 1080p→1440p */
   font-weight: 800;
   letter-spacing: 0.05em;
   line-height: 1;
 }
 .now-serving__counter {
   font-size: 2.5rem;
-  color: var(--accent-on-dark);
+  color: var(--accent-on-dark); /* AC2: #60a5fa 5.75:1 (QUE-37) */
   font-weight: 700;
 }
 
@@ -89,6 +131,7 @@ body,
   border-radius: var(--radius);
   padding: 1.5rem;
   overflow: hidden;
+  min-width: 0; /* grid-cell containment (AC3) */
 }
 .call-history__title {
   margin: 0 0 1rem;
@@ -103,15 +146,21 @@ body,
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 0.75rem;
+  gap: 0; /* dividers carry the spacing; gap+border would double up */
 }
+/* Flatten the nested card-in-card (AC4): drop the inner card background +
+   radius and use a hairline divider instead. --text-muted clears WCAG 1.4.11
+   (3:1) for boundaries with margin (see _tokens.css for the verified ratio) and
+   stays legible at TV viewing distance. */
 .call-history__item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1rem 1.25rem;
-  background: var(--surface-2);
-  border-radius: 12px;
+  padding: 1rem 0.25rem;
+  border-bottom: 1px solid var(--text-muted);
+}
+.call-history__item:last-child {
+  border-bottom: none;
 }
 .call-history__number {
   font-size: 2.5rem;
@@ -162,10 +211,13 @@ body,
 }
 .marquee__track {
   display: inline-block;
-  padding-left: 100%;
   font-size: 1.5rem;
   color: var(--text-muted);
   animation: marquee 22s linear infinite;
+}
+/* A gap between the two copies so the loop reads as continuous text (AC7). */
+.marquee__track span {
+  padding-right: 2rem;
 }
 /* Prominent idle running text — the primary standby announcement. */
 .tv-board__marquee--prominent {
@@ -177,26 +229,23 @@ body,
   font-weight: 600;
   animation: marquee 28s linear infinite;
 }
+/* The track holds two copies; translating -50% moves exactly one copy width,
+   so the second copy lands where the first was — a seamless loop with no blank
+   gap (AC7). */
 @keyframes marquee {
   from {
     transform: translateX(0);
   }
   to {
-    transform: translateX(-100%);
+    transform: translateX(-50%);
   }
 }
 
 /* Standby (idle) panel (FR-TV-03) ----------------------------------------- */
-/* Spans the full board `main` grid (which is 2fr/1fr for the active board) so
-   the promo media + running text own the whole idle screen. */
+/* Overlays the whole `main` area (an absolute layer — see .tv-board__active /
+   .standby above) so the promo media + running text own the whole idle screen. */
 .standby {
-  grid-column: 1 / -1;
-  display: flex;
-  flex-direction: column;
   gap: 1.5rem;
-  min-height: 0;
-  /* Smooth idle→active handoff (Expected Behaviour: "transisi mulus"). */
-  animation: standby-fade-in 0.3s ease-out;
 }
 .standby__media {
   flex: 1;
@@ -218,20 +267,45 @@ body,
 .standby .tv-board__marquee--prominent {
   flex: 0 0 auto;
 }
-@keyframes standby-fade-in {
-  from {
-    opacity: 0;
+
+/* 4K tier (AC3): scale the board typography up for large displays. The first
+   responsive breakpoint in the file. */
+@media (min-width: 2560px) {
+  .now-serving__number {
+    font-size: clamp(14rem, 22vw, 44rem);
   }
-  to {
-    opacity: 1;
+  .now-serving__counter {
+    font-size: clamp(3rem, 3vw, 5rem);
+  }
+  .now-serving__label {
+    font-size: clamp(1.75rem, 1.5vw, 2.5rem);
+  }
+  .now-serving__empty-text {
+    font-size: clamp(2.5rem, 3vw, 4rem);
+  }
+  .call-history__number {
+    font-size: clamp(3rem, 3vw, 5rem);
+  }
+  .call-history__title {
+    font-size: clamp(1.75rem, 1.5vw, 2.5rem);
   }
 }
+
 @media (prefers-reduced-motion: reduce) {
+  /* No crossfade / marquee motion: snap layers instantly and show a single
+     static marquee copy. */
+  .tv-board__active,
+  .standby {
+    transition: none;
+  }
+  .tv-board__active--hidden,
+  .standby--hidden {
+    visibility: hidden; /* instant, no flash of the outgoing layer */
+  }
   .marquee__track {
     animation: none;
-    padding-left: 0;
   }
-  .standby {
-    animation: none;
+  .marquee__dup {
+    display: none;
   }
 }
