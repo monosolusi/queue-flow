@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { TvStoreProvider } from './tv-store';
 import { TvBoardPage } from '../pages/TvBoardPage';
@@ -181,7 +181,11 @@ describe('TvStoreProvider realtime projection + audio (FR-TV-01/02)', () => {
       payload: { resetTo: 1, date: '2026-07-31' },
     });
     // nowServing clears → the idle standby panel returns (FR-TV-03) and the
-    // now-serving number leaves the board.
+    // now-serving number leaves the board. SYSTEM_RESET clears history too, so
+    // A-005 must be gone from the DOM ENTIRELY — unlike the COMPLETED path (where
+    // the hidden active layer legitimately retains history and the assertion is
+    // scoped to the standby), this asserts globally so a regression that fails
+    // to clear history on reset is caught.
     expect(await screen.findByTestId('standby')).toBeInTheDocument();
     expect(screen.queryByText('A-005')).not.toBeInTheDocument();
   });
@@ -198,7 +202,10 @@ describe('TvStoreProvider realtime projection + audio (FR-TV-01/02)', () => {
 
     fire(ws, statusEvent('t1', 'CALLING', 'COMPLETED'));
     expect(await screen.findByTestId('standby')).toBeInTheDocument();
-    expect(screen.queryByText('A-005')).not.toBeInTheDocument();
+    // Both layers stay mounted (AC6); the completed A-005 is retained in the
+    // hidden active layer's history, so it must be absent from the standby panel
+    // specifically — a global queryByText would match the hidden history item.
+    expect(within(screen.getByTestId('standby')).queryByText('A-005')).not.toBeInTheDocument();
   });
 
   it('retains a completed ticket in history on the quiet-store path (FR-TV-01)', async () => {
@@ -222,7 +229,9 @@ describe('TvStoreProvider realtime projection + audio (FR-TV-01/02)', () => {
     fire(ws, statusEvent('t1', 'CALLING', 'SERVING'));
     fire(ws, statusEvent('t1', 'SERVING', 'COMPLETED'));
     expect(await screen.findByTestId('standby')).toBeInTheDocument();
-    expect(screen.queryByText('A-005')).not.toBeInTheDocument();
+    // A-005 is retained in the hidden active layer's history (see above) — scope
+    // to the standby panel so the global query doesn't match it.
+    expect(within(screen.getByTestId('standby')).queryByText('A-005')).not.toBeInTheDocument();
 
     // The next call brings the active board back; A-005 must appear exactly
     // once (history), not double-pushed (nowServing was null at COMPLETED, so
@@ -247,7 +256,7 @@ describe('TvStoreProvider realtime projection + audio (FR-TV-01/02)', () => {
     // nowServing clears → idle standby; a skipped ticket is recallable via
     // "Panggil Ulang" and is not retained in history (only COMPLETED tickets are).
     expect(await screen.findByTestId('standby')).toBeInTheDocument();
-    expect(screen.queryByText('A-005')).not.toBeInTheDocument();
+    expect(within(screen.getByTestId('standby')).queryByText('A-005')).not.toBeInTheDocument();
 
     // Bring the active board back with a new call; the skipped ticket must not
     // appear in history.
@@ -276,7 +285,7 @@ describe('TvStoreProvider realtime projection + audio (FR-TV-01/02)', () => {
 
     fire(ws, statusEvent('t1', 'CALLING', 'SKIPPED'));
     expect(await screen.findByTestId('standby')).toBeInTheDocument();
-    expect(screen.queryByText('A-005')).not.toBeInTheDocument();
+    expect(within(screen.getByTestId('standby')).queryByText('A-005')).not.toBeInTheDocument();
 
     // Recall: STATUS_UPDATED (SKIPPED -> CALLING) then TICKET_CALLED for the SAME
     // ticket (not a new ticket) — the real recall flow the previous test masked.
@@ -325,25 +334,40 @@ describe('TvBoardPage idle/active switching (FR-TV-03)', () => {
 
     // Idle: the standby panel renders the promo media + the running-text
     // greeting (the {storeName} placeholder resolved against the boot-loaded
-    // store name). The active board is not rendered while idle.
+    // store name). Both layers stay mounted (AC6); the active layer carries the
+    // `--hidden` modifier and the standby is visible.
     const standby = await screen.findByTestId('standby');
     expect(standby).toBeInTheDocument();
-    expect(
-      screen.getByText(/Selamat datang di Apotek Sehat/),
-    ).toBeInTheDocument();
-    expect(screen.queryByText('Riwayat Panggilan')).not.toBeInTheDocument();
+    expect(standby).not.toHaveClass('standby--hidden');
+    expect(screen.getByTestId('board-active')).toHaveClass('tv-board__active--hidden');
+    // The active footer marquee renders the same running text, so scope to the
+    // standby to avoid a double match under the both-mounted model.
+    const standbyCopies = within(standby).getAllByText(/Selamat datang di Apotek Sehat/);
+    expect(standbyCopies).toHaveLength(2);
+    // AC7: the prominent standby marquee holds two copies (seamless loop), the
+    // duplicate hidden from AT so the announcement is read once.
+    const standbyMarquee = standbyCopies[0].closest('.marquee__track')!;
+    expect(standbyMarquee.querySelectorAll('span')).toHaveLength(2);
+    expect(standbyCopies[0]).not.toHaveAttribute('aria-hidden', 'true');
+    expect(standbyCopies[1]).toHaveAttribute('aria-hidden', 'true');
+    expect(standbyCopies[1]).toHaveClass('marquee__dup');
     // The standby media <img> is present (bundled placeholder banner).
     expect(standby.querySelector('img, video')).not.toBeNull();
 
-    // A call arrives → the standby disappears and the now-serving board appears.
+    // A call arrives → the standby hides and the now-serving board appears. Both
+    // layers stay mounted (AC6); the standby now carries `--hidden`.
     fire(ws, calledEvent('t1', 'A-005', 2));
     expect(await screen.findByText('A-005')).toBeInTheDocument();
-    expect(screen.queryByTestId('standby')).not.toBeInTheDocument();
+    expect(screen.getByTestId('standby')).toHaveClass('standby--hidden');
+    expect(screen.getByTestId('board-active')).not.toHaveClass('tv-board__active--hidden');
     expect(screen.getByText('Riwayat Panggilan')).toBeInTheDocument();
 
     // Complete the ticket → nowServing clears → the idle standby returns.
     fire(ws, statusEvent('t1', 'CALLING', 'COMPLETED'));
     expect(await screen.findByTestId('standby')).toBeInTheDocument();
-    expect(screen.queryByText('A-005')).not.toBeInTheDocument();
+    expect(screen.getByTestId('board-active')).toHaveClass('tv-board__active--hidden');
+    // A-005 is retained in the hidden active layer's history — scope to the
+    // standby so the global query doesn't match it (see COMPLETED-path note).
+    expect(within(screen.getByTestId('standby')).queryByText('A-005')).not.toBeInTheDocument();
   });
 });

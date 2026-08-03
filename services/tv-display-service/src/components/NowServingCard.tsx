@@ -10,8 +10,13 @@ export function NowServingCard({ nowServing }: { nowServing: NowServing | null }
     );
   }
   return (
-    <div className="now-serving">
-      <span className="now-serving__label">SEDANG DILAYANI</span>
+    <div
+      className="now-serving"
+      role="status"
+      aria-live="assertive"
+      aria-atomic="true"
+    >
+      <h2 className="now-serving__label">SEDANG DILAYANI</h2>
       <span className="now-serving__number">{nowServing.ticketNumber}</span>
       <span className="now-serving__counter">Counter {nowServing.counterId}</span>
     </div>
