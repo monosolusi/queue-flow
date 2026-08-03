@@ -2,6 +2,13 @@
 <html lang="id">
   <head>
     <meta charset="UTF-8" />
+    <!-- QUE-38 AC6 — `user-scalable=no` is an intentional, accepted deviation
+         from WCAG 1.4.4 (Resize text) / 2.1.1 (no-zoom) for a public unattended
+         touchscreen. Pinch-zoom would let a visitor drift the fixed large-target
+         button layout (10rem touch targets, 10rem ticket number) into an unusable
+         state with no staff present to reset it. Legibility does not depend on
+         zoom — the base sizing is already large (category code 3rem, ticket
+         number 10rem) and the UI is designed for a single fixed scale. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
     <meta name="theme-color" content="#0f172a" />
     <title>QMS Kiosk</title>
