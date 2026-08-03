@@ -2,16 +2,45 @@ import { useTvStore } from '../state/tv-store';
 import { NowServingCard } from '../components/NowServingCard';
 import { CallHistory } from '../components/CallHistory';
 import { ConnectionStatusBadge } from '../components/ConnectionStatus';
+import { StandbyMedia } from '../components/StandbyMedia';
+import { DEFAULT_STANDBY_CONTENT, resolveRunningText } from '../standby/standby-content';
 
 /**
- * The TV queue board (FR-TV-01..03). Big now-serving number, recent call
- * history, a CSS-marquee running text of the store name when idle (FR-TV-03
- * minimal), and a connection indicator. All realtime + audio wiring is owned by
- * the surrounding {@link TvStoreProvider}; this page is a pure projection of
- * the store state (SRP — it renders + announces nothing on its own).
+ * A CSS-marquee running text (FR-TV-03). `prominent` renders it as the primary
+ * idle announcement (large, full-width, announced to assistive tech); the
+ * non-prominent variant is the decorative footer shown alongside the active
+ * board. The prose is sourced once from `DEFAULT_STANDBY_CONTENT.runningText`
+ * with the `{storeName}` placeholder resolved against the boot-loaded store
+ * name, so it never lives as a hardcoded string in the page.
+ */
+function RunningText({ text, prominent }: { readonly text: string; readonly prominent: boolean }) {
+  return (
+    <div
+      className={`tv-board__marquee${prominent ? ' tv-board__marquee--prominent' : ''}`}
+      aria-hidden={prominent ? 'false' : 'true'}
+    >
+      <div className="marquee__track">{text}</div>
+    </div>
+  );
+}
+
+/**
+ * The TV queue board (FR-TV-01..03). When a ticket is being called it shows the
+ * big now-serving number + recent call history (FR-TV-01). When the queue is
+ * idle (`nowServing == null`) it shows the standby panel — bundled banner/video
+ * promo media cycled by {@link StandbyMedia} plus a prominent running-text
+ * announcement (FR-TV-03). The idle→active handoff is driven by the store's
+ * `nowServing` projection; all realtime + audio wiring is owned by the
+ * surrounding {@link TvStoreProvider}, so this page stays a pure projection
+ * (SRP — it renders + announces nothing on its own).
  */
 export function TvBoardPage() {
   const { state } = useTvStore();
+  const idle = state.nowServing === null;
+  const runningText = resolveRunningText(
+    DEFAULT_STANDBY_CONTENT.runningText,
+    state.storeName,
+  );
 
   return (
     <div className="tv-board">
@@ -21,16 +50,22 @@ export function TvBoardPage() {
       </header>
 
       <main className="tv-board__main">
-        <NowServingCard nowServing={state.nowServing} />
-        <CallHistory history={state.history} />
+        {idle ? (
+          <section className="standby" aria-label="Mode standby" data-testid="standby">
+            <StandbyMedia assets={DEFAULT_STANDBY_CONTENT.media} />
+            <RunningText text={runningText} prominent />
+          </section>
+        ) : (
+          <>
+            <NowServingCard nowServing={state.nowServing} />
+            <CallHistory history={state.history} />
+          </>
+        )}
       </main>
 
-      {/* Running text idle (FR-TV-03 minimal): a CSS marquee of the store name. */}
-      <footer className="tv-board__marquee" aria-hidden={state.nowServing ? 'true' : 'false'}>
-        <div className="marquee__track">
-          Selamat datang di {state.storeName || 'layanan antrian kami'} — mohon perhatikan nomor antrian Anda
-        </div>
-      </footer>
+      {/* Active-mode footer running text (decorative). When idle the prominent
+          running text lives inside the standby section above. */}
+      {!idle && <RunningText text={runningText} prominent={false} />}
     </div>
   );
 }
