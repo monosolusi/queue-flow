@@ -13,7 +13,13 @@ export interface CategorySelectPageProps {
   readonly printProvider?: IPrintProvider;
 }
 
-/** Result of issuing a ticket, carried to the result page via router state. */
+/**
+ * Result of issuing a ticket, carried to the result page via router state.
+ * Display-only contract: carries the fields `TicketResultPage` renders
+ * (`ticketNumber`, `categoryName`) — NOT the `waitingAhead` / `storeName` a
+ * `PrintPayload` requires. Printing is fired here in `choose` before navigating;
+ * the result page must not attempt to print from this state.
+ */
 export interface IssuedTicket {
   readonly ticket: CreatedTicketDto;
   readonly categoryName: string;
