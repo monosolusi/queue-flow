@@ -40,6 +40,7 @@ function makeApi(overrides: Partial<ICallerApi> = {}): ICallerApi {
     skip: vi.fn(() => Promise.resolve()),
     recall: vi.fn(() => Promise.resolve()),
     transfer: vi.fn(() => Promise.resolve()),
+    applyTransition: vi.fn(() => Promise.resolve()),
     listCounters: vi.fn(() => Promise.resolve([])),
     getQueueSnapshot: vi.fn(() => Promise.resolve({} as never)),
     ...overrides,
@@ -194,7 +195,7 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
     expect(api.transfer).not.toHaveBeenCalled();
   });
 
-  it('renders a disabled unsupported affordance for a custom-target transition', () => {
+  it('fires applyTransition for a custom-target transition (QUE-33)', async () => {
     const graph: StateMachineDto = {
       states: ['WAITING', 'CALLING', 'SERVING', 'PREPARING', 'COMPLETED'],
       transitions: [
@@ -204,12 +205,35 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
     };
     const api = makeApi();
     render(<ActionControls api={api} bound={bound} active={ticket('SERVING')} stateMachine={graph} />);
-    // The custom target (PREPARING) has no backing command endpoint → disabled,
-    // labeled with the transition's actionLabel.
-    const unsupported = screen.getByTestId('action-unsupported-PREPARING');
-    expect(unsupported).toHaveTextContent('Siapkan Dokumen');
-    expect(unsupported).toBeDisabled();
-    // The known target (COMPLETED) still renders a functional button.
+    // The custom target (PREPARING) is backed by the generic apply-transition
+    // endpoint → a functional button labeled with the transition's actionLabel.
+    const customBtn = screen.getByTestId('action-apply-transition-PREPARING');
+    expect(customBtn).toHaveTextContent('Siapkan Dokumen');
+    expect(customBtn).not.toBeDisabled();
+    await userEvent.click(customBtn);
+    expect(api.applyTransition).toHaveBeenCalledWith('t1', 'PREPARING');
+    // The known target (COMPLETED) still routes to its fixed command endpoint.
     expect(screen.getByTestId('action-complete')).not.toBeDisabled();
+  });
+
+  it('guards against double-fire on a custom-target transition (QUE-33)', async () => {
+    const graph: StateMachineDto = {
+      states: ['WAITING', 'CALLING', 'SERVING', 'PREPARING', 'COMPLETED'],
+      transitions: [{ from: 'SERVING', to: 'PREPARING', actionLabel: 'Siapkan Dokumen' }],
+    };
+    let resolveTransition: (() => void) | undefined;
+    const api = makeApi({
+      applyTransition: vi.fn(() => new Promise<void>((r) => (resolveTransition = r))),
+    });
+    render(<ActionControls api={api} bound={bound} active={ticket('SERVING')} stateMachine={graph} />);
+    const btn = screen.getByTestId('action-apply-transition-PREPARING');
+    await userEvent.click(btn);
+    expect(api.applyTransition).toHaveBeenCalledTimes(1);
+    // While pending the button is disabled (double-tap must not fire twice).
+    expect(btn).toBeDisabled();
+    await userEvent.click(btn);
+    expect(api.applyTransition).toHaveBeenCalledTimes(1);
+    resolveTransition!();
+    expect(await screen.findByTestId('action-apply-transition-PREPARING')).not.toBeDisabled();
   });
 });

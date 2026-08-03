@@ -23,6 +23,9 @@ export interface ICallerApi {
   skip(ticketId: string): Promise<void>;
   recall(ticketId: string): Promise<void>;
   transfer(ticketId: string, targetCategoryId: string): Promise<void>;
+  /** Generic apply-transition (QUE-33): drives a wizard-configurable edge to
+   *  an arbitrary target state not covered by the six fixed commands. */
+  applyTransition(ticketId: string, targetStatus: string): Promise<void>;
 }
 
 const API_BASE = '/api';
@@ -111,6 +114,11 @@ export class CallerApi implements ICallerApi {
   }
   transfer(ticketId: string, targetCategoryId: string): Promise<void> {
     return postJson(`/queue/${encodeURIComponent(ticketId)}/transfer`, { targetCategoryId }).then(
+      () => undefined,
+    );
+  }
+  applyTransition(ticketId: string, targetStatus: string): Promise<void> {
+    return postJson(`/queue/${encodeURIComponent(ticketId)}/transition`, { targetStatus }).then(
       () => undefined,
     );
   }

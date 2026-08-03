@@ -1,3 +1,4 @@
+export * from './apply-transition.use-case';
 export * from './call-next-ticket.use-case';
 export * from './cleanup-transaction-log.use-case';
 export * from './complete-ticket.use-case';

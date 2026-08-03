@@ -72,6 +72,7 @@ function makeApi(snap: QueueSnapshotDto = snapshot): ICallerApi {
     skip: vi.fn(() => Promise.resolve()),
     recall: vi.fn(() => Promise.resolve()),
     transfer: vi.fn(() => Promise.resolve()),
+    applyTransition: vi.fn(() => Promise.resolve()),
   };
 }
 
