@@ -152,6 +152,14 @@ function projectEvent(state: QueueState, e: QueueLifecycleWireEvent, ctx: QueueC
       // edges from `active.status`), so a WAITING-sourced generic transition is
       // out of the UI scope; the `idx === -1` guard above leaves such a ticket in
       // `waiting` untouched (no divergence on the supported flow).
+      //
+      // The one WAITING target that *does* reach the active ticket is the transfer
+      // flow (FR-CLR-03 "Pindah Kategori"): the aggregate records STATUS_UPDATED
+      // (CALLING -> WAITING) and then TICKET_TRANSFERRED in sequence. STATUS_UPDATED
+      // alone would leave a stale WAITING entry on the board; the immediately
+      // following TICKET_TRANSFERRED evicts it from `active` (see below). Do not
+      // treat WAITING as terminal here — that would race the two events and could
+      // drop the ticket before TICKET_TRANSFERRED re-adds it to `waiting`.
       const active = state.active.map((t) =>
         t.ticketId === e.aggregateId ? { ...t, status: to } : t,
       );
@@ -162,13 +170,17 @@ function projectEvent(state: QueueState, e: QueueLifecycleWireEvent, ctx: QueueC
         QueueLifecycleWireEvent['payload'],
         { fromCategoryId: string; toCategoryId: string; fromTicketNumber: string; toTicketNumber: string }
       >;
-      const inWaiting = state.waiting.some((t) => t.ticketId === e.aggregateId);
       const mine = ctx.categoryIds.has(p.toCategoryId);
-      if (inWaiting && !mine) {
-        const waiting = state.waiting.filter((t) => t.ticketId !== e.aggregateId);
-        return { ...state, waiting, waitingCount: waiting.length };
-      }
-      if (!inWaiting && mine) {
+      // A transfer re-enters the queue under a new category + number and clears
+      // the counter, so the ticket must leave `active` regardless of destination
+      // (FR-CLR-03). Without this, the preceding STATUS_UPDATED (CALLING ->
+      // WAITING) leaves a stale WAITING entry on the board for a transfer away,
+      // or the ticket appears in both `active` and `waiting` for a transfer into
+      // my own categories. Drop it from `active`, then re-add to `waiting` only
+      // when the new category is one of mine.
+      const active = state.active.filter((t) => t.ticketId !== e.aggregateId);
+      let waiting = state.waiting.filter((t) => t.ticketId !== e.aggregateId);
+      if (mine) {
         const ticket: TicketStateDto = {
           ticketId: e.aggregateId,
           ticketNumber: p.toTicketNumber,
@@ -176,10 +188,9 @@ function projectEvent(state: QueueState, e: QueueLifecycleWireEvent, ctx: QueueC
           status: 'WAITING',
           counterId: null,
         };
-        const waiting = [...state.waiting, ticket].sort(byCreatedAt);
-        return { ...state, waiting, waitingCount: waiting.length };
+        waiting = [...waiting, ticket].sort(byCreatedAt);
       }
-      return state;
+      return { ...state, active, waiting, waitingCount: waiting.length };
     }
     case 'SYSTEM_RESET':
       // The provider refetches the snapshot; mark stale as a signal.
