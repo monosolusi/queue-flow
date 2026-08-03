@@ -631,6 +631,26 @@ with no duplicate/lost ticket numbers.
   the invariant lets bad input silently degrade (e.g. `buildCallFragments` would
   emit a `-.mp3` fragment for a negative id) instead of failing fast. The
   QUE-22 arch-reviewer surfaced exactly this: the guard died with the VO.
+- **Domain VO construction failures throw `InvalidValueObjectException`, never a
+  bare `Error`.** A shared domain value object's `of`/construction method (e.g.
+  `Identifier.of`) must throw `InvalidValueObjectException` (a `DomainError`), not
+  a plain `Error`, so `DomainExceptionFilter` (`@Catch(DomainError)` only) maps a
+  malformed value to HTTP 400 instead of letting a bare `Error` escape the filter
+  and surface as a 500. Fix at the **source** — the VO owns its
+  construction-failure semantics (SRP; mirrors the QUE-32 precedent: value-object
+  *format* rejections throw `InvalidValueObjectException`, not
+  `InvalidArgumentException`/bare `Error`) — not by wrapping each untrusted-input
+  call site (which would leave a semantically-wrong bare `Error` in the shared
+  domain kernel and force every new caller to repeat the wrap, an OCP smell).
+  **Blast radius to trusted/DB-reconstitution paths is an accepted never-path
+  tradeoff:** a corrupt `row.id` reconstituted on an HTTP path now surfaces as 400
+  instead of 500, but every write goes through `Identifier.generate()` (strict v4
+  UUID + strict `isValid` regex) so the path is unreached, and the filter rethrows
+  on non-HTTP hosts (`host.getType() !== 'http'`) so scheduler/boot/WS
+  reconstitution preserves its prior 500-equivalent behavior. (QUE-31 —
+  `Identifier.of` was the lone bare-`Error` throw; `SaveSystemConfigurationUseCase.
+  buildCategories` already threw `InvalidValueObjectException` → 400 for every
+  other category invariant but the `id` path threw `Error` → 500.)
 - **Acceptance suite (QUE-30):** the DoD-1..4 acceptance specs live in
   `services/core-api/test/acceptance/*.acceptance.spec.ts` (co-located in
   core-api — not a separate project — to reuse its jest config + ts-jest +

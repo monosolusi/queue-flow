@@ -15,8 +15,14 @@ type GuardState =
  * hitting the admin panel is redirected to the wizard instead of seeing an
  * error. The guard renders its children only once setup is complete.
  *
- * Chosen over NGINX auth_request/lua routing: one HTTP call, no gateway logic
- * — the cleanest fit for an offline single-host deployment (NFR-REL-01).
+ * Progressive enhancement alongside the gateway `auth_request` first-run guard
+ * (QUE-13), NOT a replacement for it. The gateway guard is the primary gate
+ * (PRD "semua akses HTTP" → `/wizard`): it covers the operational PWA routes
+ * (`/kiosk/`, `/tv/`, `/caller/`) — which this SPA cannot reach — by probing
+ * `GET /api/system/setup-status` and 302-redirecting to `/admin/wizard` when
+ * unset. This SPA guard only covers the `/admin/` routes it wraps (the gateway
+ * intentionally does not guard `/admin/` so the wizard SPA can load to perform
+ * setup); it is a client-side fallback for those.
  */
 export function SetupGuard({ api, children }: { api: IAdminApi; children: React.ReactNode }) {
   const [state, setState] = useState<GuardState>({ status: 'loading' });

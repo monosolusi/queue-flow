@@ -18,7 +18,7 @@ import {
   InMemoryCounterRoutingRuleRepository,
   InMemorySystemConfigurationRepository,
 } from '../../src/infrastructure/persistence/in-memory';
-import { projectStateMachine } from '../../src/application/store-config';
+import { projectStateMachine, type WizardCategoryDto } from '../../src/application/store-config';
 import { StateMachine } from '../../src/domain/store-config';
 
 /**
@@ -39,7 +39,7 @@ function wizardPayload() {
     categories: [
       { code: 'A', name: 'Customer Service' },
       { code: 'B', name: 'Kasir & Pembayaran' },
-    ],
+    ] as WizardCategoryDto[],
     routingRules: [
       {
         counterId: 1,
@@ -202,6 +202,26 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
     ];
     const res = await request(app.getHttpServer()).put('/api/system/config').send(bad);
     expect(res.status).toBe(400);
+  });
+
+  it('PUT with a malformed (non-v4) categories[].id is 400 INVALID_VALUE_OBJECT, not 500', async () => {
+    // Regression for QUE-31: a hand-crafted bad `categories[].id` must surface
+    // as a domain error (400), not the 500 a plain `Error` escaped the filter
+    // as. `Identifier.of` now throws `InvalidValueObjectException` (a
+    // `DomainError`) so `DomainExceptionFilter` maps it to 400. Defense-in-depth
+    // — the wizard client only echoes v4-validated ids from GET, so a bad id
+    // never reaches the PUT in practice.
+    const bad = wizardPayload();
+    bad.categories = [
+      { id: 'not-a-uuid', code: 'A', name: 'Customer Service' },
+      { code: 'B', name: 'Kasir & Pembayaran' },
+    ];
+    const res = await request(app.getHttpServer()).put('/api/system/config').send(bad);
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_VALUE_OBJECT');
+    // setup must NOT have silently completed on a rejected payload
+    const cfg = await request(app.getHttpServer()).get('/api/system/config');
+    expect(cfg.body.isInitialSetupCompleted).toBe(false);
   });
 
   it('re-saving fully replaces categories and routing rules (no dangling old rows)', async () => {
