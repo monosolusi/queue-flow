@@ -213,7 +213,7 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     expect(await screen.findByTestId('step-3')).toBeInTheDocument();
 
     // Switch to custom mode.
-    await userEvent.click(screen.getByLabelText(/Susun state machine sendiri/));
+    await userEvent.click(screen.getByLabelText(/Susun alur status sendiri/));
     expect(screen.getByTestId('sm-editor')).toBeInTheDocument();
 
     // Add a PREPARING state, then a transition SERVING → PREPARING ("Siapkan").
@@ -262,9 +262,9 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     await screen.findByTestId('step-3');
 
     // Custom → add a stray state → back to default → finalize sends the PRD default.
-    await userEvent.click(screen.getByLabelText(/Susun state machine sendiri/));
+    await userEvent.click(screen.getByLabelText(/Susun alur status sendiri/));
     await userEvent.click(screen.getByRole('button', { name: '+ Tambah State' }));
-    await userEvent.click(screen.getByLabelText(/Gunakan state machine default/));
+    await userEvent.click(screen.getByLabelText(/Gunakan alur status standar/));
     await userEvent.click(screen.getByTestId('wizard-next'));
     expect(await screen.findByTestId('step-4')).toBeInTheDocument();
     await userEvent.click(screen.getByTestId('wizard-next'));
@@ -286,7 +286,7 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     await screen.findByTestId('step-2');
     await userEvent.click(screen.getByTestId('wizard-next'));
     await screen.findByTestId('step-3');
-    await userEvent.click(screen.getByLabelText(/Susun state machine sendiri/));
+    await userEvent.click(screen.getByLabelText(/Susun alur status sendiri/));
 
     // WAITING is referenced by the default `WAITING -> CALLING` edge, so its
     // remove button must be disabled.
@@ -306,7 +306,7 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     await screen.findByTestId('step-2');
     await userEvent.click(screen.getByTestId('wizard-next'));
     await screen.findByTestId('step-3');
-    await userEvent.click(screen.getByLabelText(/Susun state machine sendiri/));
+    await userEvent.click(screen.getByLabelText(/Susun alur status sendiri/));
 
     // Add a duplicate of the existing WAITING -> CALLING edge with an empty
     // label (two violations: duplicate edge + empty action label).
@@ -344,12 +344,12 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     expect(screen.getByTestId('review-store-name')).toHaveTextContent('Apotek Sehat');
     expect(screen.getByTestId('review-categories')).toHaveTextContent(/Customer Service/);
     expect(screen.getByTestId('review-routing')).toHaveTextContent(/Counter 1/);
-    expect(screen.getByTestId('review-state-machine')).toHaveTextContent(/Default/);
+    expect(screen.getByTestId('review-state-machine')).toHaveTextContent(/Standar/);
     expect(screen.getByTestId('review-daily-reset')).toHaveTextContent(/Otomatis/);
     expect(screen.getByTestId('review-daily-reset')).toHaveTextContent(/aktif/);
   });
 
-  it('blocks advancing past step 4 when the cron expression is malformed (FR-WZD-05 / QUE-16)', async () => {
+  it('derives the cron expression from the daily-reset time picker (FR-WZD-05 / QUE-34)', async () => {
     const { api, save } = makeApi();
     renderWizard(api);
 
@@ -362,27 +362,24 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     await userEvent.click(screen.getByTestId('wizard-next'));
     expect(await screen.findByTestId('step-4')).toBeInTheDocument();
 
-    // The default cron '0 0 * * *' is valid → Lanjut enabled, no error shown.
+    // The default cron '0 0 * * *' maps to 00:00 → Lanjut enabled, no error.
     expect(screen.getByTestId('wizard-next')).not.toBeDisabled();
     expect(screen.queryByTestId('cron-error')).not.toBeInTheDocument();
 
-    // Enter a malformed cron (only 3 fields) → Lanjut disabled, error shown.
-    await userEvent.clear(screen.getByLabelText('Cron expression'));
-    await userEvent.type(screen.getByLabelText('Cron expression'), '0 0 *');
-    expect(screen.getByTestId('cron-error')).toBeInTheDocument();
-    expect(screen.getByTestId('wizard-next')).toBeDisabled();
+    // Pick 08:30 → the form derives the cron client-side (MM HH * * * → 30 8 * * *).
+    // The time picker constrains input so no malformed cron can be produced.
+    fireEvent.change(screen.getByLabelText('Waktu reset harian'), { target: { value: '08:30' } });
+    expect(screen.queryByTestId('cron-error')).not.toBeInTheDocument();
+    expect(screen.getByTestId('wizard-next')).not.toBeDisabled();
 
-    // A click attempts to advance but the guard holds — still on step 4.
     await userEvent.click(screen.getByTestId('wizard-next'));
-    expect(screen.getByTestId('step-4')).toBeInTheDocument();
+    expect(await screen.findByTestId('step-5')).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('wizard-finalize'));
+    await screen.findByText('Admin Panel Home');
 
-    // Fix the cron → error clears and Lanjut re-enables.
-    await userEvent.clear(screen.getByLabelText('Cron expression'));
-    await userEvent.type(screen.getByLabelText('Cron expression'), '0 0 * * *');
-    expect(screen.queryByTestId('cron-error')).not.toBeInTheDocument();
-    expect(screen.getByTestId('wizard-next')).not.toBeDisabled();
-
-    expect(save).not.toHaveBeenCalled();
+    const payload = save.mock.calls[0][0] as SaveSystemConfigurationPayload;
+    expect(payload.dailyReset.mode).toBe('AUTOMATIC_CRON');
+    expect(payload.dailyReset.cronExpression).toBe('30 8 * * *');
   });
 
   it('switches to custom categories, adds a category, and sends the custom list (without mode) in the PUT payload', async () => {
@@ -559,7 +556,7 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     await userEvent.click(screen.getAllByRole('button', { name: 'Hapus' })[0]);
     expect(screen.getAllByLabelText(/^Kategori \d+ kode$/)).toHaveLength(1);
     // Switch back to default — A reappears with its ORIGINAL id from the prefill.
-    await userEvent.click(screen.getByLabelText(/Gunakan kategori default/));
+    await userEvent.click(screen.getByLabelText(/Gunakan kategori standar/));
     expect(screen.getByTestId('cat-readonly')).toBeInTheDocument();
 
     // Walk to finalize.

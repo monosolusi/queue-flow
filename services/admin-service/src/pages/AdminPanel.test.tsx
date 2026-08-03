@@ -113,7 +113,7 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     expect(screen.getByRole('checkbox', { name: 'A' })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'B' })).not.toBeChecked();
     // State machine is read-only (no editable transition inputs).
-    expect(screen.getByText('State Machine (read-only)')).toBeInTheDocument();
+    expect(screen.getByText('Alur Status Tiket (hanya lihat)')).toBeInTheDocument();
   });
 
   it('preserves existing category ids and omits id for newly added ones on save', async () => {
@@ -153,7 +153,7 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
 
     // Assign category B to Counter 1, and switch policy to CATEGORY_PRIORITY.
     await userEvent.click(screen.getByRole('checkbox', { name: 'B' }));
-    await userEvent.selectOptions(screen.getByLabelText('Counter 1 priority policy'), 'CATEGORY_PRIORITY');
+    await userEvent.selectOptions(screen.getByLabelText('Counter 1 kebijakan prioritas'), 'CATEGORY_PRIORITY');
 
     // Add a second counter.
     await userEvent.click(screen.getByRole('button', { name: '+ Tambah Counter' }));
@@ -247,30 +247,27 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     expect(screen.getByTestId('admin-save')).not.toBeDisabled();
   });
 
-  it('disables save and shows an error when the cron expression is malformed (FR-WZD-05 / QUE-16)', async () => {
+  it('derives the cron expression from the daily-reset time picker (FR-WZD-05 / QUE-34)', async () => {
     const { api, save } = makeApi();
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
 
-    // The default cron '0 0 * * *' is valid → save enabled, no error.
+    // The default cron '0 0 * * *' maps to 00:00 → save enabled, no error.
     expect(screen.getByTestId('admin-save')).not.toBeDisabled();
     expect(screen.queryByTestId('cron-error')).not.toBeInTheDocument();
 
-    // Enter a malformed cron (out-of-range hour field) → save disabled, error shown.
-    await userEvent.clear(screen.getByLabelText('Cron expression'));
-    await userEvent.type(screen.getByLabelText('Cron expression'), '0 99 * * *');
-    expect(screen.getByTestId('cron-error')).toBeInTheDocument();
-    expect(screen.getByTestId('admin-save')).toBeDisabled();
+    // Pick 08:30 → the form derives the cron client-side (MM HH * * * → 30 8 * * *).
+    // The time picker constrains input so no malformed cron can be produced.
+    fireEvent.change(screen.getByLabelText('Waktu reset harian'), { target: { value: '08:30' } });
+    expect(screen.queryByTestId('cron-error')).not.toBeInTheDocument();
+    expect(screen.getByTestId('admin-save')).not.toBeDisabled();
 
-    // A save click is blocked — nothing is sent with a malformed cron.
     await userEvent.click(screen.getByTestId('admin-save'));
-    expect(save).not.toHaveBeenCalled();
+    await screen.findByText('Konfigurasi tersimpan.');
 
-    // Fix it → error clears and save re-enables.
-    await userEvent.clear(screen.getByLabelText('Cron expression'));
-    await userEvent.type(screen.getByLabelText('Cron expression'), '0 0 * * *');
-    expect(screen.queryByTestId('cron-error')).not.toBeInTheDocument();
-    expect(screen.getByTestId('admin-save')).not.toBeDisabled();
+    const payload = save.mock.calls[0][0] as SaveSystemConfigurationPayload;
+    expect(payload.dailyReset.mode).toBe('AUTOMATIC_CRON');
+    expect(payload.dailyReset.cronExpression).toBe('30 8 * * *');
   });
 });
 

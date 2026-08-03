@@ -12,6 +12,8 @@ import {
   type WizardRoutingRuleDto,
 } from '../api/types';
 import { validateCronExpression } from '../lib/cron';
+import { PRIORITY_POLICY_LABELS, DAILY_RESET_MODE_LABELS } from '../lib/labels';
+import { timeToCron, cronToTime } from '../lib/daily-reset';
 
 /** One transition edge in the editable state machine. */
 interface Transition {
@@ -456,7 +458,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                     })
                   }
                 />
-                Gunakan kategori default (PRD §7)
+                Gunakan kategori standar
               </label>
               <label className="radio-group__item">
                 <input
@@ -472,7 +474,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
 
             {form.categoriesMode === 'default' ? (
               <div className="cat-readonly" data-testid="cat-readonly">
-                <p className="wizard__hint">Kategori default (read-only):</p>
+                <p className="wizard__hint">Kategori standar (hanya lihat):</p>
                 <ul className="entry-list">
                   {form.categories.map((c, i) => (
                     <li key={i} className="entry-row">
@@ -540,26 +542,33 @@ export function WizardPage({ api }: { api: IAdminApi }) {
             <ul className="entry-list">
               {form.routingRules.map((rule, i) => (
                 <li key={i} className="entry-row entry-row--routing">
-                  <span className="entry-row__counter-label" aria-label={`Counter ${i + 1} id`}>
-                    Counter {rule.counterId}
-                  </span>
-                  <input
-                    className="field__input entry-row__name"
-                    type="text"
-                    value={rule.counterName}
-                    onChange={(e) => updateRouting(form, setForm, i, { counterName: e.target.value })}
-                    placeholder="Nama counter"
-                    aria-label={`Counter ${i + 1} nama`}
-                  />
-                  <select
-                    className="field__input"
-                    value={rule.priorityPolicy}
-                    onChange={(e) => updateRouting(form, setForm, i, { priorityPolicy: e.target.value as PriorityPolicy })}
-                    aria-label={`Counter ${i + 1} priority policy`}
-                  >
-                    <option value="FIFO_GLOBAL">FIFO_GLOBAL</option>
-                    <option value="CATEGORY_PRIORITY">CATEGORY_PRIORITY</option>
-                  </select>
+                  <span className="entry-row__counter-title">Counter {i + 1}</span>
+                  <label className="field">
+                    <span className="field__label">Nama counter</span>
+                    <input
+                      className="field__input"
+                      type="text"
+                      value={rule.counterName}
+                      onChange={(e) => updateRouting(form, setForm, i, { counterName: e.target.value })}
+                      placeholder="mis. Loket 1"
+                      aria-label={`Counter ${i + 1} nama`}
+                    />
+                  </label>
+                  <label className="field">
+                    <span className="field__label">Kebijakan prioritas</span>
+                    <select
+                      className="field__input"
+                      value={rule.priorityPolicy}
+                      onChange={(e) => updateRouting(form, setForm, i, { priorityPolicy: e.target.value as PriorityPolicy })}
+                      aria-label={`Counter ${i + 1} kebijakan prioritas`}
+                    >
+                      {(Object.keys(PRIORITY_POLICY_LABELS) as PriorityPolicy[]).map((p) => (
+                        <option key={p} value={p}>
+                          {PRIORITY_POLICY_LABELS[p]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <fieldset className="checkbox-group">
                     <legend>Kategori dilayani</legend>
                     {categoryCodes.map((code) => (
@@ -581,13 +590,13 @@ export function WizardPage({ api }: { api: IAdminApi }) {
 
         {step === 3 && (
           <section className="wizard__step" data-testid="step-3">
-            <h2 className="wizard__step-title">State Machine</h2>
+            <h2 className="wizard__step-title">Alur Status Tiket</h2>
             <p className="wizard__hint">
-              Pilih state machine default (PRD §7) atau susun sendiri. Label aksi menjadi tombol di panel caller.
+              Pilih alur status standar atau susun sendiri. Label aksi menjadi tombol di panel caller.
             </p>
 
             <fieldset className="radio-group" data-testid="sm-mode">
-              <legend>Jenis state machine</legend>
+              <legend>Jenis alur status</legend>
               <label className="radio-group__item">
                 <input
                   type="radio"
@@ -596,7 +605,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                   checked={form.stateMachine.mode === 'default'}
                   onChange={() => setForm({ ...form, stateMachine: defaultStateMachineForm() })}
                 />
-                Gunakan state machine default (PRD §7)
+                Gunakan alur status standar
               </label>
               <label className="radio-group__item">
                 <input
@@ -608,13 +617,13 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                     setForm({ ...form, stateMachine: { ...form.stateMachine, mode: 'custom' } })
                   }
                 />
-                Susun state machine sendiri
+                Susun alur status sendiri
               </label>
             </fieldset>
 
             {form.stateMachine.mode === 'default' ? (
               <div className="sm-readonly" data-testid="sm-readonly">
-                <p className="wizard__hint">State machine default (read-only):</p>
+                <p className="wizard__hint">Alur status tiket standar (hanya lihat):</p>
                 <ul className="entry-list">
                   {form.stateMachine.transitions.map((t, i) => (
                     <li key={i} className="entry-row entry-row--transition">
@@ -732,20 +741,24 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                 value={form.dailyReset.mode}
                 onChange={(e) => setForm({ ...form, dailyReset: { ...form.dailyReset, mode: e.target.value as DailyResetMode } })}
               >
-                <option value="AUTOMATIC_CRON">Otomatis (cron)</option>
-                <option value="MANUAL">Manual</option>
+                {(Object.keys(DAILY_RESET_MODE_LABELS) as DailyResetMode[]).map((m) => (
+                  <option key={m} value={m}>
+                    {DAILY_RESET_MODE_LABELS[m]}
+                  </option>
+                ))}
               </select>
             </label>
             {form.dailyReset.mode === 'AUTOMATIC_CRON' && (
               <label className="field">
-                <span className="field__label">Cron expression</span>
+                <span className="field__label">Waktu reset harian</span>
                 <input
                   className="field__input"
-                  type="text"
-                  value={form.dailyReset.cronExpression}
-                  onChange={(e) => setForm({ ...form, dailyReset: { ...form.dailyReset, cronExpression: e.target.value } })}
-                  placeholder="0 0 * * *"
-                  aria-label="Cron expression"
+                  type="time"
+                  value={cronToTime(form.dailyReset.cronExpression) ?? '00:00'}
+                  onChange={(e) =>
+                    setForm({ ...form, dailyReset: { ...form.dailyReset, cronExpression: timeToCron(e.target.value) } })
+                  }
+                  aria-label="Waktu reset harian"
                 />
                 {cronError && (
                   <span className="field__error" data-testid="cron-error">
@@ -810,7 +823,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                 <ul className="wizard__review-list" data-testid="review-routing">
                   {form.routingRules.map((r, i) => (
                     <li key={i}>
-                      <strong>{r.counterName || `Counter ${r.counterId}`}</strong> ({r.priorityPolicy}) →{' '}
+                      <strong>{r.counterName || 'Counter'}</strong> ({PRIORITY_POLICY_LABELS[r.priorityPolicy]}) →{' '}
                       {r.assignedCategoryCodes.length > 0 ? r.assignedCategoryCodes.join(', ') : 'tidak ada kategori'}
                     </li>
                   ))}
@@ -818,11 +831,11 @@ export function WizardPage({ api }: { api: IAdminApi }) {
               </div>
 
               <div className="wizard__review-block">
-                <h3 className="wizard__review-label">State Machine</h3>
+                <h3 className="wizard__review-label">Alur Status Tiket</h3>
                 <p className="wizard__review-value" data-testid="review-state-machine">
                   {form.stateMachine.mode === 'default'
-                    ? `Default (PRD §7) — ${form.stateMachine.states.length} state, ${form.stateMachine.transitions.length} transisi`
-                    : `Custom — ${form.stateMachine.states.length} state, ${form.stateMachine.transitions.length} transisi`}
+                    ? `Standar — ${form.stateMachine.states.length} state, ${form.stateMachine.transitions.length} transisi`
+                    : `Susunan sendiri — ${form.stateMachine.states.length} state, ${form.stateMachine.transitions.length} transisi`}
                 </p>
               </div>
 
@@ -830,8 +843,8 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                 <h3 className="wizard__review-label">Kebijakan Reset Harian</h3>
                 <p className="wizard__review-value" data-testid="review-daily-reset">
                   {form.dailyReset.mode === 'AUTOMATIC_CRON'
-                    ? `Otomatis (cron: ${form.dailyReset.cronExpression || '—'})`
-                    : 'Manual'}
+                    ? `Otomatis setiap hari pukul ${cronToTime(form.dailyReset.cronExpression) ?? '00:00'}`
+                    : 'Manual (tombol reset)'}
                   {' · '}reset ke {form.dailyReset.resetTicketNumberTo}
                   {' · '}arsip hari sebelumnya: {form.dailyReset.archivePreviousDayData ? 'aktif' : 'nonaktif'}
                 </p>
