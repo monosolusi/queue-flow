@@ -300,6 +300,38 @@ fieldset {
   font-size: 1rem;
 }
 
+/* Brand-color picker + hex text input (QUE-36). The native color picker is
+ * inline-flexed with a companion hex text field so the manager can either
+ * drag-pick or type a `#rrggbb` code; both stay in sync via shared form state. */
+.brand-color__controls {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.brand-color__picker {
+  width: 3rem;
+  height: 2.4rem;
+  padding: 0;
+  border: 1px solid var(--surface-2);
+  border-radius: 8px;
+  background: var(--bg);
+  cursor: pointer;
+}
+.brand-color__hex {
+  flex: 1;
+  min-width: 0;
+}
+/* Small inline swatch in the step-5 review block (QUE-36). */
+.brand-color__swatch {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  margin-right: 0.4rem;
+  border-radius: 4px;
+  border: 1px solid var(--surface-2);
+  vertical-align: middle;
+}
+
 .entry-list {
   list-style: none;
   margin: 0 0 0.75rem;

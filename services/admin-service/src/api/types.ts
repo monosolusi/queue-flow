@@ -49,6 +49,7 @@ export interface SystemConfigurationDto {
   readonly dailyResetPolicy: DailyResetPolicyDto;
   readonly categories: readonly ConfigCategoryDto[];
   readonly routingRules: readonly ConfigRoutingRuleDto[];
+  readonly brandColor: string;
 }
 
 /**
@@ -79,6 +80,7 @@ export interface SaveSystemConfigurationPayload {
   readonly dailyReset: DailyResetPolicyDto;
   readonly categories: readonly WizardCategoryDto[];
   readonly routingRules: readonly WizardRoutingRuleDto[];
+  readonly brandColor: string;
   readonly actor?: string;
 }
 
@@ -86,6 +88,7 @@ export interface SaveSystemConfigurationPayload {
 export interface SaveSystemConfigurationResult {
   readonly isInitialSetupCompleted: boolean;
   readonly storeName: string;
+  readonly brandColor: string;
 }
 
 /**
@@ -119,6 +122,16 @@ export const DEFAULT_DAILY_RESET: DailyResetPolicyDto = {
   resetTicketNumberTo: 1,
   archivePreviousDayData: true,
 };
+
+/**
+ * The shared accent color the four frontends hardcode in `:root` (`--accent:
+ * #2563eb`). The wizard + admin panel prefill their `<input type="color">` with
+ * this on a clean store, and the backend `BrandColor.DEFAULT` mirrors it so a
+ * store that never sets a brand color keeps the existing look (zero visual
+ * regression, AC1 "default yang masuk akal"). The UI emits `#rrggbb` only; the
+ * backend VO additionally accepts OKLCH / `#rrggbbaa` for direct API calls.
+ */
+export const DEFAULT_BRAND_COLOR = '#2563eb';
 
 // --- Analytics & audit-trail read surface (FR-ADM-03 / QUE-26) ----------------
 

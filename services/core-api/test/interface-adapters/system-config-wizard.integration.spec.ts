@@ -54,6 +54,7 @@ function wizardPayload() {
         priorityPolicy: PriorityPolicy.CATEGORY_PRIORITY,
       },
     ],
+    brandColor: '#aabbcc',
   };
 }
 
@@ -102,6 +103,9 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
     expect(res.body.stateMachine.transitions.length).toBeGreaterThan(0);
     expect(res.body.categories).toEqual([]);
     expect(res.body.routingRules).toEqual([]);
+    // clean store prefills the wizard's color input with the shared --accent
+    // default (not black — a color input cannot represent empty).
+    expect(res.body.brandColor).toBe('#2563eb');
   });
 
   it('queue command endpoints 409 SYSTEM_NOT_CONFIGURED before the wizard completes', async () => {
@@ -128,6 +132,7 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
     expect(res.status).toBe(200);
     expect(res.body.isInitialSetupCompleted).toBe(true);
     expect(res.body.storeName).toBe('Toko Contoh');
+    expect(res.body.brandColor).toBe('#aabbcc');
 
     // The config is now persisted.
     const saved = await config.get();
@@ -145,6 +150,7 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
     expect(getRes.body.storeName).toBe('Toko Contoh');
     expect(getRes.body.categories.map((c: { code: string }) => c.code)).toEqual(['A', 'B']);
     expect(getRes.body.routingRules.map((r: { counterId: number }) => r.counterId)).toEqual([1, 2]);
+    expect(getRes.body.brandColor).toBe('#aabbcc');
   });
 
   it('after the wizard completes, queue endpoints succeed and state-machine read returns the graph', async () => {
@@ -244,5 +250,27 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
 
     expect((await categories.getAll()).length).toBe(1);
     expect((await routingRules.getAll()).length).toBe(1);
+  });
+
+  it('PUT with a malformed brand color is 400 (QUE-36)', async () => {
+    const bad = wizardPayload();
+    bad.brandColor = 'not-a-color';
+    const res = await request(app.getHttpServer()).put('/api/system/config').send(bad);
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_VALUE_OBJECT');
+    // setup must NOT have silently completed on a rejected payload
+    const cfg = await request(app.getHttpServer()).get('/api/system/config');
+    expect(cfg.body.isInitialSetupCompleted).toBe(false);
+  });
+
+  it('PUT accepts an oklch brand color (direct-API grammar — QUE-36)', async () => {
+    const payload = wizardPayload();
+    payload.brandColor = 'oklch(0.7 0.15 200)';
+    const res = await request(app.getHttpServer()).put('/api/system/config').send(payload);
+    expect(res.status).toBe(200);
+    expect(res.body.brandColor).toBe('oklch(0.7 0.15 200)');
+
+    const getRes = await request(app.getHttpServer()).get('/api/system/config');
+    expect(getRes.body.brandColor).toBe('oklch(0.7 0.15 200)');
   });
 });

@@ -893,6 +893,21 @@ with no duplicate/lost ticket numbers.
   `Identifier.of` was the lone bare-`Error` throw; `SaveSystemConfigurationUseCase.
   buildCategories` already threw `InvalidValueObjectException` → 400 for every
   other category invariant but the `id` path threw `Error` → 500.)
+- **Declare module-level `const`s BEFORE a domain VO class that references them
+  in a `static` field (TDZ).** A `static DEFAULT = BrandColor.of('#2563eb')`
+  initializer runs **during class evaluation** — before any later `const
+  HEX_RE = /…/` (or helper function) later in the module is initialized, so it
+  throws `ReferenceError: Cannot access 'HEX_RE' before initialization`. `const`
+  declarations are block-scoped and not hoisted for *initialization* (the temporal
+  dead zone); `static` class fields do not defer. So a VO with a static default
+  that calls its own `of()` against a module-level regex/helper must declare
+  every such `const`/`function` **above** the `class` declaration. This bit
+  `BrandColor` (QUE-36): `HEX_RE`/`OKLCH_RE`/`normalizeOklch` lived after the
+  class and `static DEFAULT` blew up at import (29 test suites failed with the
+  TDZ). Reordering them above the class fixed it. `Identifier` dodged this only
+  because it has no `static DEFAULT` calling `of()` against a module `const`.
+  Apply to any new VO that mints a `static DEFAULT`/`static` factory referencing
+  module-level helpers.
 - **Acceptance suite (QUE-30):** the DoD-1..4 acceptance specs live in
   `services/core-api/test/acceptance/*.acceptance.spec.ts` (co-located in
   core-api — not a separate project — to reuse its jest config + ts-jest +

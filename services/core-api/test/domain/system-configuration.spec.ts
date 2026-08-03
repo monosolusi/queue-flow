@@ -1,6 +1,7 @@
 import { Identifier } from '../../src/domain/shared';
 import { InvalidValueObjectException } from '../../src/domain/shared/errors';
 import {
+  BrandColor,
   DailyResetMode,
   DailyResetPolicy,
   StateMachine,
@@ -139,6 +140,24 @@ describe('SystemConfiguration aggregate', () => {
     expect(config.isInitialSetupCompleted).toBe(false);
     expect(config.stateMachine).toBe(StateMachine.DEFAULT);
     expect(config.dailyResetPolicy).toBe(DailyResetPolicy.DEFAULT);
+  });
+
+  it('defaults brandColor to the shared --accent #2563eb (zero visual regression)', () => {
+    const config = SystemConfiguration.create(Identifier.generate());
+    expect(config.brandColor.value).toBe('#2563eb');
+    expect(config.brandColor).toBe(BrandColor.DEFAULT);
+  });
+
+  it('reconstitute carries a custom brand color through', () => {
+    const config = SystemConfiguration.reconstitute({
+      id: Identifier.generate(),
+      storeName: 'Toko Brand',
+      isInitialSetupCompleted: true,
+      stateMachine: StateMachine.DEFAULT,
+      dailyResetPolicy: DailyResetPolicy.DEFAULT,
+      brandColor: BrandColor.of('#aabbcc'),
+    });
+    expect(config.brandColor.value).toBe('#aabbcc');
   });
 
   it('cannot complete setup without a store name', () => {

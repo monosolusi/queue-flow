@@ -71,6 +71,7 @@ describe('SaveSystemConfigurationUseCase — daily-reset policy audit + re-arm (
           priorityPolicy: PriorityPolicy.FIFO_GLOBAL,
         },
       ],
+      brandColor: '#2563eb',
       actor: 'admin',
       ...overrides,
     };
@@ -214,5 +215,37 @@ describe('SaveSystemConfigurationUseCase — daily-reset policy audit + re-arm (
     expect(changes[1].before).toMatchObject({ resetTicketNumberTo: 1, archivePreviousDayData: true });
     expect(changes[1].after).toMatchObject({ resetTicketNumberTo: 100, archivePreviousDayData: false });
     expect(scheduler.calls).toBe(2);
+  });
+
+  /**
+   * QUE-36 regression guard: brand color is cosmetic, so it is NOT audited.
+   * NFR-SEC-02 scopes audit to manual reset / state-schema / routing / daily-
+   * reset-policy; there is no `BRAND_COLOR_CHANGE` audit action and a brand-
+   * color-only edit must record nothing spurious on top of the always-on
+   * `STATE_SCHEMA_CHANGE` + `ROUTING_CHANGE`. Locks decision 5 (no brand-color
+   * audit) so a future change has to make an explicit, reviewable choice.
+   */
+  it('does NOT record a brand-color audit entry when only the brand color changes', async () => {
+    const repos = buildRepos();
+    const scheduler = fakeScheduler();
+    const useCase = buildUseCase(repos, scheduler);
+
+    await useCase.execute(baseCommand());
+    await useCase.execute(baseCommand({ brandColor: '#aabbcc' }));
+
+    const all = await repos.auditLog.list();
+    // No audit action names a brand-color change; the only actions recorded
+    // are the always-on STATE_SCHEMA_CHANGE + ROUTING_CHANGE (per save) and the
+    // single initial-setup DAILY_RESET_POLICY_CHANGE.
+    for (const entry of all) {
+      expect(entry.action).not.toMatch(/BRAND_COLOR/i);
+    }
+    const actionTypes = new Set(all.map((e) => e.action));
+    expect(actionTypes.has(AuditAction.STATE_SCHEMA_CHANGE)).toBe(true);
+    expect(actionTypes.has(AuditAction.ROUTING_CHANGE)).toBe(true);
+    // The brand-color-only re-save did not change the policy → only the
+    // initial-setup policy entry, not a second one.
+    expect((await policyChangeActions(repos))).toHaveLength(1);
+    expect(scheduler.calls).toBe(1); // brand-color change does not re-arm
   });
 });

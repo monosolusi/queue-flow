@@ -2,6 +2,7 @@ import type { ISystemConfigurationRepository } from '../../domain/store-config';
 import type { ICategoryRepository } from '../../domain/queue';
 import type { ICounterRoutingRuleRepository } from '../../domain/store-config';
 import { StateMachine } from '../../domain/store-config';
+import { BrandColor } from '../../domain/store-config';
 import { DailyResetPolicy, DailyResetMode } from '../../domain/store-config';
 import type { PriorityPolicy } from '../../domain/shared';
 
@@ -53,6 +54,7 @@ export interface SystemConfigurationDto {
   readonly dailyResetPolicy: DailyResetPolicyDto;
   readonly categories: readonly ConfigCategoryDto[];
   readonly routingRules: readonly ConfigRoutingRuleDto[];
+  readonly brandColor: string;
 }
 
 /** Projects the domain `StateMachine` into the flat {@link StateMachineDto}. */
@@ -112,6 +114,12 @@ export class GetSystemConfigurationUseCase {
         dailyResetPolicy: defaultDailyReset(),
         categories: [],
         routingRules: [],
+        // The default brand color (matches the hardcoded `--accent: #2563eb`
+        // across all four frontends) so a clean store prefills the wizard's
+        // `<input type="color">` with the real default, not black (a color input
+        // cannot represent empty). Mirrors the defaultStateMachine() /
+        // defaultDailyReset() null-branch precedent.
+        brandColor: BrandColor.DEFAULT.value,
       };
     }
 
@@ -125,6 +133,7 @@ export class GetSystemConfigurationUseCase {
         resetTicketNumberTo: system.dailyResetPolicy.resetTicketNumberTo,
         archivePreviousDayData: system.dailyResetPolicy.archivePreviousDayData,
       },
+      brandColor: system.brandColor.value,
       categories: allCategories
         .slice()
         .sort((a, b) => a.code.localeCompare(b.code))

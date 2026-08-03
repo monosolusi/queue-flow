@@ -13,6 +13,7 @@ function cleanStore(): SystemConfigurationDto {
     dailyResetPolicy: { mode: 'MANUAL', cronExpression: null, resetTicketNumberTo: 1, archivePreviousDayData: true },
     categories: [],
     routingRules: [],
+    brandColor: '#2563eb',
   };
 }
 
@@ -23,7 +24,7 @@ function configuredStore(): SystemConfigurationDto {
 function makeApi(config: SystemConfigurationDto): IAdminApi {
   return {
     getSystemConfig: vi.fn(() => Promise.resolve(config)),
-    saveSystemConfig: vi.fn(() => Promise.resolve({ isInitialSetupCompleted: true, storeName: config.storeName })),
+    saveSystemConfig: vi.fn(() => Promise.resolve({ isInitialSetupCompleted: true, storeName: config.storeName, brandColor: config.brandColor })),
     getActiveStateMachine: vi.fn(() => Promise.resolve(config.stateMachine)),
     getDailyReport: vi.fn(),
     getCounterPerformance: vi.fn(),

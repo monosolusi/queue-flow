@@ -62,6 +62,8 @@ describe('DoD-2 — First-Run Wizard API (FR-WZD-01..06)', () => {
     ]);
     expect(res.body.categories).toEqual([]);
     expect(res.body.routingRules).toEqual([]);
+    // clean store prefills the wizard color input with the shared --accent default.
+    expect(res.body.brandColor).toBe('#2563eb');
   });
 
   it('GET /api/system/setup-status returns 403 SETUP_REQUIRED on a clean store (gateway guard probe — FR-WZD-01)', async () => {

@@ -7,7 +7,9 @@ import type {
   StateMachineDto,
   SystemConfigurationDto,
 } from '../api/types';
+import { DEFAULT_BRAND_COLOR } from '../api/types';
 import { validateCronExpression } from '../lib/cron';
+import { validateBrandColor, isValidBrandColor } from '../lib/brand-color';
 import { validateRetentionDays } from '../lib/retention';
 import { PRIORITY_POLICY_LABELS, DAILY_RESET_MODE_LABELS } from '../lib/labels';
 import { timeToCron, cronToTime } from '../lib/daily-reset';
@@ -41,6 +43,8 @@ interface AdminForm {
   storeName: string;
   /** Passthrough — read-only here; the wizard owns state-machine editing. */
   stateMachine: StateMachineDto;
+  /** Editable brand color (QUE-36) — the manager re-themes `--accent` post-setup. */
+  brandColor: string;
   categories: CategoryRow[];
   routingRules: RoutingRow[];
   dailyReset: {
@@ -58,10 +62,10 @@ type PanelState =
 
 /**
  * The operational configuration panel (FR-ADM-01 / QUE-24). After first-run
- * setup the manager edits the three operational areas here — categories,
- * counter routing, and the daily-reset policy — without re-running the guided
- * wizard. The store name and state machine stay read-only (the wizard owns
- * those; an "Ubah Konfigurasi" link re-opens it).
+ * setup the manager edits the operational areas here — categories,
+ * counter routing, the daily-reset policy, and the brand color — without
+ * re-running the guided wizard. The store name and state machine stay read-only
+ * (the wizard owns those; an "Ubah Konfigurasi" link re-opens it).
  *
  * The panel is a thin editor over the existing config save surface: it loads
  * the full config (`GET /api/system/config`), lets the manager edit the three
@@ -147,6 +151,12 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
   const cronError =
     form.dailyReset.mode === 'AUTOMATIC_CRON' ? validateCronExpression(form.dailyReset.cronExpression) : null;
   const dailyResetValid = cronError === null;
+  // Brand-color validation (QUE-36) — mirrors the wizard step-1 guard so the
+  // operational panel cannot save a malformed color either. The error list
+  // drives the inline message and disables the save button (single source of
+  // truth, same pattern as the cron guard above).
+  const brandColorErrors = validateBrandColor(form.brandColor);
+  const brandColorValid = brandColorErrors.length === 0;
 
   async function save() {
     if (submittingRef.current) return;
@@ -157,6 +167,7 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
       await api.saveSystemConfig({
         storeName: form.storeName,
         stateMachine: form.stateMachine,
+        brandColor: form.brandColor,
         dailyReset: {
           mode: form.dailyReset.mode,
           cronExpression:
@@ -299,6 +310,35 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
         <button type="button" className="btn btn--secondary" onClick={() => addCategory(form, setState)}>
           + Tambah Kategori
         </button>
+      </section>
+
+      {/* Brand color — re-theme the store accent post-setup (QUE-36). */}
+      <section className="config-card" data-testid="brand-color-section">
+        <h2 className="config-card__title">Warna Brand</h2>
+        <div className="brand-color__controls">
+          <input
+            className="brand-color__picker"
+            type="color"
+            value={isValidBrandColor(form.brandColor) ? form.brandColor : DEFAULT_BRAND_COLOR}
+            onChange={(e) => setState({ status: 'ready', form: { ...form, brandColor: e.target.value } })}
+            aria-label="Pilih warna brand"
+          />
+          <input
+            className="field__input brand-color__hex"
+            type="text"
+            value={form.brandColor}
+            onChange={(e) => setState({ status: 'ready', form: { ...form, brandColor: e.target.value } })}
+            placeholder="#2563eb"
+            aria-label="Kode hex warna brand"
+          />
+        </div>
+        {brandColorErrors.length > 0 && (
+          <ul className="wizard__errors" data-testid="brand-color-errors" style={{ marginTop: '0.75rem' }}>
+            {brandColorErrors.map((msg) => (
+              <li key={msg}>{msg}</li>
+            ))}
+          </ul>
+        )}
       </section>
 
       {/* Counter & routing — add / edit / remove + category assignment (FR-ADM-01). */}
@@ -534,7 +574,7 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
           type="button"
           className="btn btn--primary"
           onClick={save}
-          disabled={submitting || !dailyResetValid}
+          disabled={submitting || !dailyResetValid || !brandColorValid}
           data-testid="admin-save"
         >
           {submitting ? 'Menyimpan…' : 'Simpan Konfigurasi'}
@@ -553,6 +593,7 @@ function toForm(config: SystemConfigurationDto): AdminForm {
   return {
     storeName: config.storeName,
     stateMachine: config.stateMachine,
+    brandColor: config.brandColor || DEFAULT_BRAND_COLOR,
     categories:
       config.categories.length > 0
         ? config.categories.map((c) => ({ id: c.id, rowKey: `cat-${c.id}`, code: c.code, name: c.name }))

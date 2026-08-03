@@ -5,6 +5,7 @@ import {
 } from '../../../src/domain/shared/errors';
 import { TicketStatus } from '../../../src/domain/queue';
 import {
+  BrandColor,
   StateMachine,
   StateSchema,
   StateTransitionRule,
@@ -88,6 +89,7 @@ describe('StateTransitionValidator (active-policy resolver — QUE-10 AC#1)', ()
       isInitialSetupCompleted: true,
       stateMachine: transferMachine,
       dailyResetPolicy: SystemConfiguration.create(Identifier.generate()).dailyResetPolicy,
+      brandColor: BrandColor.DEFAULT,
     });
     await config.save(system);
 

@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { WizardPage } from './WizardPage';
 import type { IAdminApi } from '../api/admin-api';
-import { DEFAULT_CATEGORIES, DEFAULT_STATE_MACHINE, type SaveSystemConfigurationPayload, type SystemConfigurationDto } from '../api/types';
+import { DEFAULT_CATEGORIES, DEFAULT_STATE_MACHINE, DEFAULT_BRAND_COLOR, type SaveSystemConfigurationPayload, type SystemConfigurationDto } from '../api/types';
 
 /** A clean store mirrors core-api's `GetSystemConfigurationUseCase`: the default
  *  state machine is returned even before setup (so the wizard is prefilled). */
@@ -16,17 +16,18 @@ function cleanStore(): SystemConfigurationDto {
     dailyResetPolicy: { mode: 'AUTOMATIC_CRON', cronExpression: '0 0 * * *', resetTicketNumberTo: 1, archivePreviousDayData: true },
     categories: [],
     routingRules: [],
+    brandColor: DEFAULT_BRAND_COLOR,
   };
 }
 
 function makeApi(
   config: SystemConfigurationDto = cleanStore(),
-  saveImpl?: (payload: SaveSystemConfigurationPayload) => Promise<{ isInitialSetupCompleted: boolean; storeName: string }>,
+  saveImpl?: (payload: SaveSystemConfigurationPayload) => Promise<{ isInitialSetupCompleted: boolean; storeName: string; brandColor: string }>,
 ) {
   const save = vi.fn(
     saveImpl ??
       ((payload: SaveSystemConfigurationPayload) =>
-        Promise.resolve({ isInitialSetupCompleted: true, storeName: payload.storeName })),
+        Promise.resolve({ isInitialSetupCompleted: true, storeName: payload.storeName, brandColor: payload.brandColor })),
   );
   const api: IAdminApi = {
     getSystemConfig: vi.fn(() => Promise.resolve(config)),
@@ -89,6 +90,7 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     expect(screen.getByTestId('review-store-name')).toHaveTextContent('Apotek Sehat Sentosa');
     expect(screen.getByTestId('review-categories')).toHaveTextContent(/Customer Service/);
     expect(screen.getByTestId('review-daily-reset')).toHaveTextContent(/Otomatis/);
+    expect(screen.getByTestId('review-brand-color')).toHaveTextContent(DEFAULT_BRAND_COLOR);
     await userEvent.click(screen.getByTestId('wizard-finalize'));
 
     // Navigation to the admin home (FR-WZD-06 — operational access after setup).
@@ -111,8 +113,39 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     expect(payload.dailyReset.mode).toBe('AUTOMATIC_CRON');
     expect(payload.dailyReset.cronExpression).toBe('0 0 * * *');
     expect(payload.dailyReset.resetTicketNumberTo).toBe(1);
+    expect(payload.brandColor).toBe(DEFAULT_BRAND_COLOR);
     expect(payload.actor).toBe('admin');
     expect((payload as unknown as Record<string, unknown>).categoriesMode).toBeUndefined();
+  });
+
+  it('step-1 brand color defaults to the shared accent and the picker change reaches the payload', async () => {
+    const { api, save } = makeApi();
+    renderWizard(api);
+
+    // Step 1 — the color picker prefills the shared --accent default.
+    expect(await screen.findByTestId('step-1')).toBeInTheDocument();
+    const picker = screen.getByLabelText('Pilih warna brand') as HTMLInputElement;
+    expect(picker.value).toBe(DEFAULT_BRAND_COLOR);
+    // Change the brand color via the hex text input.
+    const hexInput = screen.getByPlaceholderText('#2563eb');
+    await userEvent.clear(hexInput);
+    fireEvent.change(hexInput, { target: { value: '#abcdef' } });
+
+    // Walk to the review and finalize.
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await (await screen.findByTestId('step-2'));
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await (await screen.findByTestId('step-3'));
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await (await screen.findByTestId('step-4'));
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    expect(await screen.findByTestId('step-5')).toBeInTheDocument();
+    expect(screen.getByTestId('review-brand-color')).toHaveTextContent('#abcdef');
+    await userEvent.click(screen.getByTestId('wizard-finalize'));
+    await screen.findByText('Admin Panel Home');
+
+    const payload = save.mock.calls[0][0] as SaveSystemConfigurationPayload;
+    expect(payload.brandColor).toBe('#abcdef');
   });
 
   it('lets the manager move back between steps', async () => {

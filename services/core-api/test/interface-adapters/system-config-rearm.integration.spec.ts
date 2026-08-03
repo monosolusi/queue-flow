@@ -52,6 +52,7 @@ describe('System-config scheduler re-arm + cron enforcement (integration — QUE
           priorityPolicy: PriorityPolicy.FIFO_GLOBAL,
         },
       ],
+      brandColor: '#2563eb',
     };
   }
 

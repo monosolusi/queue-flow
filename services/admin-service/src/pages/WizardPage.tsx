@@ -7,11 +7,13 @@ import {
   DEFAULT_CATEGORIES,
   DEFAULT_STATE_MACHINE,
   DEFAULT_DAILY_RESET,
+  DEFAULT_BRAND_COLOR,
   type StateMachineDto,
   type WizardCategoryDto,
   type WizardRoutingRuleDto,
 } from '../api/types';
 import { validateCronExpression } from '../lib/cron';
+import { validateBrandColor, isValidBrandColor } from '../lib/brand-color';
 import { PRIORITY_POLICY_LABELS, DAILY_RESET_MODE_LABELS } from '../lib/labels';
 import { timeToCron, cronToTime } from '../lib/daily-reset';
 
@@ -52,6 +54,7 @@ interface StateMachineForm {
 /** The editable wizard form model (mirrors the PUT payload pieces). */
 interface WizardForm {
   storeName: string;
+  brandColor: string;
   categories: WizardCategoryDto[];
   categoriesMode: 'default' | 'custom';
   routingRules: WizardRoutingRuleDto[];
@@ -72,6 +75,7 @@ function defaultStateMachineForm(): StateMachineForm {
 function emptyForm(): WizardForm {
   return {
     storeName: '',
+    brandColor: DEFAULT_BRAND_COLOR,
     categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })),
     categoriesMode: 'default',
     routingRules: [{ counterId: 1, counterName: 'Counter 1', assignedCategoryCodes: [], priorityPolicy: 'FIFO_GLOBAL' as PriorityPolicy }],
@@ -249,6 +253,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
         loadedCategoriesRef.current = loadedCategories;
         setForm({
           storeName: config.storeName,
+          brandColor: config.brandColor || DEFAULT_BRAND_COLOR,
           categories: loadedCategories,
           // Infer the preset by code+name deep-equal (id-agnostic) so a re-edit
           // of a store that kept the default template stays in default mode and
@@ -306,7 +311,12 @@ export function WizardPage({ api }: { api: IAdminApi }) {
     () => (form.categoriesMode === 'custom' ? validateCustomCategories(form.categories) : []),
     [form.categoriesMode, form.categories],
   );
-  const step1Valid = catErrors.length === 0;
+  // Brand color validation (step 1). Mirrors the UI-reachable subset of the
+  // backend `BrandColor` VO (#rrggbb) so the wizard never submits a color the
+  // backend would 400. The native color picker emits valid hex by itself; this
+  // guards the companion hex text input a manager can type into.
+  const brandColorErrors = useMemo(() => validateBrandColor(form.brandColor), [form.brandColor]);
+  const step1Valid = catErrors.length === 0 && brandColorErrors.length === 0;
 
   // Step 3 is the only step with structural validation; the others are free-form
   // (the backend validates store name / categories / routing). Compute the
@@ -384,6 +394,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
         },
         categories,
         routingRules: form.routingRules,
+        brandColor: form.brandColor,
         actor: 'admin',
       });
       navigate('/');
@@ -441,6 +452,39 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                 aria-label="Jumlah counter aktif"
               />
             </label>
+
+            <div className="field" data-testid="brand-color">
+              <span className="field__label">Warna brand</span>
+              <div className="brand-color__controls">
+                <input
+                  className="brand-color__picker"
+                  type="color"
+                  // The native picker can only represent `#rrggbb`; a non-hex
+                  // brandColor (e.g. an oklch set via direct API) falls back to
+                  // the default for display only — the text input carries the
+                  // real value, and the picker's onChange overwrites it with
+                  // the chosen `#rrggbb`.
+                  value={isValidBrandColor(form.brandColor) ? form.brandColor : DEFAULT_BRAND_COLOR}
+                  onChange={(e) => setForm({ ...form, brandColor: e.target.value })}
+                  aria-label="Pilih warna brand"
+                />
+                <input
+                  className="field__input brand-color__hex"
+                  type="text"
+                  value={form.brandColor}
+                  onChange={(e) => setForm({ ...form, brandColor: e.target.value })}
+                  placeholder="#2563eb"
+                  aria-label="Kode hex warna brand"
+                />
+              </div>
+              {brandColorErrors.length > 0 && (
+                <ul className="wizard__errors" data-testid="brand-color-errors">
+                  {brandColorErrors.map((msg) => (
+                    <li key={msg}>{msg}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
 
             <fieldset className="radio-group" data-testid="cat-mode">
               <legend>Jenis kategori</legend>
@@ -804,6 +848,18 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                 <h3 className="wizard__review-label">Nama Toko</h3>
                 <p className="wizard__review-value" data-testid="review-store-name">
                   {form.storeName || '—'}
+                </p>
+              </div>
+
+              <div className="wizard__review-block">
+                <h3 className="wizard__review-label">Warna Brand</h3>
+                <p className="wizard__review-value" data-testid="review-brand-color">
+                  <span
+                    className="brand-color__swatch"
+                    style={{ backgroundColor: isValidBrandColor(form.brandColor) ? form.brandColor : DEFAULT_BRAND_COLOR }}
+                    aria-hidden="true"
+                  />
+                  {form.brandColor || '—'}
                 </p>
               </div>
 

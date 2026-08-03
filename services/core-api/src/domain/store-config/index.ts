@@ -4,6 +4,7 @@ export * from './repositories/system-configuration.repository';
 export * from './scheduler.port';
 export * from './state-machine';
 export * from './system-configuration.aggregate';
+export * from './value-objects/brand-color';
 export * from './value-objects/daily-reset-policy';
 export * from './value-objects/priority-policy';
 export * from './value-objects/state-schema';
