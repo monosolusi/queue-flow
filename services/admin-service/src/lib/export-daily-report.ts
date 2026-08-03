@@ -1,14 +1,15 @@
-import * as XLSX from 'xlsx';
 import type { AuditLogEntryDto, DailyReportDto } from '../api/types';
 
 /**
  * Builds a multi-sheet `.xlsx` workbook from the daily report + audit trail and
  * triggers a client-side download (FR-ADM-03 / QUE-26).
  *
- * SheetJS (`xlsx`) is pure JS — Vite bundles it into the admin-service bundle,
- * so the export runs fully offline with no runtime network call (NFR-REL-01).
- * `XLSX.writeFile` builds a Blob and clicks an anchor with the HTML5 `download`
- * attribute; no server round-trip, no external CDN.
+ * SheetJS (`xlsx`) is pure JS and fully offline (NFR-REL-01). It is
+ * **lazily `import()`-ed on first export** (QUE-41 AC9) so the heavy dependency
+ * splits into its own Vite chunk and never enters the main bundle — the
+ * analytics page loads faster and SheetJS is only fetched when the manager
+ * actually exports. `XLSX.writeFile` builds a Blob and clicks an anchor with
+ * the HTML5 `download` attribute; no server round-trip, no external CDN.
  *
  * Three sheets:
  *  - **Ringkasan** — the daily totals (date, total visitors, avg wait, avg service).
@@ -22,11 +23,14 @@ import type { AuditLogEntryDto, DailyReportDto } from '../api/types';
  * @param audit    the audit-trail entries, oldest-first.
  * @param fileName the download file name (e.g. `qms-report-2026-08-01.xlsx`).
  */
-export function exportDailyReport(
+export async function exportDailyReport(
   report: DailyReportDto,
   audit: readonly AuditLogEntryDto[],
   fileName: string,
-): void {
+): Promise<void> {
+  // Lazy-load SheetJS so it lands in a separate chunk, not the main bundle.
+  const XLSX = await import('xlsx');
+
   const wb = XLSX.utils.book_new();
 
   const summary = XLSX.utils.aoa_to_sheet([
