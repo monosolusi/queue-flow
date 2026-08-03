@@ -19,7 +19,13 @@ function RunningText({ text, prominent }: { readonly text: string; readonly prom
       className={`tv-board__marquee${prominent ? ' tv-board__marquee--prominent' : ''}`}
       aria-hidden={prominent ? 'false' : 'true'}
     >
-      <div className="marquee__track">{text}</div>
+      <div className="marquee__track">
+        {/* Two copies so the loop is seamless: as one copy scrolls out left the
+            next follows with no blank gap. The duplicate is hidden from AT so
+            the announcement is read once (AC7). */}
+        <span>{text}</span>
+        <span className="marquee__dup" aria-hidden="true">{text}</span>
+      </div>
     </div>
   );
 }
@@ -50,22 +56,33 @@ export function TvBoardPage() {
       </header>
 
       <main className="tv-board__main">
-        {idle ? (
-          <section className="standby" aria-label="Mode standby" data-testid="standby">
-            <StandbyMedia assets={DEFAULT_STANDBY_CONTENT.media} />
-            <RunningText text={runningText} prominent />
-          </section>
-        ) : (
-          <>
+        {/* Both layers are always mounted and crossfade via opacity+visibility
+            (AC6). The inactive layer carries a `--hidden` modifier (visibility
+            hides it from AT as well as visually). The now-serving live region
+            (AC1) lives only on the populated block below, which mounts exactly
+            when this layer is visible (nowServing != null) — so the live region
+            is never hidden; it mounts fresh with content on each call. */}
+        <div
+          className={`tv-board__active${idle ? ' tv-board__active--hidden' : ''}`}
+          data-testid="board-active"
+        >
+          <div className="tv-board__active-grid">
             <NowServingCard nowServing={state.nowServing} />
             <CallHistory history={state.history} />
-          </>
-        )}
+          </div>
+          {/* Active-mode footer running text (decorative, aria-hidden). It lives
+              inside the active layer so it fades with the board, not pop-in. */}
+          <RunningText text={runningText} prominent={false} />
+        </div>
+        <section
+          className={`standby${idle ? '' : ' standby--hidden'}`}
+          aria-label="Mode standby"
+          data-testid="standby"
+        >
+          <StandbyMedia assets={DEFAULT_STANDBY_CONTENT.media} />
+          <RunningText text={runningText} prominent />
+        </section>
       </main>
-
-      {/* Active-mode footer running text (decorative). When idle the prominent
-          running text lives inside the standby section above. */}
-      {!idle && <RunningText text={runningText} prominent={false} />}
     </div>
   );
 }

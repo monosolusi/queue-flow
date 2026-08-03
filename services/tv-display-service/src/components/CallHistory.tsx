@@ -5,14 +5,14 @@ export function CallHistory({ history }: { history: readonly NowServing[] }) {
   if (history.length === 0) {
     return (
       <section className="call-history">
-        <h2 className="call-history__title">Riwayat Panggilan</h2>
+        <h3 className="call-history__title">Riwayat Panggilan</h3>
         <p className="call-history__empty">Belum ada riwayat.</p>
       </section>
     );
   }
   return (
     <section className="call-history">
-      <h2 className="call-history__title">Riwayat Panggilan</h2>
+      <h3 className="call-history__title">Riwayat Panggilan</h3>
       <ol className="call-history__list">
         {history.map((h) => (
           <li key={h.ticketId} className="call-history__item">

@@ -1325,6 +1325,29 @@ with no duplicate/lost ticket numbers.
     `await act(async () => { await vi.advanceTimersByTimeAsync(n) })` to flush the
     re-render without an act warning — `vi.advanceTimersByTime` alone leaves the
     `setIndex` un-wrapped (surfaced building the QUE-23 `StandbyMedia` cycler).
+  - **Static CSS guards + both-mounted overlays under `css: false`.** jsdom
+    (`css: false` in every frontend vitest config) does NOT apply stylesheets,
+    so computed visibility/opacity/contrast are not testable. Two patterns:
+    (1) **CSS-driven ACs** (a token swap, a fluid `clamp()`, a divider, a
+    `@media` tier, `letter-spacing`) are guarded statically by a `styles.test.ts`
+    that reads the CSS with `node:fs` `readFileSync` + `import.meta.url`
+    (`dirname(fileURLToPath(import.meta.url))` — the services are
+    `"type":"module"`, so `__dirname` is **not** defined at runtime), collapses
+    whitespace (`/\s+/g → ' '`), and regex-asserts the rules. Do **not** use
+    Vite's `?raw` import for this — under vitest's `css: false` a `?raw` CSS
+    import resolves to an **empty string** (the css plugin still intercepts and
+    strips it). `node:fs`/`node:path`/`node:url` need `@types/node` added to the
+    service `devDependencies` and `"node"` appended to the root `tsconfig.json`
+    `types` array (dev-only type dep, never bundled — no NFR-REL-01 concern).
+    (2) **A both-mounted overlay** (both layers always in the DOM, crossfaded by a
+    BEM `--hidden` modifier on opacity+visibility) is tested via
+    `toHaveClass('--hidden')` / `not.toHaveClass('--hidden')` — **never**
+    `toBeVisible()` (css:false doesn't compute visibility). When the hidden
+    layer retains content (e.g. a COMPLETED ticket kept in the active layer's
+    history while the idle standby is showing), scope text queries to
+    `within(visibleLayer)` — a global `queryByText('A-005').not.toBeInTheDocument()`
+    fails because the hidden layer still renders the retained item in the DOM.
+    (QUE-39 tv-display-service.)
   - **ARIA: a labelled cluster of immediate-action buttons is `role="group"` +
     `aria-label`, never `role="option"`.** `role="option"` implies a `listbox`
     parent + `aria-selected` semantics; it is wrong for buttons that fire a
