@@ -1,3 +1,4 @@
+import { InvalidValueObjectException } from './errors';
 import { ValueObject } from './value-object';
 
 /**
@@ -12,7 +13,13 @@ export class Identifier extends ValueObject<string> {
 
   public static of(value: string): Identifier {
     if (!Identifier.isValid(value)) {
-      throw new Error(`Invalid UUID: '${value}'`);
+      // `Identifier` is a value object, so its construction failure is reported
+      // as a `InvalidValueObjectException` (a `DomainError`) — that lets
+      // `DomainExceptionFilter` map a hand-crafted malformed id to 400 instead
+      // of the 500 a plain `Error` would surface as. Mirrors the QUE-32
+      // precedent: value-object *format* rejections throw
+      // `InvalidValueObjectException`, not a bare `Error`/`InvalidArgumentException`.
+      throw new InvalidValueObjectException(`invalid id '${value}'`);
     }
     return new Identifier(value);
   }
