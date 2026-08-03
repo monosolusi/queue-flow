@@ -35,8 +35,10 @@ import { PostgresDurabilityProbe } from './durability-probe';
  * PostgresDurabilityProbe} as the startup recovery flow. Activated by
  * {@link PersistenceModule.forRoot} when `QMS_PERSISTENCE=postgres`.
  *
- * The audit-log repository token is bound separately (the audit context lands
- * in phase 2); this module imports the audit persistence module once it exists.
+ * The audit-log repository token is bound inline below (same `useFactory` +
+ * `PG_CONNECTION` pattern as the other Postgres repos); the audit bounded
+ * context owns the `IAuditLogRepository` port and `AuditLogEntry` aggregate in
+ * `domain/audit` (anti-corruption — no separate audit persistence module).
  */
 @Module({
   providers: [
