@@ -6,11 +6,9 @@ import type { BoundCounter } from '../state/counter-binding';
 /** Maps a transition's target state to the caller command that drives it.
  *  The default PRD §7 graph covers SERVING/SKIPPED/COMPLETED/CALLING; WAITING
  *  is the configurable "Pindah Kategori" (transfer) target (FR-CLR-03). Edges
- *  to states outside this set are not backed by a core-api command endpoint:
- *  they render as a disabled "unsupported" affordance (so every configured
- *  transition still produces a button, per the PRD) rather than vanishing. A
- *  generic apply-transition endpoint that makes them functional is tracked by
- *  a follow-up ticket. */
+ *  to states outside this set are custom-target transitions driven by the
+ *  generic apply-transition endpoint (QUE-33) — every configured transition
+ *  still produces a button, per the PRD. */
 const COMMAND_BY_TARGET: Readonly<Record<string, 'serve' | 'complete' | 'skip' | 'recall' | 'transfer'>> = {
   SERVING: 'serve',
   COMPLETED: 'complete',
@@ -134,20 +132,21 @@ export function ActionControls({ api, bound, active, stateMachine }: ActionContr
       {edges.map((edge) => {
         const command = COMMAND_BY_TARGET[edge.to];
         if (!command) {
-          // No backend command endpoint backs this transition (a custom target
-          // state). Render a disabled affordance so the configured transition
-          // is still visible — a generic apply-transition endpoint (follow-up
-          // ticket) will make it functional.
+          // A custom-target transition (an edge to a state outside the 5-state
+          // command map, e.g. SERVING -> PREPARING). Backed by the generic
+          // apply-transition endpoint (QUE-33) — fire-and-forget like the fixed
+          // commands; the STATUS_UPDATED event drives the store.
+          const busy = pending === 'apply-transition';
           return (
             <button
               key={`${edge.from}-${edge.to}`}
               type="button"
-              className="btn btn--secondary action-controls__edge action-controls__unsupported"
-              data-testid={`action-unsupported-${edge.to}`}
-              disabled
-              title="Aksi belum didukung (perlu endpoint transisi generik)"
+              className="btn btn--secondary action-controls__edge"
+              data-testid={`action-apply-transition-${edge.to}`}
+              onClick={() => void run('apply-transition', () => api.applyTransition(active!.ticketId, edge.to))}
+              disabled={busy}
             >
-              {edge.actionLabel} (belum didukung)
+              {busy ? '…' : edge.actionLabel}
             </button>
           );
         }

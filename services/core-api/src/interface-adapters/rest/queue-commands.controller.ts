@@ -1,5 +1,6 @@
 import { BadRequestException, Body, Controller, Param, Post } from '@nestjs/common';
 import {
+  ApplyTransitionUseCase,
   CallNextTicketUseCase,
   CompleteTicketUseCase,
   RecallTicketUseCase,
@@ -8,7 +9,7 @@ import {
   TransferTicketUseCase,
 } from '../../application/queue';
 import { toDateKey } from '../../application/shared/date';
-import { ticketIdOf } from '../../domain/queue';
+import { isCanonicalStatus, ticketIdOf } from '../../domain/queue';
 
 /**
  * Queue command REST surface (FR-ENG-03 / FR-CLR-03, QUE-2). The caller panel
@@ -31,6 +32,7 @@ export class QueueCommandsController {
     private readonly skipUseCase: SkipTicketUseCase,
     private readonly recallUseCase: RecallTicketUseCase,
     private readonly transferUseCase: TransferTicketUseCase,
+    private readonly applyTransitionUseCase: ApplyTransitionUseCase,
   ) {}
 
   /** `POST /api/queue/call-next { counterId }` → the next ticket for the counter. */
@@ -85,6 +87,46 @@ export class QueueCommandsController {
       ticketId: parseTicketId(ticketId),
       targetCategoryId: targetCategoryId.trim(),
       dateKey: toDateKey(Date.now()),
+    });
+  }
+
+  /**
+   * `POST /api/queue/:ticketId/transition { targetStatus }` → apply a generic,
+   * wizard-configurable transition to an arbitrary **custom** target state
+   * (QUE-33). The backing for every `action_label` that does not map to one of
+   * the six fixed commands — a plain status change (STATUS_UPDATED) with no
+   * lifecycle timestamp / counter / number side effects. Illegal transitions
+   * surface as 409 `INVALID_STATE_TRANSITION`, unknown tickets as 404.
+   *
+   * The five PRD-default states each have a dedicated command endpoint
+   * (call-next/serve/complete/skip/recall/transfer) whose aggregates own the
+   * domain-specific side effects (lifecycle timestamps, counter/number
+   * reassignment). The generic endpoint is for **custom** targets only: a
+   * canonical target is rejected with 400 so a direct API call cannot bypass
+   * those named transitions and silently corrupt the QUE-26 analytics data
+   * model (e.g. a `COMPLETED` reached via this path would leave `completedAt`
+   * null). The caller mirrors this routing client-side via `COMMAND_BY_TARGET`.
+   */
+  @Post(':ticketId/transition')
+  transition(
+    @Param('ticketId') ticketId: string,
+    @Body() body: { targetStatus?: string },
+  ) {
+    const targetStatus = body?.targetStatus;
+    if (!targetStatus || !targetStatus.trim()) {
+      throw new BadRequestException(
+        "body field 'targetStatus' must be a non-empty string",
+      );
+    }
+    const target = targetStatus.trim();
+    if (isCanonicalStatus(target)) {
+      throw new BadRequestException(
+        `targetStatus '${target}' has a dedicated command endpoint; use that instead`,
+      );
+    }
+    return this.applyTransitionUseCase.execute({
+      ticketId: parseTicketId(ticketId),
+      targetStatus: target,
     });
   }
 }

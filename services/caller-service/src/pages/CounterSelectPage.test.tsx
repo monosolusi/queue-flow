@@ -36,6 +36,7 @@ function makeApi(list: CounterDto[] = counters, reject?: Error): ICallerApi {
     skip: () => Promise.resolve(),
     recall: () => Promise.resolve(),
     transfer: () => Promise.resolve(),
+    applyTransition: () => Promise.resolve(),
   };
 }
 

@@ -140,6 +140,21 @@ describe('queueReducer — STATUS_UPDATED', () => {
     expect(next.active).toHaveLength(0);
   });
 
+  it('keeps the ticket on the board for a custom in-progress status (QUE-33)', () => {
+    // A custom status like PREPARING (reached via the generic apply-transition
+    // endpoint) is an in-progress sub-state — the ticket stays the active ticket
+    // at the counter, just with the new status. Only COMPLETED/SKIPPED leave.
+    let next = reducer(
+      baseState,
+      event('TICKET_CALLED', 't1', { ticketNumber: 'A-001', counterId: COUNTER }),
+    );
+    next = reducer(next, event('STATUS_UPDATED', 't1', { from: 'CALLING', to: 'SERVING' }));
+    next = reducer(next, event('STATUS_UPDATED', 't1', { from: 'SERVING', to: 'PREPARING' }));
+    expect(next.active).toHaveLength(1);
+    expect(next.active[0].ticketId).toBe('t1');
+    expect(next.active[0].status).toBe('PREPARING');
+  });
+
   it('ignores STATUS_UPDATED for an unknown ticket', () => {
     const next = reducer(baseState, event('STATUS_UPDATED', 'ghost', { from: 'CALLING', to: 'SERVING' }));
     expect(next).toBe(baseState);

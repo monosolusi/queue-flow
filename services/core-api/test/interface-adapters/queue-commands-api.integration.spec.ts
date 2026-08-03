@@ -306,4 +306,147 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
     const res = await request(app.getHttpServer()).post('/api/queue/call-next').send({});
     expect(res.status).toBe(400);
   });
+
+  it('POST /api/queue/:id/transition applies a custom SERVING -> PREPARING transition and broadcasts STATUS_UPDATED (QUE-33)', async () => {
+    // Re-seed a config whose machine adds the custom `SERVING -> PREPARING`
+    // ("Siapkan Dokumen") edge — what the wizard configures for an in-progress
+    // sub-state the default machine does not model.
+    const customMachine = new StateMachine(
+      StateSchema.of(['WAITING', 'CALLING', 'SERVING', 'PREPARING', 'SKIPPED', 'COMPLETED']),
+      [
+        ['WAITING', 'CALLING', 'Panggil Berikutnya'],
+        ['CALLING', 'SERVING', 'Mulai Melayani'],
+        ['CALLING', 'SKIPPED', 'Lewati / Absen'],
+        ['SKIPPED', 'CALLING', 'Panggil Ulang'],
+        ['SERVING', 'PREPARING', 'Siapkan Dokumen'],
+        ['PREPARING', 'COMPLETED', 'Selesai Layan'],
+        ['SERVING', 'COMPLETED', 'Selesai Layan'],
+      ].map(([from, to, actionLabel]) => StateTransitionRule.of(from, to, actionLabel)),
+    );
+    await systemConfig.save(
+      SystemConfiguration.reconstitute({
+        id: Identifier.generate(),
+        storeName: 'QMS Custom Store',
+        isInitialSetupCompleted: true,
+        stateMachine: customMachine,
+        dailyResetPolicy: DailyResetPolicy.DEFAULT,
+      }),
+    );
+
+    // A SERVING ticket at counter 1 — the source state for "Siapkan Dokumen".
+    const serving = QueueTicket.reconstitute({
+      id: ticketIdGenerate(),
+      ticketNumber: TicketNumber.of('A', 1),
+      categoryId: catAId,
+      status: 'SERVING',
+      counterId: 1,
+      createdAt: 50,
+      updatedAt: 60,
+      calledAt: 55,
+      servedAt: 60,
+      completedAt: null,
+    });
+    await queue.save(serving);
+
+    const received = await collectMessages(1, async () => {
+      const res = await request(app.getHttpServer())
+        .post(`/api/queue/${serving.id.value}/transition`)
+        .send({ targetStatus: 'PREPARING' });
+      expect(res.status).toBe(201);
+      expect(res.body).toMatchObject({
+        status: 'transitioned',
+        ticket: { ticketNumber: 'A-001', status: 'PREPARING', counterId: 1, categoryId: catAId },
+      });
+    });
+
+    expect(received).toHaveLength(1);
+    expect(received[0].type).toBe('STATUS_UPDATED');
+    expect(received[0].payload).toMatchObject({
+      from: 'SERVING',
+      to: 'PREPARING',
+      actionLabel: 'Siapkan Dokumen',
+    });
+
+    // The ticket is persisted in the custom state.
+    const reloaded = await queue.findById(serving.id);
+    expect(reloaded?.currentStatus).toBe('PREPARING');
+    expect(reloaded?.counterId).toBe(1); // plain status change preserves the counter
+  });
+
+  it('POST /api/queue/:id/transition rejects an illegal target with 409 INVALID_STATE_TRANSITION and broadcasts nothing', async () => {
+    // The default state machine has no SERVING -> PREPARING edge.
+    const serving = QueueTicket.reconstitute({
+      id: ticketIdGenerate(),
+      ticketNumber: TicketNumber.of('A', 1),
+      categoryId: catAId,
+      status: 'SERVING',
+      counterId: 1,
+      createdAt: 50,
+      updatedAt: 60,
+      calledAt: 55,
+      servedAt: 60,
+      completedAt: null,
+    });
+    await queue.save(serving);
+
+    const received = await collectMessages(1, async () => {
+      const res = await request(app.getHttpServer())
+        .post(`/api/queue/${serving.id.value}/transition`)
+        .send({ targetStatus: 'PREPARING' });
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('INVALID_STATE_TRANSITION');
+    });
+
+    expect(received).toHaveLength(0);
+  });
+
+  it('POST /api/queue/:id/transition rejects a missing targetStatus body with 400', async () => {
+    const serving = QueueTicket.reconstitute({
+      id: ticketIdGenerate(),
+      ticketNumber: TicketNumber.of('A', 1),
+      categoryId: catAId,
+      status: 'SERVING',
+      counterId: 1,
+      createdAt: 50,
+      updatedAt: 60,
+      calledAt: 55,
+      servedAt: 60,
+      completedAt: null,
+    });
+    await queue.save(serving);
+
+    const res = await request(app.getHttpServer())
+      .post(`/api/queue/${serving.id.value}/transition`)
+      .send({});
+    expect(res.status).toBe(400);
+  });
+
+  it('POST /api/queue/:id/transition rejects a canonical target with 400 (use the dedicated endpoint)', async () => {
+    // The five PRD-default states each have a dedicated command endpoint whose
+    // aggregate owns the lifecycle side effects. A direct API call must not be
+    // able to bypass them via the generic endpoint — e.g. reaching COMPLETED
+    // here would leave `completedAt` null and corrupt the analytics data model.
+    const serving = QueueTicket.reconstitute({
+      id: ticketIdGenerate(),
+      ticketNumber: TicketNumber.of('A', 1),
+      categoryId: catAId,
+      status: 'SERVING',
+      counterId: 1,
+      createdAt: 50,
+      updatedAt: 60,
+      calledAt: 55,
+      servedAt: 60,
+      completedAt: null,
+    });
+    await queue.save(serving);
+
+    const res = await request(app.getHttpServer())
+      .post(`/api/queue/${serving.id.value}/transition`)
+      .send({ targetStatus: 'COMPLETED' });
+    expect(res.status).toBe(400);
+    // The ticket is unchanged — no bypass occurred.
+    const reloaded = await queue.findById(serving.id);
+    expect(reloaded?.currentStatus).toBe('SERVING');
+    expect(reloaded?.completedAt).toBeNull();
+  });
 });

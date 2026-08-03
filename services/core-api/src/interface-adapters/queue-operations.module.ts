@@ -10,6 +10,7 @@ import { COUNTER_ROUTING_RULE_REPOSITORY } from '../domain/store-config';
 import { AUDIT_LOG_REPOSITORY } from '../domain/audit';
 import { TRANSACTION_MANAGER } from '../domain/shared';
 import {
+  ApplyTransitionUseCase,
   CallNextTicketUseCase,
   CleanupTransactionLogUseCase,
   CompleteTicketUseCase,
@@ -82,6 +83,15 @@ import { SystemConfigModule } from './config/system-config.module';
         new RecallTicketUseCase(queue, policyResolver, dispatcher),
     },
     {
+      // QUE-33: generic apply-transition use case. Same port shape as the
+      // single-transition commands (skip/serve/complete/recall) — no tx manager
+      // (a plain status change has no sequence reservation to guard).
+      provide: ApplyTransitionUseCase,
+      inject: [QUEUE_REPOSITORY, TRANSITION_POLICY_RESOLVER, QueueEventDispatcher],
+      useFactory: (queue, policyResolver, dispatcher) =>
+        new ApplyTransitionUseCase(queue, policyResolver, dispatcher),
+    },
+    {
       provide: TransferTicketUseCase,
       inject: [
         QUEUE_REPOSITORY,
@@ -137,6 +147,7 @@ import { SystemConfigModule } from './config/system-config.module';
     SkipTicketUseCase,
     RecallTicketUseCase,
     TransferTicketUseCase,
+    ApplyTransitionUseCase,
     ResetDailyQueueUseCase,
     CleanupTransactionLogUseCase,
   ],
