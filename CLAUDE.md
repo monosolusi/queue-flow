@@ -493,11 +493,54 @@ with no duplicate/lost ticket numbers.
   the read-only `RestApiModule` — even though categories are also referenced by
   `CounterRoutingRule` in Store Config, the read stays in its owning context
   and does **not** join routing data (anti-corruption).
-- **Kiosk ticket flow (QUE-17):** the kiosk takes a category via
-  `GET /api/categories`, then `POST /api/tickets` (QUE-9) on tap, and shows the
-  issued `ticketNumber` on a result screen. Printing is QUE-18 (not wired here).
-  The kiosk owns only selection + issuance — **no realtime/WS** (it is not a
-  queue monitor) and no per-device binding.
+- **Kiosk ticket flow (QUE-17) + receipt (QUE-18):** the kiosk takes a category
+  via `GET /api/categories`, then `POST /api/tickets` (QUE-9) on tap, and shows
+  the issued `ticketNumber` on a result screen. The thermal print path
+  (`BrowserPrintProvider` — hidden iframe + `window.print`, fire-and-forget so
+  a print failure never blocks the result screen) was scaffolded under QUE-30;
+  QUE-18 (Operational Interfaces, parent QUE-3, FR-KSK-02/03, NFR-PERF-03)
+  closed the genuine **FR-KSK-03 receipt-schema gaps** QUE-30 left — a
+  residual-gap polish ticket in the QUE-20 pattern (its AC#1 silent-print path
+  and AC#3 latency test were already met by QUE-30; the real gap was AC#2
+  template completeness). Two PRD-mandated receipt fields were missing:
+  **Nama Toko** — `PrintPayload.storeName` existed but `CategorySelectPage`
+  never populated it (the kiosk never fetched the store config); and **Jumlah
+  Antrian Di Belakang** — `POST /api/tickets` returned no queue position.
+  **`CreateTicketUseCase` now computes `waitingAhead`** (= same-category
+  WAITING count − 1, the just-issued ticket being the newest) **inside the
+  existing `txManager.runInTransaction` callback** (after `queue.save`) via a
+  new `countWaitingByCategory(categoryId)` method on the `IQueueRepository`
+  domain port (LSP — in-memory filters/`length`, Postgres `SELECT COUNT(*)::int
+  …` via `withDbClient`, enlisting on the ambient tx client so the just-inserted
+  row is visible and concurrent uncommitted inserts are excluded →
+  deterministic). `waitingAhead` rides the `CreatedTicketDto` (additive — only
+  the kiosk consumes the REST DTO; the WS `TICKET_CREATED` wire event is a
+  separate domain event carrying only `{ ticketNumber, categoryId }`, so no WS
+  consumer is affected). The receipt renders **"Anda antrian ke-{N} dari {N}"**
+  where N = `waitingAhead + 1` — at issuance the visitor is always the newest
+  waiting ticket, so position == total == N (decision confirmed with the PM;
+  "jumlah antrian di belakang" is read as the waiting backlog the visitor
+  faces). **Store-name fetch (FR-KSK-03 "Nama Toko"):** the kiosk adds
+  `IKioskApi.getStoreName()` that reuses the existing `GET /api/system/config`
+  read surface (returns `storeName` even pre-setup as `''` via
+  `GetSystemConfigurationUseCase`) — no new REST endpoint/use case (DRY,
+  matching the QUE-24 reuse precedent) — and the kiosk consumes only a minimal
+  `{ storeName }` `StoreProfileSlice` type, never the full admin
+  `SystemConfigurationDto` (ISP at the `IKioskApi` boundary; the mild ISP smell
+  of touching the config endpoint is the accepted trade-off, arch-reviewer
+  signed off). **Store-name fetch race (arch-reviewer finding, fixed):** the
+  store-name fetch must be **`Promise.allSettled`-awaited alongside
+  `listCategories` before the category buttons become interactive** — a
+  fire-and-forget store-name fetch would let a fast tap (before the config
+  fetch settled, e.g. a cold Nest bootstrap) print a headerless receipt. Both
+  fetches are off the touch→print hot path (NFR-PERF-03 unaffected); a
+  store-name *failure* never blocks the flow (`allSettled` — the receipt just
+  omits the header line, which is optional in `PrintPayload`). **General rule:
+  any receipt/print field sourced from a mount-time fetch must be resolved
+  before the user-action that consumes it is enabled** — gate the action on
+  the fetch, don't fire-and-forget a field that becomes user-visible. The
+  kiosk owns only selection + issuance + printing — **no realtime/WS** (it is
+  not a queue monitor) and no per-device binding.
 - **`QueueEventDispatcher` import gotcha:** the dispatcher is NOT re-exported
   by the `src/application/queue` barrel — import it via the direct path
   `src/application/queue/queue-event-dispatcher` (as `realtime.module.ts` and

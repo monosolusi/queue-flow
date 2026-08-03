@@ -1,14 +1,16 @@
-import type { CategoryDto, CreatedTicketDto } from './types';
+import type { CategoryDto, CreatedTicketDto, StoreProfileSlice } from './types';
 
 /**
- * The slice of the core-api the kiosk consumes (ISP — only category listing
- * and ticket creation; never leaks admin/reporting/caller DTOs). Implementations
- * live behind this interface so tests can substitute a fake without touching the
- * network.
+ * The slice of the core-api the kiosk consumes (ISP — only category listing,
+ * ticket creation, and the store name for the receipt header; never leaks
+ * admin/reporting/caller DTOs). Implementations live behind this interface so
+ * tests can substitute a fake without touching the network.
  */
 export interface IKioskApi {
   listCategories(): Promise<CategoryDto[]>;
   createTicket(categoryId: string): Promise<CreatedTicketDto>;
+  /** The store name for the receipt header (FR-KSK-03 "Nama Toko"). */
+  getStoreName(): Promise<string>;
 }
 
 const API_BASE = '/api';
@@ -58,5 +60,11 @@ export class KioskApi implements IKioskApi {
   }
   createTicket(categoryId: string): Promise<CreatedTicketDto> {
     return postJson<CreatedTicketDto>('/tickets', { categoryId });
+  }
+  getStoreName(): Promise<string> {
+    // Reuses the existing `GET /api/system/config` read surface (QUE-30 — it
+    // returns `storeName` even pre-setup as `''`) rather than adding a dedicated
+    // endpoint (DRY). The kiosk consumes only the `{ storeName }` slice (ISP).
+    return getJson<StoreProfileSlice>('/system/config').then((c) => c.storeName ?? '');
   }
 }

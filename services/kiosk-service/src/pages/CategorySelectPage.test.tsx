@@ -12,17 +12,25 @@ const categories: CategoryDto[] = [
   { id: 'cat-b', code: 'B', name: 'Kasir & Pembayaran' },
 ];
 
-function ticket(id: string, number = 'A-001'): CreatedTicketDto {
-  return { ticketId: `ticket-${id}`, ticketNumber: number, categoryId: id, status: 'WAITING' };
+function ticket(id: string, number = 'A-001', waitingAhead = 0): CreatedTicketDto {
+  return {
+    ticketId: `ticket-${id}`,
+    ticketNumber: number,
+    categoryId: id,
+    status: 'WAITING',
+    waitingAhead,
+  };
 }
 
 function makeApi(
   list: CategoryDto[] = categories,
   createImpl?: (id: string) => Promise<CreatedTicketDto>,
+  storeName = 'Toko Contoh',
 ): IKioskApi {
   return {
     listCategories: () => Promise.resolve(list),
     createTicket: createImpl ?? ((id: string) => Promise.resolve(ticket(id))),
+    getStoreName: () => Promise.resolve(storeName),
   };
 }
 
@@ -58,6 +66,7 @@ describe('CategorySelectPage (kiosk — FR-KSK-01 / QUE-17)', () => {
     renderSelect({
       listCategories: () => Promise.reject(new Error('jaringan terputus')),
       createTicket: () => Promise.resolve(ticket('cat-a')),
+      getStoreName: () => Promise.resolve(''),
     });
     expect(await screen.findByText(/jaringan terputus/i)).toBeInTheDocument();
   });
@@ -141,8 +150,87 @@ describe('CategorySelectPage (kiosk — FR-KSK-01 / QUE-17)', () => {
     expect(printProvider.print).toHaveBeenCalledTimes(1);
     expect(printed!.ticketNumber).toBe('A-001');
     expect(printed!.categoryName).toBe('Customer Service');
+    // FR-KSK-03: the receipt carries the store name + queue position.
+    expect(printed!.storeName).toBe('Toko Contoh');
+    expect(printed!.waitingAhead).toBe(0);
     // NFR-PERF-03: physical print triggers within 1.5 s of the POST resolving.
     expect(printCalledAt - createResolvedAt).toBeLessThan(1500);
+  });
+
+  it('threads the store name and queue position into the print payload (FR-KSK-03)', async () => {
+    const createTicket = vi.fn((id: string) => Promise.resolve(ticket(id, 'A-007', 6)));
+    let printed: PrintPayload | undefined;
+    const printProvider: IPrintProvider = {
+      print: vi.fn((p: PrintPayload) => {
+        printed = p;
+        return Promise.resolve();
+      }),
+    };
+    renderSelect(makeApi(categories, createTicket, 'Toko Utama Surabaya'), printProvider);
+
+    await screen.findByText('Customer Service');
+    await userEvent.click(screen.getByText('Customer Service'));
+
+    expect(await screen.findByText('Ticket Result')).toBeInTheDocument();
+    expect(printProvider.print).toHaveBeenCalledTimes(1);
+    expect(printed!.storeName).toBe('Toko Utama Surabaya');
+    expect(printed!.waitingAhead).toBe(6);
+    expect(printed!.ticketNumber).toBe('A-007');
+  });
+
+  it('omits the store name when the store-name fetch is empty (optional header)', async () => {
+    const createTicket = vi.fn((id: string) => Promise.resolve(ticket(id, 'A-001')));
+    let printed: PrintPayload | undefined;
+    const printProvider: IPrintProvider = {
+      print: vi.fn((p: PrintPayload) => {
+        printed = p;
+        return Promise.resolve();
+      }),
+    };
+    renderSelect(makeApi(categories, createTicket, ''), printProvider);
+
+    await screen.findByText('Customer Service');
+    await userEvent.click(screen.getByText('Customer Service'));
+
+    expect(await screen.findByText('Ticket Result')).toBeInTheDocument();
+    // An empty store name yields an undefined `storeName` in the payload — the
+    // receipt omits the header line (it is optional in PrintPayload).
+    expect(printed!.storeName).toBeUndefined();
+  });
+
+  it('waits for the store-name fetch before enabling a tap (no race on the receipt)', async () => {
+    // Store name resolves *after* categories; the category buttons stay
+    // loading until both settle so a fast tap can never print a headerless
+    // receipt. Categories resolve immediately, the store name on a later tick.
+    let resolveName: ((v: string) => void) | undefined;
+    const api: IKioskApi = {
+      listCategories: () => Promise.resolve(categories),
+      createTicket: (id: string) => Promise.resolve(ticket(id, 'A-001')),
+      getStoreName: () =>
+        new Promise<string>((resolve) => {
+          resolveName = resolve;
+        }),
+    };
+    let printed: PrintPayload | undefined;
+    const printProvider: IPrintProvider = {
+      print: vi.fn((p: PrintPayload) => {
+        printed = p;
+        return Promise.resolve();
+      }),
+    };
+    renderSelect(api, printProvider);
+
+    // Categories are ready, but the buttons are NOT interactive yet because
+    // the store-name fetch is still pending — the loading hint persists.
+    expect(await screen.findByText('Memuat kategori…')).toBeInTheDocument();
+
+    // Releasing the store-name fetch lets the load state flip to `loaded`.
+    resolveName!('Toko Lambat');
+    expect(await screen.findByText('Customer Service')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByText('Customer Service'));
+    expect(await screen.findByText('Ticket Result')).toBeInTheDocument();
+    expect(printed!.storeName).toBe('Toko Lambat');
   });
 
   it('still navigates when the print provider rejects (print failure is non-fatal)', async () => {

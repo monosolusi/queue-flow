@@ -38,6 +38,10 @@ export class InMemoryQueueRepository implements IQueueRepository, ITicketArchive
       .sort((a, b) => a.createdAt - b.createdAt);
   }
 
+  async countWaitingByCategory(categoryId: string): Promise<number> {
+    return this.waiting().filter((t) => t.categoryId === categoryId).length;
+  }
+
   async findActiveByCounter(counterId: number): Promise<QueueTicket[]> {
     return [...this.tickets.values()]
       .filter(

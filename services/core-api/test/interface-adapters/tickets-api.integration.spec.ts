@@ -79,6 +79,9 @@ describe('Kiosk ticket-creation REST surface (integration — QUE-9)', () => {
       .send({ categoryId: catAId });
     expect(r2.status).toBe(201);
     expect(r2.body.ticket.ticketNumber).toBe('A-002');
+    // FR-KSK-03: the second same-category ticket sees one person already ahead.
+    expect(r1.body.ticket.waitingAhead).toBe(0);
+    expect(r2.body.ticket.waitingAhead).toBe(1);
   });
 
   it('isolates the sequence per category (A-001 and B-001)', async () => {
