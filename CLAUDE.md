@@ -634,6 +634,41 @@ with no duplicate/lost ticket numbers.
   (`ARCHIVE_PREVIOUS_DAY` then `MANUAL_RESET`), not one. **Deferred:** backend
   cron-format enforcement and scheduler re-arm on policy change (still
   Hardening, pairs with audit-trail analytics surface).
+- **Wizard + admin-panel business-friendly copy & time picker (QUE-34,
+  FR-WZD):** the wizard and the operational `AdminPanel` are aimed at a
+  non-technical store manager, so user-visible text must never leak internal
+  terms ("PRD §7", `FIFO_GLOBAL`/`CATEGORY_PRIORITY`, "cron expression",
+  "State Machine", a raw numeric `Counter {id}`). Two shared pure helpers in
+  `admin-service/src/lib/` keep the friendly text in one place: **`labels.ts`**
+  (`PRIORITY_POLICY_LABELS` + `DAILY_RESET_MODE_LABELS`, `Record<Enum,string>`
+  maps) and **`daily-reset.ts`** (`timeToCron`/`cronToTime`). **The enum stays
+  as the `value=` attribute** (wire contract unchanged — `PUT /api/system/config`
+  still sends `priorityPolicy`/`mode` enum values, never the friendly text); the
+  `<option>` body and review/render text read from the label maps. Step 4's raw
+  cron text input is replaced by **`<input type="time">`** that derives the
+  5-field daily cron client-side as `MM HH * * *` (minute-then-hour — the form
+  the ticket literal `0 M H * * *` was reaching for; `08:30` → `30 8 * * *`).
+  `cronToTime` returns `null` for a non-daily-at-time cron and the call site
+  falls back to `00:00` for **display only** — the form's `cronExpression`
+  source of truth is rewritten **only** by the picker's `onChange`, so a
+  granular cron set via direct API is **not silently coerced** (granular
+  schedules remain deferred per the ticket). `validateCronExpression` still
+  guards the source-of-truth `cronExpression` (defense-in-depth for a corrupt
+  prefill). **General rule — render enum values via a friendly label map, never
+  raw enum/internal text in user-visible copy; constrain cron input to a time
+  picker and derive the cron client-side rather than making the manager type
+  one.** Both surfaces share the same helpers so the daily `AdminPanel` stays
+  consistent with the wizard (AC5's "no internal terms" grep runs over all of
+  `admin-service/src`, so the panel must be fixed alongside the wizard, not
+  split into a separate ticket). admin-service only — no core-api/domain/REST
+  change. Step-5 review contrast (FR-WZD): `.wizard__review-block` previously
+  referenced undefined `--surface-alt`/`--border`/`--muted` (light fallbacks
+  `#f7f8fa`/`#e3e6ea`/`#6b7280`) rendered under white `--text` → unreadable; it
+  now uses the defined dark tokens `--surface`/`--surface-2`/`--text-muted`
+  (WCAG AA). Also: the `AdminPanel` stale "berlaku setelah restart" hint was
+  corrected to "berlaku segera setelah disimpan" (post-QUE-32 `reArm()` is
+  immediate — do not leave a corrected-then-stale doc claim when the underlying
+  behavior changes).
 - **Wizard store-profile + category step (QUE-14, FR-WZD-02):** the wizard's
   step 1 is "Profil Toko & Kategori" — store name + **active counter count** +
   categories with a **PRD §7 Default / Custom preset** (mirrors the QUE-15
