@@ -256,10 +256,61 @@ with no duplicate/lost ticket numbers.
   waiting entry) so the chooser's "exclude current category" works on the live
   call-next path. **No core-api/domain change** — caller-service only.
   **QUE-33** (Core Queue Workflow, parent QUE-5, relatedTo QUE-20 + QUE-10) is
-  the follow-up: a generic `apply-transition` core-api endpoint + use case so
-  custom-target transitions fire a real command instead of rendering
-  disabled (not blocked by QUE-20; it supersedes the disabled affordance
-  independently).
+  **In Review** as of 2026-08-03 via PR #28
+  (https://github.com/monosolusi/queue-flow/pull/28), branch
+  `feat/que-33-generic-apply-transition-endpoint`. The backing for every
+  wizard-configured `action_label` that does not map to one of the six fixed
+  commands: a generic `apply-transition` use case + endpoint so a custom-target
+  transition (an edge to a state outside the 5-state command map, e.g.
+  `SERVING → PREPARING` "Siapkan Dokumen") fires a real command instead of
+  rendering QUE-20's disabled "(belum didukung)" affordance. Spans core-api +
+  caller-service. **core-api:** new `ApplyTransitionUseCase`
+  (`application/queue`, mirrors `SkipTicketUseCase` — injects only
+  `IQueueRepository` + `ITransitionPolicyResolver` + `QueueEventDispatcher`,
+  no `txManager`/audit: a generic transition is a single-ticket status update
+  with no sequence reservation so there is no gap to guard (NFR-REL-02) and
+  routine transitions are not audited (NFR-SEC-02 scopes audit to manual reset /
+  config / cleanup)) backed by a new public `QueueTicket.applyTransition(target,
+  policy, now)` that delegates to the existing private `transitionTo` (validates
+  via `policy.isAllowed`, sets `_currentStatus` + `_updatedAt`, records one
+  `TicketStatusChangedEvent` `STATUS_UPDATED` with
+  `policy.actionLabelFor(from, target)` — a **plain status change with no
+  lifecycle-timestamp / counter / number side effects**; the richer semantics
+  belong to the six fixed commands). Exposed as `POST /api/queue/:id/transition
+  { targetStatus }` on `QueueCommandsController` (`QueueCommandsApiModule`,
+  wired in `QueueOperationsModule` via a factory mirroring `SkipTicketUseCase`).
+  Illegal transition → 409 `INVALID_STATE_TRANSITION`; unknown ticket → 404;
+  unconfigured → 409 `SYSTEM_NOT_CONFIGURED` (all via the existing
+  `DomainExceptionFilter`). **caller-service:** `ICallerApi.applyTransition` +
+  `CallerApi` impl; `ActionControls` replaces the disabled affordance with a
+  functional button (`run('apply-transition', () =>
+  api.applyTransition(active!.ticketId, edge.to))`, same `useRef` double-tap
+  guard); `COMMAND_BY_TARGET` still routes the 5 known states to their dedicated
+  endpoints, only unmapped (custom) targets fall through to the generic endpoint.
+  **Reducer widening:** `queue-store.tsx` `STATUS_UPDATED` now treats only
+  `COMPLETED`/`SKIPPED` as leaving the counter; **every other** `to` (CALLING,
+  SERVING, or a custom in-progress state like PREPARING) updates the status in
+  place — the staff is still serving the ticket, just in a sub-state, so it
+  stays on the board as the active ticket. The state machine carries no
+  "terminal" metadata, so only the two PRD-default terminal states leave the
+  counter (documented caller contract; a custom terminal state is not
+  expressible today — future state-metadata config). **General rule — a generic
+  endpoint wrapping an aggregate's generic transition method must reject, at
+  the backend boundary, any target that has a dedicated command endpoint owning
+  domain-specific side effects.** Otherwise a direct API call bypasses those
+  side effects and silently corrupts the downstream data model: e.g. reaching
+  `COMPLETED` via `POST /api/queue/:id/transition` would set `_currentStatus`
+  but leave `_completedAt` null (the generic path owns no lifecycle timestamp),
+  corrupting the QUE-26 analytics `AVG(...)` over `completed_at`. The controller
+  rejects a canonical target with 400 ("use the dedicated endpoint") **before**
+  invoking the use case, reusing the existing domain helper
+  `isCanonicalStatus`/`CANONICAL_STATUSES` (`domain/queue`) as the single
+  source of truth for the 5 default states — the client mirrors this routing
+  via `COMMAND_BY_TARGET`, but the **backend is the authority** so the contract
+  holds against any direct API call (the arch-reviewer Major finding, fixed
+  pre-push). **Arch-reviewer APPROVED.** Gates: core-api `arch:check` clean +
+  263 tests + 20 acceptance (5 skipped) + build; caller-service 46 tests +
+  build. See [[que-ticket-workflow-preferences]].
 - **PRD language:** the Linear PRD is written in **Bahasa Indonesia** with
   English technical terms. UI `action_label` values ("Panggil Berikutnya",
   "Lewati / Absen", "Selesai Layan") are Indonesian — match them verbatim

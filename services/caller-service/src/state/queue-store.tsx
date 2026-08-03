@@ -143,14 +143,18 @@ function projectEvent(state: QueueState, e: QueueLifecycleWireEvent, ctx: QueueC
         const active = state.active.filter((t) => t.ticketId !== e.aggregateId);
         return { ...state, active };
       }
-      if (to === 'CALLING' || to === 'SERVING') {
-        const active = state.active.map((t) =>
-          t.ticketId === e.aggregateId ? { ...t, status: to } : t,
-        );
-        return { ...state, active };
-      }
-      // Unknown target status — drop from active defensively.
-      const active = state.active.filter((t) => t.ticketId !== e.aggregateId);
+      // Any other target (CALLING, SERVING, or a custom in-progress state like
+      // PREPARING reached via the generic apply-transition endpoint, QUE-33)
+      // keeps the ticket on the board as the active ticket at the counter — the
+      // staff is still serving it, just in a sub-state. Only the PRD-default
+      // terminal states (COMPLETED/SKIPPED) leave the counter. The caller only
+      // fires the generic endpoint for the active ticket (ActionControls renders
+      // edges from `active.status`), so a WAITING-sourced generic transition is
+      // out of the UI scope; the `idx === -1` guard above leaves such a ticket in
+      // `waiting` untouched (no divergence on the supported flow).
+      const active = state.active.map((t) =>
+        t.ticketId === e.aggregateId ? { ...t, status: to } : t,
+      );
       return { ...state, active };
     }
     case 'TICKET_TRANSFERRED': {

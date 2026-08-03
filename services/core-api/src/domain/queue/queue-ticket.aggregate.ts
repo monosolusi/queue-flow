@@ -211,6 +211,25 @@ export class QueueTicket extends AggregateRoot<TicketId> {
   }
 
   /**
+   * Apply a generic, configurable transition to an arbitrary target state —
+   * the backing for the wizard-configurable `action_label`s that do not map
+   * to one of the six fixed commands (QUE-33). Unlike the named transitions
+   * above, this is a **plain status change**: it validates `current ->
+   * target` against the active {@link ITransitionPolicy} and records a
+   * {@link TicketStatusChangedEvent} (STATUS_UPDATED), but it owns no
+   * domain-specific side effects — it does not set a lifecycle timestamp
+   * (`calledAt`/`servedAt`/`completedAt`), reassign the counter, or reissue
+   * the ticket number. Those richer semantics belong to the fixed commands
+   * (markCalling/startServing/complete/skip/transferTo); the generic endpoint
+   * is for custom in-progress states (PREPARING, PAYMENT, …) the manager adds
+   * via the wizard. Idempotent: a no-op when `target` already equals the
+   * current status.
+   */
+  public applyTransition(target: StatusValue, policy: ITransitionPolicy, now = Date.now()): void {
+    this.transitionTo(target, policy, now);
+  }
+
+  /**
    * Transfer this ticket to a different category — "pindah kategori"
    * (FR-CLR-03). A first-class **configurable** transition: the status leg
    * (current -> `targetStatus`, default `WAITING`) is validated against the
