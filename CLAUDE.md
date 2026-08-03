@@ -200,6 +200,37 @@ with no duplicate/lost ticket numbers.
   audit action — landed as QUE-32 (Hardening, parent QUE-6; was blockedBy
   QUE-25, pairs with audit). QUE-25 (manual reset admin button + transaction-log
   cleanup) was the last QUE-6 child before QUE-32.
+  **QUE-6 closure (Hardening umbrella, FR-ADM-03 "Grafik Rekapitulasi
+  Harian"):** all four QUE-6 children (QUE-24/25/26/32) merged with the
+  umbrella's own AC met, but a genuine PRD gap remained — FR-ADM-03 literally
+  specifies "Grafik rekapitulasi harian" (daily recap *charts*) for Total
+  Pengunjung / rata-rata waktu tunggu / rata-rata waktu layan, and QUE-26's
+  dashboard rendered metric *tiles* + *tables* only (no visualization anywhere
+  in the repo — zero `<svg>`, no chart lib in any `package.json`). Per the
+  residual-gap-polish-over-closure pattern, QUE-6 (still open) owned the
+  residual and closed with it rather than reflexively closing. The polish
+  added `RecapCharts` (`admin-service/src/components/RecapCharts.tsx`) — three
+  hand-rolled offline SVG bar charts (one per metric, one bar per category)
+  inserted between the Ringkasan tiles and the Per Kategori table, fed
+  entirely by the existing `DailyReportDto.perCategory` slice. **General
+  rule: hand-roll small visualizations from the DTO the page already loads
+  rather than vendoring a chart library** (Recharts/d3 would bloat the bundle
+  for a 2–3-bar chart and would need offline vetting, NFR-REL-01) — mirroring
+  the audio-sequencer minimal-dependency precedent. Single-series magnitude →
+  one accent hue (`--accent`) for all bars, length encodes value, category
+  code labels it (no categorical color needed; the dataviz method's sequential
+  default); text never wears the data color (labels in `--text`/`--text-muted`);
+  per-bar `<title>` is the hover/a11y channel; the sibling Per Kategori table
+  is the always-available table view. `formatSeconds` was extracted to a
+  shared `lib/format.ts` (DRY — the chart's value labels must match the
+  table's "Rata Waktu" cells exactly). **admin-service only — no core-api /
+  domain / REST change** (the report DTO already carried the chart input).
+  Test note: SVG `<text>` category-code labels collide with the Per Kategori
+  table's `<td>` under `getByText('A')` — scope such assertions to the region
+  (`getByRole('region', { name: 'Per kategori' })` + `within`) when a chart
+  and a table render the same code, and assert the chart's `aria-label`
+  summary (it carries the formatted values, so it catches a zero-width-bar
+  regression a testid-presence check cannot).
   The frontend PWA `base`/`start_url`/`scope` alignment (`/kiosk/`, `/tv/`,
   `/caller/`, `/admin/`) is complete across all four services (QUE-27).
   QUE-20 (Operational Interfaces, parent QUE-5, FR-CLR-02/03) is the caller

@@ -7,6 +7,8 @@ import type {
   DailyReportDto,
 } from '../api/types';
 import { exportDailyReport } from '../lib/export-daily-report';
+import { formatSeconds } from '../lib/format';
+import { RecapCharts } from '../components/RecapCharts';
 
 /** A counter row in the performance table (the routing-rule display name + its read). */
 interface CounterRow {
@@ -45,11 +47,6 @@ function todayLocalKey(): string {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
-}
-
-/** Formats a millisecond duration as seconds with one decimal (e.g. `30.0 s`). */
-function formatSeconds(ms: number): string {
-  return `${(ms / 1000).toFixed(1)} s`;
 }
 
 /** Renders an opaque audit snapshot as a compact JSON string (or `—` when null). */
@@ -178,6 +175,8 @@ export function AnalyticsPage({
           </div>
         </div>
       </section>
+
+      <RecapCharts report={report} />
 
       <section className="config-card" aria-label="Per kategori">
         <h2 className="config-card__title">Per Kategori</h2>
