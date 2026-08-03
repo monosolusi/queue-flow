@@ -118,7 +118,7 @@ button {
 }
 .counter-header__label {
   font-size: 0.85rem;
-  letter-spacing: 0.15em;
+  letter-spacing: 0.04em;
   color: var(--text-muted);
 }
 .counter-header__name {
@@ -286,9 +286,56 @@ button {
   gap: 0.5rem;
   padding: 0.5rem;
   border: 1px solid var(--surface-2);
-  border-radius: 0.5rem;
+  border-radius: var(--radius);
   background: var(--surface);
 }
 .action-controls__transfer-option {
   min-width: 8rem;
+}
+
+/* Skeleton loading placeholders (QUE-40 AC6) ----------------------------
+ * Decorative shapes shown during initial load instead of a text-only
+ * "Memuat…" hint. Shapes carry aria-hidden="true"; the loading region carries
+ * aria-busy="true" + a visually-hidden label for AT. Pure opacity shimmer — no
+ * gradient background-position (cheaper, one color stop). */
+.skeleton {
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+.skeleton--block {
+  min-height: 14rem; /* active-ticket card shape */
+}
+.skeleton--row {
+  min-height: 3.5rem; /* waiting-queue / counter-card row shape */
+}
+.skeleton--wide {
+  width: 100%;
+}
+@keyframes skeleton-shimmer {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
+
+/* Visually-hidden: accessible to AT, hidden from the visual layout. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
