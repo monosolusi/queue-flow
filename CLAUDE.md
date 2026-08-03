@@ -1385,6 +1385,66 @@ with no duplicate/lost ticket numbers.
     `categoryId: ''` — degrading the QUE-20 transfer chooser's "exclude current
     category" for a recalled ticket. Proper caller `categoryId` recovery on recall
     belongs to the QUE-5 caller umbrella, not QUE-4.
+- **Shared design-token system + a11y/interaction baseline (QUE-37, all 4
+  frontends):** the four standalone frontend services (kiosk/tv/caller/admin)
+  share a token + interaction baseline via **generated vendored copies**, NOT a
+  workspace package — there is no workspace manager, no `packages/` dir, no root
+  `tsconfig`, and each service is a self-contained container (NFR-MNT-02). The
+  canonical source of truth is `shared/design-tokens/tokens.css` (OKLCH color
+  space for perceptual uniformity) + `shared/design-tokens/interactions.css`
+  (the a11y/interaction baseline). `scripts/sync-design-tokens.mjs` copies each
+  into every service's `src/styles/_tokens.css` / `_interactions.css`; the
+  leading `_` marks them generated/do-not-edit. The copies are **committed**
+  (not gitignored) so a fresh clone builds each service standalone, and a
+  **drift gate** in `scripts/run-verify.mjs` re-runs sync then
+  `git diff --exit-code -- services/*/src/styles/_tokens.css
+  services/*/src/styles/_interactions.css` fails if a copy diverges — catches
+  both a forgotten re-sync after editing the source and a direct edit of a
+  generated copy. `tv-display-service` imports `_tokens.css` ONLY (no
+  `_interactions.css`) — the TV board is display-only (no interactive elements),
+  so AC2/AC3/AC4 (focus/active/button vocabulary) are vacuously satisfied; if
+  a control is ever added to the TV, add the interactions import then. **Token
+  conventions:** `--accent` is kept **hex `#2563eb`** (not OKLCH) so a
+  JS-injected hex/oklch `brandColor` overrides cleanly at runtime (the
+  runtime-injection interop point); `--text-muted` is hex and unchanged (5.71:1
+  passes WCAG 1.4.3); `--accent-contrast` is `#ffffff` with a **documented
+  limitation** — a light manager-picked brandColor could fail contrast with
+  white text, and there is no contrast algorithm in scope (a downstream
+  remediation ticket owns that). Accent/danger **TEXT on the dark surface** uses
+  the dedicated `--accent-on-dark` (`oklch(0.714 0.143 254.6)`, ~`#60a5fa`,
+  5.75:1) and `--danger-on-dark` (`oklch(0.711 0.166 22.2)`, ~`#f87171`,
+  6.45:1) tokens — swap only `color:` (text) usages to the `-on-dark` variants;
+  leave `background:`/`fill:` usages of `--accent`/`--danger` intact (a fill is
+  not text). The focus baseline uses `:where(...):focus-visible` for
+  **zero specificity** so service overrides win; `.pressable` is the opt-in
+  `:active` pressed-state utility for cards. **Runtime `--accent` from
+  `SystemConfiguration.brandColor` (QUE-36, AC6):** each service has a
+  `src/lib/theme.ts` leaf utility (`applyBrandColor(brandColor)` →
+  `document.documentElement.style.setProperty('--accent', ...)`, no-op on
+  empty/invalid so the CSS default wins). This `theme.ts` is **deliberately
+  duplicated 4× (one per service), NOT synced and NOT a shared package** — a
+  ~10-line leaf duplicated 4× is less over-engineering than a shared/synced TS
+  module crossing the standalone-service boundary (minimal-dependency ethos,
+  same precedent as the audio-sequencer). The static `--accent:#2563eb` in
+  `_tokens.css` is the pre-fetch / fetch-failure fallback — it IS the default,
+  so there is no flash of the wrong accent before the brand-color fetch
+  resolves, and a fetch failure leaves it in place. Wiring rides existing boot
+  fetches where they exist (kiosk widens `StoreProfileSlice` →
+  `{storeName, brandColor}` and renames `getStoreName()`→`getStoreProfile()`,
+  applied in the existing `Promise.allSettled` boot; tv widens its
+  `SystemConfigurationDto.brandColor` and applies it in `tv-store.tsx` boot
+  `.then` as a DOM side effect — NOT in the reducer, since brandColor is not
+  board state); caller has no config fetch so it adds a new `BrandConfigSlice` +
+  `getBrandColor()` on `ICallerApi` (ISP slice — brandColor only) + a top-level
+  `useEffect` in `App.tsx`; admin adds a top-level `useEffect` in `App.tsx`
+  reusing the existing `getSystemConfig()` (decoupled app-wide theme beats
+  prop-drilling through `SetupGuard` + 3 pages; a redundant cheap GET on a
+  single-user manager device is acceptable). **General rule — for a shared
+  frontend asset across the standalone services, prefer generated vendored
+  copies (canonical source + sync script + committed copies + drift gate) over
+  a workspace package; for a tiny runtime leaf (theme injection), prefer 4×
+  duplication over a shared/synced module.** Matches the standalone-container
+  ethos + NFR-MNT-02; the drift gate makes the 4× copies machine-consistent.
 - When adding a feature, map it to the relevant FR-* / NFR-* requirement in the
   PRD and the bounded context it belongs to. Preserve the interface boundaries
   (e.g. don't leak admin DTOs into `ICallerApi`).

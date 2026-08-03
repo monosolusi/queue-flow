@@ -13,6 +13,17 @@ export interface AssignedCategoryDto {
   readonly name: string;
 }
 
+/**
+ * The minimal slice of `GET /api/system/config` the caller consumes for theming
+ * — just the manager-configured brand color (QUE-36) applied to the runtime
+ * `--accent` (QUE-37 AC6). ISP: the caller consumes only this slice, never the
+ * full admin `SystemConfigurationDto`. Reuses the existing config read surface
+ * (DRY) rather than adding a dedicated endpoint.
+ */
+export interface BrandConfigSlice {
+  readonly brandColor: string;
+}
+
 /** One transition in the active state machine (FR-CLR-02). */
 export interface StateTransitionDto {
   readonly from: string;

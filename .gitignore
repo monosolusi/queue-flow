@@ -17,3 +17,6 @@ coverage/
 # Editor
 .vscode/
 .idea/
+
+# Local tool artifacts (design-hook cache, etc.)
+.impeccable/

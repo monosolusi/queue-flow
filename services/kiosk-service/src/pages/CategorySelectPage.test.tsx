@@ -26,11 +26,12 @@ function makeApi(
   list: CategoryDto[] = categories,
   createImpl?: (id: string) => Promise<CreatedTicketDto>,
   storeName = 'Toko Contoh',
+  brandColor = '',
 ): IKioskApi {
   return {
     listCategories: () => Promise.resolve(list),
     createTicket: createImpl ?? ((id: string) => Promise.resolve(ticket(id))),
-    getStoreName: () => Promise.resolve(storeName),
+    getStoreProfile: () => Promise.resolve({ storeName, brandColor }),
   };
 }
 
@@ -66,7 +67,7 @@ describe('CategorySelectPage (kiosk — FR-KSK-01 / QUE-17)', () => {
     renderSelect({
       listCategories: () => Promise.reject(new Error('jaringan terputus')),
       createTicket: () => Promise.resolve(ticket('cat-a')),
-      getStoreName: () => Promise.resolve(''),
+      getStoreProfile: () => Promise.resolve({ storeName: '', brandColor: '' }),
     });
     expect(await screen.findByText(/jaringan terputus/i)).toBeInTheDocument();
   });
@@ -178,6 +179,26 @@ describe('CategorySelectPage (kiosk — FR-KSK-01 / QUE-17)', () => {
     expect(printed!.ticketNumber).toBe('A-007');
   });
 
+  it('applies the manager-configured brand color to the runtime --accent (QUE-37 AC6)', async () => {
+    // The static `#2563eb` default is in place before the profile settles; the
+    // manager-picked brandColor overrides `--accent` on the document root once
+    // the store-profile fetch resolves.
+    document.documentElement.style.setProperty('--accent', '#2563eb');
+    renderSelect(makeApi(categories, undefined, 'Toko Contoh', '#abcdef'));
+
+    await screen.findByText('Customer Service');
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#abcdef');
+  });
+
+  it('keeps the static --accent default when the brand color is empty (no flash)', async () => {
+    document.documentElement.style.setProperty('--accent', '#2563eb');
+    renderSelect(makeApi(categories, undefined, 'Toko Contoh', ''));
+
+    await screen.findByText('Customer Service');
+    // Empty brandColor is ignored so the CSS default `#2563eb` stays.
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#2563eb');
+  });
+
   it('omits the store name when the store-name fetch is empty (optional header)', async () => {
     const createTicket = vi.fn((id: string) => Promise.resolve(ticket(id, 'A-001')));
     let printed: PrintPayload | undefined;
@@ -202,12 +223,12 @@ describe('CategorySelectPage (kiosk — FR-KSK-01 / QUE-17)', () => {
     // Store name resolves *after* categories; the category buttons stay
     // loading until both settle so a fast tap can never print a headerless
     // receipt. Categories resolve immediately, the store name on a later tick.
-    let resolveName: ((v: string) => void) | undefined;
+    let resolveName: ((v: { storeName: string; brandColor: string }) => void) | undefined;
     const api: IKioskApi = {
       listCategories: () => Promise.resolve(categories),
       createTicket: (id: string) => Promise.resolve(ticket(id, 'A-001')),
-      getStoreName: () =>
-        new Promise<string>((resolve) => {
+      getStoreProfile: () =>
+        new Promise<{ storeName: string; brandColor: string }>((resolve) => {
           resolveName = resolve;
         }),
     };
@@ -224,8 +245,8 @@ describe('CategorySelectPage (kiosk — FR-KSK-01 / QUE-17)', () => {
     // the store-name fetch is still pending — the loading hint persists.
     expect(await screen.findByText('Memuat kategori…')).toBeInTheDocument();
 
-    // Releasing the store-name fetch lets the load state flip to `loaded`.
-    resolveName!('Toko Lambat');
+    // Releasing the store-profile fetch lets the load state flip to `loaded`.
+    resolveName!({ storeName: 'Toko Lambat', brandColor: '' });
     expect(await screen.findByText('Customer Service')).toBeInTheDocument();
 
     await userEvent.click(screen.getByText('Customer Service'));

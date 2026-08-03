@@ -1,4 +1,4 @@
-import type { CounterDto, QueueSnapshotDto, StateMachineDto } from './types';
+import type { BrandConfigSlice, CounterDto, QueueSnapshotDto, StateMachineDto } from './types';
 
 /**
  * The slice of core-api the caller panel consumes (ISP — never leaks
@@ -16,6 +16,8 @@ export interface ICallerApi {
   listCounters(): Promise<CounterDto[]>;
   getQueueSnapshot(counterId: number): Promise<QueueSnapshotDto>;
   getActiveStateMachine(): Promise<StateMachineDto>;
+  /** The manager-configured brand color (QUE-36) applied to `--accent` (QUE-37 AC6). */
+  getBrandColor(): Promise<BrandConfigSlice>;
   // Command surface (FR-CLR-02 / FR-ENG-03) -------------------------------
   callNext(counterId: number): Promise<void>;
   serve(ticketId: string): Promise<void>;
@@ -96,6 +98,11 @@ export class CallerApi implements ICallerApi {
   }
   getActiveStateMachine(): Promise<StateMachineDto> {
     return getJson<StateMachineDto>('/system/state-machine');
+  }
+  getBrandColor(): Promise<BrandConfigSlice> {
+    // Reuses the existing `GET /api/system/config` read surface (DRY); the
+    // caller consumes only the `{ brandColor }` slice (ISP).
+    return getJson<BrandConfigSlice>('/system/config');
   }
   callNext(counterId: number): Promise<void> {
     return postJson(`/queue/call-next`, { counterId }).then(() => undefined);

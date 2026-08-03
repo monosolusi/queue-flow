@@ -15,6 +15,15 @@ function run(label, cwd, command) {
 
 let failed = false;
 try {
+  // Design-token drift gate (QUE-37): re-vendor the canonical shared tokens into
+  // each service, then fail if a generated copy diverges from the source —
+  // catches both a forgotten re-sync after editing the source and a direct
+  // edit of a generated copy (the sync overwrites it → diff).
+  process.stdout.write('\n▶ design-token sync + drift: node scripts/sync-design-tokens.mjs\n');
+  execSync('node scripts/sync-design-tokens.mjs', { cwd: root, stdio: 'inherit', env: process.env });
+  execSync('git diff --exit-code -- services/*/src/styles/_tokens.css services/*/src/styles/_interactions.css', {
+    cwd: root, stdio: 'inherit', env: process.env,
+  });
   // core-api: arch:check + jest + build (the architecture gate, NFR-MNT-01).
   run('core-api (arch + unit + build)', 'core-api', 'npm run verify');
   // frontends: vitest + vite build.

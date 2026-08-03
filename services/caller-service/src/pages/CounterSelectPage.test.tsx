@@ -37,6 +37,7 @@ function makeApi(list: CounterDto[] = counters, reject?: Error): ICallerApi {
     recall: () => Promise.resolve(),
     transfer: () => Promise.resolve(),
     applyTransition: () => Promise.resolve(),
+    getBrandColor: () => Promise.resolve({ brandColor: '' }),
   };
 }
 

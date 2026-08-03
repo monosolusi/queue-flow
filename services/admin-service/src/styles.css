@@ -1,16 +1,13 @@
+/* Design tokens + a11y/interaction baseline vendored from
+   shared/design-tokens/*.css (single source of truth). Do not edit the _*.css
+   copies directly; edit the canonical files and re-run
+   `node scripts/sync-design-tokens.mjs`. The admin button vocabulary was the
+   source for the shared interactions baseline. */
+@import './styles/_tokens.css';
+@import './styles/_interactions.css';
+
 :root {
-  --bg: #0f172a;
-  --surface: #1e293b;
-  --surface-2: #334155;
-  --text: #f1f5f9;
-  --text-muted: #94a3b8;
-  --accent: #2563eb;
-  --accent-contrast: #ffffff;
-  --success: #16a34a;
-  --warn: #d97706;
-  --danger: #dc2626;
-  --radius: 14px;
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --radius: 14px; /* per-service override; tokens.css owns the rest */
 }
 
 * {
@@ -37,32 +34,9 @@ fieldset {
   font-family: inherit;
 }
 
-/* Shared buttons --------------------------------------------------------- */
-.btn {
-  border: none;
-  border-radius: var(--radius);
-  padding: 0.9rem 1.4rem;
-  font-size: 1.05rem;
-  font-weight: 600;
-}
-.btn--primary {
-  background: var(--accent);
-  color: var(--accent-contrast);
-}
-.btn--secondary {
-  background: var(--surface-2);
-  color: var(--text);
-}
-.btn--ghost {
-  background: transparent;
-  color: var(--text-muted);
-  padding: 0.5rem 0.8rem;
-  font-size: 0.95rem;
-}
-.btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+/* The .btn / .btn--primary / .btn--secondary / .btn--ghost / :hover / :active
+   / :focus-visible / :disabled / aria-busy vocabulary now lives in the shared
+   interactions baseline (vendored above) — admin was its source. */
 
 /* SetupGuard / loading --------------------------------------------------- */
 .guard-loading,
@@ -99,7 +73,7 @@ fieldset {
   font-size: 1rem;
 }
 .admin-panel__error {
-  color: var(--danger);
+  color: var(--danger-on-dark);
 }
 .admin-panel__success {
   color: var(--success);
@@ -268,7 +242,7 @@ fieldset {
   margin-bottom: 1rem;
 }
 .wizard__error {
-  color: var(--danger);
+  color: var(--danger-on-dark);
 }
 .wizard__nav {
   display: flex;
@@ -430,7 +404,7 @@ fieldset {
   margin: 0.75rem 0 0;
   padding: 0.6rem 0.9rem;
   list-style: disc inside;
-  color: var(--danger, #c0392b);
+  color: var(--danger-on-dark);
   background: rgba(192, 57, 43, 0.06);
   border: 1px solid rgba(192, 57, 43, 0.25);
   border-radius: 8px;
@@ -441,7 +415,7 @@ fieldset {
   display: block;
   margin-top: 0.3rem;
   font-size: 0.85rem;
-  color: var(--danger, #c0392b);
+  color: var(--danger-on-dark);
 }
 
 /* Step 5 — read-only review of the assembled configuration before activation. */
