@@ -300,7 +300,28 @@ with no duplicate/lost ticket numbers.
   stays on the board as the active ticket. The state machine carries no
   "terminal" metadata, so only the two PRD-default terminal states leave the
   counter (documented caller contract; a custom terminal state is not
-  expressible today — future state-metadata config). **General rule — a generic
+  expressible today — future state-metadata config). **Transfer two-event
+  reconciliation (FR-CLR-03, QUE-5):** a transfer ("Pindah Kategori") of the
+  *active* ticket emits two events in order — `STATUS_UPDATED` (CALLING →
+  WAITING) then `TICKET_TRANSFERRED` (the aggregate's `transferTo` records
+  `TicketStatusChangedEvent` then `TicketTransferredEvent`, clearing
+  `_counterId`). `WAITING` must stay **non-terminal** in `STATUS_UPDATED` so the
+  ticket remains visible on the board between the two events; `TICKET_TRANSFERRED`
+  (which carries the authoritative `{ toCategoryId, toTicketNumber }`) then
+  evicts it from `active` and re-adds to `waiting` only when the new category is
+  one of the counter's. Treating `WAITING` as terminal in `STATUS_UPDATED` would
+  race the two-event sequence — the ticket would vanish before
+  `TICKET_TRANSFERRED` re-adds it (and if `TICKET_TRANSFERRED` were lost/delayed,
+  it would vanish permanently). The earlier `TICKET_TRANSFERRED` handler only
+  inspected `state.waiting` and never touched `state.active`, so a transferred-
+  away active ticket stayed stuck as a stale WAITING entry and a transfer into
+  the counter's own categories left the ticket in both `active` and `waiting`;
+  the existing transfer tests used `baseState` with `active: []`, so the active-
+  ticket path was untested. **General rule — when a domain operation emits a
+  sequence of events that must be reconciled together, the projection must
+  keep the intermediate state visible through the earlier event(s) and resolve
+  at the event carrying the authoritative payload, never drop at the first
+  event.** **General rule — a generic
   endpoint wrapping an aggregate's generic transition method must reject, at
   the backend boundary, any target that has a dedicated command endpoint owning
   domain-specific side effects.** Otherwise a direct API call bypasses those
@@ -342,6 +363,27 @@ with no duplicate/lost ticket numbers.
   (no tight loop). The old hardcoded "FR-TV-03 minimal" marquee footer became
   the sourced `RunningText` (prominent when idle, decorative footer when
   active).
+  **QUE-5 closure** (Operational Interfaces umbrella, FR-CLR-01..03, parent of
+  QUE-19/20/33 — all Done): the three children covered all 5 AC (counter binding,
+  call-next per routing, dynamic action buttons per state machine, recall/skip/
+  transfer/complete from UI, realtime WS reflection). The mandatory arch-reviewer
+  closure gate over the delivered `caller-service` surface found one **Major**
+  defect the children left: the `TICKET_TRANSFERRED` projection in
+  `queue-store.tsx` never touched `state.active`, so a transfer of the *active*
+  ticket (which emits `STATUS_UPDATED` CALLING→WAITING then `TICKET_TRANSFERRED`)
+  left it stuck on the board (transferred away) or in both `active` + `waiting`
+  (transferred into own categories); the existing transfer tests used `baseState`
+  with `active: []` so the active-ticket path was untested. Per the
+  residual-gap/umbrella-closure pattern, a real defect → a trivial fix PR
+  (PR #30, `fix/que-5-transfer-active-eviction`) beats closure-only. The fix
+  makes `TICKET_TRANSFERRED` unconditionally evict from `active` then re-add to
+  `waiting` only when the new category is mine, and documents why `WAITING` stays
+  non-terminal in `STATUS_UPDATED` (see the Reducer-widening corollary above).
+  caller-service only — no core-api/domain/REST change (WS payload contract
+  unchanged). **arch-reviewer APPROVED** (re-verified: Major resolved, no
+  regression in the in-waiting transfer cases, WAITING-as-terminal reasoning
+  sound). Gates: caller-service build + 48 tests (46 + 2 new regression tests);
+  core-api `arch:check` clean + 263 tests.
 - **PRD language:** the Linear PRD is written in **Bahasa Indonesia** with
   English technical terms. UI `action_label` values ("Panggil Berikutnya",
   "Lewati / Absen", "Selesai Layan") are Indonesian — match them verbatim
