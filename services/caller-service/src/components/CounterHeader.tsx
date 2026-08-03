@@ -12,7 +12,7 @@ export function CounterHeader({ bound, connection, onUnbind }: CounterHeaderProp
   return (
     <header className="counter-header">
       <div className="counter-header__identity">
-        <span className="counter-header__label">LOKET</span>
+        <span className="counter-header__label">Loket</span>
         <span className="counter-header__name">{bound.counterName}</span>
       </div>
       <div className="counter-header__actions">

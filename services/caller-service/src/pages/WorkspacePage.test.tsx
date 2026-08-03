@@ -130,6 +130,27 @@ describe('WorkspacePage', () => {
     expect(screen.getByLabelText('Aksi')).toBeInTheDocument();
   });
 
+  it('shows skeleton placeholders (not text-only Memuat) while the snapshot is loading', async () => {
+    // A snapshot fetch that never resolves keeps loadStatus === 'loading'.
+    const api = makeApi(snapshot);
+    api.getQueueSnapshot = vi.fn(() => new Promise<QueueSnapshotDto>(() => {}));
+    render(
+      <QueueStoreProvider bound={bound} api={api} socketOptions={socketOptions}>
+        <WorkspacePage bound={bound} onUnbind={vi.fn()} />
+      </QueueStoreProvider>,
+    );
+    const loading = await screen.findByTestId('workspace-loading');
+    expect(loading).toHaveAttribute('aria-busy', 'true');
+    // Skeleton shapes render inside the loading region (AC6: not text-only).
+    expect(loading.querySelectorAll('.skeleton').length).toBeGreaterThan(0);
+    // The "Memuat antrian…" label is present only as the visually-hidden SR label,
+    // not as a visible text-only hint (no .workspace__hint during loading).
+    expect(loading.querySelector('.sr-only')).toHaveTextContent('Memuat antrian…');
+    expect(document.querySelector('.workspace__hint')).not.toBeInTheDocument();
+    // No ticket number leaks into the DOM before the snapshot resolves.
+    expect(screen.queryByText('A-001')).not.toBeInTheDocument();
+  });
+
   it('unbinds when "Ganti Counter" is pressed', async () => {
     const onUnbind = vi.fn();
     renderWorkspace(snapshot, onUnbind);
