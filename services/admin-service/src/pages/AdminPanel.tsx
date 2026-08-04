@@ -13,6 +13,7 @@ import { validateBrandColor, isValidBrandColor } from '../lib/brand-color';
 import { validateRetentionDays } from '../lib/retention';
 import { PRIORITY_POLICY_LABELS, DAILY_RESET_MODE_LABELS } from '../lib/labels';
 import { timeToCron, cronToTime } from '../lib/daily-reset';
+import { applyBrandColor } from '../lib/theme';
 
 /**
  * One editable category row. `id` is carried for categories that already exist
@@ -201,6 +202,9 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
       // Reload so newly added categories get their server-minted ids into the
       // form (keeps a subsequent edit id-stable) and the UI reflects saved state.
       const config = await api.getSystemConfig();
+      // Re-apply the runtime `--accent` so a manager who changed the brand color
+      // sees it take effect immediately, without a full page reload (QUE-35).
+      applyBrandColor(config.brandColor);
       setState({ status: 'ready', form: toForm(config) });
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err));

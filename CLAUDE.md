@@ -766,7 +766,23 @@ numeric `Counter {id}`).
   URIs / metadata written into the `.xlsx`, **never fetched at runtime** (same
   class as `w3.org`). They surface in a `grep https?:// dist/assets` and must be
   whitelisted in the `offline-assets.acceptance.spec.ts` `ALLOWED_HOSTS` with a
-  rationale comment, not treated as a runtime network call.
+  rationale comment, not treated as a runtime network call. Also allowlist
+  `sheetjs.openxmlformats.org` (the SheetJS OOXML relationship namespace URI).
+  **Lazy-import namespace-URI regression (QUE-41 → QUE-35):** QUE-41 split
+  SheetJS into its own Vite chunk via `const XLSX = await import('xlsx')`
+  (lazy code-split, a deliberate perf win). A dynamic `import()` preserves the
+  **whole module**, so the OOXML relationship namespace URI
+  `http://sheetjs.openxmlformats.org/officeDocument/2006/relationships/officeDocument`
+  survived into `dist/assets/xlsx-*.js` — the prior static `import * as XLSX`
+  let tree-shaking drop it. The `offline-assets` gate (`ALLOWED_HOSTS`) had
+  `schemas.openxmlformats.org` but **not** `sheetjs.openxmlformats.org`, so the
+  gate went RED after the lazy split. **General rule — after any lazy code-split
+  of a vendored lib that embeds namespace identifiers (SheetJS, OOXML/ODF
+  libs, XML-tooling libs), re-grep `dist/assets` for `https?://` and extend
+  `ALLOWED_HOSTS` for any new namespace-URI host that surfaces** (a dynamic
+  import is tree-shake-opaque, so URIs the static path dropped reappear). The
+  same applies to any other lib moved from a static to a dynamic import:
+  re-run the offline-assets gate, don't assume the whitelist is stable.
 - **Hand-roll small visualizations from the DTO the page already loads rather
   than vendoring a chart library** (Recharts/d3 would bloat the bundle for a
   2–3-bar chart and would need offline vetting, NFR-REL-01) — mirroring the

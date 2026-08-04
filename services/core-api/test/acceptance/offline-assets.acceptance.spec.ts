@@ -31,6 +31,7 @@ const ALLOWED_HOSTS = new Set([
   // as OOXML/ODF namespace URIs and metadata, never fetched at runtime (the
   // export is a pure client-side Blob build, NFR-REL-01). Same class as w3.org.
   'schemas.openxmlformats.org', // OOXML spreadsheet/office/package namespaces
+  'sheetjs.openxmlformats.org', // SheetJS OOXML relationship namespace URI written into .xlsx metadata (not fetched)
   'schemas.microsoft.com', // Office extension namespaces (VBA, rich data, …)
   'purl.org', // Dublin Core + OOXML relationship namespace identifiers
   'purl.oclc.org', // OOXML relationship namespace identifiers

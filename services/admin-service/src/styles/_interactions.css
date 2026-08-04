@@ -15,10 +15,11 @@
 
 /* AC2 — visible focus indicator on every interactive element. `:where()`
    keeps specificity at 0 so per-service component styles can override. The
-   list covers native controls, the caller transfer chooser options
-   ([role="option"]), and the .btn / .pressable utilities. */
+   list covers native controls, the caller transfer chooser (role="group" +
+   aria-label — its destination <button>s match the native `button` selector
+   below), and the .btn / .pressable utilities. */
 :where(button, input, select, textarea, a[href], [tabindex]:not([tabindex="-1"]),
-       [role="option"], .btn, .pressable):focus-visible {
+       .btn, .pressable):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }

@@ -222,6 +222,28 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     expect(payload.brandColor).toBe('#abcdef');
   });
 
+  it('re-applies the runtime --accent after a save so a brand-color change is visible without a reload (QUE-35)', async () => {
+    const brandConfig = configuredStore();
+    brandConfig.brandColor = '#abcdef';
+    const { api } = makeApi(brandConfig);
+    renderPanel(api);
+    await screen.findByText('Apotek Sehat');
+
+    // AdminPanel does not touch the runtime accent on mount (App applies it
+    // once on mount); the panel re-applies it only after a successful save.
+    document.documentElement.style.removeProperty('--accent');
+
+    await userEvent.click(screen.getByTestId('admin-save'));
+    await screen.findByText('Konfigurasi tersimpan.');
+
+    // The post-save config reload re-applies the brand color to --accent, so a
+    // manager who changed the brand color sees it immediately (no full reload).
+    expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#abcdef');
+
+    // Cleanup so the inline style does not leak into sibling tests.
+    document.documentElement.style.removeProperty('--accent');
+  });
+
   it('disables save and shows an error for a malformed brand color (QUE-36)', async () => {
     const { api, save } = makeApi();
     renderPanel(api);
