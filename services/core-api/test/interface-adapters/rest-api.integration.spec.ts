@@ -242,4 +242,25 @@ describe('Read-only REST surface (integration — QUE-19 + QUE-17)', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ active: [], waiting: [], waitingCount: 0 });
   });
+
+  it('GET /api/reports/daily with a malformed date is 400, not 500 (boundary validation)', async () => {
+    const res = await request(app.getHttpServer()).get('/api/reports/daily?date=garbage');
+    expect(res.status).toBe(400);
+  });
+
+  it('GET /api/reports/daily with a valid-shaped date returns the zero-state report (200)', async () => {
+    const res = await request(app.getHttpServer()).get('/api/reports/daily?date=2026-08-05');
+    expect(res.status).toBe(200);
+    expect(res.body.totalTickets).toBe(0);
+  });
+
+  it('GET /api/reports/counters/:id with a non-numeric id is 400, not 500 (boundary validation)', async () => {
+    const res = await request(app.getHttpServer()).get('/api/reports/counters/abc');
+    expect(res.status).toBe(400);
+  });
+
+  it('GET /api/reports/counters/:id with a non-positive id is 400', async () => {
+    const res = await request(app.getHttpServer()).get('/api/reports/counters/0');
+    expect(res.status).toBe(400);
+  });
 });

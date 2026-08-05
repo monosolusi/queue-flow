@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpException, Put } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpException, Put } from '@nestjs/common';
 import {
   GetActiveStateMachineUseCase,
   GetSetupStatusUseCase,
@@ -6,6 +6,145 @@ import {
   SaveSystemConfigurationUseCase,
   type SaveSystemConfigurationCommand,
 } from '../../application/store-config';
+
+/**
+ * Required top-level fields on a `PUT /api/system/config` payload. The value
+ * objects / use case validate each field's *format* when present, but a missing
+ * field dereferences `undefined` (e.g. `[...undefined]`, `undefined.trim()`)
+ * and surfaces as a 500 `TypeError` — so the controller guards *presence* at
+ * the transport boundary and returns 400 instead. `actor` defaults to
+ * `'admin'`; `brandColor` is required on the wire (QUE-36 made it part of the
+ * config graph).
+ */
+const REQUIRED_CONFIG_FIELDS: ReadonlyArray<keyof SaveSystemConfigurationCommand> = [
+  'storeName',
+  'stateMachine',
+  'dailyReset',
+  'categories',
+  'routingRules',
+  'brandColor',
+];
+
+/**
+ * Expected top-level *shape* of each required field. Presence is guarded
+ * separately; this catches a present-but-wrong-type field (e.g.
+ * `stateMachine: "WAITING"`, `categories: 1`) that would otherwise reach the
+ * use case and surface as a 500 `TypeError` — e.g. `[...dto.states]` on a
+ * string, or `for (const dto of dtos)` on a number — *before* the domain value
+ * objects can throw a clean `InvalidValueObjectException` (→ 400). Shallow by
+ * design: deep format / semantic validation stays in the domain value objects
+ * (SRP). The controller is the anti-corruption translation point, so transport
+ * shape validation belongs here, not in the use case.
+ */
+const CONFIG_FIELD_SHAPES: ReadonlyArray<{
+  field: keyof SaveSystemConfigurationCommand;
+  kind: 'string' | 'array' | 'object';
+}> = [
+  { field: 'storeName', kind: 'string' },
+  { field: 'brandColor', kind: 'string' },
+  { field: 'stateMachine', kind: 'object' },
+  { field: 'dailyReset', kind: 'object' },
+  { field: 'categories', kind: 'array' },
+  { field: 'routingRules', kind: 'array' },
+];
+
+/** True when `value` does not match the expected `kind` (object = plain object, not array). */
+function shapeMismatch(value: unknown, kind: 'string' | 'array' | 'object'): boolean {
+  if (kind === 'string') return typeof value !== 'string';
+  if (kind === 'array') return !Array.isArray(value);
+  return typeof value !== 'object' || Array.isArray(value) || value === null;
+}
+
+/**
+ * Nested-shape errors for the config payload's iterable / string-scalar
+ * sub-fields. The domain value objects (`StateSchema`, `StateTransitionRule`,
+ * `DailyResetPolicy`) are typed to accept `string` and call `.trim()` /
+ * spread / `.map` on their inputs — they trust their type contract and do NOT
+ * defend non-string / non-iterable runtime input (that would pollute the pure
+ * domain layer with `typeof` guards, violating NFR-MNT-01). So a direct API
+ * call sending `stateMachine: { states: 5 }` or `dailyReset: { cronExpression:
+ * 5 }` reaches the use case and `Typeerror`s (500) *before* a value object can
+ * throw a clean `InvalidValueObjectException` (400). The controller — the
+ * anti-corruption boundary — guards these nested shapes so a malformed payload
+ * is 400, not an unhandled 500 (exception leakage). Deep semantic validation
+ * (enum membership, state-name uniqueness, cron grammar, duplicate codes)
+ * stays in the domain value objects + use case (SRP).
+ *
+ * Only the sub-fields that would crash are guarded — silent semantic accepts
+ * (e.g. a non-enum `mode` that falls through to MANUAL) are the VOs'/use-case's
+ * job, not the crash class this guard closes.
+ */
+function configNestedShapeErrors(body: Partial<SaveSystemConfigurationCommand>): string[] {
+  const errs: string[] = [];
+  const sm = body.stateMachine;
+  if (sm != null && typeof sm === 'object' && !Array.isArray(sm)) {
+    if (!Array.isArray(sm.states) || !sm.states.every((s: string) => typeof s === 'string')) {
+      errs.push('stateMachine.states must be an array of strings');
+    }
+    if (
+      !Array.isArray(sm.transitions) ||
+      !sm.transitions.every(
+        (t) =>
+          t != null &&
+          typeof t === 'object' &&
+          !Array.isArray(t) &&
+          typeof t.from === 'string' &&
+          typeof t.to === 'string' &&
+          typeof t.actionLabel === 'string',
+      )
+    ) {
+      errs.push('stateMachine.transitions must be an array of { from, to, actionLabel: string }');
+    }
+  }
+  const dr = body.dailyReset;
+  if (dr != null && typeof dr === 'object' && !Array.isArray(dr)) {
+    if (dr.cronExpression != null && typeof dr.cronExpression !== 'string') {
+      errs.push('dailyReset.cronExpression must be a string or null');
+    }
+    // `timezone` is optional (defaults to the server TZ when null/undefined),
+    // but a non-string value (e.g. `5`) reaches `DailyResetPolicy.of` which
+    // calls `.trim()` on it → TypeError 500 before the VO can throw.
+    if (dr.timezone != null && typeof dr.timezone !== 'string') {
+      errs.push('dailyReset.timezone must be a string or null');
+    }
+  }
+  if (Array.isArray(body.categories)) {
+    // Elements are validated as `unknown` — the HTTP body is untrusted, so the
+    // declared `WizardCategoryDto` type is not yet earned at this boundary.
+    (body.categories as readonly unknown[]).forEach((c, i) => {
+      // A non-object element (e.g. `null`) crashes the use case on `.code`
+      // access before any value object can throw.
+      if (c == null || typeof c !== 'object' || Array.isArray(c)) {
+        errs.push(`categories[${i}] must be a plain object`);
+        return;
+      }
+      // A non-string `name` (e.g. `5`) crashes the `Category` ctor's `.trim()`
+      // before it can throw InvalidValueObjectException. `code`/`id` are safe —
+      // `code` is regex-tested with coercion (→ 400), `id` via `Identifier.of`
+      // (→ 400) — so only `name` needs a crash guard here.
+      const name = (c as { name?: unknown }).name;
+      if (name != null && typeof name !== 'string') {
+        errs.push(`categories[${i}].name must be a string`);
+      }
+    });
+  }
+  if (Array.isArray(body.routingRules)) {
+    (body.routingRules as readonly unknown[]).forEach((r, i) => {
+      // A non-object element (e.g. `null`/`5`) crashes the use case on
+      // `.counterId`/`.assignedCategoryCodes` access before any VO can throw —
+      // reject it at the boundary instead of silently skipping.
+      if (r == null || typeof r !== 'object' || Array.isArray(r)) {
+        errs.push(`routingRules[${i}] must be a plain object`);
+        return;
+      }
+      const codes = (r as { assignedCategoryCodes?: unknown }).assignedCategoryCodes;
+      if (!Array.isArray(codes) || !codes.every((cc: unknown) => typeof cc === 'string')) {
+        errs.push(`routingRules[${i}].assignedCategoryCodes must be an array of strings`);
+      }
+    });
+  }
+  return errs;
+}
 
 /**
  * System-config REST surface for the admin panel + first-run wizard (QUE-30 /
@@ -43,14 +182,41 @@ export class SystemConfigController {
 
   /** `PUT /api/system/config` → persist the wizard / admin payload atomically. */
   @Put('config')
-  async save(@Body() body: SaveSystemConfigurationCommand & { actor?: string }) {
+  async save(@Body() body: Partial<SaveSystemConfigurationCommand> & { actor?: string }) {
+    // Guard presence of every required top-level field at the boundary so a
+    // malformed payload yields 400 (not a 500 TypeError when the use case
+    // dereferences `undefined`). Format validation stays in the value objects.
+    const missing = REQUIRED_CONFIG_FIELDS.filter((f) => body[f] == null);
+    if (missing.length > 0) {
+      throw new BadRequestException(`Missing required config field(s): ${missing.join(', ')}`);
+    }
+    // Guard the *shape* of each required field so a present-but-wrong-type
+    // value (e.g. `stateMachine: "WAITING"`, `categories: 1`) also yields 400
+    // instead of a 500 TypeError from the use case (e.g. `[...dto.states]` on
+    // a string) before the value objects can throw. Deep validation stays in
+    // the value objects.
+    const malformed = CONFIG_FIELD_SHAPES.filter((s) => shapeMismatch(body[s.field], s.kind)).map(
+      (s) => `${s.field} must be a ${s.kind === 'object' ? 'plain object' : s.kind}`,
+    );
+    if (malformed.length > 0) {
+      throw new BadRequestException(`Malformed config field(s): ${malformed.join(', ')}`);
+    }
+    // Guard nested iterable / string-scalar sub-fields that would TypeError
+    // (500) before a value object can throw — e.g. `stateMachine: { states: 5
+    // }` (`[...5]`), `dailyReset: { cronExpression: 5 }` (`(5).trim()`), or
+    // `routingRules: [{ assignedCategoryCodes: 5 }]` (`(5).map`). Deep semantic
+    // validation stays in the value objects + use case.
+    const nestedErrors = configNestedShapeErrors(body);
+    if (nestedErrors.length > 0) {
+      throw new BadRequestException(`Malformed config field(s): ${nestedErrors.join(', ')}`);
+    }
     const command: SaveSystemConfigurationCommand = {
-      storeName: body.storeName,
-      stateMachine: body.stateMachine,
-      dailyReset: body.dailyReset,
-      categories: body.categories,
-      routingRules: body.routingRules,
-      brandColor: body.brandColor,
+      storeName: body.storeName!,
+      stateMachine: body.stateMachine!,
+      dailyReset: body.dailyReset!,
+      categories: body.categories!,
+      routingRules: body.routingRules!,
+      brandColor: body.brandColor!,
       actor: body.actor ?? 'admin',
     };
     return this.saveConfig.execute(command);

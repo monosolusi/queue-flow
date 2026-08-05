@@ -412,7 +412,11 @@ export function TvStoreProvider({ api, audio, children, socketOptions }: TvStore
       sock.close();
       if (debounceTimer) clearTimeout(debounceTimer);
       clearInterval(interval);
-      // No orphaned audio if the provider unmounts mid-announcement.
+      // Drop queued announcements and stop advancing fragments so a mid-
+      // announcement unmount drains the queue. The in-flight fragment is
+      // intentionally allowed to finish (the AudioProvider contract — see
+      // sequencer-audio-provider.stop()), so this is best-effort silence, not
+      // an abrupt cut.
       audioRef.current.stop();
     };
   }, []);

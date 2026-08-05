@@ -293,6 +293,17 @@ export class QueueTicket extends AggregateRoot<TicketId> {
    * {@link TicketStatusChangedEvent} (the status leg) and a
    * {@link TicketTransferredEvent} (the category/number reassignment) so
    * downstream can sync on the re-issued number.
+   *
+   * Note: unlike {@link transitionTo}, this method intentionally does **not**
+   * short-circuit when `from === targetStatus`. A transfer is a category move
+   * regardless of whether the status also changes, so the
+   * {@link TicketStatusChangedEvent} may carry `from === to` when a manager
+   * configures a self-edge (e.g. `WAITING -> WAITING` labelled "Pindah
+   * Kategori"). The TV projection keeps `WAITING` non-terminal in
+   * `STATUS_UPDATED`, so the ticket stays visible until the subsequent
+   * `TICKET_TRANSFERRED` evicts + re-adds it — the two-event reconciliation
+   * contract still holds. The use-case layer additionally rejects a transfer to
+   * the ticket's *own* category, so a no-op category move never reaches here.
    */
   public transferTo(
     newCategoryId: string,

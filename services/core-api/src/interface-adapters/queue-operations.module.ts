@@ -109,9 +109,18 @@ import { SystemConfigModule } from './config/system-config.module';
         SEQUENCE_REPOSITORY,
         TRANSITION_POLICY_RESOLVER,
         QueueEventDispatcher,
+        TRANSACTION_MANAGER,
       ],
-      useFactory: (queue, categories, sequences, policyResolver, dispatcher) =>
-        new TransferTicketUseCase(queue, categories, sequences, policyResolver, dispatcher),
+      useFactory: (queue, categories, sequences, policyResolver, dispatcher, txManager) =>
+        new TransferTicketUseCase(
+          queue,
+          categories,
+          sequences,
+          policyResolver,
+          dispatcher,
+          undefined, // clock — keep the () => Date.now default
+          txManager,
+        ),
     },
     {
       provide: ResetDailyQueueUseCase,

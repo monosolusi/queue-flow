@@ -10,7 +10,10 @@ import type {
 import { TicketStatus } from '../../domain/queue';
 import {
   EntityNotFoundException,
+  InvalidArgumentException,
   InvalidStateTransitionException,
+  ITransactionManager,
+  NoOpTransactionManager,
 } from '../../domain/shared';
 import { QueueEventDispatcher } from './queue-event-dispatcher';
 
@@ -71,6 +74,15 @@ export type TransferTicketResult = {
  * {@link ISequenceRepository}, the aggregate's `transferTo` re-validates and
  * applies the reassignment, and the ticket is persisted.
  *
+ * The sequence reservation + aggregate mutation + persist run inside one
+ * {@link ITransactionManager.runInTransaction} so a durable implementation
+ * commits the new per-category number and the ticket update atomically
+ * (NFR-REL-02 — a power cut between the reserve and the save must not leave a
+ * gap). The realtime broadcast is drained *after* the commit so a rolled-back
+ * transfer is never announced. This mirrors `CreateTicketUseCase` /
+ * `CallNextTicketUseCase`; the `txManager` defaults to a no-op so unit specs
+ * that construct the use case directly stay unbroken.
+ *
  * Depends only on ports (DIP): the active `StateMachine` is supplied by the
  * interface-adapter layer, not loaded here.
  */
@@ -82,6 +94,7 @@ export class TransferTicketUseCase {
     private readonly policyResolver: ITransitionPolicyResolver,
     private readonly dispatcher: QueueEventDispatcher,
     private readonly clock: () => number = () => Date.now(),
+    private readonly txManager: ITransactionManager = new NoOpTransactionManager(),
   ) {}
 
   public async execute(command: TransferTicketCommand): Promise<TransferTicketResult> {
@@ -106,25 +119,48 @@ export class TransferTicketUseCase {
       throw new EntityNotFoundException('Category', command.targetCategoryId);
     }
 
+    // "Pindah kategori" semantically moves a ticket to a *different* category.
+    // A transfer to the ticket's own current category is a well-formed but
+    // business-illegal argument: it would reserve a fresh per-category number
+    // and re-issue the ticket under the same category — burning a sequence
+    // slot for a no-op move and emitting a TICKET_TRANSFERRED with
+    // fromCategoryId === toCategoryId. Reject it before any sequence is
+    // reserved (NFR-REL-02 — an illegal transfer burns no number).
+    if (command.targetCategoryId === ticket.categoryId) {
+      throw new InvalidArgumentException(
+        'Transfer target category must differ from the ticket current category',
+      );
+    }
+
     const previousCategoryId = ticket.categoryId;
     const previousTicketNumber = ticket.ticketNumber.formatted();
-    const newTicketNumber = await this.sequences.nextTicketNumber(
-      command.targetCategoryId,
-      category.code,
-      command.dateKey,
-    );
 
-    ticket.transferTo(
-      command.targetCategoryId,
-      newTicketNumber,
-      targetStatus,
-      transitionPolicy,
-      this.clock(),
-    );
-    await this.queue.save(ticket);
+    // Reserve the new per-category number + apply the transfer + persist inside
+    // one transaction so a durable implementation commits the sequence
+    // reservation and the ticket update atomically (NFR-REL-02 — a power cut
+    // between the reserve and the save must not gap the target category). The
+    // realtime broadcast is drained *after* the commit so a rolled-back
+    // transfer is never announced.
+    const transferred = await this.txManager.runInTransaction(async () => {
+      const newTicketNumber = await this.sequences.nextTicketNumber(
+        command.targetCategoryId,
+        category.code,
+        command.dateKey,
+      );
+      ticket.transferTo(
+        command.targetCategoryId,
+        newTicketNumber,
+        targetStatus,
+        transitionPolicy,
+        this.clock(),
+      );
+      await this.queue.save(ticket);
+      return ticket;
+    });
+
     // Drain the recorded TicketTransferredEvent + TicketStatusChangedEvent so
     // they broadcast (FR-ENG-04).
-    await this.dispatcher.dispatch(ticket);
+    await this.dispatcher.dispatch(transferred);
 
     return {
       status: 'transferred',

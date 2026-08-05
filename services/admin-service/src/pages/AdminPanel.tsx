@@ -15,6 +15,7 @@ import { DAILY_RESET_MODE_LABELS } from '../lib/labels';
 import { timeToCron, cronToTime } from '../lib/daily-reset';
 import { BROWSER_TIMEZONE, timezoneSelectOptions } from '../lib/timezone';
 import { applyBrandColor } from '../lib/theme';
+import { validateCustomCategories, validateResetTo } from '../lib/categories';
 import { CounterRoutingEditor } from '../components/CounterRoutingEditor';
 
 /**
@@ -169,13 +170,20 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
   // to disable the save button — same single source of truth as the wizard.
   const cronError =
     form.dailyReset.mode === 'AUTOMATIC_CRON' ? validateCronExpression(form.dailyReset.cronExpression) : null;
-  const dailyResetValid = cronError === null;
+  const resetToError = validateResetTo(form.dailyReset.resetTicketNumberTo);
+  const dailyResetValid = cronError === null && resetToError === null;
   // Brand-color validation (QUE-36) — mirrors the wizard step-1 guard so the
   // operational panel cannot save a malformed color either. The error list
   // drives the inline message and disables the save button (single source of
   // truth, same pattern as the cron guard above).
   const brandColorErrors = validateBrandColor(form.brandColor);
   const brandColorValid = brandColorErrors.length === 0;
+  // Category invariants (code `^[A-Z]+$`, non-empty name, no dupes) — mirrors
+  // the wizard step-1 guard via the shared `validateCustomCategories` helper so
+  // the operational panel cannot save a list the backend would 400. Drives the
+  // inline error list and disables the save button.
+  const catErrors = validateCustomCategories(form.categories);
+  const categoriesValid = catErrors.length === 0;
 
   async function save() {
     if (submittingRef.current) return;
@@ -303,6 +311,13 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
       {/* Categories — add / edit / remove (FR-ADM-01). */}
       <section className="config-card">
         <h2 className="config-card__title">Kategori</h2>
+        {catErrors.length > 0 && (
+          <ul className="wizard__errors" id="cat-errors" data-testid="cat-errors">
+            {catErrors.map((msg) => (
+              <li key={msg}>{msg}</li>
+            ))}
+          </ul>
+        )}
         <ul className="entry-list">
           {form.categories.map((cat, i) => (
             <li key={cat.rowKey} className="entry-row">
@@ -472,7 +487,13 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
               })
             }
             required
+            {...describedBy('reset-to-errors', resetToError !== null)}
           />
+          {resetToError !== null && (
+            <ul className="wizard__errors" id="reset-to-errors" data-testid="reset-to-errors">
+              <li>{resetToError}</li>
+            </ul>
+          )}
         </label>
         <label className="field field--inline">
           <input
@@ -595,7 +616,12 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
           type="button"
           className="btn btn--primary"
           onClick={save}
-          disabled={submitting || !dailyResetValid || !brandColorValid}
+          disabled={
+            submitting ||
+            !dailyResetValid ||
+            !brandColorValid ||
+            !categoriesValid
+          }
           data-testid="admin-save"
         >
           {submitting ? 'Menyimpan…' : 'Simpan Konfigurasi'}

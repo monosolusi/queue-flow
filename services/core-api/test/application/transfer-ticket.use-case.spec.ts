@@ -1,6 +1,7 @@
-import { Identifier } from '../../src/domain/shared';
+import { Identifier, NoOpTransactionManager } from '../../src/domain/shared';
 import {
   EntityNotFoundException,
+  InvalidArgumentException,
   InvalidStateTransitionException,
 } from '../../src/domain/shared/errors';
 import {
@@ -215,5 +216,95 @@ describe('TransferTicketUseCase (pindah kategori — FR-CLR-03)', () => {
 
     expect(r1.ticket.ticketNumber).toBe('B-001');
     expect(r2.ticket.ticketNumber).toBe('B-002');
+  });
+
+  it('rejects a transfer to the ticket current category (no-op move) and burns no sequence (NFR-REL-02)', async () => {
+    const catA = await seedCategory(categories, 'A', 'Loket Umum');
+    // A CALLING ticket under CAT-A — but seedCategory mints a fresh UUID, so
+    // reassign the ticket's categoryId to that UUID to simulate "same category".
+    const ticket = QueueTicket.create(
+      ticketIdGenerate(),
+      TicketNumber.of('A', 1),
+      catA.id.value,
+      FIXED_NOW,
+    );
+    ticket.markCalling(1, transferPolicy, FIXED_NOW + 1);
+    await queue.save(ticket);
+
+    await expect(
+      useCase.execute({
+        ticketId: ticket.id,
+        targetCategoryId: catA.id.value,
+        dateKey: DATE_KEY,
+      }),
+    ).rejects.toBeInstanceOf(InvalidArgumentException);
+
+    // No per-category number burned for the no-op move.
+    expect(await sequences.currentSequence(catA.id.value, DATE_KEY)).toBe(0);
+    // The ticket is unchanged.
+    expect(ticket.currentStatus).toBe(TicketStatus.CALLING);
+    expect(ticket.categoryId).toBe(catA.id.value);
+    expect(dispatcher.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('runs sequence reservation + transfer + save inside one transaction and never broadcasts on rollback (NFR-REL-02)', async () => {
+    const catB = await seedCategory(categories, 'B', 'Kasir & Pembayaran');
+    const ticket = callingTicket();
+    await queue.save(ticket);
+
+    const txManager = new NoOpTransactionManager();
+    const txSpy = jest.spyOn(txManager, 'runInTransaction');
+    const txUseCase = new TransferTicketUseCase(
+      queue,
+      categories,
+      sequences,
+      fakePolicyResolver(transferPolicy),
+      dispatcher,
+      clock,
+      txManager,
+    );
+
+    const result = await txUseCase.execute({
+      ticketId: ticket.id,
+      targetCategoryId: catB.id.value,
+      dateKey: DATE_KEY,
+    });
+
+    // The reserve + mutate + save ran inside exactly one tx callback.
+    expect(txSpy).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe('transferred');
+
+    // Now force the tx body to roll back (save throws) and assert the
+    // TICKET_TRANSFERRED / STATUS_UPDATED events are never broadcast — a
+    // rolled-back transfer must not leak to realtime consumers.
+    const rollbackQueue = new InMemoryQueueRepository();
+    const failingTicket = callingTicket();
+    await rollbackQueue.save(failingTicket);
+    const saveSpy = jest.spyOn(rollbackQueue, 'save').mockRejectedValueOnce(
+      new Error('tx rolled back'),
+    );
+    const rollbackUseCase = new TransferTicketUseCase(
+      rollbackQueue,
+      categories,
+      sequences,
+      fakePolicyResolver(transferPolicy),
+      dispatcher,
+      clock,
+      txManager,
+    );
+
+    await expect(
+      rollbackUseCase.execute({
+        ticketId: failingTicket.id,
+        targetCategoryId: catB.id.value,
+        dateKey: DATE_KEY,
+      }),
+    ).rejects.toThrow('tx rolled back');
+
+    // The dispatcher is never reached when the tx body throws (broadcast is
+    // after commit). The single dispatch recorded above belongs to the
+    // successful transfer, not this rollback.
+    expect(dispatcher.dispatch).toHaveBeenCalledTimes(1);
+    expect(saveSpy).toHaveBeenCalledTimes(1);
   });
 });

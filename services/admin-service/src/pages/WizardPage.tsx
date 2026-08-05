@@ -17,6 +17,7 @@ import { validateBrandColor, isValidBrandColor } from '../lib/brand-color';
 import { DAILY_RESET_MODE_LABELS } from '../lib/labels';
 import { timeToCron, cronToTime } from '../lib/daily-reset';
 import { BROWSER_TIMEZONE, timezoneSelectOptions } from '../lib/timezone';
+import { validateCustomCategories, validateResetTo } from '../lib/categories';
 import { RoutingGraph } from '../components/RoutingGraph';
 import { CounterRoutingEditor } from '../components/CounterRoutingEditor';
 
@@ -177,35 +178,6 @@ function defaultCategoriesWithIds(existing: readonly WizardCategoryDto[]): Wizar
     const match = existing.find((c) => c.code === dc.code);
     return match?.id ? { id: match.id, code: dc.code, name: dc.name } : { code: dc.code, name: dc.name };
   });
-}
-
-/**
- * Validate a custom category list, mirroring the backend `Category` value-object
- * invariants (`core-api` `domain/queue/entities/category.ts`) so the wizard
- * never submits a list the backend would reject with a 400: code `^[A-Z]+$`,
- * non-empty name, no duplicate codes. Returns a list of human-readable
- * (Indonesian) error strings; empty means valid. (Default mode is always valid —
- * `DEFAULT_CATEGORIES` satisfies the invariants by construction.)
- */
-function validateCustomCategories(cats: readonly WizardCategoryDto[]): string[] {
-  const errors: string[] = [];
-  // code -> first row it appeared on, so a duplicate points back to the original.
-  const seenCodes = new Map<string, number>();
-  for (let i = 0; i < cats.length; i++) {
-    const c = cats[i];
-    const row = i + 1;
-    if (!c.code || !/^[A-Z]+$/.test(c.code)) {
-      errors.push(`Kategori ${row}: kode harus huruf kapital (A-Z).`);
-    } else if (seenCodes.has(c.code)) {
-      errors.push(`Kategori ${row}: kode '${c.code}' duplikat dengan kategori ${seenCodes.get(c.code)}.`);
-    } else {
-      seenCodes.set(c.code, row);
-    }
-    if (!c.name || !c.name.trim()) errors.push(`Kategori ${row}: nama tidak boleh kosong.`);
-  }
-  // De-duplicate identical messages, but per-row prefixes keep distinct rows
-  // distinguishable (two empty names no longer collapse to one `li`).
-  return [...new Set(errors)];
 }
 
 /** Structural deep-equal against the PRD §7 default graph (prefill mode inference). */
@@ -415,8 +387,12 @@ export function WizardPage({ api }: { api: IAdminApi }) {
     if (!Number.isInteger(n) || n < 1) return ['Jumlah counter aktif minimal 1.'];
     return [];
   }, [form.counterCount]);
+  const storeNameError = form.storeName.trim() ? null : 'Nama toko tidak boleh kosong.';
   const step1Valid =
-    catErrors.length === 0 && brandColorErrors.length === 0 && counterCountErrors.length === 0;
+    storeNameError === null &&
+    catErrors.length === 0 &&
+    brandColorErrors.length === 0 &&
+    counterCountErrors.length === 0;
 
   // Step 2 routing validity (FR-WZD-03): at least one counter must serve at
   // least one category before the manager can advance. An all-empty routing
@@ -459,7 +435,11 @@ export function WizardPage({ api }: { api: IAdminApi }) {
     () => (form.dailyReset.mode === 'AUTOMATIC_CRON' ? validateCronExpression(form.dailyReset.cronExpression) : null),
     [form.dailyReset.mode, form.dailyReset.cronExpression],
   );
-  const step4Valid = cronError === null;
+  const resetToError = useMemo(
+    () => validateResetTo(form.dailyReset.resetTicketNumberTo),
+    [form.dailyReset.resetTicketNumberTo],
+  );
+  const step4Valid = cronError === null && resetToError === null;
 
   const next = () => {
     // Block advancing past step 1 while the custom category list is invalid so
@@ -567,7 +547,13 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                 placeholder="mis. Apotek Sehat Sentosa"
                 required
                 autoFocus
+                {...describedBy('store-name-errors', storeNameError !== null)}
               />
+              {storeNameError !== null && (
+                <ul className="wizard__errors" id="store-name-errors" data-testid="store-name-errors">
+                  <li>{storeNameError}</li>
+                </ul>
+              )}
             </label>
 
             <label className="field">
@@ -980,7 +966,13 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                   setForm({ ...form, dailyReset: { ...form.dailyReset, resetTicketNumberTo: Number(e.target.value) } })
                 }
                 required
+                {...describedBy('reset-to-errors', resetToError !== null)}
               />
+              {resetToError !== null && (
+                <ul className="wizard__errors" id="reset-to-errors" data-testid="reset-to-errors">
+                  <li>{resetToError}</li>
+                </ul>
+              )}
             </label>
             <label className="field field--inline">
               <input

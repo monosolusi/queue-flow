@@ -50,11 +50,18 @@ export class CounterRoutingRule extends AggregateRoot {
     assignedCategoryIds: readonly string[];
     priorityPolicy: PriorityPolicy;
   }): CounterRoutingRule {
+    // Enforce the same invariant as `create` on the reconstitution path so
+    // persisted data corrupted to hold an empty / duplicate / empty-string
+    // category id fails fast at boot (InvalidValueObjectException → 400/500
+    // depending on host) rather than reconstituting an aggregate that violates
+    // the creation invariant. The DB is only ever written via `create`, which
+    // normalizes, so this is a no-op on clean data and a defense-in-depth guard
+    // on corrupt data — mirroring the fail-fast durability ethos (NFR-REL-02).
     return new CounterRoutingRule(
       params.id,
       params.counterId,
       params.counterName,
-      params.assignedCategoryIds,
+      CounterRoutingRule.normalize(params.assignedCategoryIds),
       params.priorityPolicy,
     );
   }

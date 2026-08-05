@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Param, Query } from '@nestjs/common';
 import {
   GetCounterPerformanceUseCase,
   GetDailyReportUseCase,
@@ -6,6 +6,9 @@ import {
   type CounterPerformanceDto,
 } from '../../application/reporting';
 import { toDateKey } from '../../application/shared/date';
+
+/** `YYYY-MM-DD` — the only date shape the reporting read side accepts. */
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Empty daily report shape (no tickets for the date) — the analytics dashboard's zero state. */
 const EMPTY_DAILY = (date: string): DailyReportDto => ({
@@ -48,7 +51,7 @@ export class ReportingController {
 
   @Get('daily')
   async daily(@Query('date') date: string): Promise<DailyReportDto> {
-    const resolved = date?.trim() ? date.trim() : toDateKey(Date.now());
+    const resolved = this.resolveDate(date);
     return (await this.getDailyReport.execute({ date: resolved })) ?? EMPTY_DAILY(resolved);
   }
 
@@ -56,15 +59,32 @@ export class ReportingController {
   async counter(
     @Query('date') date: string,
     // `id` is the counter id path param (integer). Nest injects it as a string;
-    // a non-numeric id is a client error → coerce, the read model validates
-    // `counterId ≥ 1` and throws `InvalidValueObjectException` (→ 400).
+    // validate at the boundary so a malformed id yields 400 (not a 500 from a
+    // NaN reaching the SQL layer).
     @Param('id') id: string,
   ): Promise<CounterPerformanceDto> {
-    const resolved = date?.trim() ? date.trim() : toDateKey(Date.now());
+    const resolved = this.resolveDate(date);
     const counterId = Number(id);
+    if (!Number.isInteger(counterId) || counterId < 1) {
+      throw new BadRequestException('Counter id must be a positive integer');
+    }
     return (
       (await this.getCounterPerformance.execute({ counterId, date: resolved })) ??
       EMPTY_COUNTER(counterId, resolved)
     );
+  }
+
+  /**
+   * Resolves the `?date=` query param: defaults to the store's local today when
+   * omitted/blank, otherwise validates the `YYYY-MM-DD` shape so a malformed
+   * date yields 400 (not a 500 from a `NaN` epoch reaching the SQL layer).
+   */
+  private resolveDate(date: string | undefined): string {
+    const trimmed = date?.trim();
+    if (!trimmed) return toDateKey(Date.now());
+    if (!DATE_RE.test(trimmed)) {
+      throw new BadRequestException('date must be in YYYY-MM-DD format');
+    }
+    return trimmed;
   }
 }

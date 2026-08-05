@@ -273,4 +273,117 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
     const getRes = await request(app.getHttpServer()).get('/api/system/config');
     expect(getRes.body.brandColor).toBe('oklch(0.7 0.15 200)');
   });
+
+  it('PUT with a missing required top-level field is 400, not 500 (boundary presence guard)', async () => {
+    // A missing field dereferences `undefined` in the use case (e.g.
+    // `[...undefined]`, `undefined.trim()`) → a TypeError that is NOT a
+    // DomainError, so DomainExceptionFilter lets it surface as 500. The
+    // controller guards presence at the boundary so it is 400 instead.
+    const { stateMachine: _omit, ...bad } = wizardPayload();
+    const res = await request(app.getHttpServer()).put('/api/system/config').send(bad);
+    expect(res.status).toBe(400);
+
+    // Setup must NOT have silently completed on a rejected payload.
+    const cfg = await request(app.getHttpServer()).get('/api/system/config');
+    expect(cfg.body.isInitialSetupCompleted).toBe(false);
+  });
+
+  it('PUT with a present-but-wrong-type field is 400, not 500 (boundary shape guard)', async () => {
+    // A field that is present but the wrong type (e.g. `stateMachine: "WAITING"`)
+    // passes the presence guard, then reaches the use case where
+    // `[...dto.states]` throws a TypeError (NOT a DomainError) → 500, before
+    // the value object can throw a clean InvalidValueObjectException. The
+    // controller guards top-level shape at the boundary so it is 400 instead.
+    const bad = wizardPayload() as unknown as Record<string, unknown>;
+    bad.stateMachine = 'WAITING'; // string instead of { states, transitions }
+    const res = await request(app.getHttpServer()).put('/api/system/config').send(bad);
+    expect(res.status).toBe(400);
+
+    // Setup must NOT have silently completed on a rejected payload.
+    const cfg = await request(app.getHttpServer()).get('/api/system/config');
+    expect(cfg.body.isInitialSetupCompleted).toBe(false);
+
+    // A non-iterable categories field (number) would also TypeError in
+    // `buildCategories`'s `for...of` — confirm it is 400 too.
+    const bad2 = wizardPayload() as unknown as Record<string, unknown>;
+    bad2.categories = 1;
+    const res2 = await request(app.getHttpServer()).put('/api/system/config').send(bad2);
+    expect(res2.status).toBe(400);
+  });
+
+  it('PUT with a nested-wrong-type field is 400, not 500 (boundary nested-shape guard)', async () => {
+    // A top-level-correct-but-nested-wrong-type payload passes the presence +
+    // top-level shape guards, then reaches the use case where a spread / map /
+    // .trim() on a non-string/non-iterable sub-field throws a TypeError (NOT a
+    // DomainError) → 500, before the value object can throw a clean
+    // InvalidValueObjectException. The controller guards nested shapes at the
+    // boundary so it is 400 instead. Each case below is one that would 500.
+    const cfg0 = await request(app.getHttpServer()).get('/api/system/config');
+    expect(cfg0.body.isInitialSetupCompleted).toBe(false);
+
+    // stateMachine.states non-iterable → `[...5]` TypeError.
+    const badStates = wizardPayload() as unknown as Record<string, unknown>;
+    badStates.stateMachine = { states: 5, transitions: [] };
+    expect(
+      (await request(app.getHttpServer()).put('/api/system/config').send(badStates)).status,
+    ).toBe(400);
+
+    // stateMachine.transitions non-array → `(5).map` TypeError.
+    const badTrans = wizardPayload() as unknown as Record<string, unknown>;
+    badTrans.stateMachine = { states: ['WAITING'], transitions: 5 };
+    expect(
+      (await request(app.getHttpServer()).put('/api/system/config').send(badTrans)).status,
+    ).toBe(400);
+
+    // dailyReset.cronExpression non-string → `(5).trim()` TypeError in
+    // isValidCronExpression (AUTOMATIC_CRON mode).
+    const badCron = wizardPayload() as unknown as Record<string, unknown>;
+    badCron.dailyReset = { mode: 'AUTOMATIC_CRON', cronExpression: 5, resetTicketNumberTo: 1, archivePreviousDayData: true };
+    expect(
+      (await request(app.getHttpServer()).put('/api/system/config').send(badCron)).status,
+    ).toBe(400);
+
+    // routingRules[].assignedCategoryCodes non-array → `(5).map` TypeError.
+    const badCodes = wizardPayload() as unknown as Record<string, unknown>;
+    badCodes.routingRules = [
+      { counterId: 1, counterName: 'Loket 1', assignedCategoryCodes: 5, priorityPolicy: PriorityPolicy.FIFO_GLOBAL },
+    ];
+    expect(
+      (await request(app.getHttpServer()).put('/api/system/config').send(badCodes)).status,
+    ).toBe(400);
+
+    // dailyReset.timezone non-string → `(5).trim()` TypeError in
+    // DailyResetPolicy.of (timezone is optional but a non-string crashes).
+    const badTz = wizardPayload() as unknown as Record<string, unknown>;
+    badTz.dailyReset = { mode: 'AUTOMATIC_CRON', cronExpression: '0 0 * * *', resetTicketNumberTo: 1, archivePreviousDayData: true, timezone: 5 };
+    expect(
+      (await request(app.getHttpServer()).put('/api/system/config').send(badTz)).status,
+    ).toBe(400);
+
+    // categories[].name non-string → `(5).trim()` TypeError in the Category
+    // ctor before it can throw InvalidValueObjectException.
+    const badCatName = wizardPayload() as unknown as Record<string, unknown>;
+    badCatName.categories = [{ code: 'A', name: 5 }];
+    expect(
+      (await request(app.getHttpServer()).put('/api/system/config').send(badCatName)).status,
+    ).toBe(400);
+
+    // categories: [null] → `null.code` TypeError in the use case.
+    const badCatNull = wizardPayload() as unknown as Record<string, unknown>;
+    badCatNull.categories = [null];
+    expect(
+      (await request(app.getHttpServer()).put('/api/system/config').send(badCatNull)).status,
+    ).toBe(400);
+
+    // routingRules: [null] → `null.counterId` TypeError in the use case.
+    const badRuleNull = wizardPayload() as unknown as Record<string, unknown>;
+    badRuleNull.routingRules = [null];
+    expect(
+      (await request(app.getHttpServer()).put('/api/system/config').send(badRuleNull)).status,
+    ).toBe(400);
+
+    // None of the rejected payloads silently completed setup.
+    const cfg = await request(app.getHttpServer()).get('/api/system/config');
+    expect(cfg.body.isInitialSetupCompleted).toBe(false);
+  });
 });

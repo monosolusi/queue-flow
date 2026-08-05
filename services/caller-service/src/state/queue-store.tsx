@@ -54,7 +54,17 @@ const initialState = (counterId: number): QueueState => ({
   stale: false,
 });
 
-const byCreatedAt = (a: TicketStateDto, b: TicketStateDto) =>
+/**
+ * Display-only sort for the `waiting` list. A lexicographic compare on the
+ * zero-padded `A-001` format yields a deterministic category-code-major order
+ * (`A-*` before `B-*`); within a category the zero-padded sequence matches
+ * creation order up to 999 — past 999 (`A-1000` < `A-999` lexicographically)
+ * it can invert, and across categories it is not creation order at all. That
+ * is fine: this is a stable display projection only — the authoritative
+ * next-ticket selection is the backend's `CallNextTicketUseCase`
+ * (FIFO_GLOBAL / CATEGORY_PRIORITY), never this sort.
+ */
+const byTicketNumber = (a: TicketStateDto, b: TicketStateDto) =>
   a.ticketNumber.localeCompare(b.ticketNumber);
 
 /** Builds a reducer bound to a fixed counter + its assigned categories. */
@@ -105,7 +115,7 @@ function projectEvent(state: QueueState, e: QueueLifecycleWireEvent, ctx: QueueC
         status: 'WAITING',
         counterId: null,
       };
-      const waiting = [...state.waiting, ticket].sort(byCreatedAt);
+      const waiting = [...state.waiting, ticket].sort(byTicketNumber);
       return { ...state, waiting, waitingCount: waiting.length };
     }
     case 'TICKET_CALLED': {
@@ -188,7 +198,7 @@ function projectEvent(state: QueueState, e: QueueLifecycleWireEvent, ctx: QueueC
           status: 'WAITING',
           counterId: null,
         };
-        waiting = [...waiting, ticket].sort(byCreatedAt);
+        waiting = [...waiting, ticket].sort(byTicketNumber);
       }
       return { ...state, active, waiting, waitingCount: waiting.length };
     }
@@ -236,12 +246,24 @@ export function QueueStoreProvider({ bound, api, children, socketOptions }: Queu
   const reducer = useMemo(() => makeQueueReducer(ctx), [ctx]);
   const [state, dispatch] = useReducer(reducer, bound.counterId, initialState);
 
+  // Mounted guard so a snapshot fetch resolving after unmount does not dispatch
+  // on a dead reducer — mirrors the TV store's discipline.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const refetch = useMemo(
     () => async () => {
       try {
         const snapshot = await api.getQueueSnapshot(bound.counterId);
+        if (!mountedRef.current) return;
         dispatch({ type: 'SNAPSHOT_LOADED', snapshot });
       } catch (err) {
+        if (!mountedRef.current) return;
         dispatch({ type: 'SNAPSHOT_ERROR', message: err instanceof Error ? err.message : 'Gagal memuat antrian' });
       }
     },

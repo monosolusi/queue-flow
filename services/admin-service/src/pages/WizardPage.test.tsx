@@ -23,8 +23,16 @@ function cleanStore(): SystemConfigurationDto {
   };
 }
 
+/** A clean store with a prefilled `storeName` so tests that only need to walk
+ *  past step 1 don't have to type a name each time (the step-1 guard blocks
+ *  advance while the name is empty). Tests that exercise the name field itself
+ *  (typing flow, empty-name guard) use {@link cleanStore} instead. */
+function prefilledStore(): SystemConfigurationDto {
+  return { ...cleanStore(), storeName: 'Toko Contoh' };
+}
+
 function makeApi(
-  config: SystemConfigurationDto = cleanStore(),
+  config: SystemConfigurationDto = prefilledStore(),
   saveImpl?: (payload: SaveSystemConfigurationPayload) => Promise<{ isInitialSetupCompleted: boolean; storeName: string; brandColor: string }>,
 ) {
   const save = vi.fn(
@@ -73,7 +81,7 @@ async function assignCategoryOnStep2() {
 
 describe('WizardPage (FR-WZD-02..06)', () => {
   it('walks all five steps, renders the review, and saves the configuration on finalize', async () => {
-    const { api, save } = makeApi();
+    const { api, save } = makeApi(cleanStore());
     renderWizard(api);
 
     // Step 1 — store profile + counter count + categories (FR-WZD-02).
@@ -209,7 +217,7 @@ describe('WizardPage (FR-WZD-02..06)', () => {
   });
 
   it('surfaces an error and re-enables finalize when the save fails', async () => {
-    const { api, save } = makeApi(cleanStore(), () =>
+    const { api, save } = makeApi(prefilledStore(), () =>
       Promise.reject(new Error('state machine tidak valid')),
     );
     renderWizard(api);
@@ -234,7 +242,7 @@ describe('WizardPage (FR-WZD-02..06)', () => {
 
   it('infers custom mode when the prefilled graph differs from the PRD default', async () => {
     const customConfig: SystemConfigurationDto = {
-      ...cleanStore(),
+      ...prefilledStore(),
       stateMachine: {
         states: ['WAITING', 'CALLING', 'SERVING', 'PREPARING', 'COMPLETED'],
         transitions: [
@@ -378,7 +386,7 @@ describe('WizardPage (FR-WZD-02..06)', () => {
   });
 
   it('renders a read-only review of the full configuration on step 5 (FR-WZD-06)', async () => {
-    const { api } = makeApi();
+    const { api } = makeApi(cleanStore());
     renderWizard(api);
 
     // Step 1 — store name (default category template prefilled, read-only).
@@ -758,6 +766,22 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     await screen.findByTestId('step-1');
     const storeNameInput = screen.getByPlaceholderText('mis. Apotek Sehat Sentosa');
     expect(storeNameInput).toHaveAttribute('required');
+  });
+
+  it('blocks step-1 advance while the store name is empty and shows an inline error (client-side presence guard)', async () => {
+    // The `required` attribute only fires on native form submit, not on the
+    // Lanjut onClick — so step1Valid gates the button. With an empty name the
+    // button is disabled and an inline error appears; typing a name enables it.
+    const { api } = makeApi(cleanStore());
+    renderWizard(api);
+
+    await screen.findByTestId('step-1');
+    expect(screen.getByTestId('wizard-next')).toBeDisabled();
+    expect(screen.getByTestId('store-name-errors')).toBeInTheDocument();
+
+    await userEvent.type(screen.getByPlaceholderText('mis. Apotek Sehat Sentosa'), 'Toko Sehat');
+    expect(screen.getByTestId('wizard-next')).not.toBeDisabled();
+    expect(screen.queryByTestId('store-name-errors')).not.toBeInTheDocument();
   });
 
   it('marks custom-mode category inputs with aria-required (QUE-41 AC6)', async () => {
