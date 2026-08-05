@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ActionControls } from './ActionControls';
 import type { ICallerApi } from '../api/caller-api';
@@ -55,8 +55,11 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
     render(
       <ActionControls api={api} bound={bound} active={ticket('CALLING')} stateMachine={defaultStateMachine} />,
     );
-    // The primary call-next is always present.
-    expect(screen.getByRole('button', { name: 'Panggil Berikutnya' })).toBeInTheDocument();
+    // The primary call-next is always present (disabled while an unresolved
+    // active ticket occupies the counter — staff must resolve it first).
+    const callNextBtn = screen.getByRole('button', { name: 'Panggil Berikutnya' });
+    expect(callNextBtn).toBeInTheDocument();
+    expect(callNextBtn).toBeDisabled();
     // Edges from CALLING: → SERVING (serve) + → SKIPPED (skip).
     expect(screen.getByTestId('action-serve')).toHaveTextContent('Mulai Melayani');
     expect(screen.getByTestId('action-skip')).toHaveTextContent('Lewati / Absen');
@@ -92,7 +95,10 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
   it('shows only Panggil Berikutnya when there is no active ticket', () => {
     const api = makeApi();
     render(<ActionControls api={api} bound={bound} active={null} stateMachine={defaultStateMachine} />);
-    expect(screen.getByRole('button', { name: 'Panggil Berikutnya' })).toBeInTheDocument();
+    const callNextBtn = screen.getByRole('button', { name: 'Panggil Berikutnya' });
+    expect(callNextBtn).toBeInTheDocument();
+    // No active ticket → call-next is enabled (the counter is free to call).
+    expect(callNextBtn).not.toBeDisabled();
     expect(screen.queryByTestId('action-serve')).not.toBeInTheDocument();
     expect(screen.queryByTestId('action-reannounce')).not.toBeInTheDocument();
   });
@@ -107,18 +113,49 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
   });
 
   it('invokes the right command on tap (call-next uses the bound counter id)', async () => {
+    // call-next is disabled while an unresolved ticket occupies the counter, so
+    // verify it on a separate render with no active ticket.
+    const api = makeApi();
+    render(<ActionControls api={api} bound={bound} active={null} stateMachine={defaultStateMachine} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Panggil Berikutnya' }));
+    expect(api.callNext).toHaveBeenCalledWith(1);
+    // Unmount the first render so the second `screen` queries don't hit a
+    // duplicated "Panggil Berikutnya" button (mirrors the sibling test below).
+    cleanup();
+
+    // The per-edge serve / skip buttons stay enabled on the CALLING-state render.
+    const api2 = makeApi();
+    render(
+      <ActionControls api={api2} bound={bound} active={ticket('CALLING')} stateMachine={defaultStateMachine} />,
+    );
+    await userEvent.click(screen.getByTestId('action-serve'));
+    expect(api2.serve).toHaveBeenCalledWith('t1');
+
+    await userEvent.click(screen.getByTestId('action-skip'));
+    expect(api2.skip).toHaveBeenCalledWith('t1');
+  });
+
+  it('disables Panggil Berikutnya while an active ticket is unresolved (CALLING / SERVING)', async () => {
+    // CALLING: ticket at the counter, not yet served / skipped.
     const api = makeApi();
     render(
       <ActionControls api={api} bound={bound} active={ticket('CALLING')} stateMachine={defaultStateMachine} />,
     );
-    await userEvent.click(screen.getByRole('button', { name: 'Panggil Berikutnya' }));
-    expect(api.callNext).toHaveBeenCalledWith(1);
+    const callNextCalling = screen.getByRole('button', { name: 'Panggil Berikutnya' });
+    expect(callNextCalling).toBeDisabled();
+    await userEvent.click(callNextCalling);
+    expect(api.callNext).not.toHaveBeenCalled();
 
-    await userEvent.click(screen.getByTestId('action-serve'));
-    expect(api.serve).toHaveBeenCalledWith('t1');
-
-    await userEvent.click(screen.getByTestId('action-skip'));
-    expect(api.skip).toHaveBeenCalledWith('t1');
+    // SERVING: ticket still in-progress; call-next must stay locked until completed.
+    cleanup();
+    const api2 = makeApi();
+    render(
+      <ActionControls api={api2} bound={bound} active={ticket('SERVING')} stateMachine={defaultStateMachine} />,
+    );
+    const callNextServing = screen.getByRole('button', { name: 'Panggil Berikutnya' });
+    expect(callNextServing).toBeDisabled();
+    await userEvent.click(callNextServing);
+    expect(api2.callNext).not.toHaveBeenCalled();
   });
 
   it('invokes transfer with a target category differing from the active ticket category', async () => {
