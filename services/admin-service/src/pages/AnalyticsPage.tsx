@@ -3,32 +3,17 @@ import { Link } from 'react-router-dom';
 import type { IAdminApi } from '../api/admin-api';
 import type {
   AuditLogEntryDto,
-  CounterPerformanceDto,
   DailyReportDto,
 } from '../api/types';
 import { exportDailyReport } from '../lib/export-daily-report';
 import { formatSeconds } from '../lib/format';
 import { RecapCharts } from '../components/RecapCharts';
-
-/** A counter row in the performance table (the routing-rule display name + its read). */
-interface CounterRow {
-  readonly counterId: number;
-  readonly counterName: string;
-  readonly perf: CounterPerformanceDto;
-}
-
-/** The fully-loaded analytics view for one date. */
-interface AnalyticsData {
-  readonly date: string;
-  readonly report: DailyReportDto;
-  readonly counters: readonly CounterRow[];
-  readonly audit: readonly AuditLogEntryDto[];
-}
+import { isOverviewEmpty, loadDailyOverview, type OverviewData } from '../lib/analytics-loader';
 
 type ViewState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
-  | { status: 'ready'; data: AnalyticsData }
+  | { status: 'ready'; data: OverviewData }
   | { status: 'empty'; date: string };
 
 /** The seam the page uses to write the .xlsx export. Injected so tests can
@@ -82,14 +67,10 @@ export function AnalyticsPage({
   useEffect(() => {
     let cancelled = false;
     setState({ status: 'loading' });
-    load(api, date)
+    loadDailyOverview(api, date)
       .then((data) => {
         if (cancelled) return;
-        const isEmpty =
-          data.report.totalTickets === 0 &&
-          data.audit.length === 0 &&
-          data.counters.every((c) => c.perf.ticketsServed === 0);
-        setState(isEmpty ? { status: 'empty', date } : { status: 'ready', data });
+        setState(isOverviewEmpty(data) ? { status: 'empty', date } : { status: 'ready', data });
       })
       .catch((err) => {
         if (!cancelled) {
@@ -120,7 +101,7 @@ export function AnalyticsPage({
       <div className="analytics">
         <p className="admin-panel__error">Gagal memuat analitik: {state.message}</p>
         <Link className="btn btn--primary" to="/">
-          Kembali ke Admin
+          Kembali ke Dashboard
         </Link>
       </div>
     );
@@ -310,35 +291,7 @@ function AnalyticsHeader({
         >
           {exporting ? 'Mengekspor…' : 'Ekspor .xlsx'}
         </button>
-        <Link className="btn btn--secondary" to="/">
-          Admin
-        </Link>
       </div>
     </header>
   );
-}
-
-/**
- * Loads the full analytics view for one date: the daily report, the audit trail,
- * and per-counter performance (counters enumerated from the config's routing
- * rules). The config read is needed only to label counters by name; if it fails
- * the whole load fails (no partial view) — the dashboard is read-only, so a
- * transient error is preferable to silently dropping a section.
- */
-async function load(api: IAdminApi, date: string): Promise<AnalyticsData> {
-  const [report, config, audit] = await Promise.all([
-    api.getDailyReport(date),
-    api.getSystemConfig(),
-    api.getAuditLog(),
-  ]);
-  const counters: CounterRow[] = await Promise.all(
-    config.routingRules.map((r) =>
-      api.getCounterPerformance(r.counterId, date).then((perf) => ({
-        counterId: r.counterId,
-        counterName: r.counterName,
-        perf,
-      })),
-    ),
-  );
-  return { date, report, counters, audit };
 }

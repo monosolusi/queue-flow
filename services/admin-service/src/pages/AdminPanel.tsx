@@ -291,14 +291,6 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
           <h1 className="admin-panel__title">{form.storeName || 'QMS Admin'}</h1>
           <p className="admin-panel__subtitle">Konfigurasi Operasional</p>
         </div>
-        <div className="admin-panel__nav">
-          <Link className="btn btn--secondary" to="/analytics">
-            Analitik
-          </Link>
-          <Link className="btn btn--secondary" to="/wizard">
-            Ubah Konfigurasi (Wizard)
-          </Link>
-        </div>
       </header>
 
       {savedAt && !saveError && (

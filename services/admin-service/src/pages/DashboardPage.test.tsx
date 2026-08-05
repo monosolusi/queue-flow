@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { AnalyticsPage, type DailyReportExporter } from './AnalyticsPage';
+import { DashboardPage } from './DashboardPage';
 import type { IAdminApi } from '../api/admin-api';
 import type {
   AuditLogEntryDto,
@@ -11,7 +11,7 @@ import type {
 } from '../api/types';
 import { DEFAULT_STATE_MACHINE, DEFAULT_BRAND_COLOR } from '../api/types';
 
-/** A configured store with two categories + two counters (mirrors AdminPanel fixtures). */
+/** A configured store with two categories + two counters (mirrors AnalyticsPage fixtures). */
 function configuredStore(): SystemConfigurationDto {
   return {
     isInitialSetupCompleted: true,
@@ -113,62 +113,70 @@ function makeApi(
   return { api, stubs: { getDailyReport, getCounterPerformance, getAuditLog } };
 }
 
-function renderPage(api: IAdminApi, exporter?: DailyReportExporter) {
+function renderPage(api: IAdminApi) {
   return render(
     <MemoryRouter>
-      <AnalyticsPage api={api} exporter={exporter ?? (async () => {})} />
+      <DashboardPage api={api} />
     </MemoryRouter>,
   );
 }
 
-describe('AnalyticsPage (FR-ADM-03 / QUE-26)', () => {
-  it('shows a loading state, then renders the daily metrics, per-category + counter tables, and the audit trail', async () => {
+describe('DashboardPage', () => {
+  it('shows a loading state, then renders the 4 KPI tiles', async () => {
     const { api } = makeApi();
     renderPage(api);
 
-    expect(screen.getByText('Memuat analitik…')).toBeInTheDocument();
-    // Metrics render (totals + averages formatted as seconds).
-    expect(await screen.findByTestId('metric-total')).toHaveTextContent('4');
-    expect(screen.getByTestId('metric-wait')).toHaveTextContent('12.0 s');
-    expect(screen.getByTestId('metric-service')).toHaveTextContent('30.0 s');
-    // Per-category rows — the breakdown carries the category code, not the name.
-    // Scoped to the "Per kategori" region so the recap-chart code labels (also A/B)
-    // don't make `getByText` match multiple nodes.
-    const perCategory = screen.getByRole('region', { name: 'Per kategori' });
-    expect(within(perCategory).getByText('A')).toBeInTheDocument();
-    expect(within(perCategory).getByText('B')).toBeInTheDocument();
-    // Counter performance rows are labelled by name + #id.
-    expect(screen.getByText(/Counter 1 \(#1\)/)).toBeInTheDocument();
-    expect(screen.getByText(/Counter 2 \(#2\)/)).toBeInTheDocument();
-    // Audit trail rows — the action strings render.
-    expect(screen.getByText('MANUAL_RESET')).toBeInTheDocument();
-    expect(screen.getByText('STATE_SCHEMA_CHANGE')).toBeInTheDocument();
+    expect(screen.getByText('Memuat dashboard…')).toBeInTheDocument();
+    expect(await screen.findByTestId('kpi-total')).toHaveTextContent('4');
+    expect(screen.getByTestId('kpi-wait')).toHaveTextContent('12.0 s');
+    expect(screen.getByTestId('kpi-service')).toHaveTextContent('30.0 s');
+    // counters: counter 1 served 2, counter 2 served 1 → 3.
+    expect(screen.getByTestId('kpi-served')).toHaveTextContent('3');
   });
 
-  it('renders a per-category bar chart for each FR-ADM-03 metric (Total/Wait/Service)', async () => {
+  it('renders the four charts with their per-mark testids', async () => {
     const { api } = makeApi();
     renderPage(api);
 
-    // The recap section renders one bar per category per metric (3 metrics x 2
-    // categories = 6 bars). Each bar carries its metric + category code in the
-    // testid so the chart is assertable without SheetJS or a pixel diff.
-    await screen.findByTestId('recap-charts');
-    for (const metric of ['total', 'wait', 'service'] as const) {
-      expect(screen.getByTestId(`recap-bar-${metric}-A`)).toBeInTheDocument();
-      expect(screen.getByTestId(`recap-bar-${metric}-B`)).toBeInTheDocument();
-    }
-    // The accessible summary carries the formatted values, so a chart that
-    // rendered six zero-width bars for any input would fail this — it verifies
-    // the value-formatting wiring (count vs `formatSeconds`) without a pixel diff.
+    await screen.findByTestId('kpi-total');
+    // Chart 1 — total tiket per kategori (one bar per category code).
+    expect(screen.getByTestId('dashboard-bar-cat-A')).toBeInTheDocument();
+    expect(screen.getByTestId('dashboard-bar-cat-B')).toBeInTheDocument();
+    // Chart 2 — tiket dilayani per counter (testid keyed by counterId).
+    expect(screen.getByTestId('dashboard-bar-counter-1')).toBeInTheDocument();
+    expect(screen.getByTestId('dashboard-bar-counter-2')).toBeInTheDocument();
+    // Chart 3 — donut slices (one circle per category).
+    expect(screen.getByTestId('dashboard-donut-A')).toBeInTheDocument();
+    expect(screen.getByTestId('dashboard-donut-B')).toBeInTheDocument();
+    // Chart 4 — paired wait + service bars per category.
+    expect(screen.getByTestId('dashboard-bar-wait-A')).toBeInTheDocument();
+    expect(screen.getByTestId('dashboard-bar-service-A')).toBeInTheDocument();
+    expect(screen.getByTestId('dashboard-bar-wait-B')).toBeInTheDocument();
+    expect(screen.getByTestId('dashboard-bar-service-B')).toBeInTheDocument();
+  });
+
+  it('renders the donut accessible summary with formatted percentages', async () => {
+    const { api } = makeApi();
+    renderPage(api);
+    await screen.findByTestId('kpi-total');
     expect(
-      screen.getByRole('img', { name: /Total Pengunjung per kategori: A 3, B 1/ }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('img', { name: /Rata-rata Waktu Tunggu per kategori: A 10\.0 s, B 2\.0 s/ }),
+      screen.getByRole('img', { name: /Distribusi kategori: A 3 \(75%\), B 1 \(25%\)/ }),
     ).toBeInTheDocument();
   });
 
-  it('renders the empty state when there is no data for the date and disables export', async () => {
+  it('renders recent activity (last 5 audit entries, most-recent-first)', async () => {
+    const { api } = makeApi();
+    renderPage(api);
+    await screen.findByTestId('kpi-total');
+    // The most-recent entry (STATE_SCHEMA_CHANGE) renders first.
+    // The donut legend also uses <li>; scope to the activity list instead.
+    const activity = screen.getByRole('region', { name: 'Aktivitas terbaru' });
+    const rows = within(activity).getAllByRole('listitem');
+    expect(rows[0]).toHaveTextContent('STATE_SCHEMA_CHANGE');
+    expect(rows[1]).toHaveTextContent('MANUAL_RESET');
+  });
+
+  it('renders the empty state when there is no data for the date', async () => {
     const { api } = makeApi({
       daily: emptyDailyReport,
       counter: (_id, date) => counterPerf(_id, date, 0, 0),
@@ -176,54 +184,63 @@ describe('AnalyticsPage (FR-ADM-03 / QUE-26)', () => {
     });
     renderPage(api);
 
-    expect(await screen.findByTestId('analytics-empty')).toBeInTheDocument();
-    expect(screen.getByTestId('analytics-export')).toBeDisabled();
-    // No recap charts in the empty state (the page short-circuits before them).
-    expect(screen.queryByTestId('recap-charts')).not.toBeInTheDocument();
+    expect(await screen.findByTestId('dashboard-empty')).toBeInTheDocument();
+    // No KPI tiles in the empty state (the page short-circuits before them).
+    expect(screen.queryByTestId('kpi-total')).not.toBeInTheDocument();
   });
 
-  it('surfaces an error and a back-to-admin link when the load fails', async () => {
+  it('surfaces an error message when the load fails (no misleading wizard CTA)', async () => {
     const { api } = makeApi();
-    // Force the daily report read to fail.
     api.getDailyReport = vi.fn(() => Promise.reject(new Error('core-api down')));
     renderPage(api);
 
-    expect(await screen.findByText(/Gagal memuat analitik: core-api down/i)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Kembali ke Dashboard' })).toBeInTheDocument();
+    expect(await screen.findByTestId('dashboard-error')).toHaveTextContent(
+      /Gagal memuat dashboard: core-api down/i,
+    );
+    // SetupGuard already guarantees setup is complete, so the error path must
+    // not offer a first-run wizard CTA (wrong recovery for a transient outage).
+    expect(screen.queryByRole('link', { name: /Buka Wizard/i })).not.toBeInTheDocument();
   });
 
-  it('invokes the exporter with the loaded report, audit trail, and a date-stamped file name', async () => {
+  it('renders the page <h1> on the loading and error states (page owns the h1)', async () => {
+    // The AppShell topbar title is a non-heading <span>, so the routed page must
+    // provide the <h1> on EVERY view — including loading/error — or a screen-reader
+    // user navigating by headings finds no top-level heading (arch-review finding).
     const { api } = makeApi();
-    const exporter = vi.fn();
-    renderPage(api, exporter);
+    api.getDailyReport = vi.fn(() => Promise.reject(new Error('core-api down')));
+    renderPage(api);
 
-    await screen.findByTestId('metric-total');
-    fireEvent.click(screen.getByTestId('analytics-export'));
-
-    await waitFor(() => expect(exporter).toHaveBeenCalledTimes(1));
-    const [report, audit, fileName] = exporter.mock.calls[0];
-    expect(report.totalTickets).toBe(4);
-    expect(audit).toHaveLength(2);
-    expect(fileName).toMatch(/^qms-report-\d{4}-\d{2}-\d{2}\.xlsx$/);
+    // Loading state renders the h1 immediately (the header is synchronous; the
+    // status message settles async).
+    expect(screen.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeInTheDocument();
+    // Error state still renders the h1 alongside the error message.
+    await screen.findByTestId('dashboard-error');
+    expect(screen.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeInTheDocument();
   });
 
   it('reloads when the date changes', async () => {
     const { api, stubs } = makeApi();
     renderPage(api);
-    await screen.findByTestId('metric-total');
+    await screen.findByTestId('kpi-total');
     expect(stubs.getDailyReport).toHaveBeenLastCalledWith(expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/));
 
-    // Change the date — the report read is called again with the new key.
-    fireEvent.change(screen.getByTestId('analytics-date'), { target: { value: '2026-07-31' } });
+    fireEvent.change(screen.getByTestId('dashboard-date'), { target: { value: '2026-07-31' } });
     await waitFor(() => expect(stubs.getDailyReport).toHaveBeenLastCalledWith('2026-07-31'));
   });
 
   it('requests per-counter performance for every configured counter', async () => {
     const { api, stubs } = makeApi();
     renderPage(api);
-    await screen.findByTestId('metric-total');
+    await screen.findByTestId('kpi-total');
 
     expect(stubs.getCounterPerformance).toHaveBeenCalledWith(1, expect.any(String));
     expect(stubs.getCounterPerformance).toHaveBeenCalledWith(2, expect.any(String));
+  });
+
+  it('renders the analytics link in the header', async () => {
+    const { api } = makeApi();
+    renderPage(api);
+    await screen.findByTestId('kpi-total');
+    expect(screen.getByRole('link', { name: 'Lihat analitik lengkap' })).toHaveAttribute('href', '/analytics');
   });
 });

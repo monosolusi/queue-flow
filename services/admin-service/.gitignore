@@ -14,6 +14,13 @@ vite.config.js
 vite.config.d.ts
 *.tsbuildinfo
 
+# Stray tsc emission into src/ (tsconfig has noEmit:true, so a correct `tsc -b`
+# won't produce these — but a plain `tsc` / IDE compile can). Vite's default
+# resolve.extensions prefers .js over .tsx, so a stale src/*.js would shadow the
+# real .tsx source and silently break tests. Keep them out of the tree.
+src/**/*.js
+src/**/*.js.map
+
 # Logs & OS
 *.log
 .DS_Store
