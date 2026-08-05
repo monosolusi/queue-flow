@@ -17,12 +17,14 @@ export interface CategoryDto {
 }
 
 /**
- * A single WAITING ticket row in the global waiting queue, returned by
- * `GET /api/queue/waiting`. Mirrors core-api's `TicketStateDto` shape (the
+ * A single ticket row in the TV board state read, returned by
+ * `GET /api/queue/board`. Mirrors core-api's `TicketStateDto` shape (the
  * shared ticket→DTO projection) so the TV renders the same fields the caller
- * workspace sees, without leaking caller/admin/reporting DTOs (ISP).
+ * workspace sees, without leaking caller/admin/reporting DTOs (ISP). The same
+ * row shape serves both the `active` (CALLING/SERVING, `counterId` non-null)
+ * and `waiting` (WAITING, `counterId` null) slices.
  */
-export interface WaitingTicketDto {
+export interface TvTicketDto {
   readonly ticketId: string;
   readonly ticketNumber: string;
   readonly categoryId: string;
@@ -31,13 +33,17 @@ export interface WaitingTicketDto {
 }
 
 /**
- * Read model returned by `GET /api/queue/waiting`: every WAITING ticket across
- * all categories, oldest first (FIFO by `createdAt`). The server owns this read
- * model — the TV fetches it on boot and refetches after every lifecycle event
- * (it does not project waiting state from events).
+ * Read model returned by `GET /api/queue/board`: every active (CALLING/SERVING)
+ * ticket across all counters (ordered by `updatedAt` asc — the last is the
+ * most-recently-touched, which the TV projects to `nowServing`) plus every
+ * WAITING ticket across all categories, oldest first (FIFO by `createdAt`).
+ * The server owns this read model — the TV fetches it on boot and refetches
+ * after every lifecycle event (it does not project waiting state from events,
+ * and `nowServing` is restored from the `active` slice on boot/refresh).
  */
-export interface WaitingQueueDto {
-  readonly waiting: readonly WaitingTicketDto[];
+export interface TvBoardStateDto {
+  readonly active: readonly TvTicketDto[];
+  readonly waiting: readonly TvTicketDto[];
   readonly waitingCount: number;
 }
 

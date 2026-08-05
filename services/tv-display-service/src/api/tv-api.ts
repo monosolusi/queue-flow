@@ -1,17 +1,17 @@
-import type { CategoryDto, SystemConfigurationDto, WaitingQueueDto } from './types';
+import type { CategoryDto, SystemConfigurationDto, TvBoardStateDto } from './types';
 
 /**
  * The slice of core-api the TV board consumes (ISP — only the store profile
- * for the running-text idle marquee, the category master data, and the global
- * waiting-queue read; never leaks caller/admin/reporting DTOs). Implementations
- * live behind this interface so tests can substitute a fake without touching the
- * network.
+ * for the running-text idle marquee, the category master data, and the TV
+ * board state read (active + waiting); never leaks caller/admin/reporting
+ * DTOs). Implementations live behind this interface so tests can substitute a
+ * fake without touching the network.
  */
 export interface ITvApi {
   getSystemConfig(): Promise<SystemConfigurationDto>;
   getCategories(): Promise<CategoryDto[]>;
-  /** Every WAITING ticket across all categories, oldest first. */
-  getWaitingQueue(): Promise<WaitingQueueDto>;
+  /** The TV board state: active (CALLING/SERVING) + waiting tickets. */
+  getBoardState(): Promise<TvBoardStateDto>;
 }
 
 const API_BASE = '/api';
@@ -43,7 +43,7 @@ export class TvApi implements ITvApi {
   getCategories(): Promise<CategoryDto[]> {
     return getJson<CategoryDto[]>('/categories');
   }
-  getWaitingQueue(): Promise<WaitingQueueDto> {
-    return getJson<WaitingQueueDto>('/queue/waiting');
+  getBoardState(): Promise<TvBoardStateDto> {
+    return getJson<TvBoardStateDto>('/queue/board');
   }
 }

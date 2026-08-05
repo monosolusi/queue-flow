@@ -28,7 +28,7 @@ const VISIBLE_LIMIT = 10;
  * `nowServing` the way the now-serving assertive region is (a minor a11y
  * nuance: some AT may announce the list once on the idle→active transition).
  *
- * The waiting list is sourced from the server's `GET /api/queue/waiting` read
+ * The waiting list is sourced from the server's `GET /api/queue/board` read
  * model (the store refetches it after every lifecycle event); this component
  * never projects waiting state from events (SRP — the server owns the read
  * model).

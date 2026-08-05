@@ -186,16 +186,24 @@ describe('Read-only REST surface (integration — QUE-19 + QUE-17)', () => {
     expect(res.body.code).toBe('ENTITY_NOT_FOUND');
   });
 
-  it('GET /api/queue/waiting returns every WAITING ticket across all categories oldest first', async () => {
+  it('GET /api/queue/board returns every active ticket + every WAITING ticket across all categories', async () => {
     // The beforeEach seed created A-001 (100) and A-002 (200) WAITING plus A-003 CALLING.
     // Add a WAITING CAT-B ticket older than both to assert cross-category FIFO.
     await queue.save(
       QueueTicket.create(ticketIdGenerate(), TicketNumber.of('B', 1), catBId, 50),
     );
 
-    const res = await request(app.getHttpServer()).get('/api/queue/waiting');
+    const res = await request(app.getHttpServer()).get('/api/queue/board');
 
     expect(res.status).toBe(200);
+    // The active slice carries the seeded CALLING ticket (A-003 at counter 1).
+    expect(res.body.active).toHaveLength(1);
+    expect(res.body.active[0]).toMatchObject({
+      ticketNumber: 'A-003',
+      status: 'CALLING',
+      counterId: 1,
+    });
+    // The waiting slice is cross-category FIFO by createdAt.
     expect(res.body.waiting.map((t: { ticketNumber: string }) => t.ticketNumber)).toEqual([
       'B-001',
       'A-001',
@@ -211,27 +219,27 @@ describe('Read-only REST surface (integration — QUE-19 + QUE-17)', () => {
     });
   });
 
-  it('GET /api/queue/waiting returns an empty zero-state when no tickets are WAITING', async () => {
+  it('GET /api/queue/board returns an empty zero-state when no tickets are WAITING/active', async () => {
     (queue as InMemoryQueueRepository).clear();
-    // Re-seed only a CALLING ticket so the store is non-empty but no WAITING rows.
+    // Re-seed only a COMPLETED ticket so the store is non-empty but no active/waiting rows.
     await queue.save(
       QueueTicket.reconstitute({
         id: ticketIdGenerate(),
         ticketNumber: TicketNumber.of('A', 1),
         categoryId: catAId,
-        status: 'CALLING',
+        status: 'COMPLETED',
         counterId: 1,
         createdAt: 10,
-        updatedAt: 10,
+        updatedAt: 20,
         calledAt: 10,
-        servedAt: null,
-        completedAt: null,
+        servedAt: 15,
+        completedAt: 20,
       }),
     );
 
-    const res = await request(app.getHttpServer()).get('/api/queue/waiting');
+    const res = await request(app.getHttpServer()).get('/api/queue/board');
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ waiting: [], waitingCount: 0 });
+    expect(res.body).toEqual({ active: [], waiting: [], waitingCount: 0 });
   });
 });

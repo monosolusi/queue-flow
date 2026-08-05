@@ -57,6 +57,16 @@ export interface IQueueRepository {
    */
   findAllWaiting(): Promise<QueueTicket[]>;
   /**
+   * Every CALLING/SERVING ticket across all counters, ordered by `updatedAt`
+   * asc (most-recently-touched last). The category-agnostic counterpart to
+   * {@link findActiveByCounter} (mirrors how {@link findAllWaiting} is the
+   * category-agnostic counterpart to {@link findWaitingByCategories}); used by
+   * the TV board (no bound counter) to restore the now-serving ticket on
+   * refresh. The write-side port already carries read methods so no new ISP
+   * split is warranted (mirrors the existing pattern).
+   */
+  findAllActive(): Promise<QueueTicket[]>;
+  /**
    * Count of tickets currently WAITING in `categoryId` (FR-KSK-03 — the kiosk
    * receipt prints the visitor's queue position). A dedicated COUNT read is
    * cheaper than loading aggregates via {@link findWaitingByCategory} and keeps

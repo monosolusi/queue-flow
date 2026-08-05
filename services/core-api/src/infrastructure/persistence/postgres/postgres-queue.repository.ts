@@ -128,6 +128,22 @@ export class PostgresQueueRepository implements IQueueRepository, ITicketArchive
     });
   }
 
+  async findAllActive(): Promise<QueueTicket[]> {
+    // Category-agnostic counterpart to findActiveByCounter (no counterId
+    // filter): every CALLING/SERVING ticket across all counters, ordered by
+    // updated_at asc so the most-recently-touched active ticket is last. Used
+    // by the TV board (no bound counter) to restore nowServing on refresh.
+    return withDbClient(this.pool, async (client) => {
+      const { rows } = await client.query<TicketRow>(
+        `SELECT * FROM tickets
+         WHERE status IN ($1, $2)
+         ORDER BY updated_at ASC`,
+        [TicketStatus.CALLING, TicketStatus.SERVING],
+      );
+      return rows.map(toTicket);
+    });
+  }
+
   async findNextWaiting(query: NextTicketQuery): Promise<QueueTicket | null> {
     return withDbClient(this.pool, async (client) => {
       const cats = Array.from(query.assignedCategoryIds);

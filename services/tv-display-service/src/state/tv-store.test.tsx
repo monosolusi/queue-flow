@@ -6,7 +6,7 @@ import { TvStoreProvider } from './tv-store';
 import { TvBoardPage } from '../pages/TvBoardPage';
 import type { ITvApi } from '../api/tv-api';
 import type { AudioProvider } from '../audio/audio-provider';
-import type { QueueLifecycleWireEvent, WaitingQueueDto } from '../api/types';
+import type { QueueLifecycleWireEvent, TvTicketDto } from '../api/types';
 
 /** Fake WebSocket whose instances the test can reach to deliver frames. */
 class FakeWebSocket {
@@ -30,7 +30,11 @@ class FakeWebSocket {
   }
 }
 
-function makeApi(brandColor = '', waiting: WaitingQueueDto['waiting'] = []): ITvApi {
+function makeApi(
+  brandColor = '',
+  waiting: TvTicketDto[] = [],
+  active: TvTicketDto[] = [],
+): ITvApi {
   return {
     getSystemConfig: vi.fn(() =>
       Promise.resolve({ isInitialSetupCompleted: true, storeName: 'Apotek Sehat', brandColor }),
@@ -41,8 +45,8 @@ function makeApi(brandColor = '', waiting: WaitingQueueDto['waiting'] = []): ITv
         { id: 'cat-b', code: 'B', name: 'Kasir' },
       ]),
     ),
-    getWaitingQueue: vi.fn(() =>
-      Promise.resolve({ waiting, waitingCount: waiting.length }),
+    getBoardState: vi.fn(() =>
+      Promise.resolve({ active, waiting, waitingCount: waiting.length }),
     ),
   };
 }
@@ -105,11 +109,21 @@ describe('TvStoreProvider realtime projection + audio (FR-TV-01/02)', () => {
     const audio = makeAudio();
     renderBoard(api, audio);
 
-    // Boot: store name + categories loaded.
-
+    // Boot: store name + categories + board state loaded. Awaiting the boot
+    // BOARD_LOADED flush is load-bearing here — without it the boot
+    // getBoardState() microtask resolves AFTER the TICKET_CALLED dispatch
+    // below and its BOARD_LOADED (mock active=[]) wipes the event-projected
+    // nowServing before findByText polls. The async act on `ws.onopen` is
+    // also load-bearing: onopen triggers a reconnect refetch via onStatus,
+    // whose .then() microtask would otherwise drain at the findByText await
+    // AFTER the event dispatch and wipe nowServing (mock active=[]). Async
+    // act drains that microtask first.
     const ws = FakeWebSocket.instances[0];
     expect(ws).toBeDefined();
-    act(() => ws.onopen?.(new Event('open')));
+    await screen.findByText('Apotek Sehat');
+    await act(async () => {
+      ws.onopen?.(new Event('open'));
+    });
 
     // A call arrives → now-serving shows the number + counter, and the audio
     // sequencer is driven with the announcement fragments (FR-TV-02).
@@ -376,8 +390,8 @@ describe('TvBoardPage idle/active switching (FR-TV-03)', () => {
   });
 });
 
-describe('Waiting queue refetch (server owns the read model)', () => {
-  it('boot dispatches WAITING_LOADED with the fetched waiting list', async () => {
+describe('TV board state refetch (server owns the read model)', () => {
+  it('boot dispatches BOARD_LOADED with the fetched waiting list', async () => {
     const waiting = [
       { ticketId: 't1', ticketNumber: 'B-001', categoryId: 'cat-b', status: 'WAITING', counterId: null },
       { ticketId: 't2', ticketNumber: 'A-002', categoryId: 'cat-a', status: 'WAITING', counterId: null },
@@ -395,16 +409,129 @@ describe('Waiting queue refetch (server owns the read model)', () => {
     expect(await screen.findAllByText('B-001')).toHaveLength(2);
     expect(screen.getAllByText('A-002')).toHaveLength(2);
     expect(screen.getAllByText(/Menunggu: 2 tiket/)).toHaveLength(2);
-    expect(api.getWaitingQueue).toHaveBeenCalledTimes(1);
+    expect(api.getBoardState).toHaveBeenCalledTimes(1);
   });
 
-  it('a waiting-fetch failure degrades gracefully — board still boots, waiting stays []', async () => {
+  it('boot restores nowServing from the active slice (refresh shows the current antrian)', async () => {
+    // The bug: a TV board refresh left nowServing null because no TICKET_CALLED
+    // event had fired. The server-sourced active slice restores it.
+    const active = [
+      { ticketId: 't1', ticketNumber: 'A-005', categoryId: 'cat-a', status: 'CALLING', counterId: 2 },
+    ];
+    const api = makeApi('', [], active);
+    const audio = makeAudio();
+    renderBoard(api, audio);
+
+    // The now-serving hero shows the restored ticket + counter — the active
+    // board layer is visible (not the standby). The active layer's now-serving
+    // card renders the ticket number; assert it appears (the standby layer is
+    // hidden via the --hidden modifier and does not render a now-serving hero).
+    expect(await screen.findByText('A-005')).toBeInTheDocument();
+    expect(screen.getByText('Counter 2')).toBeInTheDocument();
+    // The active board layer is visible (not hidden) — nowServing is non-null.
+    expect(screen.getByTestId('board-active')).not.toHaveClass('tv-board__active--hidden');
+    expect(screen.getByTestId('standby')).toHaveClass('standby--hidden');
+    expect(api.getBoardState).toHaveBeenCalledTimes(1);
+  });
+
+  it('boot leaves nowServing null when the active slice is empty (standby)', async () => {
+    const api = makeApi('', [], []);
+    const audio = makeAudio();
+    renderBoard(api, audio);
+
+    // No active ticket → the standby panel is visible.
+    expect(await screen.findByTestId('standby')).toBeInTheDocument();
+    expect(screen.getByTestId('board-active')).toHaveClass('tv-board__active--hidden');
+  });
+
+  it('restores the most-recently-touched active ticket (last in the active slice)', async () => {
+    // findAllActive orders by updatedAt asc; the last is the most-recently-
+    // touched. The TV projects that one to nowServing.
+    const active = [
+      { ticketId: 't-old', ticketNumber: 'A-001', categoryId: 'cat-a', status: 'SERVING', counterId: 1 },
+      { ticketId: 't-new', ticketNumber: 'B-007', categoryId: 'cat-b', status: 'CALLING', counterId: 2 },
+    ];
+    const api = makeApi('', [], active);
+    const audio = makeAudio();
+    renderBoard(api, audio);
+
+    // The newer call (B-007 at counter 2) wins as nowServing.
+    expect(await screen.findByText('B-007')).toBeInTheDocument();
+    expect(screen.getByText('Counter 2')).toBeInTheDocument();
+  });
+
+  it('BOARD_LOADED dedupes history against the restored nowServing', async () => {
+    // Seed: boot with no active ticket (standby). Fire a TICKET_CALLED so a
+    // ticket enters nowServing, then fire a second call that pushes the first
+    // into history, then complete the second call (nowServing clears, history
+    // retains it), then trigger a refetch whose active slice restores the
+    // first ticket as nowServing — it must be removed from history (no
+    // double-appearance).
+    const api = makeApi('', []);
+    const audio = makeAudio();
+    renderBoard(api, audio);
+    await screen.findByText('Apotek Sehat');
+    const ws = FakeWebSocket.instances[0];
+
+    // Two calls: t1 (A-005) then t2 (B-001). t1 is displaced to history.
+    fire(ws, calledEvent('t1', 'A-005', 2));
+    await screen.findByText('A-005');
+    fire(ws, calledEvent('t2', 'B-001', 1));
+    expect(await screen.findByText('B-001')).toBeInTheDocument();
+    // A-005 is now in history (one occurrence — the history list).
+    expect(screen.getAllByText('A-005')).toHaveLength(1);
+
+    // Complete t2 → nowServing clears → standby. A refetch with active=[t1]
+    // restores t1 as nowServing and must remove it from history.
+    fire(ws, statusEvent('t2', 'CALLING', 'COMPLETED'));
+    expect(await screen.findByTestId('standby')).toBeInTheDocument();
+
+    // Swap the mock so the next refetch returns t1 as the only active ticket.
+    (api.getBoardState as ReturnType<typeof vi.fn>).mockImplementation(() =>
+      Promise.resolve({
+        active: [
+          { ticketId: 't1', ticketNumber: 'A-005', categoryId: 'cat-a', status: 'CALLING', counterId: 2 },
+        ],
+        waiting: [],
+        waitingCount: 0,
+      }),
+    );
+    // Drive a TICKET_CREATED event to schedule a debounced refetch (any event
+    // schedules one), then wait for the 300ms debounce + fetch to resolve.
+    // We can't use findByText('A-005') here — A-005 is already in the DOM via
+    // history (the hidden active layer retains it under css:false), so
+    // findByText would resolve immediately from the stale history item before
+    // the debounced refetch fires. Wait real time past the debounce instead.
+    fire(ws, {
+      type: 'TICKET_CREATED',
+      aggregateId: 't3',
+      occurredAt: 9,
+      version: 9,
+      payload: { ticketNumber: 'A-009', categoryId: 'cat-a' },
+    });
+    // Wait for the 300ms debounce + microtask to flush — the BOARD_LOADED
+    // dispatch restores t1 as nowServing and dedupes it from history.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 350));
+    });
+
+    // A-005 is now nowServing (restored from the server's active slice). The
+    // active board layer is visible (not the standby).
+    expect(screen.getByTestId('board-active')).not.toHaveClass('tv-board__active--hidden');
+    expect(screen.getByText('Counter 2')).toBeInTheDocument();
+    // A-005 must NOT appear in history (deduped against the restored
+    // nowServing). The CallHistory section is the only place history renders.
+    const history = screen.getByText('Riwayat Panggilan').closest('section');
+    expect(within(history!).queryByText('A-005')).not.toBeInTheDocument();
+  });
+
+  it('a board-state-fetch failure degrades gracefully — board still boots, waiting stays []', async () => {
     const api: ITvApi = {
       getSystemConfig: vi.fn(() =>
         Promise.resolve({ isInitialSetupCompleted: true, storeName: 'Apotek Sehat', brandColor: '' }),
       ),
       getCategories: vi.fn(() => Promise.resolve([{ id: 'cat-a', code: 'A', name: 'CS' }])),
-      getWaitingQueue: vi.fn(() => Promise.reject(new Error('boom'))),
+      getBoardState: vi.fn(() => Promise.reject(new Error('boom'))),
     };
     const audio = makeAudio();
     renderBoard(api, audio);
@@ -447,7 +574,7 @@ describe('Waiting queue refetch (server owns the read model)', () => {
     expect(screen.queryAllByText('B-001')).toHaveLength(0);
   });
 
-  it('a TICKET_CALLED event triggers a debounced refetch of the waiting queue', async () => {
+  it('a TICKET_CALLED event triggers a debounced refetch of the board state', async () => {
     vi.useFakeTimers();
     try {
       const api = makeApi('', []);
@@ -459,17 +586,17 @@ describe('Waiting queue refetch (server owns the read model)', () => {
       });
       const ws = FakeWebSocket.instances[0];
       // Initial boot fetch.
-      expect(api.getWaitingQueue).toHaveBeenCalledTimes(1);
+      expect(api.getBoardState).toHaveBeenCalledTimes(1);
 
       // A call arrives → schedules a debounced refetch.
       act(() => ws.sendEvent(calledEvent('t1', 'A-005', 2)));
-      expect(api.getWaitingQueue).toHaveBeenCalledTimes(1); // not yet — debounced
+      expect(api.getBoardState).toHaveBeenCalledTimes(1); // not yet — debounced
 
       // Advance the debounce window — the refetch fires once.
       await act(async () => {
         await vi.advanceTimersByTimeAsync(300);
       });
-      expect(api.getWaitingQueue).toHaveBeenCalledTimes(2);
+      expect(api.getBoardState).toHaveBeenCalledTimes(2);
 
       // A second event within the debounce window coalesces into one fetch.
       act(() => ws.sendEvent(calledEvent('t2', 'B-001', 1)));
@@ -478,21 +605,21 @@ describe('Waiting queue refetch (server owns the read model)', () => {
         await vi.advanceTimersByTimeAsync(300);
       });
       // Two more events produced one more fetch (3 total after boot).
-      expect(api.getWaitingQueue).toHaveBeenCalledTimes(3);
+      expect(api.getBoardState).toHaveBeenCalledTimes(3);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('loads the waiting queue under <React.StrictMode> (mountedRef not stuck false)', async () => {
+  it('loads the board state under <React.StrictMode> (mountedRef not stuck false)', async () => {
     // Regression: the dedicated `[]`-deps effect that flips `mountedRef.current
     // = false` in cleanup must reset it to `true` in the body. Under
     // <React.StrictMode> an `[]`-deps effect is double-invoked on mount
     // (body -> cleanup -> body); without the reset, the cleanup's `false`
-    // wins and every later `refetchWaiting` resolution is dropped — the
-    // waiting queue never loads in dev. RTL `render()` does NOT wrap in
-    // StrictMode, so the existing tests miss this; this case wraps the
-    // provider harness in <React.StrictMode> explicitly.
+    // wins and every later `refetchBoard` resolution is dropped — the board
+    // never loads in dev. RTL `render()` does NOT wrap in StrictMode, so the
+    // existing tests miss this; this case wraps the provider harness in
+    // <React.StrictMode> explicitly.
     const waiting = [
       { ticketId: 't1', ticketNumber: 'B-001', categoryId: 'cat-b', status: 'WAITING', counterId: null },
       { ticketId: 't2', ticketNumber: 'A-002', categoryId: 'cat-a', status: 'WAITING', counterId: null },
@@ -517,10 +644,10 @@ describe('Waiting queue refetch (server owns the read model)', () => {
     // The waiting rows render in BOTH the active + standby layers (crossfade
     // keeps both mounted), so each row appears twice. The key assertion is
     // that they render AT ALL under StrictMode — pre-fix, `mountedRef` was
-    // stuck `false` and the boot `refetchWaiting` resolution was dropped.
+    // stuck `false` and the boot `refetchBoard` resolution was dropped.
     expect(await screen.findAllByText('B-001')).toHaveLength(2);
     expect(screen.getAllByText('A-002')).toHaveLength(2);
     expect(screen.getAllByText(/Menunggu: 2 tiket/)).toHaveLength(2);
-    expect(api.getWaitingQueue).toHaveBeenCalledTimes(1);
+    expect(api.getBoardState).toHaveBeenCalledTimes(1);
   });
 });

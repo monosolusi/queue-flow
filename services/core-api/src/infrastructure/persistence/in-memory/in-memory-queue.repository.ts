@@ -57,6 +57,20 @@ export class InMemoryQueueRepository implements IQueueRepository, ITicketArchive
       .sort((a, b) => a.updatedAt - b.updatedAt);
   }
 
+  async findAllActive(): Promise<QueueTicket[]> {
+    // Category-agnostic counterpart to findActiveByCounter (no counterId
+    // filter): every CALLING/SERVING ticket across all counters, ordered by
+    // updatedAt asc so the most-recently-touched active ticket is last. Used
+    // by the TV board (no bound counter) to restore nowServing on refresh.
+    return [...this.tickets.values()]
+      .filter(
+        (t) =>
+          t.currentStatus === TicketStatus.CALLING ||
+          t.currentStatus === TicketStatus.SERVING,
+      )
+      .sort((a, b) => a.updatedAt - b.updatedAt);
+  }
+
   async findNextWaiting(query: NextTicketQuery): Promise<QueueTicket | null> {
     const candidates = this.waiting().filter((t) =>
       query.assignedCategoryIds.includes(t.categoryId),

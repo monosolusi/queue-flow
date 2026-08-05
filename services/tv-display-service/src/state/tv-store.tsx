@@ -7,7 +7,7 @@ import {
   useRef,
   type ReactNode,
 } from 'react';
-import type { CategoryDto, QueueLifecycleWireEvent, WaitingTicketDto } from '../api/types';
+import type { CategoryDto, QueueLifecycleWireEvent, TvTicketDto } from '../api/types';
 import type { ITvApi } from '../api/tv-api';
 import { type AudioProvider } from '../audio/audio-provider';
 import { buildCallFragments } from '../audio/audio-provider';
@@ -34,7 +34,7 @@ export interface TvState {
   readonly history: readonly NowServing[];
   /**
    * The global waiting queue (every WAITING ticket across all categories,
-   * oldest first). Sourced from the server's `GET /api/queue/waiting` read
+   * oldest first). Sourced from the server's `GET /api/queue/board` read
    * model and refetched after every lifecycle event — the TV does NOT project
    * this from events (SRP — the server owns the queue read model).
    */
@@ -49,15 +49,19 @@ export interface TvState {
 export type TvAction =
   | { type: 'BOOT_LOADED'; storeName: string; categories: CategoryDto[] }
   | { type: 'BOOT_ERROR'; message: string }
-  | { type: 'WAITING_LOADED'; waiting: readonly WaitingTicket[] }
+  | {
+      type: 'BOARD_LOADED';
+      nowServing: NowServing | null;
+      waiting: readonly WaitingTicket[];
+    }
   | { type: 'CONNECTION'; status: ConnectionStatus }
   | { type: 'EVENT'; event: QueueLifecycleWireEvent };
 
 const HISTORY_LIMIT = 5;
-/** Debounce for refetching the waiting queue after a lifecycle event. */
-const WAITING_REFETCH_DEBOUNCE_MS = 300;
+/** Debounce for refetching the TV board state after a lifecycle event. */
+const BOARD_REFETCH_DEBOUNCE_MS = 300;
 /** Periodic safety-net refetch interval (covers a dropped broadcast). */
-const WAITING_REFETCH_INTERVAL_MS = 30_000;
+const BOARD_REFETCH_INTERVAL_MS = 30_000;
 
 const initialState: TvState = {
   nowServing: null,
@@ -70,9 +74,20 @@ const initialState: TvState = {
   categories: [],
 };
 
-/** Maps the wire DTO into the slim slice the board renders. */
-function toWaitingTicket(t: WaitingTicketDto): WaitingTicket {
+/** Maps a wire DTO row into the slim waiting slice the board renders. */
+function toWaitingTicket(t: TvTicketDto): WaitingTicket {
   return { ticketId: t.ticketId, ticketNumber: t.ticketNumber, categoryId: t.categoryId };
+}
+
+/**
+ * Maps the most-recently-touched active row into the {@link NowServing} slice.
+ * Returns `null` when `counterId` is null — defensive against a degenerate
+ * custom machine that produced an active row without a counter; the PRD
+ * default machine always sets `counterId` on CALLING/SERVING.
+ */
+function toNowServing(t: TvTicketDto): NowServing | null {
+  if (t.counterId === null) return null;
+  return { ticketId: t.ticketId, ticketNumber: t.ticketNumber, counterId: t.counterId };
 }
 
 function tvReducer(state: TvState, action: TvAction): TvState {
@@ -87,8 +102,21 @@ function tvReducer(state: TvState, action: TvAction): TvState {
       };
     case 'BOOT_ERROR':
       return { ...state, loadStatus: 'error', loadError: action.message };
-    case 'WAITING_LOADED':
-      return { ...state, waiting: action.waiting };
+    case 'BOARD_LOADED': {
+      // Dedupe history against the restored nowServing so a ticket never
+      // appears in both nowServing and history (a server restore can
+      // re-introduce a ticket that was previously pushed into history by a
+      // TICKET_CALLED event — e.g. multi-counter where an older active ticket
+      // was displaced to history by a newer call, then the newer call
+      // completes and the refetch restores the older one as nowServing).
+      // BOARD_LOADED must NOT wipe history (history is client-projected from
+      // events; the server read carries only active+waiting, not completed
+      // history) — it only dedupes against the restored nowServing.
+      const history = action.nowServing
+        ? state.history.filter((h) => h.ticketId !== action.nowServing!.ticketId)
+        : state.history;
+      return { ...state, nowServing: action.nowServing, history, waiting: action.waiting };
+    }
     case 'CONNECTION':
       return { ...state, connection: action.status };
     case 'EVENT':
@@ -196,15 +224,15 @@ export function TvStoreProvider({ api, audio, children, socketOptions }: TvStore
   const audioRef = useRef(audio);
   audioRef.current = audio;
 
-  // Generation guard + in-flight guard for the waiting-queue fetch. The boot
+  // Generation guard + in-flight guard for the TV board state fetch. The boot
   // fetch, the debounced event refetch, the reconnect refetch, and the 30s
-  // interval refetch all route through `refetchWaitingRef.current` so there is
+  // interval refetch all route through `refetchBoardRef.current` so there is
   // ONE resolution policy: a monotonic generation counter decides which
   // resolution wins (last-write-wins among fetches that actually started, not
   // on the slowest), and an in-flight boolean prevents duplicate concurrent
-  // GET /api/queue/waiting work when an event/interval tick lands while a
+  // GET /api/queue/board work when an event/interval tick lands while a
   // fetch is already pending.
-  const waitingGenRef = useRef(0);
+  const boardGenRef = useRef(0);
   const inFlightRef = useRef(false);
   // Mounted guard shared by every refetch trigger (boot + socket + interval).
   // Symmetric to the boot effect's local `cancelled` flag: a fetch resolving
@@ -214,34 +242,46 @@ export function TvStoreProvider({ api, audio, children, socketOptions }: TvStore
   const mountedRef = useRef(true);
 
   /**
-   * Fetch the global waiting queue from the server's read model and dispatch
-   * `WAITING_LOADED`. Stable across the socket effect (closed over `apiRef`).
-   * Never throws — a fetch failure degrades gracefully (the board keeps the
-   * previous waiting list; the next refetch retries). Generation-counted: a
-   * resolution is dropped if a newer fetch has started since (last-write-wins
-   * on the freshest fetch that started, not on the slowest to resolve). This
-   * closes the boot-vs-event race where a slow boot `getWaitingQueue()` would
-   * resolve AFTER an event-driven debounced refetch already produced fresher
-   * state and overwrite it with stale data. In-flight-guarded: a second call
-   * while one is pending returns early — the pending fetch covers it and a
-   * later event/interval tick refetches if needed (prevents the interval +
-   * debounce from issuing two concurrent fetches when an event lands near a
-   * tick).
+   * Fetch the TV board state from the server's read model and dispatch
+   * `BOARD_LOADED`. Restores `nowServing` from the active slice (the last
+   * entry, most-recently-touched) and replaces `waiting`. Stable across the
+   * socket effect (closed over `apiRef`). Never throws — a fetch failure
+   * degrades gracefully (the board keeps the previous nowServing + waiting
+   * list; the next refetch retries). Generation-counted: a resolution is
+   * dropped if a newer fetch has started since (last-write-wins on the
+   * freshest fetch that started, not on the slowest to resolve). This closes
+   * the boot-vs-event race where a slow boot `getBoardState()` would resolve
+   * AFTER an event-driven debounced refetch already produced fresher state
+   * and overwrite it with stale data. In-flight-guarded: a second call while
+   * one is pending returns early — the pending fetch covers it and a later
+   * event/interval tick refetches if needed (prevents the interval + debounce
+   * from issuing two concurrent fetches when an event lands near a tick).
    */
-  const refetchWaitingRef = useRef<() => void>(() => {});
-  refetchWaitingRef.current = () => {
+  const refetchBoardRef = useRef<() => void>(() => {});
+  refetchBoardRef.current = () => {
     if (inFlightRef.current) return; // a fetch is pending — it covers this tick
-    const gen = ++waitingGenRef.current;
+    const gen = ++boardGenRef.current;
     inFlightRef.current = true;
     apiRef.current
-      .getWaitingQueue()
+      .getBoardState()
       .then((dto) => {
-        if (gen !== waitingGenRef.current) return; // a newer fetch started — drop stale
+        if (gen !== boardGenRef.current) return; // a newer fetch started — drop stale
         if (!mountedRef.current) return; // provider unmounted — don't dispatch
-        dispatch({ type: 'WAITING_LOADED', waiting: dto.waiting.map(toWaitingTicket) });
+        // nowServing = most-recently-updated active ticket (findAllActive orders
+        // by updatedAt asc, so the last is the most-recently-touched). Restored
+        // on boot AND every refetch so a refresh shows the current antrian and
+        // the board reconciles to the server's source of truth after every
+        // event.
+        const nowServing =
+          dto.active.length > 0 ? toNowServing(dto.active[dto.active.length - 1]) : null;
+        dispatch({
+          type: 'BOARD_LOADED',
+          nowServing,
+          waiting: dto.waiting.map(toWaitingTicket),
+        });
       })
       .catch(() => {
-        /* graceful degradation: keep the previous waiting list on failure */
+        /* graceful degradation: keep the previous nowServing + waiting list on failure */
       })
       .finally(() => {
         inFlightRef.current = false;
@@ -253,10 +293,11 @@ export function TvStoreProvider({ api, audio, children, socketOptions }: TvStore
   // (with the static --accent default). The same config read carries the brand
   // color (QUE-37 AC6), applied to the runtime `--accent` here as a side
   // effect (a DOM mutation, not board state). The static `#2563eb` default
-  // stays in place on failure (no flash — it IS the default). The global
-  // waiting queue is fetched separately via the shared generation-counted
-  // `refetchWaiting` path so its resolution races no other fetch (a slow boot
-  // resolution cannot overwrite fresher event-driven state).
+  // stays in place on failure (no flash — it IS the default). The TV board
+  // state (active + waiting) is fetched separately via the shared
+  // generation-counted `refetchBoard` path so its resolution races no other
+  // fetch (a slow boot resolution cannot overwrite fresher event-driven
+  // state).
   useEffect(() => {
     let cancelled = false;
     Promise.allSettled([api.getSystemConfig(), api.getCategories()])
@@ -276,10 +317,10 @@ export function TvStoreProvider({ api, audio, children, socketOptions }: TvStore
           });
         }
       });
-    // Fetch the waiting queue through the shared generation-counted path. A
-    // boot waiting-fetch failure degrades gracefully (waiting stays `[]`); the
-    // periodic refetch retries.
-    refetchWaitingRef.current();
+    // Fetch the TV board state through the shared generation-counted path. A
+    // boot board-fetch failure degrades gracefully (nowServing + waiting stay
+    // null/[]); the periodic refetch retries.
+    refetchBoardRef.current();
     return () => {
       cancelled = true;
     };
@@ -294,8 +335,8 @@ export function TvStoreProvider({ api, audio, children, socketOptions }: TvStore
     // Reset on each (re)mount — under <React.StrictMode> an `[]`-deps effect is
     // double-invoked on mount (body -> cleanup -> body); without this reset the
     // cleanup that flips `mountedRef.current = false` would win and every later
-    // `refetchWaiting` resolution would be dropped, leaving the waiting queue
-    // empty for the whole dev session.
+    // `refetchBoard` resolution would be dropped, leaving the board empty for
+    // the whole dev session.
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
@@ -304,8 +345,12 @@ export function TvStoreProvider({ api, audio, children, socketOptions }: TvStore
 
   // Realtime subscription (owned by the provider). On each TICKET_CALLED, drive
   // the audio sequencer with the announcement fragments (FR-TV-02). After every
-  // lifecycle event, debounce-refetch the waiting queue so the server stays the
-  // single source of truth (the board does not project waiting from events).
+  // lifecycle event, debounce-refetch the TV board state so the server stays
+  // the single source of truth (the board does not project waiting from
+  // events). The realtime event projection (`projectEvent`) still drives
+  // instant nowServing + history updates; the debounced `BOARD_LOADED`
+  // refetch reconciles nowServing from the server and dedupes history — both
+  // converge to the same correct state.
   const optsRef = useRef(socketOptions);
   useEffect(() => {
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -316,8 +361,8 @@ export function TvStoreProvider({ api, audio, children, socketOptions }: TvStore
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
         debounceTimer = null;
-        refetchWaitingRef.current();
-      }, WAITING_REFETCH_DEBOUNCE_MS);
+        refetchBoardRef.current();
+      }, BOARD_REFETCH_DEBOUNCE_MS);
     };
 
     const sock = new QueueSocket(
@@ -347,7 +392,7 @@ export function TvStoreProvider({ api, audio, children, socketOptions }: TvStore
           // On reconnect (open after non-open), refetch immediately so the
           // board resyncs after any missed broadcasts while disconnected.
           if (status === 'open' && prevStatus !== 'open') {
-            refetchWaitingRef.current();
+            refetchBoardRef.current();
           }
           prevStatus = status;
         },
@@ -358,10 +403,10 @@ export function TvStoreProvider({ api, audio, children, socketOptions }: TvStore
 
     // Periodic safety-net refetch covering any dropped broadcast.
     // Read the latest ref each tick (matches the debounce path's indirection) —
-    // capturing `refetchWaitingRef.current` directly would pin the function
+    // capturing `refetchBoardRef.current` directly would pin the function
     // reference from effect-setup time, which is fragile even though the body
     // only closes over refs today.
-    const interval = setInterval(() => refetchWaitingRef.current(), WAITING_REFETCH_INTERVAL_MS);
+    const interval = setInterval(() => refetchBoardRef.current(), BOARD_REFETCH_INTERVAL_MS);
 
     return () => {
       sock.close();
