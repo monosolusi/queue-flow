@@ -2,10 +2,10 @@ import type { CategoryDto, SystemConfigurationDto, TvBoardStateDto } from './typ
 
 /**
  * The slice of core-api the TV board consumes (ISP — only the store profile
- * for the running-text idle marquee, the category master data, and the TV
- * board state read (active + waiting); never leaks caller/admin/reporting
- * DTOs). Implementations live behind this interface so tests can substitute a
- * fake without touching the network.
+ * for the board header, the category master data, and the TV board state read
+ * (active + waiting); never leaks caller/admin/reporting DTOs).
+ * Implementations live behind this interface so tests can substitute a fake
+ * without touching the network.
  */
 export interface ITvApi {
   getSystemConfig(): Promise<SystemConfigurationDto>;

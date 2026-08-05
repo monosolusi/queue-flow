@@ -1064,22 +1064,26 @@ config, proxied to `core-api:3000` by Vite in dev).
   double-push: the `aggregateId` guard skips a `STATUS_UPDATED` for a ticket
   no longer `nowServing`, and a `TICKET_CALLED` after a `COMPLETED` finds
   `nowServing` null so pushes nothing.
-- **TV standby mode (FR-TV-03):** when the queue is idle (`nowServing == null`)
-  the board shows a standby panel that cycles bundled local banner/video
-  promo media plus a prominent running-text announcement, and crossfades back
-  to the active now-serving board on the first `TICKET_CALLED`. tv-display
-  only — standby media is a pure client concern (the backend never displays
-  media), mirroring the audio precedent; the PRD §7 config schema carries no
-  `runningText`/`media`/`standby` field, so manager-configurability is out of
-  scope. Idle content is a client-owned default + bundled local assets
-  (`public/media/`, precached by Workbox), exactly like the audio MP3s in
-  `public/audio/`. **No speculative `StandbyMediaProvider` interface** — there
-  is exactly one media renderer and a speculative port would be
-  over-abstraction; the test seam is the `baseURL`/`assets` props.
-  `src/standby/standby-content.ts` is the single source of truth for idle
-  content; `StandbyMedia` cycles image (timer) / video (`ended`, single
-  loops), error-skips missing assets, and holds once every asset has errored
-  (no tight loop).
+- **TV idle state (was FR-TV-03 standby/promosi — REMOVED):** the standby
+  panel that cycled bundled promo media + a prominent running-text marquee and
+  crossfaded against the active board was **removed** from `/tv/` per the
+  user's decision — the crossfade caused the "kadang hilang kadang ada"
+  flicker the manager reported (the idle panel sometimes appeared, sometimes
+  didn't, on the opacity/visibility handoff). The active board's
+  `NowServingCard` empty state ("Menunggu panggilan berikutnya…") is now the
+  **sole idle state**: when `nowServing == null` the active board stays
+  always-visible (no overlay, no crossfade, no `--hidden` modifier), and the
+  empty card renders inside it. The waiting queue + call history stay mounted
+  alongside the empty card. `src/standby/`, `src/components/StandbyMedia.tsx`,
+  `public/media/`, the `RunningText` marquee, the `.standby`/`.standby__grid`/
+  `.tv-board__marquee`/`@keyframes marquee` CSS, and the promo-media
+  `globPatterns` extensions (svg/png/jpg/jpeg/gif/webm/mp4) were all removed;
+  only `mp3` is precached now (audio announcements stay). Audio remains a pure
+  client concern (the backend never plays sound) — no `domain/notification`
+  bounded context. The `WaitingQueue` `live?: boolean` prop was simplified
+  (the `live={false}` standby duplicate is gone; `aria-live="polite"` is now
+  unconditional). The `tv-store` reducer's `nowServing: null` behavior is
+  unchanged — it is the idle state, not the standby feature.
 
 ### Shared design-token system + a11y/interaction baseline (all 4 frontends)
 

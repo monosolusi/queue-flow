@@ -33,11 +33,11 @@ export default defineConfig({
         enabled: false,
       },
       workbox: {
-        // Precache the built bundle + the vendored audio MP3s + the standby
-        // promo media (image/video banners — FR-TV-03) so the TV boots,
-        // announces, and shows its idle screen fully offline (NFR-REL-01).
+        // Precache the built bundle + the vendored audio MP3s so the TV boots
+        // and announces fully offline (NFR-REL-01). The standby/promosi panel
+        // was removed (FR-TV-03) — no image/video media assets are precached.
         navigateFallback: '/tv/index.html',
-        globPatterns: ['**/*.{js,css,html,mp3,webmanifest,svg,png,jpg,jpeg,gif,webm,mp4}'],
+        globPatterns: ['**/*.{js,css,html,mp3,webmanifest}'],
       },
     }),
   ],

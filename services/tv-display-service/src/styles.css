@@ -41,26 +41,19 @@ body,
   font-size: 2rem;
 }
 .tv-board__main {
-  position: relative;
   flex: 1;
   min-height: 0;
 }
-/* The idle (standby) and active board layers are both always mounted and
-   crossfade via opacity + visibility (AC6). Each overlays the whole main
-   area; the inactive one carries a `--hidden` modifier. visibility:hidden
-   hides the inactive layer from AT as well as visually — no aria-hidden is
-   needed on the wrappers. */
-.tv-board__active,
-.standby {
-  position: absolute;
-  inset: 0;
+/* The active board is the single always-visible layer (the standby/promosi
+   panel was removed — it flickered "kadang hilang kadang ada" on the
+   crossfade; the NowServingCard empty state is now the sole idle state). It
+   is a plain flex column filling the main area — no overlay, no crossfade. */
+.tv-board__active {
   display: flex;
   flex-direction: column;
-  min-height: 0;
-  transition: opacity 0.3s ease;
-}
-.tv-board__active {
   gap: 1.25rem;
+  height: 100%;
+  min-height: 0;
 }
 .tv-board__active-grid {
   flex: 1;
@@ -69,20 +62,6 @@ body,
   grid-template-rows: minmax(0, 1fr);
   gap: 1.5rem;
   min-height: 0;
-}
-/* The active-mode footer marquee sits below the grid and does not stretch. */
-.tv-board__active > .tv-board__marquee {
-  flex: 0 0 auto;
-}
-/* Hidden layer: fade opacity out, then drop visibility after the fade so it is
-   non-interactive and removed from the a11y tree. The show direction snaps
-   visibility back immediately (visibility is not in its transition). */
-.tv-board__active--hidden,
-.standby--hidden {
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-  transition: opacity 0.3s ease, visibility 0s 0.3s;
 }
 
 /* Now serving ------------------------------------------------------------- */
@@ -185,10 +164,10 @@ body,
    rule). */
 /* The panel is a size container so children can scale to the panel's height via
    cqh units — all VISIBLE_LIMIT items always fit the panel regardless of its
-   height (responsive). The panel height is determinate because the parent
-   grids use grid-template-rows: minmax(0, 1fr) (active + standby) and the
-   active side column resolves it via flex — size containment is safe (the
-   panel's size is determined by the flex/grid parent, not its content). */
+   height (responsive). The panel height is determinate because the active
+   grid uses grid-template-rows: minmax(0, 1fr) and the active side column
+   resolves it via flex — size containment is safe (the panel's size is
+   determined by the flex/grid parent, not its content). */
 .waiting-queue {
   background: var(--surface);
   border-radius: var(--radius);
@@ -316,95 +295,6 @@ body,
   color: var(--danger-on-dark);
 }
 
-/* Running text marquee (FR-TV-03) ----------------------------------------- */
-.tv-board__marquee {
-  overflow: hidden;
-  white-space: nowrap;
-  background: var(--surface);
-  border-radius: var(--radius);
-  padding: 0.75rem 0;
-}
-.marquee__track {
-  display: inline-block;
-  font-size: 1.5rem;
-  color: var(--text-muted);
-  animation: marquee 22s linear infinite;
-}
-/* A gap between the two copies so the loop reads as continuous text (AC7). */
-.marquee__track span {
-  padding-right: 2rem;
-}
-/* Prominent idle running text — the primary standby announcement. */
-.tv-board__marquee--prominent {
-  background: var(--surface);
-}
-.tv-board__marquee--prominent .marquee__track {
-  font-size: 2.5rem;
-  color: var(--text);
-  font-weight: 600;
-  animation: marquee 28s linear infinite;
-}
-/* The track holds two copies; translating -50% moves exactly one copy width,
-   so the second copy lands where the first was — a seamless loop with no blank
-   gap (AC7). */
-@keyframes marquee {
-  from {
-    transform: translateX(0);
-  }
-  to {
-    transform: translateX(-50%);
-  }
-}
-
-/* Standby (idle) panel (FR-TV-03) ----------------------------------------- */
-/* Overlays the whole `main` area (an absolute layer — see .tv-board__active /
-   .standby above). The idle screen is shared between the waiting queue (left
-   half — a customer never faces ads with no queue in sight, the "pindahkan
-   iklan ke tempat lain" fix) and the demoted promo media (right half); the
-   prominent running text sits below as a full-width bar. */
-.standby {
-  gap: 1.5rem;
-}
-/* The grid is the flex:1 child of the .standby flex column (the marquee below
-   stays flex:0 0 auto). Two equal columns: waiting queue + promo media. */
-.standby__grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: minmax(0, 1fr);
-  gap: 1.5rem;
-  flex: 1;
-  min-height: 0;
-}
-/* Grid-cell containment so each child fills its cell and clips overflow
-   instead of pushing the grid wider/taller (AC3). */
-.standby__grid > .waiting-queue {
-  min-height: 0;
-  overflow: hidden;
-}
-.standby__grid > .standby__media {
-  min-height: 0;
-}
-.standby__media {
-  flex: 1;
-  min-height: 0;
-  background: var(--surface);
-  border-radius: var(--radius);
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.standby__media img,
-.standby__media video {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-/* The prominent running text sits below the grid as a full-width bar. */
-.standby .tv-board__marquee--prominent {
-  flex: 0 0 auto;
-}
-
 /* 4K tier (AC3): scale the board typography up for large displays. The first
    responsive breakpoint in the file. The number sizes to its container
    (cqw) so it stays on one line at the wider column width. */
@@ -437,24 +327,5 @@ body,
   .waiting-queue__category,
   .waiting-queue__count {
     font-size: clamp(1.25rem, 2.5cqh, 2rem);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  /* No crossfade / marquee motion: snap layers instantly and show a single
-     static marquee copy. */
-  .tv-board__active,
-  .standby {
-    transition: none;
-  }
-  .tv-board__active--hidden,
-  .standby--hidden {
-    visibility: hidden; /* instant, no flash of the outgoing layer */
-  }
-  .marquee__track {
-    animation: none;
-  }
-  .marquee__dup {
-    display: none;
   }
 }

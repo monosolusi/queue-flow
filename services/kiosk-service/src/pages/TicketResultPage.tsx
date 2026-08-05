@@ -7,8 +7,8 @@ import type { IssuedTicket } from './CategorySelectPage';
  * tapping "Selesai" would otherwise leave their ticket number visible to the
  * next visitor (privacy + confusion). 10s sits in the 8–12s band. The timer is
  * a client-owned default — the PRD §7 config schema carries no auto-return
- * field, so manager-configurability is out of scope (mirrors the QUE-23
- * standby-content precedent). Hardcoded, not configurable.
+ * field, so manager-configurability is out of scope (mirrors the audio MP3
+ * client-owned-default precedent). Hardcoded, not configurable.
  */
 const AUTO_RETURN_MS = 10_000;
 

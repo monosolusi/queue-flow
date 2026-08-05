@@ -64,16 +64,4 @@ describe('WaitingQueue panel', () => {
     expect(region).toHaveAttribute('aria-live', 'polite');
     expect(region).toHaveClass('waiting-queue');
   });
-
-  it('omits aria-live when live={false} (standby non-live duplicate)', () => {
-    render(
-      <WaitingQueue waiting={waiting} categories={categories} live={false} />,
-    );
-    const region = screen.getByLabelText('Antrian Berikutnya');
-    expect(region).toHaveClass('waiting-queue');
-    // The standby instance is a visual duplicate only — two always-mounted
-    // aria-live polite regions would risk double-announcement, so the active
-    // instance stays the single live region.
-    expect(region).not.toHaveAttribute('aria-live');
-  });
 });

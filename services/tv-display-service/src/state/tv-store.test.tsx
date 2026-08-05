@@ -181,7 +181,7 @@ describe('TvStoreProvider realtime projection + audio (FR-TV-01/02)', () => {
     expect(screen.getAllByText('A-005')).toHaveLength(1); // history item only
   });
 
-  it('clears now-serving on SYSTEM_RESET and returns to the idle standby', async () => {
+  it('clears now-serving on SYSTEM_RESET and returns to the idle empty state', async () => {
     const api = makeApi();
     const audio = makeAudio();
     renderBoard(api, audio);
@@ -198,17 +198,17 @@ describe('TvStoreProvider realtime projection + audio (FR-TV-01/02)', () => {
       version: 3,
       payload: { resetTo: 1, date: '2026-07-31' },
     });
-    // nowServing clears → the idle standby panel returns (FR-TV-03) and the
-    // now-serving number leaves the board. SYSTEM_RESET clears history too, so
-    // A-005 must be gone from the DOM ENTIRELY — unlike the COMPLETED path (where
-    // the hidden active layer legitimately retains history and the assertion is
-    // scoped to the standby), this asserts globally so a regression that fails
-    // to clear history on reset is caught.
-    expect(await screen.findByTestId('standby')).toBeInTheDocument();
+    // nowServing clears → the active board's NowServingCard renders its empty
+    // state ("Menunggu panggilan berikutnya…"). SYSTEM_RESET clears history too,
+    // so A-005 must be gone from the DOM ENTIRELY (no standby panel exists); the
+    // CallHistory section title stays, but the empty-state message renders.
+    expect(await screen.findByText('Menunggu panggilan berikutnya…')).toBeInTheDocument();
     expect(screen.queryByText('A-005')).not.toBeInTheDocument();
+    expect(screen.getByText('Riwayat Panggilan')).toBeInTheDocument();
+    expect(screen.getByText('Belum ada riwayat.')).toBeInTheDocument();
   });
 
-  it('clears now-serving when the ticket completes and returns to idle standby', async () => {
+  it('clears now-serving when the ticket completes and returns to the idle empty state', async () => {
     const api = makeApi();
     const audio = makeAudio();
     renderBoard(api, audio);
@@ -219,11 +219,12 @@ describe('TvStoreProvider realtime projection + audio (FR-TV-01/02)', () => {
     await screen.findByText('A-005');
 
     fire(ws, statusEvent('t1', 'CALLING', 'COMPLETED'));
-    expect(await screen.findByTestId('standby')).toBeInTheDocument();
-    // Both layers stay mounted (AC6); the completed A-005 is retained in the
-    // hidden active layer's history, so it must be absent from the standby panel
-    // specifically — a global queryByText would match the hidden history item.
-    expect(within(screen.getByTestId('standby')).queryByText('A-005')).not.toBeInTheDocument();
+    // nowServing clears → NowServingCard renders its empty state. The completed
+    // A-005 is retained in the CallHistory section (FR-TV-01), so it stays in the
+    // DOM as a history entry.
+    expect(await screen.findByText('Menunggu panggilan berikutnya…')).toBeInTheDocument();
+    expect(screen.getByText('Riwayat Panggilan')).toBeInTheDocument();
+    expect(screen.getAllByText('A-005')).toHaveLength(1); // history entry only
   });
 
   it('retains a completed ticket in history on the quiet-store path (FR-TV-01)', async () => {
@@ -231,8 +232,8 @@ describe('TvStoreProvider realtime projection + audio (FR-TV-01/02)', () => {
     // The completed ticket must enter "Riwayat Panggilan" even though no other
     // call displaced it while it was on the board (the quiet-store case that
     // left history empty before the retention fix). The retention is observed
-    // when the next call brings the active board back; while idle the board is
-    // replaced by the standby panel (FR-TV-03).
+    // when the next call brings the active board back; while idle the
+    // NowServingCard renders its empty state (FR-TV-01).
     const api = makeApi();
     const audio = makeAudio();
     renderBoard(api, audio);
@@ -242,16 +243,15 @@ describe('TvStoreProvider realtime projection + audio (FR-TV-01/02)', () => {
     fire(ws, calledEvent('t1', 'A-005', 2));
     await screen.findByText('A-005');
 
-    // Serve → complete. nowServing clears → idle standby; A-005 leaves the
-    // board but is retained in history.
+    // Serve → complete. nowServing clears → idle empty state; A-005 leaves the
+    // now-serving card but is retained in history.
     fire(ws, statusEvent('t1', 'CALLING', 'SERVING'));
     fire(ws, statusEvent('t1', 'SERVING', 'COMPLETED'));
-    expect(await screen.findByTestId('standby')).toBeInTheDocument();
-    // A-005 is retained in the hidden active layer's history (see above) — scope
-    // to the standby panel so the global query doesn't match it.
-    expect(within(screen.getByTestId('standby')).queryByText('A-005')).not.toBeInTheDocument();
+    expect(await screen.findByText('Menunggu panggilan berikutnya…')).toBeInTheDocument();
+    // A-005 is retained in CallHistory — exactly one history entry.
+    expect(screen.getAllByText('A-005')).toHaveLength(1);
 
-    // The next call brings the active board back; A-005 must appear exactly
+    // The next call brings the now-serving card back; A-005 must appear exactly
     // once (history), not double-pushed (nowServing was null at COMPLETED, so
     // the TICKET_CALLED had nothing to displace).
     fire(ws, calledEvent('t2', 'B-013', 1));
@@ -271,13 +271,12 @@ describe('TvStoreProvider realtime projection + audio (FR-TV-01/02)', () => {
     await screen.findByText('A-005');
 
     fire(ws, statusEvent('t1', 'CALLING', 'SKIPPED'));
-    // nowServing clears → idle standby; a skipped ticket is recallable via
+    // nowServing clears → idle empty state; a skipped ticket is recallable via
     // "Panggil Ulang" and is not retained in history (only COMPLETED tickets are).
-    expect(await screen.findByTestId('standby')).toBeInTheDocument();
-    expect(within(screen.getByTestId('standby')).queryByText('A-005')).not.toBeInTheDocument();
+    expect(await screen.findByText('Menunggu panggilan berikutnya…')).toBeInTheDocument();
+    expect(screen.queryByText('A-005')).not.toBeInTheDocument();
 
-    // Bring the active board back with a new call; the skipped ticket must not
-    // appear in history.
+    // Bring a new call in; the skipped ticket must not appear in history.
     fire(ws, calledEvent('t2', 'B-001', 1));
     expect(await screen.findByText('B-001')).toBeInTheDocument();
     expect(screen.getByText('Belum ada riwayat.')).toBeInTheDocument();
@@ -302,8 +301,8 @@ describe('TvStoreProvider realtime projection + audio (FR-TV-01/02)', () => {
     expect(audio.sequences).toHaveLength(1); // announced on the first call
 
     fire(ws, statusEvent('t1', 'CALLING', 'SKIPPED'));
-    expect(await screen.findByTestId('standby')).toBeInTheDocument();
-    expect(within(screen.getByTestId('standby')).queryByText('A-005')).not.toBeInTheDocument();
+    expect(await screen.findByText('Menunggu panggilan berikutnya…')).toBeInTheDocument();
+    expect(screen.queryByText('A-005')).not.toBeInTheDocument();
 
     // Recall: STATUS_UPDATED (SKIPPED -> CALLING) then TICKET_CALLED for the SAME
     // ticket (not a new ticket) — the real recall flow the previous test masked.
@@ -342,51 +341,34 @@ describe('TvStoreProvider realtime projection + audio (FR-TV-01/02)', () => {
   });
 });
 
-describe('TvBoardPage idle/active switching (FR-TV-03)', () => {
-  it('shows the standby media + running text when idle, switches to the active board on a call, and returns to standby when the call completes', async () => {
+describe('TvBoardPage idle/active switching (FR-TV-01)', () => {
+  it('shows the now-serving empty state when idle, switches to the ticket on a call, and returns to the empty state when the call completes', async () => {
     const api = makeApi();
     const audio = makeAudio();
     renderBoard(api, audio);
     await screen.findByText('Apotek Sehat');
     const ws = FakeWebSocket.instances[0];
 
-    // Idle: the standby panel renders the promo media + the running-text
-    // greeting (the {storeName} placeholder resolved against the boot-loaded
-    // store name). Both layers stay mounted (AC6); the active layer carries the
-    // `--hidden` modifier and the standby is visible.
-    const standby = await screen.findByTestId('standby');
-    expect(standby).toBeInTheDocument();
-    expect(standby).not.toHaveClass('standby--hidden');
-    expect(screen.getByTestId('board-active')).toHaveClass('tv-board__active--hidden');
-    // The active footer marquee renders the same running text, so scope to the
-    // standby to avoid a double match under the both-mounted model.
-    const standbyCopies = within(standby).getAllByText(/Selamat datang di Apotek Sehat/);
-    expect(standbyCopies).toHaveLength(2);
-    // AC7: the prominent standby marquee holds two copies (seamless loop), the
-    // duplicate hidden from AT so the announcement is read once.
-    const standbyMarquee = standbyCopies[0].closest('.marquee__track')!;
-    expect(standbyMarquee.querySelectorAll('span')).toHaveLength(2);
-    expect(standbyCopies[0]).not.toHaveAttribute('aria-hidden', 'true');
-    expect(standbyCopies[1]).toHaveAttribute('aria-hidden', 'true');
-    expect(standbyCopies[1]).toHaveClass('marquee__dup');
-    // The standby media <img> is present (bundled placeholder banner).
-    expect(standby.querySelector('img, video')).not.toBeNull();
+    // Idle: NowServingCard renders its empty state ("Menunggu panggilan
+    // berikutnya…"). There is no standby panel — the active board is the sole
+    // always-visible layer (the promosi/standby feature was removed).
+    expect(screen.getByText('Menunggu panggilan berikutnya…')).toBeInTheDocument();
+    expect(screen.getByTestId('board-active')).toBeInTheDocument();
+    expect(screen.queryByText('A-005')).not.toBeInTheDocument();
 
-    // A call arrives → the standby hides and the now-serving board appears. Both
-    // layers stay mounted (AC6); the standby now carries `--hidden`.
+    // A call arrives → the now-serving board shows the ticket number + counter.
     fire(ws, calledEvent('t1', 'A-005', 2));
     expect(await screen.findByText('A-005')).toBeInTheDocument();
-    expect(screen.getByTestId('standby')).toHaveClass('standby--hidden');
-    expect(screen.getByTestId('board-active')).not.toHaveClass('tv-board__active--hidden');
+    expect(screen.getByText('Counter 2')).toBeInTheDocument();
     expect(screen.getByText('Riwayat Panggilan')).toBeInTheDocument();
+    expect(screen.queryByText('Menunggu panggilan berikutnya…')).not.toBeInTheDocument();
 
-    // Complete the ticket → nowServing clears → the idle standby returns.
+    // Complete the ticket → nowServing clears → NowServingCard renders its
+    // empty state again; A-005 is retained in CallHistory (FR-TV-01).
     fire(ws, statusEvent('t1', 'CALLING', 'COMPLETED'));
-    expect(await screen.findByTestId('standby')).toBeInTheDocument();
-    expect(screen.getByTestId('board-active')).toHaveClass('tv-board__active--hidden');
-    // A-005 is retained in the hidden active layer's history — scope to the
-    // standby so the global query doesn't match it (see COMPLETED-path note).
-    expect(within(screen.getByTestId('standby')).queryByText('A-005')).not.toBeInTheDocument();
+    expect(await screen.findByText('Menunggu panggilan berikutnya…')).toBeInTheDocument();
+    expect(screen.getByText('Riwayat Panggilan')).toBeInTheDocument();
+    expect(screen.getAllByText('A-005')).toHaveLength(1); // history entry only
   });
 });
 
@@ -400,15 +382,12 @@ describe('TV board state refetch (server owns the read model)', () => {
     const audio = makeAudio();
     renderBoard(api, audio);
 
-    // The waiting panel renders the fetched rows alongside the now-serving hero
-    // (the active layer is mounted but hidden via the --hidden modifier; css:false
-    // means findByText still resolves the text in the DOM). The standby layer
-    // also renders a non-live WaitingQueue duplicate (the crossfade needs both
-    // layers mounted), so each waiting row/text appears twice — use
-    // findAllByText/getAllByText and assert the count.
-    expect(await screen.findAllByText('B-001')).toHaveLength(2);
-    expect(screen.getAllByText('A-002')).toHaveLength(2);
-    expect(screen.getAllByText(/Menunggu: 2 tiket/)).toHaveLength(2);
+    // The waiting panel renders the fetched rows. There is no longer a standby
+    // duplicate of the waiting panel — the active board is the sole layer — so
+    // each row / count line appears exactly once.
+    expect(await screen.findAllByText('B-001')).toHaveLength(1);
+    expect(screen.getAllByText('A-002')).toHaveLength(1);
+    expect(screen.getAllByText(/Menunggu: 2 tiket/)).toHaveLength(1);
     expect(api.getBoardState).toHaveBeenCalledTimes(1);
   });
 
@@ -422,26 +401,24 @@ describe('TV board state refetch (server owns the read model)', () => {
     const audio = makeAudio();
     renderBoard(api, audio);
 
-    // The now-serving hero shows the restored ticket + counter — the active
-    // board layer is visible (not the standby). The active layer's now-serving
-    // card renders the ticket number; assert it appears (the standby layer is
-    // hidden via the --hidden modifier and does not render a now-serving hero).
+    // The now-serving hero shows the restored ticket + counter. The active
+    // board is the sole layer; NowServingCard renders the ticket number.
     expect(await screen.findByText('A-005')).toBeInTheDocument();
     expect(screen.getByText('Counter 2')).toBeInTheDocument();
-    // The active board layer is visible (not hidden) — nowServing is non-null.
-    expect(screen.getByTestId('board-active')).not.toHaveClass('tv-board__active--hidden');
-    expect(screen.getByTestId('standby')).toHaveClass('standby--hidden');
+    // The active board is visible; nowServing is non-null, so NowServingCard
+    // does NOT render its empty-state text.
+    expect(screen.queryByText('Menunggu panggilan berikutnya…')).not.toBeInTheDocument();
     expect(api.getBoardState).toHaveBeenCalledTimes(1);
   });
 
-  it('boot leaves nowServing null when the active slice is empty (standby)', async () => {
+  it('boot leaves nowServing null when the active slice is empty (idle empty state)', async () => {
     const api = makeApi('', [], []);
     const audio = makeAudio();
     renderBoard(api, audio);
 
-    // No active ticket → the standby panel is visible.
-    expect(await screen.findByTestId('standby')).toBeInTheDocument();
-    expect(screen.getByTestId('board-active')).toHaveClass('tv-board__active--hidden');
+    // No active ticket → NowServingCard renders its empty state.
+    expect(await screen.findByText('Menunggu panggilan berikutnya…')).toBeInTheDocument();
+    expect(screen.getByTestId('board-active')).toBeInTheDocument();
   });
 
   it('restores the most-recently-touched active ticket (last in the active slice)', async () => {
@@ -461,11 +438,11 @@ describe('TV board state refetch (server owns the read model)', () => {
   });
 
   it('BOARD_LOADED dedupes history against the restored nowServing', async () => {
-    // Seed: boot with no active ticket (standby). Fire a TICKET_CALLED so a
-    // ticket enters nowServing, then fire a second call that pushes the first
-    // into history, then complete the second call (nowServing clears, history
-    // retains it), then trigger a refetch whose active slice restores the
-    // first ticket as nowServing — it must be removed from history (no
+    // Seed: boot with no active ticket (idle empty state). Fire a TICKET_CALLED
+    // so a ticket enters nowServing, then fire a second call that pushes the
+    // first into history, then complete the second call (nowServing clears,
+    // history retains it), then trigger a refetch whose active slice restores
+    // the first ticket as nowServing — it must be removed from history (no
     // double-appearance).
     const api = makeApi('', []);
     const audio = makeAudio();
@@ -481,10 +458,10 @@ describe('TV board state refetch (server owns the read model)', () => {
     // A-005 is now in history (one occurrence — the history list).
     expect(screen.getAllByText('A-005')).toHaveLength(1);
 
-    // Complete t2 → nowServing clears → standby. A refetch with active=[t1]
-    // restores t1 as nowServing and must remove it from history.
+    // Complete t2 → nowServing clears → idle empty state. A refetch with
+    // active=[t1] restores t1 as nowServing and must remove it from history.
     fire(ws, statusEvent('t2', 'CALLING', 'COMPLETED'));
-    expect(await screen.findByTestId('standby')).toBeInTheDocument();
+    expect(await screen.findByText('Menunggu panggilan berikutnya…')).toBeInTheDocument();
 
     // Swap the mock so the next refetch returns t1 as the only active ticket.
     (api.getBoardState as ReturnType<typeof vi.fn>).mockImplementation(() =>
@@ -499,9 +476,9 @@ describe('TV board state refetch (server owns the read model)', () => {
     // Drive a TICKET_CREATED event to schedule a debounced refetch (any event
     // schedules one), then wait for the 300ms debounce + fetch to resolve.
     // We can't use findByText('A-005') here — A-005 is already in the DOM via
-    // history (the hidden active layer retains it under css:false), so
-    // findByText would resolve immediately from the stale history item before
-    // the debounced refetch fires. Wait real time past the debounce instead.
+    // history (CallHistory retains it under css:false), so findByText would
+    // resolve immediately from the stale history item before the debounced
+    // refetch fires. Wait real time past the debounce instead.
     fire(ws, {
       type: 'TICKET_CREATED',
       aggregateId: 't3',
@@ -516,9 +493,9 @@ describe('TV board state refetch (server owns the read model)', () => {
     });
 
     // A-005 is now nowServing (restored from the server's active slice). The
-    // active board layer is visible (not the standby).
-    expect(screen.getByTestId('board-active')).not.toHaveClass('tv-board__active--hidden');
+    // now-serving card shows the ticket + counter.
     expect(screen.getByText('Counter 2')).toBeInTheDocument();
+    expect(screen.queryByText('Menunggu panggilan berikutnya…')).not.toBeInTheDocument();
     // A-005 must NOT appear in history (deduped against the restored
     // nowServing). The CallHistory section is the only place history renders.
     const history = screen.getByText('Riwayat Panggilan').closest('section');
@@ -536,12 +513,12 @@ describe('TV board state refetch (server owns the read model)', () => {
     const audio = makeAudio();
     renderBoard(api, audio);
 
-    // Config still loaded — board boots.
+    // Config still loaded — board boots. Empty waiting state — the active
+    // board's waiting panel renders the empty-state text exactly once (no
+    // standby duplicate exists).
     expect(await screen.findByText('Apotek Sehat')).toBeInTheDocument();
-    // Empty waiting state — no rows, zero count. Both layers (active + standby)
-    // render the empty panel, so each empty-state text appears twice.
-    expect(screen.getAllByText('Belum ada antrian menunggu.')).toHaveLength(2);
-    expect(screen.getAllByText(/Menunggu: 0 tiket/)).toHaveLength(2);
+    expect(screen.getByText('Belum ada antrian menunggu.')).toBeInTheDocument();
+    expect(screen.getByText(/Menunggu: 0 tiket/)).toBeInTheDocument();
   });
 
   it('SYSTEM_RESET clears the waiting list immediately for snappy UX', async () => {
@@ -551,11 +528,12 @@ describe('TV board state refetch (server owns the read model)', () => {
     const api = makeApi('', waiting);
     const audio = makeAudio();
     renderBoard(api, audio);
-    // Both layers (active + standby) render the waiting row.
-    expect(await screen.findAllByText('B-001')).toHaveLength(2);
+    // The waiting panel renders the row (the active board is the sole layer;
+    // no standby duplicate).
+    expect(await screen.findAllByText('B-001')).toHaveLength(1);
     const ws = FakeWebSocket.instances[0];
 
-    // Bring up a call so the active layer is the visible one, then reset.
+    // Bring up a call so the now-serving card is populated, then reset.
     fire(ws, calledEvent('t2', 'A-005', 2));
     expect(await screen.findByText('A-005')).toBeInTheDocument();
 
@@ -566,11 +544,11 @@ describe('TV board state refetch (server owns the read model)', () => {
       version: 3,
       payload: { resetTo: 1, date: '2026-07-31' },
     });
-    // The waiting list is cleared locally immediately — B-001 leaves both
-    // layers' waiting panels (the debounced refetch confirms an empty list with
-    // the mock's initial seed; here the mock stays at one row so we only assert
-    // the local clear before the debounce fires). queryAllByText returns [] when
-    // none remain (the duplicate is gone from both layers).
+    // The waiting list is cleared locally immediately — B-001 leaves the
+    // waiting panel (the debounced refetch confirms an empty list with the
+    // mock's initial seed; here the mock stays at one row so we only assert
+    // the local clear before the debounce fires). queryAllByText returns []
+    // when none remain.
     expect(screen.queryAllByText('B-001')).toHaveLength(0);
   });
 
@@ -641,13 +619,14 @@ describe('TV board state refetch (server owns the read model)', () => {
       </React.StrictMode>,
     );
 
-    // The waiting rows render in BOTH the active + standby layers (crossfade
-    // keeps both mounted), so each row appears twice. The key assertion is
-    // that they render AT ALL under StrictMode — pre-fix, `mountedRef` was
-    // stuck `false` and the boot `refetchBoard` resolution was dropped.
-    expect(await screen.findAllByText('B-001')).toHaveLength(2);
-    expect(screen.getAllByText('A-002')).toHaveLength(2);
-    expect(screen.getAllByText(/Menunggu: 2 tiket/)).toHaveLength(2);
+    // The waiting rows render in the active board's waiting panel (no standby
+    // duplicate exists — the promosi/standby feature was removed). The key
+    // assertion is that they render AT ALL under StrictMode — pre-fix,
+    // `mountedRef` was stuck `false` and the boot `refetchBoard` resolution
+    // was dropped.
+    expect(await screen.findAllByText('B-001')).toHaveLength(1);
+    expect(screen.getAllByText('A-002')).toHaveLength(1);
+    expect(screen.getAllByText(/Menunggu: 2 tiket/)).toHaveLength(1);
     expect(api.getBoardState).toHaveBeenCalledTimes(1);
   });
 });

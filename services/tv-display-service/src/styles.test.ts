@@ -87,8 +87,9 @@ describe('styles.css AC guards', () => {
   it('waiting-queue scales rows to the panel height (cqh) + scrollable list (no clip)', () => {
     // The panel is a size container so children can scale to its height via cqh
     // units — all VISIBLE_LIMIT items always fit the panel regardless of its
-    // height (responsive). The panel height is determinate because the parent
-    // grids use grid-template-rows: minmax(0, 1fr) (active + standby).
+    // height (responsive). The panel height is determinate because the active
+    // grid uses grid-template-rows: minmax(0, 1fr) and the active side column
+    // resolves it via flex.
     const panel = rule('.waiting-queue');
     expect(panel).toContain('container-type: size');
     expect(panel).toContain('display: flex');
@@ -104,34 +105,26 @@ describe('styles.css AC guards', () => {
     expect(rule('.waiting-queue__item')).toMatch(/cqh/);
   });
 
-  it('active + standby grids define a determinate row height (minmax(0, 1fr))', () => {
+  it('active grid defines a determinate row height (minmax(0, 1fr))', () => {
     expect(rule('.tv-board__active-grid')).toContain('grid-template-rows: minmax(0, 1fr)');
-    expect(rule('.standby__grid')).toContain('grid-template-rows: minmax(0, 1fr)');
   });
 
-  it('AC6: both layers overlay the main area + a --hidden modifier + reduced-motion', () => {
-    expect(rule('.tv-board__main')).toContain('position: relative');
-    const active = rule('.tv-board__active, .standby');
-    expect(active).toContain('position: absolute');
-    expect(active).toContain('inset: 0');
-    expect(active).toContain('transition: opacity 0.3s ease');
-    const hidden = rule('.tv-board__active--hidden, .standby--hidden');
-    expect(hidden).toContain('opacity: 0');
-    expect(hidden).toContain('visibility: hidden');
-    expect(hidden).toContain('pointer-events: none');
-    // Reduced motion snaps the layers instantly (no opacity fade).
-    expect(css).toMatch(/prefers-reduced-motion/);
-    expect(css).not.toContain('@keyframes standby-fade-in');
-  });
-
-  it('AC7: marquee translates -50% (seamless two-copy loop), padding-left:100% removed', () => {
-    expect(css).toMatch(/translateX\(-50%\)/);
-    expect(css).not.toContain('padding-left: 100%');
-    // The dup copy + a gap between copies so the loop reads as continuous.
-    expect(css).toContain('.marquee__dup');
-    expect(rule('.marquee__track span')).toContain('padding-right');
-    // Reduced motion disables the animation + the dup copy.
-    expect(css).toMatch(/prefers-reduced-motion[\s\S]*\.marquee__dup\s*\{[^}]*display: none/);
+  it('AC6: the active board is the single always-visible layer (no standby/crossfade)', () => {
+    // The standby/promosi panel was removed (it flickered on the crossfade);
+    // the active board is now a plain flex column filling the main area — no
+    // overlay, no --hidden modifier, no crossfade.
+    expect(css).not.toContain('.standby');
+    expect(css).not.toContain('--hidden');
+    expect(css).not.toContain('position: absolute');
+    expect(css).not.toContain('transition: opacity');
+    const active = rule('.tv-board__active');
+    expect(active).toContain('display: flex');
+    expect(active).toContain('flex-direction: column');
+    expect(active).toContain('height: 100%');
+    expect(active).toContain('min-height: 0');
+    // No marquee/standby keyframes remain.
+    expect(css).not.toContain('@keyframes marquee');
+    expect(css).not.toMatch(/prefers-reduced-motion/);
   });
 
   it('AC8: now-serving eyebrow letter-spacing ≤ 0.08em', () => {
@@ -139,18 +132,5 @@ describe('styles.css AC guards', () => {
     const ls = r.match(/letter-spacing:\s*([\d.]+)em/);
     expect(ls, 'letter-spacing must be set').not.toBeNull();
     expect(parseFloat(ls![1])).toBeLessThanOrEqual(0.08);
-  });
-
-  it('standby shares the idle screen: queue + promo media in a 1fr 1fr grid', () => {
-    // The idle screen no longer shows full-screen ads — the waiting queue
-    // shares it with (smaller) promo media ("pindahkan iklan ke tempat lain").
-    const grid = rule('.standby__grid');
-    expect(grid).toContain('display: grid');
-    expect(grid).toContain('grid-template-columns: 1fr 1fr');
-    expect(grid).toContain('flex: 1');
-    expect(grid).toContain('min-height: 0');
-    // Grid-cell containment so each child fills its cell and clips overflow.
-    expect(rule('.standby__grid > .waiting-queue')).toContain('min-height: 0');
-    expect(rule('.standby__grid > .standby__media')).toContain('min-height: 0');
   });
 });
