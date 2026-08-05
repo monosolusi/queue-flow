@@ -8,6 +8,7 @@ import {
   StateSchema,
   SystemConfiguration,
 } from '../../src/domain/store-config';
+import { DEFAULT_TIMEZONE } from '../../src/domain/store-config/value-objects/timezone';
 import { TicketStatus } from '../../src/domain/queue';
 
 describe('StateMachine (default PRD §7 graph)', () => {
@@ -72,6 +73,44 @@ describe('DailyResetPolicy', () => {
     expect(d.cronExpression).toBe('0 0 * * *');
     expect(d.resetTicketNumberTo).toBe(1);
     expect(d.archivePreviousDayData).toBe(true);
+  });
+
+  it('defaults timezone to the server local IANA zone when omitted (QUE-42)', () => {
+    const d = DailyResetPolicy.DEFAULT;
+    expect(d.timezone).toBe(DEFAULT_TIMEZONE);
+    // An explicit-omit construction (`of(...)` with no 5th arg) also defaults.
+    const manual = DailyResetPolicy.of(DailyResetMode.MANUAL, null);
+    expect(manual.timezone).toBe(DEFAULT_TIMEZONE);
+    // An empty-string timezone is treated as omitted (defaults to local TZ).
+    const empty = DailyResetPolicy.of(DailyResetMode.MANUAL, null, 1, true, '');
+    expect(empty.timezone).toBe(DEFAULT_TIMEZONE);
+  });
+
+  it('accepts a valid IANA timezone (QUE-42)', () => {
+    const d = DailyResetPolicy.of(
+      DailyResetMode.AUTOMATIC_CRON,
+      '0 0 * * *',
+      1,
+      true,
+      'Asia/Jakarta',
+    );
+    expect(d.timezone).toBe('Asia/Jakarta');
+  });
+
+  it.each([
+    ['Foo/Bar', 'unknown IANA name'],
+    ['NotATimezone', 'not a path-shaped IANA name'],
+    ['Asia/Jakarta/Extra', 'too many segments'],
+  ])('rejects a malformed timezone %j (%s) with InvalidValueObjectException (QUE-42)', (tz) => {
+    expect(() => DailyResetPolicy.of(DailyResetMode.AUTOMATIC_CRON, '0 0 * * *', 1, true, tz)).toThrow(
+      InvalidValueObjectException,
+    );
+  });
+
+  it('validates the timezone in MANUAL mode too (the stored value must always be a valid IANA TZ)', () => {
+    expect(() => DailyResetPolicy.of(DailyResetMode.MANUAL, null, 1, true, 'Foo/Bar')).toThrow(
+      InvalidValueObjectException,
+    );
   });
 
   it('allows MANUAL mode without a cron expression', () => {

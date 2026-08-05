@@ -181,6 +181,39 @@ describe('SaveSystemConfigurationUseCase — daily-reset policy audit + re-arm (
     expect(scheduler.calls).toBe(2);
   });
 
+  /**
+   * QUE-42 — a provided `timezone` round-trips through the saved
+   * `DailyResetPolicy.timezone` and appears in the audit `after` snapshot.
+   * The before/after `toMatchObject` assertions stay subset-safe (the snapshot
+   * now carries `timezone`, but existing assertions that match a subset of
+   * fields keep passing).
+   */
+  it('persists a provided timezone and records it in the audit after snapshot (QUE-42)', async () => {
+    const repos = buildRepos();
+    const scheduler = fakeScheduler();
+    const useCase = buildUseCase(repos, scheduler);
+
+    await useCase.execute(
+      baseCommand({
+        dailyReset: {
+          mode: DailyResetMode.AUTOMATIC_CRON,
+          cronExpression: '0 0 * * *',
+          resetTicketNumberTo: 1,
+          archivePreviousDayData: true,
+          timezone: 'Asia/Jakarta',
+        },
+      }),
+    );
+
+    const saved = await repos.config.get();
+    expect(saved!.dailyResetPolicy.timezone).toBe('Asia/Jakarta');
+
+    const changes = await policyChangeActions(repos);
+    expect(changes).toHaveLength(1);
+    expect(changes[0].after).toMatchObject({ timezone: 'Asia/Jakarta' });
+    expect(scheduler.calls).toBe(1);
+  });
+
   it('does not call reArm when no scheduler is injected (unit-test default)', async () => {
     const repos = buildRepos();
     const useCase = buildUseCase(repos, null);

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { IAdminApi } from '../api/admin-api';
 import type {
@@ -11,9 +11,11 @@ import { DEFAULT_BRAND_COLOR } from '../api/types';
 import { validateCronExpression } from '../lib/cron';
 import { validateBrandColor, isValidBrandColor } from '../lib/brand-color';
 import { validateRetentionDays } from '../lib/retention';
-import { PRIORITY_POLICY_LABELS, DAILY_RESET_MODE_LABELS } from '../lib/labels';
+import { DAILY_RESET_MODE_LABELS } from '../lib/labels';
 import { timeToCron, cronToTime } from '../lib/daily-reset';
+import { BROWSER_TIMEZONE, timezoneSelectOptions } from '../lib/timezone';
 import { applyBrandColor } from '../lib/theme';
+import { CounterRoutingEditor } from '../components/CounterRoutingEditor';
 
 /**
  * One editable category row. `id` is carried for categories that already exist
@@ -35,7 +37,14 @@ interface RoutingRow {
   readonly rowKey: string;
   counterId: number;
   counterName: string;
-  assignedCategoryCodes: string[];
+  /** `readonly` so the shared `CounterRoutingEditor`'s `RoutingRuleRow`
+   *  (also `readonly string[]`) is structurally compatible with the
+   *  `Partial<RoutingRow>` patch it emits — the editor's draft is mutable
+   *  internally but the patch it emits is treated as readonly at the
+   *  boundary. None of the admin helpers mutate the array in place; they all
+   *  create new arrays (the `readonly` is a type-level guarantee, not a
+   *  runtime constraint). */
+  readonly assignedCategoryCodes: readonly string[];
   priorityPolicy: PriorityPolicy;
 }
 
@@ -53,6 +62,8 @@ interface AdminForm {
     cronExpression: string;
     resetTicketNumberTo: number;
     archivePreviousDayData: boolean;
+    /** IANA timezone the daily-reset cron fires in (QUE-42). */
+    timezone: string;
   };
 }
 
@@ -136,13 +147,6 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
     };
   }, [api]);
 
-  // Derived from `state` so the hook order is stable across loading/ready
-  // (Rules of Hooks: hooks must run before any early return).
-  const categoryCodes = useMemo(
-    () => (state.status === 'ready' ? state.form.categories.map((c) => c.code) : []),
-    [state],
-  );
-
   if (state.status === 'loading') {
     return <div className="admin-panel admin-panel--loading">Memuat konfigurasi…</div>;
   }
@@ -189,13 +193,17 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
             form.dailyReset.mode === 'AUTOMATIC_CRON' ? form.dailyReset.cronExpression : null,
           resetTicketNumberTo: form.dailyReset.resetTicketNumberTo,
           archivePreviousDayData: form.dailyReset.archivePreviousDayData,
+          timezone: form.dailyReset.timezone,
         },
         // Preserve `id` on existing categories; omit it for rows added this
         // session so the backend mints fresh ids.
         categories: form.categories.map((c) =>
           c.id ? { id: c.id, code: c.code, name: c.name } : { code: c.code, name: c.name },
         ),
-        routingRules: form.routingRules,
+        // Strip the client-only `rowKey` (a React key) at the boundary so it
+        // never travels on the wire — `WizardRoutingRuleDto` carries no
+        // `rowKey`, and the PUT payload type is `readonly WizardRoutingRuleDto[]`.
+        routingRules: form.routingRules.map(({ rowKey, ...rest }) => rest),
         actor: 'admin',
       });
       setSavedAt(Date.now());
@@ -367,70 +375,20 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
         )}
       </section>
 
-      {/* Counter & routing — add / edit / remove + category assignment (FR-ADM-01). */}
+      {/* Counter & routing — add / edit / remove + category assignment (FR-ADM-01).
+          Unified with the wizard's Step 2 table + Edit-modal design (QUE-43).
+          counterId is auto-managed by the parent helpers (not hand-editable). */}
       <section className="config-card">
         <h2 className="config-card__title">Counter &amp; Routing</h2>
-        <ul className="entry-list">
-          {form.routingRules.map((rule, i) => (
-            <li key={rule.rowKey} className="entry-row entry-row--routing">
-              <input
-                className="field__input entry-row__counter-id"
-                type="number"
-                min={1}
-                value={rule.counterId}
-                onChange={(e) => updateRouting(form, setState, i, { counterId: Number(e.target.value) })}
-                aria-label={`Counter ${i + 1} id`}
-                aria-required="true"
-              />
-              <input
-                className="field__input entry-row__name"
-                type="text"
-                value={rule.counterName}
-                onChange={(e) => updateRouting(form, setState, i, { counterName: e.target.value })}
-                placeholder="Nama counter"
-                aria-label={`Counter ${i + 1} nama`}
-                aria-required="true"
-              />
-              <select
-                className="field__input"
-                value={rule.priorityPolicy}
-                onChange={(e) => updateRouting(form, setState, i, { priorityPolicy: e.target.value as PriorityPolicy })}
-                aria-label={`Counter ${i + 1} kebijakan prioritas`}
-                aria-required="true"
-              >
-                {(Object.keys(PRIORITY_POLICY_LABELS) as PriorityPolicy[]).map((p) => (
-                  <option key={p} value={p}>
-                    {PRIORITY_POLICY_LABELS[p]}
-                  </option>
-                ))}
-              </select>
-              <fieldset className="checkbox-group">
-                <legend>Kategori dilayani</legend>
-                {categoryCodes.map((code) => (
-                  <label key={code} className="checkbox-group__item">
-                    <input
-                      type="checkbox"
-                      checked={rule.assignedCategoryCodes.includes(code)}
-                      onChange={(e) => toggleRoutingCategory(form, setState, i, code, e.target.checked)}
-                    />
-                    {code}
-                  </label>
-                ))}
-              </fieldset>
-              <button
-                type="button"
-                className="btn btn--ghost"
-                onClick={() => removeRouting(form, setState, i)}
-                disabled={form.routingRules.length <= 1}
-              >
-                Hapus
-              </button>
-            </li>
-          ))}
-        </ul>
-        <button type="button" className="btn btn--secondary" onClick={() => addRouting(form, setState)}>
-          + Tambah Counter
-        </button>
+        <CounterRoutingEditor
+          routingRules={form.routingRules}
+          categories={form.categories}
+          onUpdate={(i, patch) => updateRouting(form, setState, i, patch)}
+          onAdd={() => addRouting(form, setState)}
+          onRemove={(i) => removeRouting(form, setState, i)}
+          canRemove={() => form.routingRules.length > 1}
+          idPrefix="routing"
+        />
       </section>
 
       {/* Daily reset policy — mode / cron / resetTo / archive (FR-ADM-01). */}
@@ -453,27 +411,50 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
           </select>
         </label>
         {form.dailyReset.mode === 'AUTOMATIC_CRON' && (
-          <label className="field">
-            <span className="field__label">
-              Waktu reset harian<span aria-hidden="true"> *</span>
-            </span>
-            <input
-              className="field__input"
-              type="time"
-              value={cronToTime(form.dailyReset.cronExpression) ?? '00:00'}
-              onChange={(e) =>
-                setState({ status: 'ready', form: { ...form, dailyReset: { ...form.dailyReset, cronExpression: timeToCron(e.target.value) } } })
-              }
-              aria-label="Waktu reset harian"
-              required
-              {...describedBy('cron-error', Boolean(cronError))}
-            />
-            {cronError && (
-              <span className="field__error" id="cron-error" data-testid="cron-error">
-                {cronError}
+          <>
+            <label className="field">
+              <span className="field__label">
+                Waktu reset harian<span aria-hidden="true"> *</span>
               </span>
-            )}
-          </label>
+              <input
+                className="field__input"
+                type="time"
+                value={cronToTime(form.dailyReset.cronExpression) ?? '00:00'}
+                onChange={(e) =>
+                  setState({ status: 'ready', form: { ...form, dailyReset: { ...form.dailyReset, cronExpression: timeToCron(e.target.value) } } })
+                }
+                aria-label="Waktu reset harian"
+                required
+                {...describedBy('cron-error', Boolean(cronError))}
+              />
+              {cronError && (
+                <span className="field__error" id="cron-error" data-testid="cron-error">
+                  {cronError}
+                </span>
+              )}
+            </label>
+            <label className="field">
+              <span className="field__label">Zona waktu</span>
+              <select
+                className="field__input"
+                value={form.dailyReset.timezone}
+                onChange={(e) =>
+                  setState({
+                    status: 'ready',
+                    form: { ...form, dailyReset: { ...form.dailyReset, timezone: e.target.value } },
+                  })
+                }
+                aria-label="Zona waktu"
+                data-testid="tz-select"
+              >
+                {timezoneSelectOptions(form.dailyReset.timezone).map((tz) => (
+                  <option key={tz} value={tz}>
+                    {tz}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </>
         )}
         <label className="field">
           <span className="field__label">
@@ -663,6 +644,7 @@ function toForm(config: SystemConfigurationDto): AdminForm {
       cronExpression: config.dailyResetPolicy.cronExpression ?? '',
       resetTicketNumberTo: config.dailyResetPolicy.resetTicketNumberTo,
       archivePreviousDayData: config.dailyResetPolicy.archivePreviousDayData,
+      timezone: config.dailyResetPolicy.timezone || BROWSER_TIMEZONE,
     },
   };
 }
@@ -716,20 +698,4 @@ function addRouting(form: AdminForm, setState: (s: PanelState) => void) {
 }
 function removeRouting(form: AdminForm, setState: (s: PanelState) => void, i: number) {
   setState({ status: 'ready', form: { ...form, routingRules: form.routingRules.filter((_, idx) => idx !== i) } });
-}
-function toggleRoutingCategory(
-  form: AdminForm,
-  setState: (s: PanelState) => void,
-  i: number,
-  code: string,
-  checked: boolean,
-) {
-  const routingRules = form.routingRules.map((r, idx) => {
-    if (idx !== i) return r;
-    const set = new Set(r.assignedCategoryCodes);
-    if (checked) set.add(code);
-    else set.delete(code);
-    return { ...r, assignedCategoryCodes: [...set] };
-  });
-  setState({ status: 'ready', form: { ...form, routingRules } });
 }

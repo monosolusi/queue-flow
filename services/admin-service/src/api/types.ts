@@ -7,6 +7,8 @@
  * DTOs).
  */
 
+import { BROWSER_TIMEZONE } from '../lib/timezone';
+
 export type PriorityPolicy = 'FIFO_GLOBAL' | 'CATEGORY_PRIORITY';
 export type DailyResetMode = 'AUTOMATIC_CRON' | 'MANUAL';
 
@@ -26,6 +28,10 @@ export interface DailyResetPolicyDto {
   readonly cronExpression: string | null;
   readonly resetTicketNumberTo: number;
   readonly archivePreviousDayData: boolean;
+  /** IANA timezone the daily-reset cron fires in (always present on the read
+   *  projection — the backend VO defaults to the server's local TZ when
+   *  unset). QUE-42. */
+  readonly timezone: string;
 }
 
 export interface ConfigCategoryDto {
@@ -121,6 +127,7 @@ export const DEFAULT_DAILY_RESET: DailyResetPolicyDto = {
   cronExpression: '0 0 * * *',
   resetTicketNumberTo: 1,
   archivePreviousDayData: true,
+  timezone: BROWSER_TIMEZONE,
 };
 
 /**

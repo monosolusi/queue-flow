@@ -66,6 +66,7 @@ export class PostgresSystemConfigurationRepository implements ISystemConfigurati
             cronExpression: config.dailyResetPolicy.cronExpression,
             resetTicketNumberTo: config.dailyResetPolicy.resetTicketNumberTo,
             archivePreviousDayData: config.dailyResetPolicy.archivePreviousDayData,
+            timezone: config.dailyResetPolicy.timezone,
           }),
           config.brandColor.value,
         ],
@@ -103,10 +104,21 @@ function toConfig(row: ConfigRow): SystemConfiguration {
 }
 
 function deserializePolicy(props: DailyResetPolicyProps) {
+  // Defensive `timezone` pass-through for old rows pre-QUE-42: the JSONB
+  // column carries no `timezone` key on stores saved before the feature, so
+  // `props.timezone` is `undefined`. The VO's `of(...)` defaults an absent /
+  // empty timezone to the server's local IANA zone (`DEFAULT_TIMEZONE`), so
+  // passing `undefined` here rehydrates a pre-feature row to the same
+  // operational behavior the host had before (cron fired in host local time).
+  // No SQL migration is needed — the JSONB column is flexible, and the new key
+  // appears lazily on the next save (mirrors the `brandColor` `?? DEFAULT`
+  // fallback for the boot window between a code deploy and a migration). On
+  // the next save the new `timezone` key is written alongside the others.
   return DailyResetPolicy.of(
     props.mode as DailyResetMode,
     props.cronExpression,
     props.resetTicketNumberTo,
     props.archivePreviousDayData,
+    props.timezone ?? undefined,
   );
 }

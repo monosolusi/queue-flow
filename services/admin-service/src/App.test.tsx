@@ -15,6 +15,7 @@ function makeConfig(brandColor = '#2563eb'): SystemConfigurationDto {
       cronExpression: null,
       resetTicketNumberTo: 1,
       archivePreviousDayData: true,
+      timezone: 'Asia/Jakarta',
     },
     categories: [],
     routingRules: [],

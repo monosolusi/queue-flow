@@ -41,6 +41,9 @@ export interface DailyResetPolicyDto {
   readonly cronExpression: string | null;
   readonly resetTicketNumberTo: number;
   readonly archivePreviousDayData: boolean;
+  /** IANA timezone the daily-reset cron fires in (always present on the read
+   *  projection — the VO defaults to the server's local TZ when unset). */
+  readonly timezone: string;
 }
 
 /**
@@ -81,6 +84,7 @@ function defaultDailyReset(): DailyResetPolicyDto {
     cronExpression: p.cronExpression,
     resetTicketNumberTo: p.resetTicketNumberTo,
     archivePreviousDayData: p.archivePreviousDayData,
+    timezone: p.timezone,
   };
 }
 
@@ -132,6 +136,7 @@ export class GetSystemConfigurationUseCase {
         cronExpression: system.dailyResetPolicy.cronExpression,
         resetTicketNumberTo: system.dailyResetPolicy.resetTicketNumberTo,
         archivePreviousDayData: system.dailyResetPolicy.archivePreviousDayData,
+        timezone: system.dailyResetPolicy.timezone,
       },
       brandColor: system.brandColor.value,
       categories: allCategories

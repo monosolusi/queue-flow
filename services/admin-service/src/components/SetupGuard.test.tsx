@@ -10,7 +10,7 @@ function cleanStore(): SystemConfigurationDto {
     isInitialSetupCompleted: false,
     storeName: '',
     stateMachine: { states: [], transitions: [] },
-    dailyResetPolicy: { mode: 'MANUAL', cronExpression: null, resetTicketNumberTo: 1, archivePreviousDayData: true },
+    dailyResetPolicy: { mode: 'MANUAL', cronExpression: null, resetTicketNumberTo: 1, archivePreviousDayData: true, timezone: 'Asia/Jakarta' },
     categories: [],
     routingRules: [],
     brandColor: '#2563eb',

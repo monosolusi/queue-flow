@@ -22,6 +22,7 @@ function configuredStore(): SystemConfigurationDto {
       cronExpression: '0 0 * * *',
       resetTicketNumberTo: 1,
       archivePreviousDayData: true,
+      timezone: 'Asia/Jakarta',
     },
     categories: [
       { id: 'cat-a', code: 'A', name: 'Customer Service' },

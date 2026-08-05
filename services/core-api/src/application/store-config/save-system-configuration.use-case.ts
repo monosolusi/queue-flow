@@ -55,6 +55,13 @@ export interface WizardDailyResetDto {
   readonly cronExpression: string | null;
   readonly resetTicketNumberTo: number;
   readonly archivePreviousDayData: boolean;
+  /**
+   * IANA timezone the daily-reset cron fires in (e.g. `Asia/Jakarta`). Optional
+   * on the wire for backward-compat with direct API calls / existing tests that
+   * omit it — the VO defaults to the server's local TZ when absent. The admin /
+   * wizard client always sends it (QUE-42).
+   */
+  readonly timezone?: string;
 }
 
 /**
@@ -101,12 +108,14 @@ function dailyResetPolicySnapshot(p: DailyResetPolicy): {
   cronExpression: string | null;
   resetTicketNumberTo: number;
   archivePreviousDayData: boolean;
+  timezone: string;
 } {
   return {
     mode: p.mode,
     cronExpression: p.cronExpression,
     resetTicketNumberTo: p.resetTicketNumberTo,
     archivePreviousDayData: p.archivePreviousDayData,
+    timezone: p.timezone,
   };
 }
 
@@ -161,6 +170,7 @@ export class SaveSystemConfigurationUseCase {
       command.dailyReset.cronExpression,
       command.dailyReset.resetTicketNumberTo,
       command.dailyReset.archivePreviousDayData,
+      command.dailyReset.timezone,
     );
     // Brand color is a pure config field — no scheduler/audit side-effect, so no
     // change-gating flag or post-commit re-arm (unlike the daily-reset policy).

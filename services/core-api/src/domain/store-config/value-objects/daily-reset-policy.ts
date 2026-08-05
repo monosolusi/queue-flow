@@ -1,6 +1,7 @@
 import { InvalidValueObjectException } from '../../shared/errors';
 import { ValueObject } from '../../shared/value-object';
 import { isValidCronExpression } from './cron-expression';
+import { DEFAULT_TIMEZONE, isValidTimezone } from './timezone';
 
 export enum DailyResetMode {
   AUTOMATIC_CRON = 'AUTOMATIC_CRON',
@@ -12,6 +13,7 @@ export interface DailyResetPolicyProps {
   readonly cronExpression: string | null;
   readonly resetTicketNumberTo: number;
   readonly archivePreviousDayData: boolean;
+  readonly timezone: string;
 }
 
 /**
@@ -28,6 +30,7 @@ export class DailyResetPolicy extends ValueObject<DailyResetPolicyProps> {
     cronExpression: string | null,
     resetTicketNumberTo = 1,
     archivePreviousDayData = true,
+    timezone: string = DEFAULT_TIMEZONE,
   ): DailyResetPolicy {
     if (mode === DailyResetMode.AUTOMATIC_CRON) {
       if (!cronExpression) {
@@ -52,11 +55,27 @@ export class DailyResetPolicy extends ValueObject<DailyResetPolicyProps> {
         `resetTicketNumberTo must be a positive integer, got '${resetTicketNumberTo}'`,
       );
     }
+    // Timezone enforcement (QUE-42): an empty/omitted timezone defaults to the
+    // server's local IANA zone; a provided timezone must be a valid IANA name
+    // — otherwise the boot-time / re-arm `CronJob` (5th positional ctor arg)
+    // would throw on an unknown zone. Validated ALWAYS (even MANUAL mode) so
+    // the stored value is always a valid IANA TZ; the cost is negligible and
+    // the invariant uniform. Mirrors the cron-format enforcement: a malformed
+    // TZ is a malformed value object → `InvalidValueObjectException` → 400,
+    // never a 500.
+    const resolvedTimezone =
+      !timezone || timezone.trim() === '' ? DEFAULT_TIMEZONE : timezone;
+    if (!isValidTimezone(resolvedTimezone)) {
+      throw new InvalidValueObjectException(
+        `DailyResetPolicy.timezone must be a valid IANA timezone, got '${timezone}'`,
+      );
+    }
     return new DailyResetPolicy({
       mode,
       cronExpression,
       resetTicketNumberTo,
       archivePreviousDayData,
+      timezone: resolvedTimezone,
     });
   }
 
@@ -65,6 +84,7 @@ export class DailyResetPolicy extends ValueObject<DailyResetPolicyProps> {
     '0 0 * * *',
     1,
     true,
+    DEFAULT_TIMEZONE,
   );
 
   public get mode(): DailyResetMode {
@@ -81,5 +101,10 @@ export class DailyResetPolicy extends ValueObject<DailyResetPolicyProps> {
 
   public get archivePreviousDayData(): boolean {
     return this.value.archivePreviousDayData;
+  }
+
+  /** The IANA timezone the daily-reset cron fires in (e.g. `Asia/Jakarta`). */
+  public get timezone(): string {
+    return this.value.timezone;
   }
 }

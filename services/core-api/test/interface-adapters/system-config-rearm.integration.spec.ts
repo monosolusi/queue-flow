@@ -198,4 +198,59 @@ describe('System-config scheduler re-arm + cron enforcement (integration — QUE
     expect(scheduler.armedCronExpression).toBe(armedAfterInitial); // still '0 0 * * *'
     expect(registry.doesExist('cron', 'daily-reset')).toBe(true);
   });
+
+  it('changing only the timezone (same cron) re-arms and updates armedTimezone (QUE-42)', async () => {
+    // Initial save with the default (no timezone) → arms in the server's local TZ.
+    await request(app.getHttpServer()).put('/api/system/config').send(wizardPayload());
+    expect(scheduler.armedCronExpression).toBe('0 0 * * *');
+    const initialTz = scheduler.armedTimezone;
+    expect(initialTz).not.toBeNull();
+
+    // Pick a target IANA zone guaranteed different from the server's local TZ
+    // so the re-arm is observable regardless of where the test runs (CI is
+    // usually UTC; a developer machine may be Asia/Jakarta, etc.).
+    const targetTz =
+      initialTz === 'America/New_York' ? 'Asia/Jakarta' : 'America/New_York';
+
+    // Re-save with the SAME cron but a different IANA timezone.
+    const res = await request(app.getHttpServer())
+      .put('/api/system/config')
+      .send(
+        wizardPayload({
+          ...defaultDailyReset(),
+          timezone: targetTz,
+        }),
+      );
+    expect(res.status).toBe(200);
+
+    // Same cron expression, but the armed TZ updated.
+    expect(scheduler.armedCronExpression).toBe('0 0 * * *');
+    expect(scheduler.armedTimezone).toBe(targetTz);
+    expect(scheduler.armedTimezone).not.toBe(initialTz);
+    expect(registry.doesExist('cron', 'daily-reset')).toBe(true);
+  });
+
+  it('a malformed timezone is rejected with 400 and the cron is NOT re-armed (QUE-42)', async () => {
+    // Arm a valid cron first so we can prove a rejected save leaves it intact.
+    await request(app.getHttpServer()).put('/api/system/config').send(wizardPayload());
+    expect(scheduler.armedCronExpression).toBe('0 0 * * *');
+    const armedTzBefore = scheduler.armedTimezone;
+
+    const res = await request(app.getHttpServer())
+      .put('/api/system/config')
+      .send(
+        wizardPayload({
+          ...defaultDailyReset(),
+          timezone: 'Foo/Bar', // not a valid IANA name
+        }),
+      );
+
+    // 400 — the VO rejects the malformed timezone at construction (before the
+    // tx opens), so the config is not persisted and the scheduler is untouched.
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_VALUE_OBJECT');
+    expect(scheduler.armedCronExpression).toBe('0 0 * * *');
+    expect(scheduler.armedTimezone).toBe(armedTzBefore);
+    expect(registry.doesExist('cron', 'daily-reset')).toBe(true);
+  });
 });

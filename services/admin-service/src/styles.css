@@ -268,6 +268,11 @@ fieldset {
   margin-top: -0.5rem;
   margin-bottom: 1rem;
 }
+/* A hint inside a flex-column `.field` must not pull up into the input above
+ * (the standalone step-intro hints use the negative margin intentionally). */
+.field .wizard__hint {
+  margin-top: 0;
+}
 .wizard__error {
   color: var(--danger-on-dark);
 }
@@ -473,6 +478,41 @@ fieldset {
   color: var(--danger-on-dark);
 }
 
+/* Inline field hint — a neutral explanation wired to an input via
+   aria-describedby (e.g. the priority-policy description under the modal
+   select). Distinct from .field__error (danger) so a hint never reads as an
+   error to AT or color-contrast checks. */
+.field__hint {
+  display: block;
+  margin-top: 0.3rem;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+/* A "you must do this before continuing" hint — used on step 2 when no
+   category is assigned to any counter yet. Carries the danger tint so it reads
+   as a blocker, not a neutral tip, matching the disabled Lanjut button. */
+.wizard__hint--required {
+  color: var(--danger-on-dark);
+  margin-top: 0.75rem;
+  margin-bottom: 0;
+}
+
+/* Priority-policy cell in the step-2 routing table (feedback: short label +
+   tooltip). The label stays narrow; the info glyph carries the full
+   explanation as a native title tooltip + an AT aria-label. */
+.policy-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.policy-cell__info {
+  font-size: 0.85rem;
+  line-height: 1;
+  color: var(--accent-on-dark);
+  cursor: help;
+}
+
 /* Step 5 — read-only review of the assembled configuration before activation. */
 .wizard__review {
   display: grid;
@@ -639,4 +679,187 @@ fieldset {
 ::placeholder {
   color: var(--text-muted);
   opacity: 1;
+}
+
+/* Routing edit modal — hand-rolled overlay (jsdom-safe; no native <dialog>). */
+.modal__overlay {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  padding: 1rem;
+}
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--surface-2);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.25rem 1rem;
+  width: min(32rem, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.modal__title {
+  margin: 0 0 0.25rem;
+  font-size: 1.05rem;
+}
+.modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+/* Searchable category select (Step 2 modal). */
+.category-select {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.category-select__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.category-select__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.4rem 0.2rem 0.55rem;
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 999px;
+  font-size: 0.85rem;
+}
+.category-select__chip-remove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 0.2rem;
+  line-height: 1;
+}
+.category-select__empty-inline {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+.category-select__input {
+  position: relative;
+}
+.category-select__field {
+  width: 100%;
+  /* Leave room for the open/close toggle on the right so typed text never sits
+     under the button. */
+  padding-right: 2.25rem;
+}
+/* Manual open/close toggle — explicit dismiss affordance (feedback: "bisa
+   ditutup manual juga"). Sits inside the input's right gutter; `tabindex=-1`
+   keeps the combobox as the single tab stop into the field. */
+.category-select__toggle {
+  position: absolute;
+  top: 50%;
+  right: 0.4rem;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0.2rem 0.35rem;
+  line-height: 1;
+  font-size: 0.9rem;
+  border-radius: 6px;
+}
+.category-select__toggle:hover {
+  color: var(--text);
+}
+.category-select__listbox {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin: 0.2rem 0 0;
+  padding: 0.25rem;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--surface-2);
+  border-radius: var(--radius);
+  /* maxHeight is set inline from a measured fit so the listbox never extends
+     the scroll container (the modal) — see SearchableCategorySelect. The CSS
+     max-height here is a non-JS fallback only. */
+  overflow-y: auto;
+  z-index: 10;
+}
+/* Flipped above the input when there isn't room below — keeps the listbox
+   inside the scroll container without pushing the action buttons (feedback:
+   the modal must not scroll when the combobox opens). */
+.category-select__listbox--up {
+  top: auto;
+  bottom: 100%;
+  margin: 0 0 0.2rem;
+}
+.category-select__option {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+  min-height: 2.5rem;
+}
+.category-select__option--highlighted {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+.category-select__option-check {
+  margin-left: auto;
+  color: var(--accent-on-dark);
+}
+
+/* Routing graph — Step 5 review (hand-rolled offline SVG, NFR-REL-01). */
+.routing-graph {
+  margin-top: 0.25rem;
+}
+.routing-graph__svg {
+  width: 100%;
+  max-width: 480px;
+  height: auto;
+  display: block;
+}
+.routing-graph__node {
+  stroke-width: 1.5;
+}
+.routing-graph__node--counter {
+  fill: color-mix(in srgb, var(--accent) 20%, var(--surface));
+  stroke: var(--accent);
+}
+.routing-graph__node--category {
+  fill: var(--surface);
+  stroke: var(--surface-2);
+}
+.routing-graph__node-label {
+  fill: var(--text);
+  font-size: 12px;
+}
+.routing-graph__edge {
+  stroke: var(--surface-2);
+  stroke-width: 1.5;
+}
+.routing-graph__legend {
+  margin: 0.4rem 0 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+/* Step-2 routing table actions column (shrink the Edit cell). */
+.data-table__actions {
+  white-space: nowrap;
+  text-align: right;
 }

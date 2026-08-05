@@ -1,19 +1,22 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { WizardPage } from './WizardPage';
 import type { IAdminApi } from '../api/admin-api';
 import { DEFAULT_CATEGORIES, DEFAULT_STATE_MACHINE, DEFAULT_BRAND_COLOR, type SaveSystemConfigurationPayload, type SystemConfigurationDto } from '../api/types';
+import { BROWSER_TIMEZONE } from '../lib/timezone';
 
 /** A clean store mirrors core-api's `GetSystemConfigurationUseCase`: the default
- *  state machine is returned even before setup (so the wizard is prefilled). */
+ *  state machine is returned even before setup (so the wizard is prefilled),
+ *  and the default daily-reset policy carries the server's local IANA timezone
+ *  (which equals the browser's zone on the single on-premise box — NFR-SEC-01). */
 function cleanStore(): SystemConfigurationDto {
   return {
     isInitialSetupCompleted: false,
     storeName: '',
     stateMachine: DEFAULT_STATE_MACHINE,
-    dailyResetPolicy: { mode: 'AUTOMATIC_CRON', cronExpression: '0 0 * * *', resetTicketNumberTo: 1, archivePreviousDayData: true },
+    dailyResetPolicy: { mode: 'AUTOMATIC_CRON', cronExpression: '0 0 * * *', resetTicketNumberTo: 1, archivePreviousDayData: true, timezone: BROWSER_TIMEZONE },
     categories: [],
     routingRules: [],
     brandColor: DEFAULT_BRAND_COLOR,
@@ -53,6 +56,21 @@ function renderWizard(api: IAdminApi) {
   );
 }
 
+/** Step-2 guard helper. The wizard now blocks advancing past step 2 until at
+ *  least one counter serves a category (FR-WZD-03 feedback: "jika belum ada
+ *  kategori dilayani, tidak bisa next"). Assigns "Customer Service" (code A)
+ *  to Counter 1 via the edit modal so a test that only needs to walk past step
+ *  2 can do so without re-asserting the combobox flow each time. Call after the
+ *  step-1 → step-2 `wizard-next` click. */
+async function assignCategoryOnStep2() {
+  await screen.findByTestId('step-2');
+  await userEvent.click(screen.getByTestId('routing-edit-0'));
+  const search = screen.getByRole('combobox', { name: /Kategori dilayani/ });
+  await userEvent.type(search, 'Customer');
+  await userEvent.click(screen.getByRole('option', { name: /Customer Service/ }));
+  await userEvent.click(screen.getByTestId('routing-modal-save'));
+}
+
 describe('WizardPage (FR-WZD-02..06)', () => {
   it('walks all five steps, renders the review, and saves the configuration on finalize', async () => {
     const { api, save } = makeApi();
@@ -67,9 +85,14 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     expect(screen.getByTestId('cat-readonly')).toBeInTheDocument();
     await userEvent.click(screen.getByTestId('wizard-next'));
 
-    // Step 2 — routing matrix (FR-WZD-03). Assign category A to Counter 1.
+    // Step 2 — routing matrix (FR-WZD-03). Assign category A to Counter 1 via
+    // the edit modal + searchable category combobox (selected by name).
     expect(await screen.findByTestId('step-2')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('checkbox', { name: 'A' }));
+    await userEvent.click(screen.getByTestId('routing-edit-0'));
+    const search = screen.getByRole('combobox', { name: /Kategori dilayani/ });
+    await userEvent.type(search, 'Customer');
+    await userEvent.click(screen.getByRole('option', { name: /Customer Service/ }));
+    await userEvent.click(screen.getByTestId('routing-modal-save'));
     await userEvent.click(screen.getByTestId('wizard-next'));
 
     // Step 3 — state machine designer with the PRD §7 default prefilled (FR-WZD-04).
@@ -133,7 +156,7 @@ describe('WizardPage (FR-WZD-02..06)', () => {
 
     // Walk to the review and finalize.
     await userEvent.click(screen.getByTestId('wizard-next'));
-    await (await screen.findByTestId('step-2'));
+    await assignCategoryOnStep2();
     await userEvent.click(screen.getByTestId('wizard-next'));
     await (await screen.findByTestId('step-3'));
     await userEvent.click(screen.getByTestId('wizard-next'));
@@ -163,10 +186,11 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     const { api, save } = makeApi();
     renderWizard(api);
 
-    // Skip to step 4 via three "Lanjut" clicks.
+    // Skip to step 4 via three "Lanjut" clicks (assigning a category on step 2
+    // so the step-2 guard lets the manager advance).
     await (await screen.findByTestId('step-1'));
     await userEvent.click(screen.getByTestId('wizard-next'));
-    expect(await screen.findByTestId('step-2')).toBeInTheDocument();
+    await assignCategoryOnStep2();
     await userEvent.click(screen.getByTestId('wizard-next'));
     expect(await screen.findByTestId('step-3')).toBeInTheDocument();
     await userEvent.click(screen.getByTestId('wizard-next'));
@@ -193,7 +217,7 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     // Walk to step 5 (the review step) and finalize.
     await (await screen.findByTestId('step-1'));
     await userEvent.click(screen.getByTestId('wizard-next'));
-    expect(await screen.findByTestId('step-2')).toBeInTheDocument();
+    await assignCategoryOnStep2();
     await userEvent.click(screen.getByTestId('wizard-next'));
     expect(await screen.findByTestId('step-3')).toBeInTheDocument();
     await userEvent.click(screen.getByTestId('wizard-next'));
@@ -226,7 +250,7 @@ describe('WizardPage (FR-WZD-02..06)', () => {
 
     await (await screen.findByTestId('step-1'));
     await userEvent.click(screen.getByTestId('wizard-next'));
-    await screen.findByTestId('step-2');
+    await assignCategoryOnStep2();
     await userEvent.click(screen.getByTestId('wizard-next'));
     expect(await screen.findByTestId('step-3')).toBeInTheDocument();
     // A non-default graph opens in custom mode with the editor (not read-only).
@@ -238,10 +262,10 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     const { api, save } = makeApi();
     renderWizard(api);
 
-    // Step 1 → 2 → 3.
+    // Step 1 → 2 → 3 (assign a category on step 2 so the guard lets it advance).
     await (await screen.findByTestId('step-1'));
     await userEvent.click(screen.getByTestId('wizard-next'));
-    await screen.findByTestId('step-2');
+    await assignCategoryOnStep2();
     await userEvent.click(screen.getByTestId('wizard-next'));
     expect(await screen.findByTestId('step-3')).toBeInTheDocument();
 
@@ -290,7 +314,7 @@ describe('WizardPage (FR-WZD-02..06)', () => {
 
     await (await screen.findByTestId('step-1'));
     await userEvent.click(screen.getByTestId('wizard-next'));
-    await screen.findByTestId('step-2');
+    await assignCategoryOnStep2();
     await userEvent.click(screen.getByTestId('wizard-next'));
     await screen.findByTestId('step-3');
 
@@ -316,7 +340,7 @@ describe('WizardPage (FR-WZD-02..06)', () => {
 
     await (await screen.findByTestId('step-1'));
     await userEvent.click(screen.getByTestId('wizard-next'));
-    await screen.findByTestId('step-2');
+    await assignCategoryOnStep2();
     await userEvent.click(screen.getByTestId('wizard-next'));
     await screen.findByTestId('step-3');
     await userEvent.click(screen.getByLabelText(/Susun alur status sendiri/));
@@ -336,7 +360,7 @@ describe('WizardPage (FR-WZD-02..06)', () => {
 
     await (await screen.findByTestId('step-1'));
     await userEvent.click(screen.getByTestId('wizard-next'));
-    await screen.findByTestId('step-2');
+    await assignCategoryOnStep2();
     await userEvent.click(screen.getByTestId('wizard-next'));
     await screen.findByTestId('step-3');
     await userEvent.click(screen.getByLabelText(/Susun alur status sendiri/));
@@ -361,9 +385,13 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     await (await screen.findByTestId('step-1'));
     await userEvent.type(screen.getByPlaceholderText('mis. Apotek Sehat Sentosa'), 'Apotek Sehat');
     await userEvent.click(screen.getByTestId('wizard-next'));
-    // Step 2 — assign category A to Counter 1.
+    // Step 2 — assign category A to Counter 1 via the edit modal.
     await screen.findByTestId('step-2');
-    await userEvent.click(screen.getByRole('checkbox', { name: 'A' }));
+    await userEvent.click(screen.getByTestId('routing-edit-0'));
+    const search = screen.getByRole('combobox', { name: /Kategori dilayani/ });
+    await userEvent.type(search, 'Customer');
+    await userEvent.click(screen.getByRole('option', { name: /Customer Service/ }));
+    await userEvent.click(screen.getByTestId('routing-modal-save'));
     await userEvent.click(screen.getByTestId('wizard-next'));
     // Step 3 — default state machine.
     await screen.findByTestId('step-3');
@@ -376,7 +404,10 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     expect(await screen.findByTestId('step-5')).toBeInTheDocument();
     expect(screen.getByTestId('review-store-name')).toHaveTextContent('Apotek Sehat');
     expect(screen.getByTestId('review-categories')).toHaveTextContent(/Customer Service/);
-    expect(screen.getByTestId('review-routing')).toHaveTextContent(/Counter 1/);
+    // The routing review is now an auto-generated SVG graph (jsdom doesn't
+    // traverse SVG <text> via toHaveTextContent reliably), so assert the
+    // summary aria-label carries the counter/category counts instead.
+    expect(screen.getByRole('img', { name: /Grafik routing: 1 counter, 1 kategori/ })).toBeInTheDocument();
     expect(screen.getByTestId('review-state-machine')).toHaveTextContent(/Standar/);
     expect(screen.getByTestId('review-daily-reset')).toHaveTextContent(/Otomatis/);
     expect(screen.getByTestId('review-daily-reset')).toHaveTextContent(/aktif/);
@@ -389,7 +420,7 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     // Walk to step 4.
     await (await screen.findByTestId('step-1'));
     await userEvent.click(screen.getByTestId('wizard-next'));
-    await screen.findByTestId('step-2');
+    await assignCategoryOnStep2();
     await userEvent.click(screen.getByTestId('wizard-next'));
     await screen.findByTestId('step-3');
     await userEvent.click(screen.getByTestId('wizard-next'));
@@ -433,7 +464,7 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     await userEvent.click(screen.getByTestId('wizard-next'));
 
     // Walk the remaining steps to finalize.
-    await screen.findByTestId('step-2');
+    await assignCategoryOnStep2();
     await userEvent.click(screen.getByTestId('wizard-next'));
     await screen.findByTestId('step-3');
     await userEvent.click(screen.getByTestId('wizard-next'));
@@ -479,17 +510,17 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     const { api } = makeApi();
     renderWizard(api);
 
-    // Step 1 — set the counter count to 3. The count input is a controlled
-    // numeric input bound to routingRules.length, so set it via fireEvent.change
-    // (userEvent.clear snaps back to the clamped length, making type append).
+    // Step 1 — set the counter count to 3. The count input is a free-text
+    // field (digits only, empty allowed) bound to `form.counterCount`, so
+    // fireEvent.change works cleanly (the handler strips non-digits).
     await (await screen.findByTestId('step-1'));
     const countInput = screen.getByLabelText('Jumlah counter aktif');
     fireEvent.change(countInput, { target: { value: '3' } });
     await userEvent.click(screen.getByTestId('wizard-next'));
 
-    // Step 2 — three counter rows are present.
+    // Step 2 — three counter rows are present (one Edit button per row).
     expect(await screen.findByTestId('step-2')).toBeInTheDocument();
-    expect(screen.getAllByLabelText(/^Counter \d+ nama$/)).toHaveLength(3);
+    expect(screen.getAllByRole('button', { name: /^Edit counter \d+$/ })).toHaveLength(3);
 
     // Back to step 1, reduce to 1 → step 2 shows a single row. Re-query the
     // count input: the {step === N && ...} block unmounts step 1 on navigation,
@@ -499,7 +530,73 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     fireEvent.change(screen.getByLabelText('Jumlah counter aktif'), { target: { value: '1' } });
     await userEvent.click(screen.getByTestId('wizard-next'));
     expect(await screen.findByTestId('step-2')).toBeInTheDocument();
-    expect(screen.getAllByLabelText(/^Counter \d+ nama$/)).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: /^Edit counter \d+$/ })).toHaveLength(1);
+  });
+
+  it('clearing the counter count input blocks advance and shows the inline error', async () => {
+    const { api } = makeApi();
+    renderWizard(api);
+
+    await (await screen.findByTestId('step-1'));
+    const countInput = screen.getByLabelText('Jumlah counter aktif');
+    // Default is '1' → Lanjut enabled, no error.
+    expect(screen.getByTestId('wizard-next')).not.toBeDisabled();
+    expect(screen.queryByTestId('counter-count-errors')).not.toBeInTheDocument();
+
+    // Clear the field → Lanjut disabled and the inline error list shows.
+    fireEvent.change(countInput, { target: { value: '' } });
+    expect(screen.getByTestId('wizard-next')).toBeDisabled();
+    expect(screen.getByTestId('counter-count-errors')).toBeInTheDocument();
+    // The routingRules are left at their last valid state (1 row) — the field
+    // is empty but the routing-rule source of truth is not emptied.
+    expect(screen.getByLabelText('Jumlah counter aktif')).toHaveValue('');
+
+    // Type '2' → guard lifts, the error is gone, and advancing works.
+    fireEvent.change(countInput, { target: { value: '2' } });
+    expect(screen.getByTestId('wizard-next')).not.toBeDisabled();
+    expect(screen.queryByTestId('counter-count-errors')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    expect(await screen.findByTestId('step-2')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /^Edit counter \d+$/ })).toHaveLength(2);
+  });
+
+  it('strips non-digit characters from the counter count input', async () => {
+    const { api } = makeApi();
+    renderWizard(api);
+
+    await (await screen.findByTestId('step-1'));
+    const countInput = screen.getByLabelText('Jumlah counter aktif');
+    // Typing '3a' strips to '3' (digits only) and stays valid.
+    fireEvent.change(countInput, { target: { value: '3a' } });
+    expect(countInput).toHaveValue('3');
+    expect(screen.getByTestId('wizard-next')).not.toBeDisabled();
+    expect(screen.queryByTestId('counter-count-errors')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    expect(await screen.findByTestId('step-2')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /^Edit counter \d+$/ })).toHaveLength(3);
+  });
+
+  it('prefills the counter count text from the loaded routing rules', async () => {
+    // A configured store with two routing rules prefills the counter count as
+    // '2' (text), matching the routingRules array length.
+    const idA = '11111111-1111-4111-8111-111111111111';
+    const configuredStore: SystemConfigurationDto = {
+      ...cleanStore(),
+      isInitialSetupCompleted: true,
+      storeName: 'Toko Lama',
+      categories: [{ id: idA, code: 'A', name: 'Customer Service' }],
+      routingRules: [
+        { counterId: 1, counterName: 'Counter 1', assignedCategoryIds: [idA], priorityPolicy: 'FIFO_GLOBAL' },
+        { counterId: 2, counterName: 'Counter 2', assignedCategoryIds: [], priorityPolicy: 'FIFO_GLOBAL' },
+      ],
+    };
+    const { api } = makeApi(configuredStore);
+    renderWizard(api);
+
+    await (await screen.findByTestId('step-1'));
+    expect(screen.getByLabelText('Jumlah counter aktif')).toHaveValue('2');
+    expect(screen.getByTestId('wizard-next')).not.toBeDisabled();
   });
 
   it('infers custom category mode when the prefilled categories differ from the PRD default', async () => {
@@ -538,7 +635,8 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     renderWizard(api);
 
     // Step 1 opens in default mode (inferred by code+name, ignoring id) and is
-    // read-only. Walk to finalize without touching categories.
+    // read-only. Walk to finalize without touching categories — Counter 1 is
+    // already assigned category A by the prefill, so the step-2 guard passes.
     await (await screen.findByTestId('step-1'));
     expect(screen.getByTestId('cat-readonly')).toBeInTheDocument();
     await userEvent.click(screen.getByTestId('wizard-next'));
@@ -592,7 +690,8 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     await userEvent.click(screen.getByLabelText(/Gunakan kategori standar/));
     expect(screen.getByTestId('cat-readonly')).toBeInTheDocument();
 
-    // Walk to finalize.
+    // Walk to finalize — Counter 1 is already assigned category A by the
+    // prefill, so the step-2 guard passes without re-touching the routing.
     await userEvent.click(screen.getByTestId('wizard-next'));
     await screen.findByTestId('step-2');
     await userEvent.click(screen.getByTestId('wizard-next'));
@@ -675,5 +774,193 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     expect(codeInputs[0]).toHaveAttribute('aria-required', 'true');
     const nameInputs = screen.getAllByLabelText(/^Kategori \d+ nama$/);
     expect(nameInputs[0]).toHaveAttribute('aria-required', 'true');
+  });
+
+  it('Step 2 modal Simpan persists counter name, priority, and category names', async () => {
+    const { api, save } = makeApi();
+    renderWizard(api);
+
+    await (await screen.findByTestId('step-1'));
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    expect(await screen.findByTestId('step-2')).toBeInTheDocument();
+
+    // Open the edit modal for Counter 1, change its name, priority, and assign
+    // a category by name.
+    await userEvent.click(screen.getByTestId('routing-edit-0'));
+    const nameInput = screen.getByLabelText('Counter 1 nama');
+    await userEvent.clear(nameInput);
+    await userEvent.type(nameInput, 'Loket Penerimaan');
+    await userEvent.selectOptions(screen.getByLabelText('Counter 1 kebijakan prioritas'), 'CATEGORY_PRIORITY');
+    const search = screen.getByRole('combobox', { name: /Kategori dilayani/ });
+    await userEvent.type(search, 'Kasir');
+    await userEvent.click(screen.getByRole('option', { name: /Kasir & Pembayaran/ }));
+    await userEvent.click(screen.getByTestId('routing-modal-save'));
+
+    // The table cell now shows the friendly priority label + category name.
+    expect(screen.getByTestId('routing-counter-name-0')).toHaveTextContent('Loket Penerimaan');
+    expect(screen.getByTestId('routing-categories-0')).toHaveTextContent('Kasir & Pembayaran');
+    expect(screen.getByTestId('routing-categories-0')).not.toHaveTextContent(/\bB\b/);
+
+    // Walk to finalize and assert the wire payload carries the codes.
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-3');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-4');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-5');
+    await userEvent.click(screen.getByTestId('wizard-finalize'));
+    await screen.findByText('Admin Panel Home');
+
+    const payload = save.mock.calls[0][0] as SaveSystemConfigurationPayload;
+    expect(payload.routingRules[0].counterName).toBe('Loket Penerimaan');
+    expect(payload.routingRules[0].priorityPolicy).toBe('CATEGORY_PRIORITY');
+    expect(payload.routingRules[0].assignedCategoryCodes).toEqual(['B']);
+  });
+
+  it('Step 2 modal Batal discards edits', async () => {
+    const { api } = makeApi();
+    renderWizard(api);
+
+    await (await screen.findByTestId('step-1'));
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    expect(await screen.findByTestId('step-2')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId('routing-edit-0'));
+    await userEvent.type(screen.getByLabelText('Counter 1 nama'), 'Sementara');
+    await userEvent.click(screen.getByText('Batal'));
+
+    // The table cell still shows the original default name.
+    expect(screen.getByTestId('routing-counter-name-0')).toHaveTextContent('Counter 1');
+    expect(screen.getByTestId('routing-counter-name-0')).not.toHaveTextContent('Sementara');
+  });
+
+  it('Step 4 shows a timezone selector defaulting to the browser zone and a hint next to the time picker (QUE-42)', async () => {
+    const { api } = makeApi();
+    renderWizard(api);
+
+    await (await screen.findByTestId('step-1'));
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await assignCategoryOnStep2();
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-3');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    expect(await screen.findByTestId('step-4')).toBeInTheDocument();
+
+    // AUTOMATIC_CRON is the default → the time picker + tz selector render.
+    const tzSelect = screen.getByTestId('tz-select') as HTMLSelectElement;
+    // The selector defaults to the browser's IANA zone.
+    const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    expect(tzSelect.value).toBe(browserTz);
+    // The selector is changeable — pick a different curated zone and assert it
+    // reaches the form. Use a curated option that's guaranteed present and
+    // different from the browser zone (Asia/Jakarta vs America/New_York).
+    const targetTz =
+      browserTz === 'America/New_York' ? 'Asia/Jakarta' : 'America/New_York';
+    await userEvent.selectOptions(tzSelect, targetTz);
+    expect(tzSelect.value).toBe(targetTz);
+
+    // The hint still renders and reflects the selected zone's offset, matching
+    // the existing CI-machine tz-agnostic regex ("Waktu setempat: <zone> (UTC±HH:MM)").
+    const tzHint = screen.getByTestId('tz-hint');
+    expect(tzHint).toHaveTextContent(/Waktu setempat: .+ \(UTC[+-]\d{2}:\d{2}\)/);
+  });
+
+  it('Step 5 daily-reset review includes the timezone label', async () => {
+    const { api } = makeApi();
+    renderWizard(api);
+
+    await (await screen.findByTestId('step-1'));
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await assignCategoryOnStep2();
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-3');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-4');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    expect(await screen.findByTestId('step-5')).toBeInTheDocument();
+
+    const review = screen.getByTestId('review-daily-reset');
+    expect(review).toHaveTextContent(/Otomatis/);
+    expect(review).toHaveTextContent(/Waktu setempat/);
+  });
+
+  it('blocks advancing past step 2 until a category is assigned (feedback)', async () => {
+    const { api, save } = makeApi();
+    renderWizard(api);
+
+    // Step 1 → 2 (no categories assigned yet on a clean store).
+    await (await screen.findByTestId('step-1'));
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    expect(await screen.findByTestId('step-2')).toBeInTheDocument();
+
+    // The guard: Lanjut is disabled and the empty-matrix hint shows.
+    expect(screen.getByTestId('wizard-next')).toBeDisabled();
+    expect(screen.getByTestId('routing-empty-hint')).toBeInTheDocument();
+
+    // A click attempts to advance but the guard holds — still on step 2, no save.
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    expect(screen.getByTestId('step-2')).toBeInTheDocument();
+    expect(save).not.toHaveBeenCalled();
+
+    // Assigning a category to Counter 1 lifts the guard and hides the hint.
+    await assignCategoryOnStep2();
+    expect(screen.queryByTestId('routing-empty-hint')).not.toBeInTheDocument();
+    expect(screen.getByTestId('wizard-next')).not.toBeDisabled();
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    expect(await screen.findByTestId('step-3')).toBeInTheDocument();
+  });
+
+  it('shows the short priority label + tooltip in the step-2 table (feedback)', async () => {
+    const { api } = makeApi();
+    renderWizard(api);
+
+    await (await screen.findByTestId('step-1'));
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    expect(await screen.findByTestId('step-2')).toBeInTheDocument();
+
+    // The table cell carries the short label (no parenthetical), and the info
+    // glyph carries the full explanation as its title tooltip + aria-label.
+    const fifoInfo = screen.getByRole('img', { name: /Keterangan: .* urutan masuk/i });
+    expect(fifoInfo).toBeInTheDocument();
+    expect(fifoInfo).toHaveAttribute('title');
+    expect(fifoInfo.getAttribute('title')).toMatch(/lebih dulu/i);
+    // The short label is present; the long parenthetical is not inlined.
+    expect(screen.getByText('Urutan masuk')).toBeInTheDocument();
+    expect(screen.queryByText(/yang lebih dulu dilayani lebih dulu/i)).not.toBeInTheDocument();
+  });
+
+  it('shows the priority description hint under the modal select and updates on change', async () => {
+    const { api } = makeApi();
+    renderWizard(api);
+
+    await (await screen.findByTestId('step-1'));
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-2');
+
+    await userEvent.click(screen.getByTestId('routing-edit-0'));
+    const desc = await screen.findByTestId('routing-priority-desc');
+    // Default FIFO_GLOBAL → its description.
+    expect(desc).toHaveTextContent(/urutan masuk/i);
+
+    // Switch to CATEGORY_PRIORITY → the description hint follows the pick.
+    await userEvent.selectOptions(screen.getByLabelText('Counter 1 kebijakan prioritas'), 'CATEGORY_PRIORITY');
+    expect(desc).toHaveTextContent(/prioritas lebih tinggi/i);
+  });
+
+  it('returns focus to the Edit button when the routing modal closes (a11y 2.4.3)', async () => {
+    const { api } = makeApi();
+    renderWizard(api);
+
+    await (await screen.findByTestId('step-1'));
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-2');
+
+    const editBtn = screen.getByTestId('routing-edit-0');
+    await userEvent.click(editBtn);
+    // Modal open — the name input is autofocused.
+    expect(screen.getByLabelText('Counter 1 nama')).toHaveFocus();
+    // Batal closes the modal → focus returns to the Edit trigger, not body.
+    await userEvent.click(screen.getByText('Batal'));
+    await waitFor(() => expect(editBtn).toHaveFocus());
   });
 });

@@ -14,8 +14,11 @@ import {
 } from '../api/types';
 import { validateCronExpression } from '../lib/cron';
 import { validateBrandColor, isValidBrandColor } from '../lib/brand-color';
-import { PRIORITY_POLICY_LABELS, DAILY_RESET_MODE_LABELS } from '../lib/labels';
+import { DAILY_RESET_MODE_LABELS } from '../lib/labels';
 import { timeToCron, cronToTime } from '../lib/daily-reset';
+import { BROWSER_TIMEZONE, timezoneSelectOptions } from '../lib/timezone';
+import { RoutingGraph } from '../components/RoutingGraph';
+import { CounterRoutingEditor } from '../components/CounterRoutingEditor';
 
 /** One transition edge in the editable state machine. */
 interface Transition {
@@ -57,12 +60,71 @@ interface WizardForm {
   brandColor: string;
   categories: WizardCategoryDto[];
   categoriesMode: 'default' | 'custom';
+  /** Raw text value of the step-1 "Jumlah counter aktif" input (digits only,
+   *  empty allowed). Kept separate from `routingRules.length` (the routing-rule
+   *  source of truth) so the manager can clear the field — a number input bound
+   *  to `routingRules.length` snaps back to the clamped length on clear, making
+   *  the number impossible to delete. `routingRules` stays at its last valid
+   *  state while the field is empty/invalid; `step1Valid` blocks advance. */
+  counterCount: string;
   routingRules: WizardRoutingRuleDto[];
   stateMachine: StateMachineForm;
-  dailyReset: { mode: DailyResetMode; cronExpression: string; resetTicketNumberTo: number; archivePreviousDayData: boolean };
+  dailyReset: {
+    mode: DailyResetMode;
+    cronExpression: string;
+    resetTicketNumberTo: number;
+    archivePreviousDayData: boolean;
+    /** IANA timezone the daily-reset cron fires in (QUE-42). */
+    timezone: string;
+  };
 }
 
 const TOTAL_STEPS = 5;
+
+/**
+ * Computes the UTC offset (`UTC±HH:MM`, zero-padded) of a given IANA timezone
+ * using `Intl.DateTimeFormat`. The offset is computed for "now" so it reflects
+ * current DST rules (a zone with seasonal DST flips its offset through the
+ * year). Falls back to the browser's offset when `tz` is empty or unresolvable
+ * (defensive — the constrained `<select>` never produces an unresolvable
+ * value, so this is belt-and-suspenders). The `Intl` `shortOffset` format
+ * returns variable-width strings like `GMT+7` / `GMT-4` / `GMT+5:30`, so we
+ * parse the sign + hours + minutes and re-emit zero-padded `UTC±HH:MM` to
+ * match the existing test regex (`UTC[+-]\d{2}:\d{2}`).
+ */
+function tzOffsetFor(tz: string): string {
+  if (!tz) return formatTzOffset(-new Date().getTimezoneOffset());
+  try {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      timeZoneName: 'shortOffset',
+    });
+    const parts = formatter.formatToParts(new Date());
+    const offsetPart = parts.find((p) => p.type === 'timeZoneName');
+    if (offsetPart) {
+      const match = /^GMT([+-])(\d{1,2})(?::(\d{1,2}))?$/.exec(offsetPart.value);
+      if (match) {
+        const sign = match[1];
+        const hh = String(Number(match[2])).padStart(2, '0');
+        const mm = match[3] ? String(Number(match[3])).padStart(2, '0') : '00';
+        return `UTC${sign}${hh}:${mm}`;
+      }
+      // A bare `GMT` (no offset, for UTC itself) → `UTC+00:00`.
+      if (offsetPart.value === 'GMT') return 'UTC+00:00';
+    }
+  } catch {
+    // fall through to browser offset
+  }
+  return formatTzOffset(-new Date().getTimezoneOffset());
+}
+
+function formatTzOffset(totalMinutes: number): string {
+  const sign = totalMinutes >= 0 ? '+' : '-';
+  const abs = Math.abs(totalMinutes);
+  const hh = String(Math.floor(abs / 60)).padStart(2, '0');
+  const mm = String(abs % 60).padStart(2, '0');
+  return `UTC${sign}${hh}:${mm}`;
+}
 
 function defaultStateMachineForm(): StateMachineForm {
   return {
@@ -78,9 +140,14 @@ function emptyForm(): WizardForm {
     brandColor: DEFAULT_BRAND_COLOR,
     categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })),
     categoriesMode: 'default',
+    counterCount: '1',
     routingRules: [{ counterId: 1, counterName: 'Counter 1', assignedCategoryCodes: [], priorityPolicy: 'FIFO_GLOBAL' as PriorityPolicy }],
     stateMachine: defaultStateMachineForm(),
-    dailyReset: { ...DEFAULT_DAILY_RESET, cronExpression: DEFAULT_DAILY_RESET.cronExpression ?? '' },
+    dailyReset: {
+      ...DEFAULT_DAILY_RESET,
+      cronExpression: DEFAULT_DAILY_RESET.cronExpression ?? '',
+      timezone: BROWSER_TIMEZONE,
+    },
   };
 }
 
@@ -266,6 +333,24 @@ export function WizardPage({ api }: { api: IAdminApi }) {
             ? config.categories.map((c) => ({ id: c.id, code: c.code, name: c.name }))
             : DEFAULT_CATEGORIES.map((c) => ({ ...c }));
         loadedCategoriesRef.current = loadedCategories;
+        const routingRules =
+          config.routingRules.length > 0
+            ? config.routingRules.map((r) => ({
+                counterId: r.counterId,
+                counterName: r.counterName,
+                assignedCategoryCodes: r.assignedCategoryIds
+                  .map((id) => idToCode.get(id))
+                  .filter((code): code is string => Boolean(code)),
+                priorityPolicy: r.priorityPolicy,
+              }))
+            : [
+                {
+                  counterId: 1,
+                  counterName: 'Counter 1',
+                  assignedCategoryCodes: [],
+                  priorityPolicy: 'FIFO_GLOBAL' as PriorityPolicy,
+                },
+              ];
         setForm({
           storeName: config.storeName,
           brandColor: config.brandColor || DEFAULT_BRAND_COLOR,
@@ -274,24 +359,8 @@ export function WizardPage({ api }: { api: IAdminApi }) {
           // of a store that kept the default template stays in default mode and
           // re-uses the existing category ids (preserved at finalize).
           categoriesMode: isDefaultCategories(loadedCategories) ? 'default' : 'custom',
-          routingRules:
-            config.routingRules.length > 0
-              ? config.routingRules.map((r) => ({
-                  counterId: r.counterId,
-                  counterName: r.counterName,
-                  assignedCategoryCodes: r.assignedCategoryIds
-                    .map((id) => idToCode.get(id))
-                    .filter((code): code is string => Boolean(code)),
-                  priorityPolicy: r.priorityPolicy,
-                }))
-              : [
-                  {
-                    counterId: 1,
-                    counterName: 'Counter 1',
-                    assignedCategoryCodes: [],
-                    priorityPolicy: 'FIFO_GLOBAL',
-                  },
-                ],
+          counterCount: String(routingRules.length),
+          routingRules,
           stateMachine: {
             mode: isDefaultGraph(config.stateMachine.states, config.stateMachine.transitions) ? 'default' : 'custom',
             states: [...config.stateMachine.states],
@@ -302,6 +371,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
             cronExpression: config.dailyResetPolicy.cronExpression ?? '',
             resetTicketNumberTo: config.dailyResetPolicy.resetTicketNumberTo,
             archivePreviousDayData: config.dailyResetPolicy.archivePreviousDayData,
+            timezone: config.dailyResetPolicy.timezone,
           },
         });
         setLoading(false);
@@ -316,7 +386,10 @@ export function WizardPage({ api }: { api: IAdminApi }) {
     };
   }, [api]);
 
-  const categoryCodes = useMemo(() => form.categories.map((c) => c.code), [form.categories]);
+  // code→name lookup for Step 2 was hoisted into the shared
+  // `CounterRoutingEditor` (the editor builds its own). `RoutingGraph` on
+  // Step 5 builds its own code→name map as well, so no shared lookup is needed
+  // here anymore.
 
   // Step 1 category validation. Default mode is always valid (DEFAULT_CATEGORIES
   // satisfies the Category invariants by construction); custom mode mirrors the
@@ -331,7 +404,35 @@ export function WizardPage({ api }: { api: IAdminApi }) {
   // backend would 400. The native color picker emits valid hex by itself; this
   // guards the companion hex text input a manager can type into.
   const brandColorErrors = useMemo(() => validateBrandColor(form.brandColor), [form.brandColor]);
-  const step1Valid = catErrors.length === 0 && brandColorErrors.length === 0;
+  // Step 1 counter-count validation. The text input is clearable (the manager
+  // could not delete the number in the old number input — it snapped back to the
+  // clamped length), but the count must be a positive integer to advance, so an
+  // empty or non-positive field blocks Lanjut. Mirrors the step-1 category/brand
+  // color guard pattern: one error list drives both the inline UI and the guard.
+  const counterCountErrors = useMemo(() => {
+    const n = Number(form.counterCount);
+    if (form.counterCount === '') return ['Jumlah counter aktif wajib diisi.'];
+    if (!Number.isInteger(n) || n < 1) return ['Jumlah counter aktif minimal 1.'];
+    return [];
+  }, [form.counterCount]);
+  const step1Valid =
+    catErrors.length === 0 && brandColorErrors.length === 0 && counterCountErrors.length === 0;
+
+  // Step 2 routing validity (FR-WZD-03): at least one counter must serve at
+  // least one category before the manager can advance. An all-empty routing
+  // matrix is a degenerate config (every counter is dead — no ticket can ever
+  // be routed), and the feedback was that the manager could sail past step 2
+  // without assigning anything. This guard mirrors the step-1/3/4 guard
+  // pattern: drive both the inline hint and the Lanjut disabled state from one
+  // boolean so the UI and the `next()` guard share a single source of truth.
+  // Minimal-by-design: it blocks only the fully-unassigned matrix ("belum ada
+  // kategori dilayani"), not a counter that happens to be idle while another is
+  // wired — a per-counter "every counter must serve ≥1" rule would over-restrict
+  // legitimate multi-counter layouts and is not what the feedback asked for.
+  const step2Valid = useMemo(
+    () => form.routingRules.some((r) => r.assignedCategoryCodes.length > 0),
+    [form.routingRules],
+  );
 
   // Step 3 is the only step with structural validation; the others are free-form
   // (the backend validates store name / categories / routing). Compute the
@@ -365,6 +466,11 @@ export function WizardPage({ api }: { api: IAdminApi }) {
     // the manager never reaches the routing matrix with categories the backend
     // would 400 on save.
     if (step === 1 && !step1Valid) return;
+    // Block advancing past step 2 while no counter serves any category so the
+    // manager never reaches the state-machine step with a degenerate (all-empty)
+    // routing matrix — matches the Lanjut disabled state (single source of
+    // truth: step2Valid).
+    if (step === 2 && !step2Valid) return;
     // Block advancing past step 3 while the custom state machine is invalid so
     // the manager never reaches finalize with a graph the backend would 400.
     if (step === 3 && !step3Valid) return;
@@ -406,6 +512,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
           cronExpression: form.dailyReset.mode === 'AUTOMATIC_CRON' ? form.dailyReset.cronExpression : null,
           resetTicketNumberTo: form.dailyReset.resetTicketNumberTo,
           archivePreviousDayData: form.dailyReset.archivePreviousDayData,
+          timezone: form.dailyReset.timezone,
         },
         categories,
         routingRules: form.routingRules,
@@ -469,14 +576,22 @@ export function WizardPage({ api }: { api: IAdminApi }) {
               </span>
               <input
                 className="field__input"
-                type="number"
-                min={1}
-                value={form.routingRules.length}
-                onChange={(e) => setCounterCount(form, setForm, Number(e.target.value))}
+                type="text"
+                inputMode="numeric"
+                value={form.counterCount}
+                onChange={(e) => setCounterCount(form, setForm, e.target.value)}
                 aria-label="Jumlah counter aktif"
-                required
+                aria-required="true"
+                {...describedBy('counter-count-errors', counterCountErrors.length > 0)}
               />
             </label>
+            {counterCountErrors.length > 0 && (
+              <ul className="wizard__errors" id="counter-count-errors" data-testid="counter-count-errors">
+                {counterCountErrors.map((msg) => (
+                  <li key={msg}>{msg}</li>
+                ))}
+              </ul>
+            )}
 
             <div className="field" data-testid="brand-color">
               <span className="field__label">Warna brand</span>
@@ -613,55 +728,22 @@ export function WizardPage({ api }: { api: IAdminApi }) {
           <section className="wizard__step" data-testid="step-2">
             <h2 className="wizard__step-title">Matriks Routing Counter</h2>
             <p className="wizard__hint">
-              Pasang kategori yang dilayani tiap counter. Jumlah counter diatur di Langkah 1.
+              Pasang kategori yang dilayani tiap counter. Jumlah counter diatur di Langkah 1. Klik
+              Edit untuk mengubah kategori yang dilayani.
             </p>
 
-            <ul className="entry-list">
-              {form.routingRules.map((rule, i) => (
-                <li key={i} className="entry-row entry-row--routing">
-                  <span className="entry-row__counter-title">Counter {i + 1}</span>
-                  <label className="field">
-                    <span className="field__label">Nama counter</span>
-                    <input
-                      className="field__input"
-                      type="text"
-                      value={rule.counterName}
-                      onChange={(e) => updateRouting(form, setForm, i, { counterName: e.target.value })}
-                      placeholder="mis. Loket 1"
-                      aria-label={`Counter ${i + 1} nama`}
-                    />
-                  </label>
-                  <label className="field">
-                    <span className="field__label">Kebijakan prioritas</span>
-                    <select
-                      className="field__input"
-                      value={rule.priorityPolicy}
-                      onChange={(e) => updateRouting(form, setForm, i, { priorityPolicy: e.target.value as PriorityPolicy })}
-                      aria-label={`Counter ${i + 1} kebijakan prioritas`}
-                    >
-                      {(Object.keys(PRIORITY_POLICY_LABELS) as PriorityPolicy[]).map((p) => (
-                        <option key={p} value={p}>
-                          {PRIORITY_POLICY_LABELS[p]}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <fieldset className="checkbox-group">
-                    <legend>Kategori dilayani</legend>
-                    {categoryCodes.map((code) => (
-                      <label key={code} className="checkbox-group__item">
-                        <input
-                          type="checkbox"
-                          checked={rule.assignedCategoryCodes.includes(code)}
-                          onChange={(e) => toggleRoutingCategory(form, setForm, i, code, e.target.checked)}
-                        />
-                        {code}
-                      </label>
-                    ))}
-                  </fieldset>
-                </li>
-              ))}
-            </ul>
+            <CounterRoutingEditor
+              routingRules={form.routingRules}
+              categories={form.categories}
+              onUpdate={(i, patch) => updateRouting(form, setForm, i, patch)}
+              idPrefix="routing"
+            />
+
+            {!step2Valid && (
+              <p className="wizard__hint wizard__hint--required" data-testid="routing-empty-hint">
+                Pilih minimal satu kategori pada salah satu counter untuk melanjutkan.
+              </p>
+            )}
           </section>
         )}
 
@@ -835,27 +917,55 @@ export function WizardPage({ api }: { api: IAdminApi }) {
               </select>
             </label>
             {form.dailyReset.mode === 'AUTOMATIC_CRON' && (
-              <label className="field">
-                <span className="field__label">
-                  Waktu reset harian<span aria-hidden="true"> *</span>
-                </span>
-                <input
-                  className="field__input"
-                  type="time"
-                  value={cronToTime(form.dailyReset.cronExpression) ?? '00:00'}
-                  onChange={(e) =>
-                    setForm({ ...form, dailyReset: { ...form.dailyReset, cronExpression: timeToCron(e.target.value) } })
-                  }
-                  aria-label="Waktu reset harian"
-                  required
-                  {...describedBy('cron-error', Boolean(cronError))}
-                />
-                {cronError && (
-                  <span className="field__error" id="cron-error" data-testid="cron-error">
-                    {cronError}
+              <>
+                <label className="field">
+                  <span className="field__label">
+                    Waktu reset harian<span aria-hidden="true"> *</span>
                   </span>
-                )}
-              </label>
+                  <input
+                    className="field__input"
+                    type="time"
+                    value={cronToTime(form.dailyReset.cronExpression) ?? '00:00'}
+                    onChange={(e) =>
+                      setForm({ ...form, dailyReset: { ...form.dailyReset, cronExpression: timeToCron(e.target.value) } })
+                    }
+                    aria-label="Waktu reset harian"
+                    required
+                    {...describedBy('cron-error', Boolean(cronError))}
+                  />
+                  {cronError && (
+                    <span className="field__error" id="cron-error" data-testid="cron-error">
+                      {cronError}
+                    </span>
+                  )}
+                </label>
+                <label className="field">
+                  <span className="field__label">Zona waktu</span>
+                  <select
+                    className="field__input"
+                    value={form.dailyReset.timezone}
+                    onChange={(e) =>
+                      setForm({ ...form, dailyReset: { ...form.dailyReset, timezone: e.target.value } })
+                    }
+                    aria-label="Zona waktu"
+                    data-testid="tz-select"
+                  >
+                    {timezoneSelectOptions(form.dailyReset.timezone).map((tz) => (
+                      <option key={tz} value={tz}>
+                        {tz}
+                      </option>
+                    ))}
+                  </select>
+                  {/* The hint shows the selected zone's UTC offset (not the
+                      browser's) so the manager sees which offset the cron
+                      fires in. `data-testid="tz-hint"` is retained so the
+                      existing test's `Waktu setempat: <zone> (UTC±HH:MM)`
+                      regex still matches (loosened, CI-machine tz-agnostic). */}
+                  <p className="wizard__hint" data-testid="tz-hint">
+                    Waktu setempat: {form.dailyReset.timezone} ({tzOffsetFor(form.dailyReset.timezone)})
+                  </p>
+                </label>
+              </>
             )}
             <label className="field">
               <span className="field__label">
@@ -925,14 +1035,10 @@ export function WizardPage({ api }: { api: IAdminApi }) {
 
               <div className="wizard__review-block">
                 <h3 className="wizard__review-label">Counter &amp; Routing</h3>
-                <ul className="wizard__review-list" data-testid="review-routing">
-                  {form.routingRules.map((r, i) => (
-                    <li key={i}>
-                      <strong>{r.counterName || 'Counter'}</strong> ({PRIORITY_POLICY_LABELS[r.priorityPolicy]}) →{' '}
-                      {r.assignedCategoryCodes.length > 0 ? r.assignedCategoryCodes.join(', ') : 'tidak ada kategori'}
-                    </li>
-                  ))}
-                </ul>
+                <RoutingGraph
+                  routingRules={form.routingRules}
+                  categories={form.categories}
+                />
               </div>
 
               <div className="wizard__review-block">
@@ -948,7 +1054,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                 <h3 className="wizard__review-label">Kebijakan Reset Harian</h3>
                 <p className="wizard__review-value" data-testid="review-daily-reset">
                   {form.dailyReset.mode === 'AUTOMATIC_CRON'
-                    ? `Otomatis setiap hari pukul ${cronToTime(form.dailyReset.cronExpression) ?? '00:00'}`
+                    ? `Otomatis setiap hari pukul ${cronToTime(form.dailyReset.cronExpression) ?? '00:00'} Waktu setempat (${form.dailyReset.timezone}, ${tzOffsetFor(form.dailyReset.timezone)})`
                     : 'Manual (tombol reset)'}
                   {' · '}reset ke {form.dailyReset.resetTicketNumberTo}
                   {' · '}arsip hari sebelumnya: {form.dailyReset.archivePreviousDayData ? 'aktif' : 'nonaktif'}
@@ -970,7 +1076,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
             type="button"
             className="btn btn--primary"
             onClick={next}
-            disabled={(step === 1 && !step1Valid) || (step === 3 && !step3Valid) || (step === 4 && !step4Valid) || submitting}
+            disabled={(step === 1 && !step1Valid) || (step === 2 && !step2Valid) || (step === 3 && !step3Valid) || (step === 4 && !step4Valid) || submitting}
             data-testid="wizard-next"
           >
             Lanjut
@@ -1003,43 +1109,44 @@ function updateRouting(form: WizardForm, setForm: (f: WizardForm) => void, i: nu
   setForm({ ...form, routingRules });
 }
 /**
- * Sync the routing-rule rows to the counter count entered on step 1. Growing
- * appends default-named counters (`Counter N`, auto `counterId`, empty
- * assignments, `FIFO_GLOBAL`); shrinking truncates. **No renumber** — counter
- * identity (`counterId`, which `QueueTicket.counterId` references) is preserved
- * and gaps are not closed, matching the prior add/remove semantics. The count is
- * clamped `>=1` so the wizard can never construct an empty counter set.
+ * Sync the routing-rule rows to the counter count text entered on step 1.
+ * The input is a free-text field (digits only, empty allowed) so the manager
+ * can clear the number — but clearing or entering an invalid value leaves the
+ * field empty/invalid and the Lanjut guard blocks advance (the routingRules are
+ * left at their last valid state, never emptied). Growing appends default-named
+ * counters (`Counter N`, auto `counterId`, empty assignments, `FIFO_GLOBAL`);
+ * shrinking truncates. **No renumber** — counter identity (`counterId`, which
+ * `QueueTicket.counterId` references) is preserved and gaps are not closed.
  */
-function setCounterCount(form: WizardForm, setForm: (f: WizardForm) => void, count: number) {
-  const n = Math.max(1, Math.floor(count) || 1);
-  const rules = [...form.routingRules];
-  if (rules.length > n) rules.length = n;
-  // max(existing counterId)+1, NOT length+1: a re-edit can load a gapped /
-  // non-sequential set of counterIds (e.g. `[1, 3, 5]` from a non-wizard editor),
-  // and length+1 would collide (duplicate `counterId` 5) — the backend
-  // `buildRoutingRules` rejects duplicate counterIds with a 400. No renumber —
-  // existing counter identities are preserved (gaps are not closed).
-  let nextId = rules.reduce((m, r) => Math.max(m, r.counterId), 0) + 1;
-  while (rules.length < n) {
-    rules.push({
-      counterId: nextId,
-      counterName: `Counter ${nextId}`,
-      assignedCategoryCodes: [],
-      priorityPolicy: 'FIFO_GLOBAL' as PriorityPolicy,
-    });
-    nextId++;
+function setCounterCount(form: WizardForm, setForm: (f: WizardForm) => void, raw: string) {
+  // Digits only; allow empty so the field can be cleared.
+  const count = raw.replace(/[^0-9]/g, '');
+  const n = Number(count);
+  if (count !== '' && Number.isInteger(n) && n >= 1) {
+    const rules = [...form.routingRules];
+    if (rules.length > n) rules.length = n;
+    // max(existing counterId)+1, NOT length+1: a re-edit can load a gapped /
+    // non-sequential set of counterIds (e.g. `[1, 3, 5]` from a non-wizard
+    // editor), and length+1 would collide (duplicate `counterId` 5) — the
+    // backend `buildRoutingRules` rejects duplicate counterIds with a 400. No
+    // renumber — existing counter identities are preserved (gaps are not
+    // closed).
+    let nextId = rules.reduce((m, r) => Math.max(m, r.counterId), 0) + 1;
+    while (rules.length < n) {
+      rules.push({
+        counterId: nextId,
+        counterName: `Counter ${nextId}`,
+        assignedCategoryCodes: [],
+        priorityPolicy: 'FIFO_GLOBAL' as PriorityPolicy,
+      });
+      nextId++;
+    }
+    setForm({ ...form, counterCount: count, routingRules: rules });
+  } else {
+    // Empty or invalid (e.g. "0"): store the raw text but leave routingRules at
+    // their last valid state. step1Valid blocks advance while empty/invalid.
+    setForm({ ...form, counterCount: count });
   }
-  setForm({ ...form, routingRules: rules });
-}
-function toggleRoutingCategory(form: WizardForm, setForm: (f: WizardForm) => void, i: number, code: string, checked: boolean) {
-  const routingRules = form.routingRules.map((r, idx) => {
-    if (idx !== i) return r;
-    const set = new Set(r.assignedCategoryCodes);
-    if (checked) set.add(code);
-    else set.delete(code);
-    return { ...r, assignedCategoryCodes: [...set] };
-  });
-  setForm({ ...form, routingRules });
 }
 
 function updateTransition(form: WizardForm, setForm: (f: WizardForm) => void, i: number, patch: Partial<{ from: string; to: string; actionLabel: string }>) {

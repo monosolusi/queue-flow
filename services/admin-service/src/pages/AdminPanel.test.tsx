@@ -28,6 +28,7 @@ function configuredStore(): SystemConfigurationDto {
       cronExpression: '0 0 * * *',
       resetTicketNumberTo: 1,
       archivePreviousDayData: true,
+      timezone: 'Asia/Jakarta',
     },
     categories: [
       { id: 'cat-a', code: 'A', name: 'Customer Service' },
@@ -111,9 +112,11 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     // Categories prefilled with existing names.
     expect(screen.getByLabelText('Kategori 1 kode')).toHaveValue('A');
     expect(screen.getByLabelText('Kategori 1 nama')).toHaveValue('Customer Service');
-    // Routing assignment mapped from id 'cat-a' -> code 'A' (checkbox checked).
-    expect(screen.getByRole('checkbox', { name: 'A' })).toBeChecked();
-    expect(screen.getByRole('checkbox', { name: 'B' })).not.toBeChecked();
+    // Routing assignment mapped from id 'cat-a' -> code 'A' is reflected in the
+    // shared routing table's Kategori Dilayani cell (the table replaces the old
+    // inline checkbox group; opening the Edit modal would show the selection in
+    // SearchableCategorySelect).
+    expect(screen.getByTestId('routing-categories-0')).toHaveTextContent('Customer Service');
     // State machine is read-only (no editable transition inputs).
     expect(screen.getByText('Alur Status Tiket (hanya lihat)')).toBeInTheDocument();
   });
@@ -153,11 +156,19 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
 
-    // Assign category B to Counter 1, and switch policy to CATEGORY_PRIORITY.
-    await userEvent.click(screen.getByRole('checkbox', { name: 'B' }));
-    await userEvent.selectOptions(screen.getByLabelText('Counter 1 kebijakan prioritas'), 'CATEGORY_PRIORITY');
+    // Open the Edit modal for Counter 1, assign category B, switch policy to
+    // CATEGORY_PRIORITY, then Simpan (mirrors the wizard Step 2 flow).
+    await userEvent.click(screen.getByTestId('routing-edit-0'));
+    const search = screen.getByRole('combobox', { name: /Kategori dilayani/ });
+    await userEvent.type(search, 'Farmasi');
+    await userEvent.click(screen.getByRole('option', { name: /Farmasi/ }));
+    await userEvent.selectOptions(
+      screen.getByLabelText('Counter 1 kebijakan prioritas'),
+      'CATEGORY_PRIORITY',
+    );
+    await userEvent.click(screen.getByTestId('routing-modal-save'));
 
-    // Add a second counter.
+    // Add a second counter (auto-assigns counterId = max+1 = 2).
     await userEvent.click(screen.getByRole('button', { name: '+ Tambah Counter' }));
 
     await userEvent.click(screen.getByTestId('admin-save'));
@@ -223,8 +234,7 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
   });
 
   it('re-applies the runtime --accent after a save so a brand-color change is visible without a reload (QUE-35)', async () => {
-    const brandConfig = configuredStore();
-    brandConfig.brandColor = '#abcdef';
+    const brandConfig = { ...configuredStore(), brandColor: '#abcdef' };
     const { api } = makeApi(brandConfig);
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
@@ -282,7 +292,9 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
 
     expect(screen.getByLabelText('Kategori 1 kode')).toHaveAttribute('aria-required', 'true');
     expect(screen.getByLabelText('Kategori 1 nama')).toHaveAttribute('aria-required', 'true');
-    expect(screen.getByLabelText('Counter 1 id')).toHaveAttribute('aria-required', 'true');
+    // Counter name + priority live inside the shared Edit modal now (counterId
+    // is no longer hand-editable). Open the modal to assert their aria-required.
+    await userEvent.click(screen.getByTestId('routing-edit-0'));
     expect(screen.getByLabelText('Counter 1 nama')).toHaveAttribute('aria-required', 'true');
     expect(screen.getByLabelText('Counter 1 kebijakan prioritas')).toHaveAttribute('aria-required', 'true');
   });
@@ -306,11 +318,18 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
 
-    // Build [1, 2, 3].
+    // Build [1, 2, 3] via two "+ Tambah Counter" clicks (configuredStore
+    // starts with one counter, counterId 1).
     await userEvent.click(screen.getByRole('button', { name: '+ Tambah Counter' }));
     await userEvent.click(screen.getByRole('button', { name: '+ Tambah Counter' }));
-    // Remove the middle counter (Counter 2, id=2) -> survivors [1, 3].
-    await userEvent.click(within(rowOf('Counter 2 id')).getByRole('button', { name: 'Hapus' }));
+    // Remove the middle counter (Counter 2, id=2) -> survivors [1, 3]. The
+    // Hapus buttons in the Aksi column live inside the `data-table` (unique to
+    // the routing section — categories use `entry-list`); scope to it so the
+    // categories-section Hapus buttons don't pollute the index. After the two
+    // adds the routing table has 3 rows → Hapus indices [0, 1, 2]; index 1 is
+    // the middle row.
+    const routingTable = document.querySelector('table.data-table') as HTMLElement;
+    await userEvent.click(within(routingTable).getAllByRole('button', { name: 'Hapus' })[1]);
     // Add again — must mint 4 (max+1), not 3, or the backend rejects a dup id.
     await userEvent.click(screen.getByRole('button', { name: '+ Tambah Counter' }));
 
@@ -355,6 +374,49 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     const payload = save.mock.calls[0][0] as SaveSystemConfigurationPayload;
     expect(payload.dailyReset.mode).toBe('AUTOMATIC_CRON');
     expect(payload.dailyReset.cronExpression).toBe('30 8 * * *');
+  });
+
+  it('shows a timezone selector defaulting to the loaded config zone (QUE-42)', async () => {
+    const { api, save } = makeApi();
+    renderPanel(api);
+    await screen.findByText('Apotek Sehat');
+
+    // The tz selector renders in the AUTOMATIC_CRON block and defaults to the
+    // loaded config's timezone (configuredStore → 'Asia/Jakarta').
+    const tzSelect = screen.getByTestId('tz-select') as HTMLSelectElement;
+    expect(tzSelect.value).toBe('Asia/Jakarta');
+
+    // Pick a different zone and save — the new zone reaches the PUT payload.
+    await userEvent.selectOptions(tzSelect, 'America/New_York');
+    await userEvent.click(screen.getByTestId('admin-save'));
+    await screen.findByText('Konfigurasi tersimpan.');
+
+    const payload = save.mock.calls[0][0] as SaveSystemConfigurationPayload;
+    expect(payload.dailyReset.timezone).toBe('America/New_York');
+  });
+
+  it('keeps a persisted non-curated timezone selectable (QUE-42 arch-review fix)', async () => {
+    // A direct API call can persist a valid IANA zone that is neither the
+    // browser's nor in TIMEZONE_OPTIONS (e.g. Asia/Kolkata). The <select> must
+    // still offer it as an <option> so the displayed value equals the wire
+    // value — a save that doesn't touch the select sends what the manager sees.
+    const nonCurated = 'Asia/Kolkata';
+    const config: SystemConfigurationDto = {
+      ...configuredStore(),
+      dailyResetPolicy: { ...configuredStore().dailyResetPolicy, timezone: nonCurated },
+    };
+    const { api } = makeApi(config);
+    renderPanel(api);
+    await screen.findByText('Apotek Sehat');
+
+    const tzSelect = screen.getByTestId('tz-select') as HTMLSelectElement;
+    // The prefilled non-curated zone is the current value...
+    expect(tzSelect.value).toBe(nonCurated);
+    // ...and is present as an <option> (the constrained-<select> contract holds
+    // for persisted values, not just curated/browser ones).
+    expect(
+      Array.from(tzSelect.options).some((o) => o.value === nonCurated),
+    ).toBe(true);
   });
 });
 
