@@ -29,11 +29,19 @@ export interface ActionControlsProps {
 /**
  * Dynamic action buttons driven by the active state machine (FR-CLR-02 /
  * QUE-20). The always-present primary "Panggil Berikutnya" button issues
- * `call-next` for the bound counter (it is not tied to a specific ticket). For
+ * `call-next` for the bound counter (it is not tied to a specific ticket). It
+ * is **disabled while an unresolved active ticket occupies the counter**: the
+ * caller store projects `active` to only non-terminal in-progress tickets
+ * (CALLING / SERVING / a custom in-progress state), so `active !== null` means
+ * staff must resolve the current ticket first (serve / skip / complete) before
+ * calling the next one — calling next on top of an unresolved ticket would
+ * strand it in CALLING forever and corrupt analytics. The per-edge buttons
+ * (Mulai Melayani / Lewati / Absen / Selesai Layan / Panggil Ulang) guide the
+ * staff to resolve it; once the active ticket leaves the counter (COMPLETED /
+ * SKIPPED / transferred) `active` becomes `null` and call-next re-enables. For
  * the active ticket's current status, one button per outgoing edge is rendered,
- * labeled with the transition's `actionLabel` (Indonesian — "Mulai Melayani",
- * "Lewati / Absen", "Selesai Layan", "Panggil Ulang"). Edge → command is mapped
- * by the target state (see {@link COMMAND_BY_TARGET}). Commands are
+ * labeled with the transition's `actionLabel` (Indonesian). Edge → command is
+ * mapped by the target state (see {@link COMMAND_BY_TARGET}). Commands are
  * fire-and-forget: the resulting TICKET_CALLED / STATUS_UPDATED /
  * TICKET_TRANSFERRED event arrives over the WebSocket and updates the store; a
  * pending flag guards against double-fire. Illegal transitions surface as an
@@ -127,7 +135,8 @@ export function ActionControls({ api, bound, active, stateMachine }: ActionContr
         type="button"
         className="btn btn--primary action-controls__call-next"
         onClick={() => run('call-next', () => api.callNext(bound.counterId))}
-        disabled={pending === 'call-next'}
+        disabled={pending === 'call-next' || active !== null}
+        title={active !== null ? 'Selesaikan tiket aktif terlebih dahulu (layani, lewati, atau selesaikan)' : undefined}
       >
         {pending === 'call-next' ? 'Memanggil…' : 'Panggil Berikutnya'}
       </button>
