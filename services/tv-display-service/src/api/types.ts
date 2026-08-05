@@ -16,6 +16,31 @@ export interface CategoryDto {
   readonly name: string;
 }
 
+/**
+ * A single WAITING ticket row in the global waiting queue, returned by
+ * `GET /api/queue/waiting`. Mirrors core-api's `TicketStateDto` shape (the
+ * shared ticket→DTO projection) so the TV renders the same fields the caller
+ * workspace sees, without leaking caller/admin/reporting DTOs (ISP).
+ */
+export interface WaitingTicketDto {
+  readonly ticketId: string;
+  readonly ticketNumber: string;
+  readonly categoryId: string;
+  readonly status: string;
+  readonly counterId: number | null;
+}
+
+/**
+ * Read model returned by `GET /api/queue/waiting`: every WAITING ticket across
+ * all categories, oldest first (FIFO by `createdAt`). The server owns this read
+ * model — the TV fetches it on boot and refetches after every lifecycle event
+ * (it does not project waiting state from events).
+ */
+export interface WaitingQueueDto {
+  readonly waiting: readonly WaitingTicketDto[];
+  readonly waitingCount: number;
+}
+
 /** Store profile, returned by `GET /api/system/config`. The TV needs the store
  * name (running text) + the manager-configured brand color (QUE-36) applied to
  * the runtime `--accent` (QUE-37 AC6). */

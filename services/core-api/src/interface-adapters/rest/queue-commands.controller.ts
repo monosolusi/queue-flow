@@ -4,6 +4,7 @@ import {
   CallNextTicketUseCase,
   CompleteTicketUseCase,
   RecallTicketUseCase,
+  ReannounceTicketUseCase,
   ServeTicketUseCase,
   SkipTicketUseCase,
   TransferTicketUseCase,
@@ -31,6 +32,7 @@ export class QueueCommandsController {
     private readonly completeUseCase: CompleteTicketUseCase,
     private readonly skipUseCase: SkipTicketUseCase,
     private readonly recallUseCase: RecallTicketUseCase,
+    private readonly reannounceUseCase: ReannounceTicketUseCase,
     private readonly transferUseCase: TransferTicketUseCase,
     private readonly applyTransitionUseCase: ApplyTransitionUseCase,
   ) {}
@@ -64,6 +66,14 @@ export class QueueCommandsController {
   @Post(':ticketId/recall')
   recall(@Param('ticketId') ticketId: string) {
     return this.recallUseCase.execute({ ticketId: parseTicketId(ticketId) });
+  }
+
+  /** `POST /api/queue/:ticketId/reannounce` → re-announce the currently-calling
+   *  ticket ("Panggil Lagi"). Re-emits TICKET_CALLED without a state change;
+   *  only valid from CALLING (a 409 otherwise). */
+  @Post(':ticketId/reannounce')
+  reannounce(@Param('ticketId') ticketId: string) {
+    return this.reannounceUseCase.execute({ ticketId: parseTicketId(ticketId) });
   }
 
   /**

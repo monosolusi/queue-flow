@@ -18,6 +18,10 @@ export interface CategoryDto {
  * The kiosk displays `ticketNumber` (e.g. `A-001`); `status` is `WAITING`.
  * `waitingAhead` (people already WAITING in this category when the ticket was
  * issued) drives the receipt's queue-position line (FR-KSK-03).
+ *
+ * core-api wraps this in a `{ status: 'created', ticket }` envelope on the
+ * wire; `KioskApi.createTicket` unwraps it, so kiosk code sees the inner
+ * ticket (this type) directly.
  */
 export interface CreatedTicketDto {
   readonly ticketId: string;

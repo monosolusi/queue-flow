@@ -96,6 +96,16 @@ export class PostgresQueueRepository implements IQueueRepository, ITicketArchive
     });
   }
 
+  async findAllWaiting(): Promise<QueueTicket[]> {
+    return withDbClient(this.pool, async (client) => {
+      const { rows } = await client.query<TicketRow>(
+        `SELECT * FROM tickets WHERE status = $1 ORDER BY created_at ASC`,
+        [TicketStatus.WAITING],
+      );
+      return rows.map(toTicket);
+    });
+  }
+
   async countWaitingByCategory(categoryId: string): Promise<number> {
     return withDbClient(this.pool, async (client) => {
       const { rows } = await client.query<{ count: number | string }>(

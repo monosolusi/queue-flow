@@ -15,6 +15,7 @@ import {
   CleanupTransactionLogUseCase,
   CompleteTicketUseCase,
   RecallTicketUseCase,
+  ReannounceTicketUseCase,
   ResetDailyQueueUseCase,
   ServeTicketUseCase,
   SkipTicketUseCase,
@@ -83,6 +84,15 @@ import { SystemConfigModule } from './config/system-config.module';
         new RecallTicketUseCase(queue, policyResolver, dispatcher),
     },
     {
+      // "Panggil Lagi" — re-announce the currently-calling ticket. No state
+      // transition (no policy resolver) and no sequence reservation (no tx
+      // manager) — just the queue repo + the dispatcher to drain the
+      // re-emitted TICKET_CALLED (FR-ENG-04 / FR-TV-01/02).
+      provide: ReannounceTicketUseCase,
+      inject: [QUEUE_REPOSITORY, QueueEventDispatcher],
+      useFactory: (queue, dispatcher) => new ReannounceTicketUseCase(queue, dispatcher),
+    },
+    {
       // QUE-33: generic apply-transition use case. Same port shape as the
       // single-transition commands (skip/serve/complete/recall) — no tx manager
       // (a plain status change has no sequence reservation to guard).
@@ -146,6 +156,7 @@ import { SystemConfigModule } from './config/system-config.module';
     CompleteTicketUseCase,
     SkipTicketUseCase,
     RecallTicketUseCase,
+    ReannounceTicketUseCase,
     TransferTicketUseCase,
     ApplyTransitionUseCase,
     ResetDailyQueueUseCase,

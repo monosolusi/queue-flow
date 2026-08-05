@@ -185,4 +185,53 @@ describe('Read-only REST surface (integration — QUE-19 + QUE-17)', () => {
     expect(res.status).toBe(404);
     expect(res.body.code).toBe('ENTITY_NOT_FOUND');
   });
+
+  it('GET /api/queue/waiting returns every WAITING ticket across all categories oldest first', async () => {
+    // The beforeEach seed created A-001 (100) and A-002 (200) WAITING plus A-003 CALLING.
+    // Add a WAITING CAT-B ticket older than both to assert cross-category FIFO.
+    await queue.save(
+      QueueTicket.create(ticketIdGenerate(), TicketNumber.of('B', 1), catBId, 50),
+    );
+
+    const res = await request(app.getHttpServer()).get('/api/queue/waiting');
+
+    expect(res.status).toBe(200);
+    expect(res.body.waiting.map((t: { ticketNumber: string }) => t.ticketNumber)).toEqual([
+      'B-001',
+      'A-001',
+      'A-002',
+    ]);
+    expect(res.body.waitingCount).toBe(3);
+    // Each row reuses the shared TicketStateDto shape.
+    expect(res.body.waiting[0]).toMatchObject({
+      ticketNumber: 'B-001',
+      categoryId: catBId,
+      status: 'WAITING',
+      counterId: null,
+    });
+  });
+
+  it('GET /api/queue/waiting returns an empty zero-state when no tickets are WAITING', async () => {
+    (queue as InMemoryQueueRepository).clear();
+    // Re-seed only a CALLING ticket so the store is non-empty but no WAITING rows.
+    await queue.save(
+      QueueTicket.reconstitute({
+        id: ticketIdGenerate(),
+        ticketNumber: TicketNumber.of('A', 1),
+        categoryId: catAId,
+        status: 'CALLING',
+        counterId: 1,
+        createdAt: 10,
+        updatedAt: 10,
+        calledAt: 10,
+        servedAt: null,
+        completedAt: null,
+      }),
+    );
+
+    const res = await request(app.getHttpServer()).get('/api/queue/waiting');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ waiting: [], waitingCount: 0 });
+  });
 });

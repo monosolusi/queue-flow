@@ -39,6 +39,7 @@ function makeApi(overrides: Partial<ICallerApi> = {}): ICallerApi {
     complete: vi.fn(() => Promise.resolve()),
     skip: vi.fn(() => Promise.resolve()),
     recall: vi.fn(() => Promise.resolve()),
+    reannounce: vi.fn(() => Promise.resolve()),
     transfer: vi.fn(() => Promise.resolve()),
     applyTransition: vi.fn(() => Promise.resolve()),
     getBrandColor: vi.fn(() => Promise.resolve({ brandColor: '' })),
@@ -59,6 +60,9 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
     // Edges from CALLING: → SERVING (serve) + → SKIPPED (skip).
     expect(screen.getByTestId('action-serve')).toHaveTextContent('Mulai Melayani');
     expect(screen.getByTestId('action-skip')).toHaveTextContent('Lewati / Absen');
+    // "Panggil Lagi" is a fixed affordance shown only while a ticket is CALLING
+    // (re-announce — distinct from recall, which is the SKIPPED → CALLING edge).
+    expect(screen.getByTestId('action-reannounce')).toHaveTextContent('Panggil Lagi');
     // No complete/recall from CALLING.
     expect(screen.queryByTestId('action-complete')).not.toBeInTheDocument();
     expect(screen.queryByTestId('action-recall')).not.toBeInTheDocument();
@@ -71,6 +75,8 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
     );
     expect(screen.getByTestId('action-complete')).toHaveTextContent('Selesai Layan');
     expect(screen.queryByTestId('action-serve')).not.toBeInTheDocument();
+    // Panggil Lagi is only for CALLING.
+    expect(screen.queryByTestId('action-reannounce')).not.toBeInTheDocument();
   });
 
   it('renders Panggil Ulang when the active ticket is SKIPPED', () => {
@@ -79,6 +85,8 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
       <ActionControls api={api} bound={bound} active={ticket('SKIPPED')} stateMachine={defaultStateMachine} />,
     );
     expect(screen.getByTestId('action-recall')).toHaveTextContent('Panggil Ulang');
+    // Panggil Lagi is only for CALLING — not shown for SKIPPED.
+    expect(screen.queryByTestId('action-reannounce')).not.toBeInTheDocument();
   });
 
   it('shows only Panggil Berikutnya when there is no active ticket', () => {
@@ -86,6 +94,16 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
     render(<ActionControls api={api} bound={bound} active={null} stateMachine={defaultStateMachine} />);
     expect(screen.getByRole('button', { name: 'Panggil Berikutnya' })).toBeInTheDocument();
     expect(screen.queryByTestId('action-serve')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('action-reannounce')).not.toBeInTheDocument();
+  });
+
+  it('invokes reannounce on tap when the active ticket is CALLING (Panggil Lagi)', async () => {
+    const api = makeApi();
+    render(
+      <ActionControls api={api} bound={bound} active={ticket('CALLING')} stateMachine={defaultStateMachine} />,
+    );
+    await userEvent.click(screen.getByTestId('action-reannounce'));
+    expect(api.reannounce).toHaveBeenCalledWith('t1');
   });
 
   it('invokes the right command on tap (call-next uses the bound counter id)', async () => {

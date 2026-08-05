@@ -1,6 +1,7 @@
 import { useTvStore } from '../state/tv-store';
 import { NowServingCard } from '../components/NowServingCard';
 import { CallHistory } from '../components/CallHistory';
+import { WaitingQueue } from '../components/WaitingQueue';
 import { ConnectionStatusBadge } from '../components/ConnectionStatus';
 import { StandbyMedia } from '../components/StandbyMedia';
 import { DEFAULT_STANDBY_CONTENT, resolveRunningText } from '../standby/standby-content';
@@ -33,12 +34,13 @@ function RunningText({ text, prominent }: { readonly text: string; readonly prom
 /**
  * The TV queue board (FR-TV-01..03). When a ticket is being called it shows the
  * big now-serving number + recent call history (FR-TV-01). When the queue is
- * idle (`nowServing == null`) it shows the standby panel — bundled banner/video
- * promo media cycled by {@link StandbyMedia} plus a prominent running-text
- * announcement (FR-TV-03). The idle→active handoff is driven by the store's
- * `nowServing` projection; all realtime + audio wiring is owned by the
- * surrounding {@link TvStoreProvider}, so this page stays a pure projection
- * (SRP — it renders + announces nothing on its own).
+ * idle (`nowServing == null`) it shows the standby panel — the waiting queue
+ * shares the idle screen with (now smaller) promo media cycled by
+ * {@link StandbyMedia}, plus a prominent running-text announcement (FR-TV-03).
+ * The idle→active handoff is driven by the store's `nowServing` projection;
+ * all realtime + audio wiring is owned by the surrounding
+ * {@link TvStoreProvider}, so this page stays a pure projection (SRP — it
+ * renders + announces nothing on its own).
  */
 export function TvBoardPage() {
   const { state } = useTvStore();
@@ -68,7 +70,13 @@ export function TvBoardPage() {
         >
           <div className="tv-board__active-grid">
             <NowServingCard nowServing={state.nowServing} />
-            <CallHistory history={state.history} />
+            {/* The 1fr right column stacks the waiting queue (top) above the
+                call history (bottom); the now-serving card stays the 2fr hero
+                on the left. */}
+            <div className="tv-board__active-side">
+              <WaitingQueue waiting={state.waiting} categories={state.categories} />
+              <CallHistory history={state.history} />
+            </div>
           </div>
           {/* Active-mode footer running text (decorative, aria-hidden). It lives
               inside the active layer so it fades with the board, not pop-in. */}
@@ -79,7 +87,22 @@ export function TvBoardPage() {
           aria-label="Mode standby"
           data-testid="standby"
         >
-          <StandbyMedia assets={DEFAULT_STANDBY_CONTENT.media} />
+          {/* Idle layout (FR-TV-03): the waiting queue takes the left half so a
+              customer is never left looking at ads with no queue in sight (the
+              "pindahkan iklan ke temppat lain" fix); promo media is demoted to
+              the right half. The active WaitingQueue is the single aria-live
+              region — the standby instance is `live={false}` (a non-live visual
+              duplicate) so two always-mounted live regions don't double-announce
+              (mirrors the active layer's "live region mounts fresh / is never
+              hidden" rule). */}
+          <div className="standby__grid">
+            <WaitingQueue
+              waiting={state.waiting}
+              categories={state.categories}
+              live={false}
+            />
+            <StandbyMedia assets={DEFAULT_STANDBY_CONTENT.media} />
+          </div>
           <RunningText text={runningText} prominent />
         </section>
       </main>

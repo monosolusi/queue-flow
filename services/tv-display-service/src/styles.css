@@ -98,6 +98,9 @@ body,
      intrinsic width and clip overflow instead of pushing the grid wider. */
   min-width: 0;
   overflow: hidden;
+  /* Inline-size container so the number sizes to the 2fr column, not the
+     viewport — the one-line guarantee (FR-TV responsiveness). */
+  container-type: inline-size;
 }
 .now-serving--empty {
   color: var(--text-muted);
@@ -114,10 +117,13 @@ body,
   color: var(--text-muted);
 }
 .now-serving__number {
-  font-size: clamp(8rem, 22vw, 22rem); /* AC3: fluid 1080p→1440p */
+  font-size: clamp(5rem, 18cqw, 22rem); /* AC3: fluid to the 2fr column, not the viewport */
   font-weight: 800;
   letter-spacing: 0.05em;
   line-height: 1;
+  /* One-line guarantee (FR-TV responsiveness): the queue number never wraps.
+     The cqw clamp scales to the column so nowrap never clips it. */
+  white-space: nowrap;
 }
 .now-serving__counter {
   font-size: 2.5rem;
@@ -169,6 +175,93 @@ body,
 .call-history__counter {
   color: var(--text-muted);
   font-size: 1.25rem;
+}
+
+/* Waiting queue ("Antrian Berikutnya") ------------------------------------ */
+/* Mirrors .call-history: a surface card with hairline dividers (AC4) and
+   grid-cell containment (AC3). Uses the per-service var(--radius), --surface,
+   and --text-muted directly — no new shared token (per the per-service-override
+   rule). */
+.waiting-queue {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  overflow: hidden;
+  min-width: 0; /* grid-cell containment (AC3) */
+}
+.waiting-queue__title {
+  margin: 0 0 1rem;
+  font-size: 1.5rem;
+}
+.waiting-queue__empty {
+  color: var(--text-muted);
+  font-size: 1.25rem;
+}
+.waiting-queue__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0; /* dividers carry the spacing; gap+border would double up */
+}
+.waiting-queue__item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 1rem 0.25rem;
+  border-bottom: 1px solid var(--text-muted);
+}
+.waiting-queue__item:last-child {
+  border-bottom: none;
+}
+.waiting-queue__position {
+  color: var(--text-muted);
+  font-size: 1.25rem;
+  min-width: 2.5rem;
+}
+.waiting-queue__number {
+  font-size: 2.5rem;
+  font-weight: 700;
+}
+.waiting-queue__category {
+  color: var(--text-muted);
+  font-size: 1.25rem;
+  margin-left: auto;
+  /* A long category name (e.g. "Customer Service", "Pendaftaran") must not
+     break the flex row layout on the TV board — truncate with ellipsis. */
+  min-width: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.waiting-queue__count {
+  margin: 1rem 0 0;
+  color: var(--text-muted);
+  font-size: 1.1rem;
+}
+
+/* Active grid right column (stacks waiting queue + call history) ------------ */
+/* The 1fr right column stacks the waiting queue (top) above the call history
+   (bottom); now-serving stays the 2fr hero on the left. min-width:0 so the
+   column can shrink below its content's intrinsic width (grid-cell containment,
+   AC3). */
+.tv-board__active-side {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  min-width: 0;
+  min-height: 0;
+}
+/* The side column's children share the column height — the waiting panel takes
+   a flexible share, the call history keeps its natural height. */
+.tv-board__active-side > .waiting-queue {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.tv-board__active-side > .call-history {
+  flex: 0 0 auto;
 }
 
 /* Connection status ------------------------------------------------------- */
@@ -243,9 +336,30 @@ body,
 
 /* Standby (idle) panel (FR-TV-03) ----------------------------------------- */
 /* Overlays the whole `main` area (an absolute layer — see .tv-board__active /
-   .standby above) so the promo media + running text own the whole idle screen. */
+   .standby above). The idle screen is shared between the waiting queue (left
+   half — a customer never faces ads with no queue in sight, the "pindahkan
+   iklan ke tempat lain" fix) and the demoted promo media (right half); the
+   prominent running text sits below as a full-width bar. */
 .standby {
   gap: 1.5rem;
+}
+/* The grid is the flex:1 child of the .standby flex column (the marquee below
+   stays flex:0 0 auto). Two equal columns: waiting queue + promo media. */
+.standby__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  flex: 1;
+  min-height: 0;
+}
+/* Grid-cell containment so each child fills its cell and clips overflow
+   instead of pushing the grid wider/taller (AC3). */
+.standby__grid > .waiting-queue {
+  min-height: 0;
+  overflow: hidden;
+}
+.standby__grid > .standby__media {
+  min-height: 0;
 }
 .standby__media {
   flex: 1;
@@ -263,16 +377,17 @@ body,
   height: 100%;
   object-fit: contain;
 }
-/* The prominent running text sits below the media as a full-width bar. */
+/* The prominent running text sits below the grid as a full-width bar. */
 .standby .tv-board__marquee--prominent {
   flex: 0 0 auto;
 }
 
 /* 4K tier (AC3): scale the board typography up for large displays. The first
-   responsive breakpoint in the file. */
+   responsive breakpoint in the file. The number sizes to its container
+   (cqw) so it stays on one line at the wider column width. */
 @media (min-width: 2560px) {
   .now-serving__number {
-    font-size: clamp(14rem, 22vw, 44rem);
+    font-size: clamp(10rem, 18cqw, 40rem);
   }
   .now-serving__counter {
     font-size: clamp(3rem, 3vw, 5rem);
@@ -288,6 +403,17 @@ body,
   }
   .call-history__title {
     font-size: clamp(1.75rem, 1.5vw, 2.5rem);
+  }
+  .waiting-queue__number {
+    font-size: clamp(3rem, 3vw, 5rem);
+  }
+  .waiting-queue__title {
+    font-size: clamp(1.75rem, 1.5vw, 2.5rem);
+  }
+  .waiting-queue__position,
+  .waiting-queue__category,
+  .waiting-queue__count {
+    font-size: clamp(1.5rem, 1.2vw, 2rem);
   }
 }
 

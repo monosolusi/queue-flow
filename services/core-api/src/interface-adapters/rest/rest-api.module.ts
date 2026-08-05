@@ -5,6 +5,7 @@ import { COUNTER_ROUTING_RULE_REPOSITORY } from '../../domain/store-config';
 import { QUEUE_REPOSITORY } from '../../domain/queue';
 import {
   GetQueueSnapshotUseCase,
+  GetWaitingQueueUseCase,
   ListCategoriesUseCase,
   ListCountersUseCase,
 } from '../../application';
@@ -43,6 +44,11 @@ import { DomainExceptionFilter } from './domain-exception.filter';
       inject: [QUEUE_REPOSITORY, COUNTER_ROUTING_RULE_REPOSITORY],
       useFactory: (queue, routingRules) =>
         new GetQueueSnapshotUseCase(queue, routingRules),
+    },
+    {
+      provide: GetWaitingQueueUseCase,
+      inject: [QUEUE_REPOSITORY],
+      useFactory: (queue) => new GetWaitingQueueUseCase(queue),
     },
     {
       provide: ListCategoriesUseCase,

@@ -58,8 +58,16 @@ export class KioskApi implements IKioskApi {
   listCategories(): Promise<CategoryDto[]> {
     return getJson<CategoryDto[]>('/categories');
   }
+  /**
+   * Creates a ticket. core-api wraps the result in a `{ status: 'created',
+   * ticket }` envelope (see `tickets-api.integration.spec.ts`); this unwraps
+   * it so the kiosk consumes the flat {@link CreatedTicketDto} (the envelope
+   * is a transport detail the kiosk client owns — the ISP slice stays flat).
+   */
   createTicket(categoryId: string): Promise<CreatedTicketDto> {
-    return postJson<CreatedTicketDto>('/tickets', { categoryId });
+    return postJson<{ status: 'created'; ticket: CreatedTicketDto }>('/tickets', {
+      categoryId,
+    }).then((r) => r.ticket);
   }
   getStoreProfile(): Promise<StoreProfileSlice> {
     // Reuses the existing `GET /api/system/config` read surface (QUE-30 — it

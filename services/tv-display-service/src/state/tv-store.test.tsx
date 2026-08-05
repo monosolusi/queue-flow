@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { act, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import React from 'react';
 import { TvStoreProvider } from './tv-store';
 import { TvBoardPage } from '../pages/TvBoardPage';
 import type { ITvApi } from '../api/tv-api';
 import type { AudioProvider } from '../audio/audio-provider';
-import type { QueueLifecycleWireEvent } from '../api/types';
+import type { QueueLifecycleWireEvent, WaitingQueueDto } from '../api/types';
 
 /** Fake WebSocket whose instances the test can reach to deliver frames. */
 class FakeWebSocket {
@@ -29,7 +30,7 @@ class FakeWebSocket {
   }
 }
 
-function makeApi(brandColor = ''): ITvApi {
+function makeApi(brandColor = '', waiting: WaitingQueueDto['waiting'] = []): ITvApi {
   return {
     getSystemConfig: vi.fn(() =>
       Promise.resolve({ isInitialSetupCompleted: true, storeName: 'Apotek Sehat', brandColor }),
@@ -39,6 +40,9 @@ function makeApi(brandColor = ''): ITvApi {
         { id: 'cat-a', code: 'A', name: 'Customer Service' },
         { id: 'cat-b', code: 'B', name: 'Kasir' },
       ]),
+    ),
+    getWaitingQueue: vi.fn(() =>
+      Promise.resolve({ waiting, waitingCount: waiting.length }),
     ),
   };
 }
@@ -369,5 +373,154 @@ describe('TvBoardPage idle/active switching (FR-TV-03)', () => {
     // A-005 is retained in the hidden active layer's history — scope to the
     // standby so the global query doesn't match it (see COMPLETED-path note).
     expect(within(screen.getByTestId('standby')).queryByText('A-005')).not.toBeInTheDocument();
+  });
+});
+
+describe('Waiting queue refetch (server owns the read model)', () => {
+  it('boot dispatches WAITING_LOADED with the fetched waiting list', async () => {
+    const waiting = [
+      { ticketId: 't1', ticketNumber: 'B-001', categoryId: 'cat-b', status: 'WAITING', counterId: null },
+      { ticketId: 't2', ticketNumber: 'A-002', categoryId: 'cat-a', status: 'WAITING', counterId: null },
+    ];
+    const api = makeApi('', waiting);
+    const audio = makeAudio();
+    renderBoard(api, audio);
+
+    // The waiting panel renders the fetched rows alongside the now-serving hero
+    // (the active layer is mounted but hidden via the --hidden modifier; css:false
+    // means findByText still resolves the text in the DOM). The standby layer
+    // also renders a non-live WaitingQueue duplicate (the crossfade needs both
+    // layers mounted), so each waiting row/text appears twice — use
+    // findAllByText/getAllByText and assert the count.
+    expect(await screen.findAllByText('B-001')).toHaveLength(2);
+    expect(screen.getAllByText('A-002')).toHaveLength(2);
+    expect(screen.getAllByText(/Menunggu: 2 tiket/)).toHaveLength(2);
+    expect(api.getWaitingQueue).toHaveBeenCalledTimes(1);
+  });
+
+  it('a waiting-fetch failure degrades gracefully — board still boots, waiting stays []', async () => {
+    const api: ITvApi = {
+      getSystemConfig: vi.fn(() =>
+        Promise.resolve({ isInitialSetupCompleted: true, storeName: 'Apotek Sehat', brandColor: '' }),
+      ),
+      getCategories: vi.fn(() => Promise.resolve([{ id: 'cat-a', code: 'A', name: 'CS' }])),
+      getWaitingQueue: vi.fn(() => Promise.reject(new Error('boom'))),
+    };
+    const audio = makeAudio();
+    renderBoard(api, audio);
+
+    // Config still loaded — board boots.
+    expect(await screen.findByText('Apotek Sehat')).toBeInTheDocument();
+    // Empty waiting state — no rows, zero count. Both layers (active + standby)
+    // render the empty panel, so each empty-state text appears twice.
+    expect(screen.getAllByText('Belum ada antrian menunggu.')).toHaveLength(2);
+    expect(screen.getAllByText(/Menunggu: 0 tiket/)).toHaveLength(2);
+  });
+
+  it('SYSTEM_RESET clears the waiting list immediately for snappy UX', async () => {
+    const waiting = [
+      { ticketId: 't1', ticketNumber: 'B-001', categoryId: 'cat-b', status: 'WAITING', counterId: null },
+    ];
+    const api = makeApi('', waiting);
+    const audio = makeAudio();
+    renderBoard(api, audio);
+    // Both layers (active + standby) render the waiting row.
+    expect(await screen.findAllByText('B-001')).toHaveLength(2);
+    const ws = FakeWebSocket.instances[0];
+
+    // Bring up a call so the active layer is the visible one, then reset.
+    fire(ws, calledEvent('t2', 'A-005', 2));
+    expect(await screen.findByText('A-005')).toBeInTheDocument();
+
+    fire(ws, {
+      type: 'SYSTEM_RESET',
+      aggregateId: 'system',
+      occurredAt: 3,
+      version: 3,
+      payload: { resetTo: 1, date: '2026-07-31' },
+    });
+    // The waiting list is cleared locally immediately — B-001 leaves both
+    // layers' waiting panels (the debounced refetch confirms an empty list with
+    // the mock's initial seed; here the mock stays at one row so we only assert
+    // the local clear before the debounce fires). queryAllByText returns [] when
+    // none remain (the duplicate is gone from both layers).
+    expect(screen.queryAllByText('B-001')).toHaveLength(0);
+  });
+
+  it('a TICKET_CALLED event triggers a debounced refetch of the waiting queue', async () => {
+    vi.useFakeTimers();
+    try {
+      const api = makeApi('', []);
+      const audio = makeAudio();
+      renderBoard(api, audio);
+      // Wait for boot (Promise.allSettled under fake timers — flush microtasks).
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      const ws = FakeWebSocket.instances[0];
+      // Initial boot fetch.
+      expect(api.getWaitingQueue).toHaveBeenCalledTimes(1);
+
+      // A call arrives → schedules a debounced refetch.
+      act(() => ws.sendEvent(calledEvent('t1', 'A-005', 2)));
+      expect(api.getWaitingQueue).toHaveBeenCalledTimes(1); // not yet — debounced
+
+      // Advance the debounce window — the refetch fires once.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+      expect(api.getWaitingQueue).toHaveBeenCalledTimes(2);
+
+      // A second event within the debounce window coalesces into one fetch.
+      act(() => ws.sendEvent(calledEvent('t2', 'B-001', 1)));
+      act(() => ws.sendEvent(calledEvent('t3', 'B-002', 1)));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+      // Two more events produced one more fetch (3 total after boot).
+      expect(api.getWaitingQueue).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('loads the waiting queue under <React.StrictMode> (mountedRef not stuck false)', async () => {
+    // Regression: the dedicated `[]`-deps effect that flips `mountedRef.current
+    // = false` in cleanup must reset it to `true` in the body. Under
+    // <React.StrictMode> an `[]`-deps effect is double-invoked on mount
+    // (body -> cleanup -> body); without the reset, the cleanup's `false`
+    // wins and every later `refetchWaiting` resolution is dropped — the
+    // waiting queue never loads in dev. RTL `render()` does NOT wrap in
+    // StrictMode, so the existing tests miss this; this case wraps the
+    // provider harness in <React.StrictMode> explicitly.
+    const waiting = [
+      { ticketId: 't1', ticketNumber: 'B-001', categoryId: 'cat-b', status: 'WAITING', counterId: null },
+      { ticketId: 't2', ticketNumber: 'A-002', categoryId: 'cat-a', status: 'WAITING', counterId: null },
+    ];
+    const api = makeApi('', waiting);
+    const audio = makeAudio();
+    FakeWebSocket.instances = [];
+    render(
+      <React.StrictMode>
+        <MemoryRouter>
+          <TvStoreProvider
+            api={api}
+            audio={audio}
+            socketOptions={{ WebSocketCtor: FakeWebSocket as unknown as typeof WebSocket }}
+          >
+            <TvBoardPage />
+          </TvStoreProvider>
+        </MemoryRouter>
+      </React.StrictMode>,
+    );
+
+    // The waiting rows render in BOTH the active + standby layers (crossfade
+    // keeps both mounted), so each row appears twice. The key assertion is
+    // that they render AT ALL under StrictMode — pre-fix, `mountedRef` was
+    // stuck `false` and the boot `refetchWaiting` resolution was dropped.
+    expect(await screen.findAllByText('B-001')).toHaveLength(2);
+    expect(screen.getAllByText('A-002')).toHaveLength(2);
+    expect(screen.getAllByText(/Menunggu: 2 tiket/)).toHaveLength(2);
+    expect(api.getWaitingQueue).toHaveBeenCalledTimes(1);
   });
 });

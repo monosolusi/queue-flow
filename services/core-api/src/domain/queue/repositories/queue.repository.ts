@@ -48,6 +48,15 @@ export interface IQueueRepository {
    */
   findWaitingByCategories(categoryIds: readonly string[]): Promise<QueueTicket[]>;
   /**
+   * Every WAITING ticket across all categories, ordered oldest first (FIFO by
+   * `createdAt`). The category-agnostic counterpart to
+   * {@link findWaitingByCategories}; used by the TV board (which has no bound
+   * counter) to render the global waiting queue. Like the sibling waiting
+   * reads, the write-side port already carries read methods so no new ISP
+   * split is warranted (mirrors the existing pattern).
+   */
+  findAllWaiting(): Promise<QueueTicket[]>;
+  /**
    * Count of tickets currently WAITING in `categoryId` (FR-KSK-03 — the kiosk
    * receipt prints the visitor's queue position). A dedicated COUNT read is
    * cheaper than loading aggregates via {@link findWaitingByCategory} and keeps

@@ -205,6 +205,42 @@ export class QueueTicket extends AggregateRoot<TicketId> {
     }
   }
 
+  /**
+   * Re-announce the currently-calling ticket — "Panggil Lagi". Distinct from
+   * {@link recall}: recall is a `SKIPPED -> CALLING` *transition* that also
+   * re-announces; `reannounce` performs **no state change** — the ticket is
+   * already in CALLING, and the staff just wants the TV/audio to repeat the
+   * announcement (the customer didn't hear it). Re-emits a
+   * {@link TicketCalledEvent} (so the TV board re-shows the ticket and the
+   * audio queue re-announces it, FR-TV-01/02) and re-sets `calledAt` to the
+   * re-announce time (a fresh call attempt — mirrors `recall`'s calledAt
+   * semantics). Only valid from CALLING; any other status surfaces as an
+   * {@link InvalidStateTransitionException} (→ 409) for a consistent
+   * error contract with the other state-guarded commands. No
+   * {@link ITransitionPolicy} is consulted because no transition occurs.
+   *
+   * Defensive `_counterId !== null` guard mirrors `recall`: a CALLING ticket
+   * always has a counterId per the PRD §7 default machine (`markCalling` sets
+   * it), but a degenerate custom machine could reach CALLING without one — the
+   * calledAt reset still proceeds (it's a re-announce attempt) but no
+   * re-announce event fires for that edge (no counter to re-call to).
+   */
+  public reannounce(now = Date.now()): void {
+    if (this._currentStatus !== TicketStatus.CALLING) {
+      throw new InvalidStateTransitionException(this._currentStatus, TicketStatus.CALLING);
+    }
+    // A re-announce is a fresh call attempt — reset the called-at timestamp so
+    // the wait-time metric reflects the time from creation to the *latest*
+    // announcement, not the original (now-stale) one. Mirrors `recall`.
+    this._calledAt = now;
+    this._updatedAt = now;
+    if (this._counterId !== null) {
+      this.record(
+        new TicketCalledEvent(this.id.value, this._ticketNumber.formatted(), this._counterId, now),
+      );
+    }
+  }
+
   /** Begin serving. CALLING -> SERVING ("Mulai Melayani"). */
   public startServing(policy: ITransitionPolicy, now = Date.now()): void {
     this.transitionTo(TicketStatus.SERVING, policy, now);

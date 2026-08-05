@@ -185,6 +185,28 @@ describe('DoD-3 — Offline End-to-End realtime flow', () => {
 
     tv.close();
   });
+
+  it('reannounce re-broadcasts TICKET_CALLED for the currently-calling ticket (Panggil Lagi)', async () => {
+    const ticket = await http(booted.app).post('/api/tickets').send({ categoryId: catAId }).expect(201);
+    const ticketId = ticket.body.ticket.ticketId;
+
+    const tv = await openWs(booted.port);
+    const tvEvents: WireEvent[] = [];
+    tv.on('message', (d) => tvEvents.push(JSON.parse(d.toString())));
+
+    // call-next → TICKET_CALLED + STATUS_UPDATED (2 events).
+    await http(booted.app).post('/api/queue/call-next').send({ counterId: 1 }).expect(201);
+    await waitForLength(tvEvents, 2);
+
+    // reannounce → only TICKET_CALLED (no state change, no STATUS_UPDATED).
+    await http(booted.app).post(`/api/queue/${ticketId}/reannounce`).expect(201);
+    await waitForLength(tvEvents, 3);
+    expect(tvEvents[2].type).toBe('TICKET_CALLED');
+    expect(tvEvents[2].payload.ticketNumber).toBe('A-001');
+    expect(tvEvents[2].payload.counterId).toBe(1);
+
+    tv.close();
+  });
 });
 
 /** Resolves once `arr` reaches `n` (or after a short timeout, to avoid hangs). */

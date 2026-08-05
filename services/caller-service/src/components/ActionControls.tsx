@@ -132,6 +132,23 @@ export function ActionControls({ api, bound, active, stateMachine }: ActionContr
         {pending === 'call-next' ? 'Memanggil…' : 'Panggil Berikutnya'}
       </button>
 
+      {/* "Panggil Lagi" — re-announce the currently-calling ticket. A fixed
+          affordance (NOT edge-driven) shown only while a ticket is in CALLING,
+          so staff can repeat the TV/audio announcement when the customer didn't
+          hear it. Reuses the same run/pending/in-flight guard machinery as the
+          edge buttons; no new state. */}
+      {active?.status === 'CALLING' && (
+        <button
+          type="button"
+          className="btn btn--secondary action-controls__reannounce"
+          data-testid="action-reannounce"
+          onClick={() => void run('reannounce', () => api.reannounce(active!.ticketId))}
+          disabled={pending === 'reannounce'}
+        >
+          {pending === 'reannounce' ? 'Memanggil…' : 'Panggil Lagi'}
+        </button>
+      )}
+
       {edges.map((edge) => {
         const command = COMMAND_BY_TARGET[edge.to];
         if (!command) {

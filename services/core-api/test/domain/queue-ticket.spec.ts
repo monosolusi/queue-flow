@@ -111,6 +111,64 @@ describe('QueueTicket aggregate', () => {
     expect(ticket.currentStatus).toBe(TicketStatus.WAITING);
   });
 
+  describe('reannounce (Panggil Lagi — re-announce a CALLING ticket, no state change)', () => {
+    it('re-emits TICKET_CALLED with the retained counterId + ticket number and does not change status', () => {
+      const ticket = newTicket();
+      ticket.markCalling(1, policy, FIXED_NOW);
+      ticket.pullDomainEvents(); // drop the call events to isolate the re-announce
+
+      ticket.reannounce(FIXED_NOW + 5);
+
+      // No state change — still CALLING, same counter.
+      expect(ticket.currentStatus).toBe(TicketStatus.CALLING);
+      expect(ticket.counterId).toBe(1);
+      const events = ticket.pullDomainEvents();
+      // Only the TICKET_CALLED re-emit — no STATUS_UPDATED (no transition).
+      expect(events).toHaveLength(1);
+      expect(events[0]).toBeInstanceOf(TicketCalledEvent);
+      expect((events[0] as TicketCalledEvent).type).toBe('TICKET_CALLED');
+      expect((events[0] as TicketCalledEvent).counterId).toBe(1);
+      expect((events[0] as TicketCalledEvent).ticketNumber).toBe('A-001');
+    });
+
+    it('re-sets calledAt to the re-announce time (fresh call attempt)', () => {
+      const ticket = newTicket();
+      ticket.markCalling(1, policy, FIXED_NOW);
+      expect(ticket.calledAt).toBe(FIXED_NOW);
+      ticket.reannounce(FIXED_NOW + 30);
+      expect(ticket.calledAt).toBe(FIXED_NOW + 30);
+    });
+
+    it('is only valid from CALLING — throws InvalidStateTransitionException from WAITING', () => {
+      const ticket = newTicket();
+      ticket.pullDomainEvents(); // drop the creation event first
+      expect(() => ticket.reannounce(FIXED_NOW)).toThrow(InvalidStateTransitionException);
+      expect(ticket.currentStatus).toBe(TicketStatus.WAITING);
+      expect(ticket.pendingEventCount).toBe(0);
+    });
+
+    it('throws InvalidStateTransitionException from SERVING / SKIPPED / COMPLETED', () => {
+      // SERVING
+      const serving = newTicket();
+      serving.markCalling(1, policy, FIXED_NOW);
+      serving.startServing(policy, FIXED_NOW + 1);
+      expect(() => serving.reannounce(FIXED_NOW + 2)).toThrow(InvalidStateTransitionException);
+
+      // SKIPPED
+      const skipped = newTicket();
+      skipped.markCalling(1, policy, FIXED_NOW);
+      skipped.skip(policy, FIXED_NOW + 1);
+      expect(() => skipped.reannounce(FIXED_NOW + 2)).toThrow(InvalidStateTransitionException);
+
+      // COMPLETED
+      const completed = newTicket();
+      completed.markCalling(1, policy, FIXED_NOW);
+      completed.startServing(policy, FIXED_NOW + 1);
+      completed.complete(policy, FIXED_NOW + 2);
+      expect(() => completed.reannounce(FIXED_NOW + 3)).toThrow(InvalidStateTransitionException);
+    });
+  });
+
   it('markCalling is a no-op when already CALLING (no counter change, no event)', () => {
     const ticket = newTicket();
     ticket.markCalling(1, policy, FIXED_NOW);

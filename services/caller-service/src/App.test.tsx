@@ -14,6 +14,7 @@ function makeApi(brandColor = '', reject?: Error): ICallerApi {
     complete: () => Promise.resolve(),
     skip: () => Promise.resolve(),
     recall: () => Promise.resolve(),
+    reannounce: () => Promise.resolve(),
     transfer: () => Promise.resolve(),
     applyTransition: () => Promise.resolve(),
     getBrandColor: reject ? () => Promise.reject(reject) : () => Promise.resolve({ brandColor }),

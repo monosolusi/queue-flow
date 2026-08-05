@@ -24,6 +24,9 @@ export interface ICallerApi {
   complete(ticketId: string): Promise<void>;
   skip(ticketId: string): Promise<void>;
   recall(ticketId: string): Promise<void>;
+  /** Re-announce the currently-calling ticket ("Panggil Lagi") — re-emits
+   *  TICKET_CALLED without a state change; only valid from CALLING. */
+  reannounce(ticketId: string): Promise<void>;
   transfer(ticketId: string, targetCategoryId: string): Promise<void>;
   /** Generic apply-transition (QUE-33): drives a wizard-configurable edge to
    *  an arbitrary target state not covered by the six fixed commands. */
@@ -87,7 +90,7 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
  * Fetch-based {@link ICallerApi} using relative `/api` URLs — same-origin behind
  * NGINX in production, proxied to core-api:3000 by Vite in dev. No remote calls
  * (NFR-REL-01). Command endpoints map to the core-api `QueueCommandsController`
- * (`POST /api/queue/call-next`, `…/:id/serve|complete|skip|recall|transfer`).
+ * (`POST /api/queue/call-next`, `…/:id/serve|complete|skip|recall|reannounce|transfer`).
  */
 export class CallerApi implements ICallerApi {
   listCounters(): Promise<CounterDto[]> {
@@ -118,6 +121,9 @@ export class CallerApi implements ICallerApi {
   }
   recall(ticketId: string): Promise<void> {
     return postEmpty(`/queue/${encodeURIComponent(ticketId)}/recall`);
+  }
+  reannounce(ticketId: string): Promise<void> {
+    return postEmpty(`/queue/${encodeURIComponent(ticketId)}/reannounce`);
   }
   transfer(ticketId: string, targetCategoryId: string): Promise<void> {
     return postJson(`/queue/${encodeURIComponent(ticketId)}/transfer`, { targetCategoryId }).then(
