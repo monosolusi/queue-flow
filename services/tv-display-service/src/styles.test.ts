@@ -84,6 +84,31 @@ describe('styles.css AC guards', () => {
     expect(css).toMatch(/@media\s*\(min-width:\s*2560px\)[\s\S]*\.waiting-queue__number\s*\{[^}]*clamp/);
   });
 
+  it('waiting-queue scales rows to the panel height (cqh) + scrollable list (no clip)', () => {
+    // The panel is a size container so children can scale to its height via cqh
+    // units — all VISIBLE_LIMIT items always fit the panel regardless of its
+    // height (responsive). The panel height is determinate because the parent
+    // grids use grid-template-rows: minmax(0, 1fr) (active + standby).
+    const panel = rule('.waiting-queue');
+    expect(panel).toContain('container-type: size');
+    expect(panel).toContain('display: flex');
+    expect(panel).toContain('flex-direction: column');
+    // The list is scrollable (safety-net) — never clipped/invisible.
+    const list = rule('.waiting-queue__list');
+    expect(list).toContain('overflow-y: auto');
+    expect(list).toContain('flex: 1 1 auto');
+    expect(list).toContain('min-height: 0');
+    // Item font/padding scale to the panel height via cqh clamps.
+    expect(rule('.waiting-queue__number')).toContain('clamp(');
+    expect(rule('.waiting-queue__number')).toMatch(/cqh/);
+    expect(rule('.waiting-queue__item')).toMatch(/cqh/);
+  });
+
+  it('active + standby grids define a determinate row height (minmax(0, 1fr))', () => {
+    expect(rule('.tv-board__active-grid')).toContain('grid-template-rows: minmax(0, 1fr)');
+    expect(rule('.standby__grid')).toContain('grid-template-rows: minmax(0, 1fr)');
+  });
+
   it('AC6: both layers overlay the main area + a --hidden modifier + reduced-motion', () => {
     expect(rule('.tv-board__main')).toContain('position: relative');
     const active = rule('.tv-board__active, .standby');
