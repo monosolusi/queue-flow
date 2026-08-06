@@ -20,6 +20,7 @@ import {
 } from '../../src/infrastructure/persistence/in-memory';
 import { projectStateMachine, type WizardCategoryDto } from '../../src/application/store-config';
 import { StateMachine } from '../../src/domain/store-config';
+import { authHeader, bootstrapAuthedAdmin } from '../acceptance/_helpers';
 
 /**
  * The PRD §7 reference wizard payload — 2 categories, 2 counters, the default
@@ -72,6 +73,7 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
   let categories: ICategoryRepository;
   let routingRules: ICounterRoutingRuleRepository;
   let auditLog: IAuditLogRepository;
+  let token: string;
 
   beforeAll(async () => {
     app = await NestFactory.create(AppModule, { logger: false });
@@ -81,6 +83,13 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
     categories = app.get(CATEGORY_REPOSITORY);
     routingRules = app.get(COUNTER_ROUTING_RULE_REPOSITORY);
     auditLog = app.get(AUDIT_LOG_REPOSITORY);
+    // QUE-43: the wizard PUT is pre-setup-tokenless via AdminOrSetupGuard, but
+    // the post-setup state-machine + call-next reads need an authenticated
+    // bearer, and a *second* PUT after setup completes needs one too. Bootstrap
+    // the admin once; sending the bearer on the pre-setup PUT is harmless
+    // (AdminOrSetupGuard allows pre-setup regardless, attaching no principal, so
+    // the audit actor stays the 'system' sentinel for the first save).
+    token = await bootstrapAuthedAdmin(app);
   });
 
   afterAll(async () => {
@@ -113,20 +122,21 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
     // SystemNotConfiguredException on a clean store — the pre-setup guard.
     const res = await request(app.getHttpServer())
       .post('/api/queue/call-next')
+      .set(authHeader(token))
       .send({ counterId: 1 });
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('SYSTEM_NOT_CONFIGURED');
   });
 
   it('GET /api/system/state-machine 409s before setup completes', async () => {
-    const res = await request(app.getHttpServer()).get('/api/system/state-machine');
+    const res = await request(app.getHttpServer()).get('/api/system/state-machine').set(authHeader(token));
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('SYSTEM_NOT_CONFIGURED');
   });
 
   it('PUT /api/system/config saves the wizard payload and flips isInitialSetupCompleted (FR-WZD-06)', async () => {
     const res = await request(app.getHttpServer())
-      .put('/api/system/config')
+      .put('/api/system/config').set(authHeader(token))
       .send(wizardPayload());
 
     expect(res.status).toBe(200);
@@ -154,10 +164,10 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
   });
 
   it('after the wizard completes, queue endpoints succeed and state-machine read returns the graph', async () => {
-    await request(app.getHttpServer()).put('/api/system/config').send(wizardPayload());
+    await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(wizardPayload());
 
     // The state-machine read surface now returns the saved graph.
-    const sm = await request(app.getHttpServer()).get('/api/system/state-machine');
+    const sm = await request(app.getHttpServer()).get('/api/system/state-machine').set(authHeader(token));
     expect(sm.status).toBe(200);
     expect(sm.body.states).toContain('WAITING');
     const callEdge = sm.body.transitions.find(
@@ -176,14 +186,17 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
   });
 
   it('PUT records STATE_SCHEMA_CHANGE + ROUTING_CHANGE audit entries (NFR-SEC-02)', async () => {
-    await request(app.getHttpServer()).put('/api/system/config').send(wizardPayload());
+    await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(wizardPayload());
 
     const entries = await auditLog.list();
     const actions = entries.map((e) => e.action);
     expect(actions).toContain(AuditAction.STATE_SCHEMA_CHANGE);
     expect(actions).toContain(AuditAction.ROUTING_CHANGE);
-    // every entry is attributed to the admin actor
-    expect(entries.every((e) => e.actor === 'admin')).toBe(true);
+    // QUE-43: the wizard save runs pre-setup, so AdminOrSetupGuard attaches no
+    // principal even when a bearer is sent — the audit actor is the 'system'
+    // sentinel (the setup act itself, attributable to the system, not a user).
+    // Post-setup re-saves would attribute to the authenticated admin's username.
+    expect(entries.every((e) => e.actor === 'system')).toBe(true);
   });
 
   it('PUT with a bad state machine (transition references unknown state) is 400', async () => {
@@ -192,7 +205,7 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
       states: ['WAITING', 'CALLING'],
       transitions: [{ from: 'WAITING', to: 'NOPE', actionLabel: 'x' }],
     };
-    const res = await request(app.getHttpServer()).put('/api/system/config').send(bad);
+    const res = await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad);
     expect(res.status).toBe(400);
   });
 
@@ -206,7 +219,7 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
         priorityPolicy: PriorityPolicy.FIFO_GLOBAL,
       },
     ];
-    const res = await request(app.getHttpServer()).put('/api/system/config').send(bad);
+    const res = await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad);
     expect(res.status).toBe(400);
   });
 
@@ -222,7 +235,7 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
       { id: 'not-a-uuid', code: 'A', name: 'Customer Service' },
       { code: 'B', name: 'Kasir & Pembayaran' },
     ];
-    const res = await request(app.getHttpServer()).put('/api/system/config').send(bad);
+    const res = await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad);
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('INVALID_VALUE_OBJECT');
     // setup must NOT have silently completed on a rejected payload
@@ -231,7 +244,7 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
   });
 
   it('re-saving fully replaces categories and routing rules (no dangling old rows)', async () => {
-    await request(app.getHttpServer()).put('/api/system/config').send(wizardPayload());
+    await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(wizardPayload());
     expect((await routingRules.getAll()).length).toBe(2);
 
     // Re-save with a single counter / single category.
@@ -245,7 +258,7 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
         priorityPolicy: PriorityPolicy.FIFO_GLOBAL,
       },
     ];
-    const res = await request(app.getHttpServer()).put('/api/system/config').send(replacement);
+    const res = await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(replacement);
     expect(res.status).toBe(200);
 
     expect((await categories.getAll()).length).toBe(1);
@@ -255,7 +268,7 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
   it('PUT with a malformed brand color is 400 (QUE-36)', async () => {
     const bad = wizardPayload();
     bad.brandColor = 'not-a-color';
-    const res = await request(app.getHttpServer()).put('/api/system/config').send(bad);
+    const res = await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad);
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('INVALID_VALUE_OBJECT');
     // setup must NOT have silently completed on a rejected payload
@@ -266,7 +279,7 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
   it('PUT accepts an oklch brand color (direct-API grammar — QUE-36)', async () => {
     const payload = wizardPayload();
     payload.brandColor = 'oklch(0.7 0.15 200)';
-    const res = await request(app.getHttpServer()).put('/api/system/config').send(payload);
+    const res = await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(payload);
     expect(res.status).toBe(200);
     expect(res.body.brandColor).toBe('oklch(0.7 0.15 200)');
 
@@ -280,7 +293,7 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
     // DomainError, so DomainExceptionFilter lets it surface as 500. The
     // controller guards presence at the boundary so it is 400 instead.
     const { stateMachine: _omit, ...bad } = wizardPayload();
-    const res = await request(app.getHttpServer()).put('/api/system/config').send(bad);
+    const res = await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad);
     expect(res.status).toBe(400);
 
     // Setup must NOT have silently completed on a rejected payload.
@@ -296,7 +309,7 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
     // controller guards top-level shape at the boundary so it is 400 instead.
     const bad = wizardPayload() as unknown as Record<string, unknown>;
     bad.stateMachine = 'WAITING'; // string instead of { states, transitions }
-    const res = await request(app.getHttpServer()).put('/api/system/config').send(bad);
+    const res = await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad);
     expect(res.status).toBe(400);
 
     // Setup must NOT have silently completed on a rejected payload.
@@ -307,7 +320,7 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
     // `buildCategories`'s `for...of` — confirm it is 400 too.
     const bad2 = wizardPayload() as unknown as Record<string, unknown>;
     bad2.categories = 1;
-    const res2 = await request(app.getHttpServer()).put('/api/system/config').send(bad2);
+    const res2 = await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad2);
     expect(res2.status).toBe(400);
   });
 
@@ -325,14 +338,14 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
     const badStates = wizardPayload() as unknown as Record<string, unknown>;
     badStates.stateMachine = { states: 5, transitions: [] };
     expect(
-      (await request(app.getHttpServer()).put('/api/system/config').send(badStates)).status,
+      (await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(badStates)).status,
     ).toBe(400);
 
     // stateMachine.transitions non-array → `(5).map` TypeError.
     const badTrans = wizardPayload() as unknown as Record<string, unknown>;
     badTrans.stateMachine = { states: ['WAITING'], transitions: 5 };
     expect(
-      (await request(app.getHttpServer()).put('/api/system/config').send(badTrans)).status,
+      (await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(badTrans)).status,
     ).toBe(400);
 
     // dailyReset.cronExpression non-string → `(5).trim()` TypeError in
@@ -340,7 +353,7 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
     const badCron = wizardPayload() as unknown as Record<string, unknown>;
     badCron.dailyReset = { mode: 'AUTOMATIC_CRON', cronExpression: 5, resetTicketNumberTo: 1, archivePreviousDayData: true };
     expect(
-      (await request(app.getHttpServer()).put('/api/system/config').send(badCron)).status,
+      (await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(badCron)).status,
     ).toBe(400);
 
     // routingRules[].assignedCategoryCodes non-array → `(5).map` TypeError.
@@ -349,7 +362,7 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
       { counterId: 1, counterName: 'Loket 1', assignedCategoryCodes: 5, priorityPolicy: PriorityPolicy.FIFO_GLOBAL },
     ];
     expect(
-      (await request(app.getHttpServer()).put('/api/system/config').send(badCodes)).status,
+      (await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(badCodes)).status,
     ).toBe(400);
 
     // dailyReset.timezone non-string → `(5).trim()` TypeError in
@@ -357,7 +370,7 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
     const badTz = wizardPayload() as unknown as Record<string, unknown>;
     badTz.dailyReset = { mode: 'AUTOMATIC_CRON', cronExpression: '0 0 * * *', resetTicketNumberTo: 1, archivePreviousDayData: true, timezone: 5 };
     expect(
-      (await request(app.getHttpServer()).put('/api/system/config').send(badTz)).status,
+      (await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(badTz)).status,
     ).toBe(400);
 
     // categories[].name non-string → `(5).trim()` TypeError in the Category
@@ -365,21 +378,21 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
     const badCatName = wizardPayload() as unknown as Record<string, unknown>;
     badCatName.categories = [{ code: 'A', name: 5 }];
     expect(
-      (await request(app.getHttpServer()).put('/api/system/config').send(badCatName)).status,
+      (await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(badCatName)).status,
     ).toBe(400);
 
     // categories: [null] → `null.code` TypeError in the use case.
     const badCatNull = wizardPayload() as unknown as Record<string, unknown>;
     badCatNull.categories = [null];
     expect(
-      (await request(app.getHttpServer()).put('/api/system/config').send(badCatNull)).status,
+      (await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(badCatNull)).status,
     ).toBe(400);
 
     // routingRules: [null] → `null.counterId` TypeError in the use case.
     const badRuleNull = wizardPayload() as unknown as Record<string, unknown>;
     badRuleNull.routingRules = [null];
     expect(
-      (await request(app.getHttpServer()).put('/api/system/config').send(badRuleNull)).status,
+      (await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(badRuleNull)).status,
     ).toBe(400);
 
     // None of the rejected payloads silently completed setup.

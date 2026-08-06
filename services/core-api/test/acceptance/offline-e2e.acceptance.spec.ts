@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from '@jest/globals';
 import {
   type BootedApp,
+  authHeader,
+  bootstrapAuthedAdmin,
   clearRepos,
   collectMessages,
   createApp,
@@ -37,9 +39,15 @@ import {
 describe('DoD-3 — Offline End-to-End realtime flow', () => {
   let booted: BootedApp;
   let catAId: string;
+  // QUE-43: the caller command surface + `GET /api/queue` are authenticated
+  // (admin or caller-staff). The bootstrap admin bearer threads onto every
+  // queue command/read below; `POST /api/tickets` (kiosk) and `/ws` (TV) stay
+  // public and tokenless — the offline flow must not require a kiosk/TV login.
+  let token: string;
 
   beforeAll(async () => {
     booted = await createApp();
+    token = await bootstrapAuthedAdmin(booted.app);
   });
 
   afterAll(async () => {
@@ -79,6 +87,7 @@ describe('DoD-3 — Offline End-to-End realtime flow', () => {
     // Counter 1 is routed to category A (PRD §7).
     await http(booted.app)
       .post('/api/queue/call-next')
+      .set(authHeader(token))
       .send({ counterId: 1 })
       .expect(201);
 
@@ -95,13 +104,19 @@ describe('DoD-3 — Offline End-to-End realtime flow', () => {
     expect(called.payload.counterId).toBe(1);
 
     // serve → STATUS_UPDATED (CALLING -> SERVING), complete → STATUS_UPDATED (SERVING -> COMPLETED).
-    const serveRes = await http(booted.app).post(`/api/queue/${ticketId}/serve`).expect(201);
+    const serveRes = await http(booted.app)
+      .post(`/api/queue/${ticketId}/serve`)
+      .set(authHeader(token))
+      .expect(201);
     expect(serveRes.body.status).toBe('serving');
     await waitForLength(tvEvents, 3);
     expect(tvEvents[2].type).toBe('STATUS_UPDATED');
     expect(tvEvents[2].payload.to).toBe('SERVING');
 
-    await http(booted.app).post(`/api/queue/${ticketId}/complete`).expect(201);
+    await http(booted.app)
+      .post(`/api/queue/${ticketId}/complete`)
+      .set(authHeader(token))
+      .expect(201);
     await waitForLength(tvEvents, 4);
     expect(tvEvents[3].type).toBe('STATUS_UPDATED');
     expect(tvEvents[3].payload.to).toBe('COMPLETED');
@@ -126,7 +141,7 @@ describe('DoD-3 — Offline End-to-End realtime flow', () => {
     for (let i = 0; i < 20; i++) {
       const next = new Promise<WireEvent>((r) => (resolveNext = r));
       const t0 = process.hrtime.bigint();
-      await http(booted.app).post('/api/queue/call-next').send({ counterId: 1 }).expect(201);
+      await http(booted.app).post('/api/queue/call-next').set(authHeader(token)).send({ counterId: 1 }).expect(201);
       await next;
       const ms = Number(process.hrtime.bigint() - t0) / 1e6;
       latencies.push(ms);
@@ -148,7 +163,7 @@ describe('DoD-3 — Offline End-to-End realtime flow', () => {
     const latencies: number[] = [];
     for (let i = 0; i < 50; i++) {
       const t0 = process.hrtime.bigint();
-      await http(booted.app).get('/api/queue?counterId=1').expect(200);
+      await http(booted.app).get('/api/queue?counterId=1').set(authHeader(token)).expect(200);
       latencies.push(Number(process.hrtime.bigint() - t0) / 1e6);
     }
     latencies.sort((a, b) => a - b);
@@ -164,14 +179,14 @@ describe('DoD-3 — Offline End-to-End realtime flow', () => {
     const tvEvents: WireEvent[] = [];
     tv.on('message', (d) => tvEvents.push(JSON.parse(d.toString())));
 
-    await http(booted.app).post('/api/queue/call-next').send({ counterId: 1 }).expect(201);
+    await http(booted.app).post('/api/queue/call-next').set(authHeader(token)).send({ counterId: 1 }).expect(201);
     await waitForLength(tvEvents, 2);
 
-    await http(booted.app).post(`/api/queue/${ticketId}/skip`).expect(201);
+    await http(booted.app).post(`/api/queue/${ticketId}/skip`).set(authHeader(token)).expect(201);
     await waitForLength(tvEvents, 3);
     expect(tvEvents[2].payload.to).toBe('SKIPPED');
 
-    await http(booted.app).post(`/api/queue/${ticketId}/recall`).expect(201);
+    await http(booted.app).post(`/api/queue/${ticketId}/recall`).set(authHeader(token)).expect(201);
     // Recall is a re-call to the same counter: it emits STATUS_UPDATED
     // (SKIPPED -> CALLING) then TICKET_CALLED carrying {ticketNumber, counterId}
     // so the TV board re-shows the ticket and the audio queue re-announces it
@@ -195,11 +210,11 @@ describe('DoD-3 — Offline End-to-End realtime flow', () => {
     tv.on('message', (d) => tvEvents.push(JSON.parse(d.toString())));
 
     // call-next → TICKET_CALLED + STATUS_UPDATED (2 events).
-    await http(booted.app).post('/api/queue/call-next').send({ counterId: 1 }).expect(201);
+    await http(booted.app).post('/api/queue/call-next').set(authHeader(token)).send({ counterId: 1 }).expect(201);
     await waitForLength(tvEvents, 2);
 
     // reannounce → only TICKET_CALLED (no state change, no STATUS_UPDATED).
-    await http(booted.app).post(`/api/queue/${ticketId}/reannounce`).expect(201);
+    await http(booted.app).post(`/api/queue/${ticketId}/reannounce`).set(authHeader(token)).expect(201);
     await waitForLength(tvEvents, 3);
     expect(tvEvents[2].type).toBe('TICKET_CALLED');
     expect(tvEvents[2].payload.ticketNumber).toBe('A-001');

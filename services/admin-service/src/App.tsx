@@ -1,29 +1,38 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { AdminApi } from './api/admin-api';
-import type { IAdminApi } from './api/admin-api';
+import type { IAdminAppApi } from './api/admin-api';
 import type { SystemConfigurationDto } from './api/types';
 import { applyBrandColor } from './lib/theme';
 import { SetupGuard } from './components/SetupGuard';
 import { AppShell } from './components/AppShell';
+import { AuthProvider } from './auth/auth-context';
+import { RequireAuth } from './auth/RequireAuth';
 import { AdminPanel } from './pages/AdminPanel';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { DashboardPage } from './pages/DashboardPage';
+import { LoginPage } from './pages/LoginPage';
+import { UsersPage } from './pages/UsersPage';
 import { WizardPage } from './pages/WizardPage';
 
 /**
  * Top-level routing for the admin panel + first-run wizard (FR-WZD-01..06).
  *
+ * `/login`    — the manager sign-in page (public — reachable without a token;
+ *               RequireAuth sends unauthenticated users here).
  * `/`         — the manager Dashboard: **live operational status** (now-serving,
  *               waiting counts per category, counter active/idle), REST-polled
- *               (QUE-44), guarded by {@link SetupGuard}: a clean store
- *               (isInitialSetupCompleted === false) redirects to `/wizard`.
- * `/config`   — the operational config panel, guarded by {@link SetupGuard}.
- * `/wizard`   — the 5-step first-run setup wizard (reachable directly so the
- *               manager can re-edit configuration after initial setup too).
+ *               (QUE-44), guarded by RequireAuth (auth) then SetupGuard: a clean
+ *               store (isInitialSetupCompleted === false) redirects to `/wizard`.
+ * `/config`   — the operational config panel (authed + setup-complete).
+ * `/users`    — the user-management page, admin-only (authed + setup-complete;
+ *               the backend `GET|POST|DELETE /api/users` is admin-only too).
+ * `/wizard`   — the 6-step first-run setup wizard (reachable directly, no auth —
+ *               the first-run path has no token yet; the wizard creates the
+ *               initial admin via setup-admin then logs in).
  * `/analytics` — the **historical analytics** view (multi-day range trends,
  *               per-category/counter performance, audit trail, local `.xlsx`
- *               export) (FR-ADM-03 / QUE-44), guarded by {@link SetupGuard}.
+ *               export) (FR-ADM-03 / QUE-44), authed + setup-complete.
  *
  * The admin app is a config/wizard/analytics/dashboard tool. QUE-44 expands it
  * into a read-only **operational monitor** for the live dashboard: it REST-polls
@@ -42,8 +51,14 @@ import { WizardPage } from './pages/WizardPage';
  * brand label) AND threads the {@link SystemConfigurationDto} to the dashboard
  * (categories for the waiting-counts grid) without a second round-trip — the
  * dashboard poll reuses this config instead of re-fetching it every tick.
+ *
+ * {@link AuthProvider} wraps the shell + routes so the current principal is
+ * resolved once (a single `/api/auth/me` probe); {@link AppShell}'s profile
+ * menu, {@link RequireAuth}, and {@link UsersPage} all read it from the shared
+ * context. RequireAuth is composed outside SetupGuard: no token → `/login`
+ * first, then incomplete setup → `/wizard` (auth first, then setup).
  */
-export function App({ api }: { api?: IAdminApi } = {}) {
+export function App({ api }: { api?: IAdminAppApi } = {}) {
   const adminApi = useMemo(() => api ?? new AdminApi(), [api]);
   const [storeName, setStoreName] = useState<string | undefined>(undefined);
   const [config, setConfig] = useState<SystemConfigurationDto | null>(null);
@@ -64,44 +79,62 @@ export function App({ api }: { api?: IAdminApi } = {}) {
   }, [adminApi]);
 
   return (
-    <>
+    <AuthProvider api={adminApi}>
       {/* AC8 — skip link for keyboard users; visually hidden until focused. */}
       <a href="#main-content" className="skip-link">
         Lewati ke konten
       </a>
       {/* AC8 — single <main> landmark per route (the AppShell owns it; the
-          routed page owns the h1). The wizard route bypasses the shell so the
-          wizard keeps its own full-width layout. */}
+          routed page owns the h1). The wizard/login routes bypass the shell so
+          they keep their own full-width layout while the skip-link target +
+          single-<main> landmark invariant still holds. */}
       <AppShell storeName={storeName}>
         <Routes>
+          <Route path="/login" element={<LoginPage api={adminApi} />} />
+          <Route path="/wizard" element={<WizardPage api={adminApi} />} />
           <Route
             path="/"
             element={
-              <SetupGuard api={adminApi}>
-                <DashboardPage api={adminApi} config={config} />
-              </SetupGuard>
+              <RequireAuth>
+                <SetupGuard api={adminApi}>
+                  <DashboardPage api={adminApi} config={config} />
+                </SetupGuard>
+              </RequireAuth>
             }
           />
           <Route
             path="/config"
             element={
-              <SetupGuard api={adminApi}>
-                <AdminPanel api={adminApi} />
-              </SetupGuard>
+              <RequireAuth>
+                <SetupGuard api={adminApi}>
+                  <AdminPanel api={adminApi} />
+                </SetupGuard>
+              </RequireAuth>
             }
           />
           <Route
             path="/analytics"
             element={
-              <SetupGuard api={adminApi}>
-                <AnalyticsPage api={adminApi} />
-              </SetupGuard>
+              <RequireAuth>
+                <SetupGuard api={adminApi}>
+                  <AnalyticsPage api={adminApi} />
+                </SetupGuard>
+              </RequireAuth>
             }
           />
-          <Route path="/wizard" element={<WizardPage api={adminApi} />} />
+          <Route
+            path="/users"
+            element={
+              <RequireAuth>
+                <SetupGuard api={adminApi}>
+                  <UsersPage api={adminApi} />
+                </SetupGuard>
+              </RequireAuth>
+            }
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AppShell>
-    </>
+    </AuthProvider>
   );
 }

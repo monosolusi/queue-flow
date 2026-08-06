@@ -25,6 +25,7 @@ import {
   InMemoryCounterRoutingRuleRepository,
   InMemoryQueueRepository,
 } from '../../src/infrastructure/persistence/in-memory';
+import { authHeader, bootstrapAuthedAdmin } from '../acceptance/_helpers';
 
 /**
  * Integration: boots the real Nest app with the in-memory persistence module
@@ -39,6 +40,7 @@ describe('Read-only REST surface (integration — QUE-19 + QUE-17)', () => {
   let categories: ICategoryRepository;
   let catAId: string;
   let catBId: string;
+  let token: string;
 
   beforeAll(async () => {
     // AppModule wires the WS gateway, so the ws adapter must be bound to the
@@ -50,6 +52,10 @@ describe('Read-only REST surface (integration — QUE-19 + QUE-17)', () => {
     queue = app.get(QUEUE_REPOSITORY);
     routingRules = app.get(COUNTER_ROUTING_RULE_REPOSITORY);
     categories = app.get(CATEGORY_REPOSITORY);
+    // QUE-43: /api/counters, /api/queue?counterId=, and /api/reports/* require
+    // an authenticated bearer (admin or caller-staff). /api/categories and
+    // /api/queue/board stay public (kiosk + TV) — those calls send no token.
+    token = await bootstrapAuthedAdmin(app);
   });
 
   afterAll(async () => {
@@ -112,7 +118,7 @@ describe('Read-only REST surface (integration — QUE-19 + QUE-17)', () => {
   });
 
   it('GET /api/counters returns the configured counters with assigned categories', async () => {
-    const res = await request(app.getHttpServer()).get('/api/counters');
+    const res = await request(app.getHttpServer()).get('/api/counters').set(authHeader(token));
 
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(2);
@@ -153,7 +159,7 @@ describe('Read-only REST surface (integration — QUE-19 + QUE-17)', () => {
   });
 
   it('GET /api/queue?counterId=1 returns the active ticket and waiting queue for counter 1', async () => {
-    const res = await request(app.getHttpServer()).get('/api/queue?counterId=1');
+    const res = await request(app.getHttpServer()).get('/api/queue?counterId=1').set(authHeader(token));
 
     expect(res.status).toBe(200);
     expect(res.body.counterId).toBe(1);
@@ -171,17 +177,17 @@ describe('Read-only REST surface (integration — QUE-19 + QUE-17)', () => {
   });
 
   it('GET /api/queue without counterId is a 400 client error', async () => {
-    const res = await request(app.getHttpServer()).get('/api/queue');
+    const res = await request(app.getHttpServer()).get('/api/queue').set(authHeader(token));
     expect(res.status).toBe(400);
   });
 
   it('GET /api/queue?counterId=not-a-number is a 400 client error', async () => {
-    const res = await request(app.getHttpServer()).get('/api/queue?counterId=abc');
+    const res = await request(app.getHttpServer()).get('/api/queue?counterId=abc').set(authHeader(token));
     expect(res.status).toBe(400);
   });
 
   it('GET /api/queue for an unknown counter surfaces as 404 via the domain exception filter', async () => {
-    const res = await request(app.getHttpServer()).get('/api/queue?counterId=999');
+    const res = await request(app.getHttpServer()).get('/api/queue?counterId=999').set(authHeader(token));
     expect(res.status).toBe(404);
     expect(res.body.code).toBe('ENTITY_NOT_FOUND');
   });
@@ -244,23 +250,23 @@ describe('Read-only REST surface (integration — QUE-19 + QUE-17)', () => {
   });
 
   it('GET /api/reports/daily with a malformed date is 400, not 500 (boundary validation)', async () => {
-    const res = await request(app.getHttpServer()).get('/api/reports/daily?date=garbage');
+    const res = await request(app.getHttpServer()).get('/api/reports/daily?date=garbage').set(authHeader(token));
     expect(res.status).toBe(400);
   });
 
   it('GET /api/reports/daily with a valid-shaped date returns the zero-state report (200)', async () => {
-    const res = await request(app.getHttpServer()).get('/api/reports/daily?date=2026-08-05');
+    const res = await request(app.getHttpServer()).get('/api/reports/daily?date=2026-08-05').set(authHeader(token));
     expect(res.status).toBe(200);
     expect(res.body.totalTickets).toBe(0);
   });
 
   it('GET /api/reports/counters/:id with a non-numeric id is 400, not 500 (boundary validation)', async () => {
-    const res = await request(app.getHttpServer()).get('/api/reports/counters/abc');
+    const res = await request(app.getHttpServer()).get('/api/reports/counters/abc').set(authHeader(token));
     expect(res.status).toBe(400);
   });
 
   it('GET /api/reports/counters/:id with a non-positive id is 400', async () => {
-    const res = await request(app.getHttpServer()).get('/api/reports/counters/0');
+    const res = await request(app.getHttpServer()).get('/api/reports/counters/0').set(authHeader(token));
     expect(res.status).toBe(400);
   });
 });

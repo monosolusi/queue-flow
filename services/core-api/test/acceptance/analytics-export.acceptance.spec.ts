@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from '@jest/globals';
 import {
   type BootedApp,
+  authHeader,
+  bootstrapAuthedAdmin,
   clearRepos,
   createApp,
   http,
@@ -53,9 +55,15 @@ describe('DoD-5 — Daily analytics & local export (FR-ADM-03 / QUE-26)', () => 
   let catAId: string;
   let catBId: string;
   const today = todayKey();
+  // QUE-43: queue commands + reports + audit + daily-reset are authenticated
+  // (reports/audit/daily-reset admin-only; queue commands admin-or-caller). The
+  // bootstrap admin is named 'admin' so the daily-reset audit actor === 'admin'.
+  // `POST /api/tickets` (kiosk) stays public and tokenless.
+  let token: string;
 
   beforeAll(async () => {
     booted = await createApp();
+    token = await bootstrapAuthedAdmin(booted.app);
   });
 
   afterAll(async () => {
@@ -73,7 +81,11 @@ describe('DoD-5 — Daily analytics & local export (FR-ADM-03 / QUE-26)', () => 
   }
 
   async function callNext(counterId: number): Promise<string> {
-    const res = await http(booted.app).post('/api/queue/call-next').send({ counterId }).expect(201);
+    const res = await http(booted.app)
+      .post('/api/queue/call-next')
+      .set(authHeader(token))
+      .send({ counterId })
+      .expect(201);
     expect(res.body.status).toBe('called');
     return res.body.ticket.ticketId as string;
   }
@@ -84,9 +96,9 @@ describe('DoD-5 — Daily analytics & local export (FR-ADM-03 / QUE-26)', () => 
     await sleep(2);
     const ticketId = await callNext(counterId);
     await sleep(2);
-    await http(booted.app).post(`/api/queue/${ticketId}/serve`).expect(201);
+    await http(booted.app).post(`/api/queue/${ticketId}/serve`).set(authHeader(token)).expect(201);
     await sleep(2);
-    await http(booted.app).post(`/api/queue/${ticketId}/complete`).expect(201);
+    await http(booted.app).post(`/api/queue/${ticketId}/complete`).set(authHeader(token)).expect(201);
     return ticketId;
   }
 
@@ -106,16 +118,19 @@ describe('DoD-5 — Daily analytics & local export (FR-ADM-03 / QUE-26)', () => 
     await sleep(2);
     const t2 = await callNext(1);
     await sleep(2);
-    await http(booted.app).post(`/api/queue/${t2}/skip`).expect(201);
-    await http(booted.app).post(`/api/queue/${t2}/recall`).expect(201);
+    await http(booted.app).post(`/api/queue/${t2}/skip`).set(authHeader(token)).expect(201);
+    await http(booted.app).post(`/api/queue/${t2}/recall`).set(authHeader(token)).expect(201);
     await sleep(2);
-    await http(booted.app).post(`/api/queue/${t2}/serve`).expect(201);
+    await http(booted.app).post(`/api/queue/${t2}/serve`).set(authHeader(token)).expect(201);
     await sleep(2);
-    await http(booted.app).post(`/api/queue/${t2}/complete`).expect(201);
+    await http(booted.app).post(`/api/queue/${t2}/complete`).set(authHeader(token)).expect(201);
     // Counter 2 (serves A+B, CATEGORY_PRIORITY) completes one B ticket.
     await createAndComplete(catBId, 2);
 
-    const res = await http(booted.app).get(`/api/reports/daily?date=${today}`).expect(200);
+    const res = await http(booted.app)
+      .get(`/api/reports/daily?date=${today}`)
+      .set(authHeader(token))
+      .expect(200);
 
     expect(res.body.totalTickets).toBe(3);
     // Every ticket was called and completed, so both averages are populated.
@@ -137,25 +152,37 @@ describe('DoD-5 — Daily analytics & local export (FR-ADM-03 / QUE-26)', () => 
     await createAndComplete(catAId, 1);
     await createAndComplete(catBId, 2);
 
-    const c1 = await http(booted.app).get(`/api/reports/counters/1?date=${today}`).expect(200);
+    const c1 = await http(booted.app)
+      .get(`/api/reports/counters/1?date=${today}`)
+      .set(authHeader(token))
+      .expect(200);
     expect(c1.body.counterId).toBe(1);
     expect(c1.body.ticketsServed).toBe(2);
     expect(c1.body.avgServiceTimeMs).toBeGreaterThan(0);
 
-    const c2 = await http(booted.app).get(`/api/reports/counters/2?date=${today}`).expect(200);
+    const c2 = await http(booted.app)
+      .get(`/api/reports/counters/2?date=${today}`)
+      .set(authHeader(token))
+      .expect(200);
     expect(c2.body.counterId).toBe(2);
     expect(c2.body.ticketsServed).toBe(1);
     expect(c2.body.avgServiceTimeMs).toBeGreaterThan(0);
 
     // A counter that served nothing that day returns the zero-shape (not 404).
-    const c3 = await http(booted.app).get(`/api/reports/counters/999?date=${today}`).expect(200);
+    const c3 = await http(booted.app)
+      .get(`/api/reports/counters/999?date=${today}`)
+      .set(authHeader(token))
+      .expect(200);
     expect(c3.body.ticketsServed).toBe(0);
     expect(c3.body.avgServiceTimeMs).toBe(0);
   });
 
   it('returns a zero-shape daily report when no tickets exist for the date', async () => {
     await seed();
-    const res = await http(booted.app).get(`/api/reports/daily?date=${today}`).expect(200);
+    const res = await http(booted.app)
+      .get(`/api/reports/daily?date=${today}`)
+      .set(authHeader(token))
+      .expect(200);
     expect(res.body.totalTickets).toBe(0);
     expect(res.body.avgWaitTimeMs).toBe(0);
     expect(res.body.avgServiceTimeMs).toBe(0);
@@ -167,17 +194,23 @@ describe('DoD-5 — Daily analytics & local export (FR-ADM-03 / QUE-26)', () => 
     await createAndComplete(catAId, 1);
 
     // A manual reset is a human-initiated mutation → audited (NFR-SEC-02).
-    const reset = await http(booted.app).post('/api/system/daily-reset').expect(201);
+    const reset = await http(booted.app)
+      .post('/api/system/daily-reset')
+      .set(authHeader(token))
+      .expect(201);
     expect(reset.body.archivedCount).toBe(0); // no prior-day tickets to archive.
 
-    const log = await http(booted.app).get('/api/audit/log').expect(200);
+    const log = await http(booted.app).get('/api/audit/log').set(authHeader(token)).expect(200);
     const actions = (log.body as Array<{ action: string }>).map((e) => e.action);
     expect(actions).toContain('ARCHIVE_PREVIOUS_DAY');
     expect(actions).toContain('MANUAL_RESET');
 
     // The reset's archive threshold is `created_at < startOfLocalDay(now)`, so
     // today's ticket survives in the active store — the daily report still sees it.
-    const res = await http(booted.app).get(`/api/reports/daily?date=${today}`).expect(200);
+    const res = await http(booted.app)
+      .get(`/api/reports/daily?date=${today}`)
+      .set(authHeader(token))
+      .expect(200);
     expect(res.body.totalTickets).toBe(1);
   });
 
@@ -188,9 +221,13 @@ describe('DoD-5 — Daily analytics & local export (FR-ADM-03 / QUE-26)', () => 
     await createAndComplete(catBId, 2);
 
     // A same-day range (from == to == today) must match the daily totals.
-    const daily = await http(booted.app).get(`/api/reports/daily?date=${today}`).expect(200);
+    const daily = await http(booted.app)
+      .get(`/api/reports/daily?date=${today}`)
+      .set(authHeader(token))
+      .expect(200);
     const range = await http(booted.app)
       .get(`/api/reports/range?from=${today}&to=${today}`)
+      .set(authHeader(token))
       .expect(200);
 
     expect(range.body.totalTickets).toBe(daily.body.totalTickets);
@@ -211,6 +248,7 @@ describe('DoD-5 — Daily analytics & local export (FR-ADM-03 / QUE-26)', () => 
     // A span over 90 days is rejected at the use case (→ 400).
     await http(booted.app)
       .get('/api/reports/range?from=2026-01-01&to=2026-04-01')
+      .set(authHeader(token))
       .expect(400);
   });
 });

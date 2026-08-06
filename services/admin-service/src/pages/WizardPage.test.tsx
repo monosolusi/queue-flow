@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { WizardPage } from './WizardPage';
-import type { IAdminApi } from '../api/admin-api';
+import type { IAdminApi, IAuthApi } from '../api/admin-api';
 import { DEFAULT_CATEGORIES, DEFAULT_STATE_MACHINE, DEFAULT_BRAND_COLOR, type SaveSystemConfigurationPayload, type SystemConfigurationDto } from '../api/types';
 import { BROWSER_TIMEZONE } from '../lib/timezone';
 
@@ -40,7 +40,17 @@ function makeApi(
       ((payload: SaveSystemConfigurationPayload) =>
         Promise.resolve({ isInitialSetupCompleted: true, storeName: payload.storeName, brandColor: payload.brandColor })),
   );
-  const api: IAdminApi = {
+  // Auth spies (QUE-43). First-run finalize calls setupInitialAdmin then login;
+  // re-edit finalize calls neither. Defaults resolve so the happy-path walk
+  // completes; tests override via the returned spies when they assert ordering.
+  const setupInitialAdmin = vi.fn(
+    (username: string) => Promise.resolve({ id: 'admin-id', username, role: 'admin' as const, createdAt: 0 }),
+  );
+  const login = vi.fn(
+    (username: string) =>
+      Promise.resolve({ token: 'test-token', user: { id: 'admin-id', username, role: 'admin' as const } }),
+  );
+  const api: IAdminApi & IAuthApi = {
     getSystemConfig: vi.fn(() => Promise.resolve(config)),
     saveSystemConfig: save,
     getActiveStateMachine: vi.fn(() => Promise.resolve(config.stateMachine)),
@@ -52,11 +62,15 @@ function makeApi(
     getAuditLog: vi.fn(),
     triggerManualReset: vi.fn(),
     cleanupTransactionLogs: vi.fn(),
+    login,
+    logout: vi.fn(() => Promise.resolve()),
+    getMe: vi.fn(),
+    setupInitialAdmin,
   };
-  return { api, save };
+  return { api, save, setupInitialAdmin, login };
 }
 
-function renderWizard(api: IAdminApi) {
+function renderWizard(api: IAdminApi & IAuthApi) {
   return render(
     <MemoryRouter initialEntries={['/wizard']}>
       <Routes>
@@ -82,9 +96,26 @@ async function assignCategoryOnStep2() {
   await userEvent.click(screen.getByTestId('routing-modal-save'));
 }
 
+/**
+ * Step-5 admin-credentials helper (QUE-43, first-run only). The new step 5
+ * requires a valid username + password + confirm before the Lanjut guard lets
+ * the manager reach the review (now step 6). Tests that only need to walk past
+ * the credentials step fill the defaults and advance. Call after the step-4 →
+ * step-5 `wizard-next` click. On re-edit (setup already complete) the step is a
+ * read-only notice and the Lanjut is already enabled — those tests click
+ * `wizard-next` directly without this helper.
+ */
+async function fillAdminCredentialsOnStep5(username = 'admin', password = 'password123') {
+  await screen.findByTestId('step-5');
+  await userEvent.type(screen.getByTestId('admin-username'), username);
+  await userEvent.type(screen.getByTestId('admin-password'), password);
+  await userEvent.type(screen.getByTestId('admin-password-confirm'), password);
+  await userEvent.click(screen.getByTestId('wizard-next'));
+}
+
 describe('WizardPage (FR-WZD-02..06)', () => {
-  it('walks all five steps, renders the review, and saves the configuration on finalize', async () => {
-    const { api, save } = makeApi(cleanStore());
+  it('walks all six steps, renders the review, and saves the configuration on finalize', async () => {
+    const { api, save, setupInitialAdmin, login } = makeApi(cleanStore());
     renderWizard(api);
 
     // Step 1 — store profile + counter count + categories (FR-WZD-02).
@@ -118,22 +149,35 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     expect(await screen.findByTestId('step-4')).toBeInTheDocument();
     await userEvent.click(screen.getByTestId('wizard-next'));
 
-    // Step 5 — review & activate (FR-WZD-06).
-    expect(await screen.findByTestId('step-5')).toBeInTheDocument();
+    // Step 5 — admin credentials (QUE-43, first-run). Fill + advance to step 6.
+    await fillAdminCredentialsOnStep5('manajer', 'rahasia123');
+
+    // Step 6 — review & activate (FR-WZD-06).
+    expect(await screen.findByTestId('step-6')).toBeInTheDocument();
     expect(screen.getByTestId('wizard-review')).toBeInTheDocument();
     expect(screen.getByTestId('review-store-name')).toHaveTextContent('Apotek Sehat Sentosa');
     expect(screen.getByTestId('review-categories')).toHaveTextContent(/Customer Service/);
     expect(screen.getByTestId('review-daily-reset')).toHaveTextContent(/Otomatis/);
     expect(screen.getByTestId('review-brand-color')).toHaveTextContent(DEFAULT_BRAND_COLOR);
+    expect(screen.getByTestId('review-admin-username')).toHaveTextContent('manajer');
     await userEvent.click(screen.getByTestId('wizard-finalize'));
 
     // Navigation to the admin home (FR-WZD-06 — operational access after setup).
     expect(await screen.findByText('Admin Panel Home')).toBeInTheDocument();
 
+    // First-run finalize creates the initial admin BEFORE the config save
+    // (setup-admin only works while setup is incomplete; the config save flips
+    // it complete), then logs in with the just-created credentials.
+    expect(setupInitialAdmin).toHaveBeenCalledTimes(1);
+    expect(setupInitialAdmin).toHaveBeenCalledWith('manajer', 'rahasia123');
+    expect(login).toHaveBeenCalledTimes(1);
+    expect(login).toHaveBeenCalledWith('manajer', 'rahasia123');
+
     // The PUT payload carries the entered store name, the PRD §7 default
     // categories (no ids — backend mints them on first save), the routing
-    // assignment, the default state machine, and the daily-reset policy with
-    // actor 'admin' (NFR-SEC-02). `categoriesMode` is a UI-only preset and must
+    // assignment, the default state machine, and the daily-reset policy. The
+    // `actor` field is no longer sent (the server derives the audit actor from
+    // the bearer token — QUE-43). `categoriesMode` is a UI-only preset and must
     // never reach the wire (mirrors `stateMachine.mode`).
     expect(save).toHaveBeenCalledTimes(1);
     const payload = save.mock.calls[0][0] as SaveSystemConfigurationPayload;
@@ -148,7 +192,7 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     expect(payload.dailyReset.cronExpression).toBe('0 0 * * *');
     expect(payload.dailyReset.resetTicketNumberTo).toBe(1);
     expect(payload.brandColor).toBe(DEFAULT_BRAND_COLOR);
-    expect(payload.actor).toBe('admin');
+    expect((payload as unknown as Record<string, unknown>).actor).toBeUndefined();
     expect((payload as unknown as Record<string, unknown>).categoriesMode).toBeUndefined();
   });
 
@@ -173,7 +217,8 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     await userEvent.click(screen.getByTestId('wizard-next'));
     await (await screen.findByTestId('step-4'));
     await userEvent.click(screen.getByTestId('wizard-next'));
-    expect(await screen.findByTestId('step-5')).toBeInTheDocument();
+    await fillAdminCredentialsOnStep5();
+    expect(await screen.findByTestId('step-6')).toBeInTheDocument();
     expect(screen.getByTestId('review-brand-color')).toHaveTextContent('#abcdef');
     await userEvent.click(screen.getByTestId('wizard-finalize'));
     await screen.findByText('Admin Panel Home');
@@ -210,7 +255,8 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     // Switch mode to MANUAL.
     await userEvent.selectOptions(screen.getByLabelText('Mode'), 'MANUAL');
     await userEvent.click(screen.getByTestId('wizard-next'));
-    expect(await screen.findByTestId('step-5')).toBeInTheDocument();
+    await fillAdminCredentialsOnStep5();
+    expect(await screen.findByTestId('step-6')).toBeInTheDocument();
     await userEvent.click(screen.getByTestId('wizard-finalize'));
     await screen.findByText('Admin Panel Home');
 
@@ -225,7 +271,7 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     );
     renderWizard(api);
 
-    // Walk to step 5 (the review step) and finalize.
+    // Walk to step 6 (the review step) and finalize.
     await (await screen.findByTestId('step-1'));
     await userEvent.click(screen.getByTestId('wizard-next'));
     await assignCategoryOnStep2();
@@ -234,7 +280,8 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     await userEvent.click(screen.getByTestId('wizard-next'));
     expect(await screen.findByTestId('step-4')).toBeInTheDocument();
     await userEvent.click(screen.getByTestId('wizard-next'));
-    expect(await screen.findByTestId('step-5')).toBeInTheDocument();
+    await fillAdminCredentialsOnStep5();
+    expect(await screen.findByTestId('step-6')).toBeInTheDocument();
     await userEvent.click(screen.getByTestId('wizard-finalize'));
 
     expect(await screen.findByText(/state machine tidak valid/i)).toBeInTheDocument();
@@ -304,7 +351,8 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     await userEvent.click(screen.getByTestId('wizard-next'));
     expect(await screen.findByTestId('step-4')).toBeInTheDocument();
     await userEvent.click(screen.getByTestId('wizard-next'));
-    expect(await screen.findByTestId('step-5')).toBeInTheDocument();
+    await fillAdminCredentialsOnStep5();
+    expect(await screen.findByTestId('step-6')).toBeInTheDocument();
     await userEvent.click(screen.getByTestId('wizard-finalize'));
     await screen.findByText('Admin Panel Home');
 
@@ -336,7 +384,8 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     await userEvent.click(screen.getByTestId('wizard-next'));
     expect(await screen.findByTestId('step-4')).toBeInTheDocument();
     await userEvent.click(screen.getByTestId('wizard-next'));
-    expect(await screen.findByTestId('step-5')).toBeInTheDocument();
+    await fillAdminCredentialsOnStep5();
+    expect(await screen.findByTestId('step-6')).toBeInTheDocument();
     await userEvent.click(screen.getByTestId('wizard-finalize'));
     await screen.findByText('Admin Panel Home');
 
@@ -388,7 +437,7 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     expect(save).not.toHaveBeenCalled();
   });
 
-  it('renders a read-only review of the full configuration on step 5 (FR-WZD-06)', async () => {
+  it('renders a read-only review of the full configuration on step 6 (FR-WZD-06)', async () => {
     const { api } = makeApi(cleanStore());
     renderWizard(api);
 
@@ -410,9 +459,11 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     // Step 4 — daily reset (default automatic, valid cron).
     await screen.findByTestId('step-4');
     await userEvent.click(screen.getByTestId('wizard-next'));
+    // Step 5 — admin credentials (first-run). Fill + advance to step 6.
+    await fillAdminCredentialsOnStep5();
 
-    // Step 5 — the review renders a summary of every assembled section.
-    expect(await screen.findByTestId('step-5')).toBeInTheDocument();
+    // Step 6 — the review renders a summary of every assembled section.
+    expect(await screen.findByTestId('step-6')).toBeInTheDocument();
     expect(screen.getByTestId('review-store-name')).toHaveTextContent('Apotek Sehat');
     expect(screen.getByTestId('review-categories')).toHaveTextContent(/Customer Service/);
     // The routing review is now an auto-generated SVG graph (jsdom doesn't
@@ -448,7 +499,8 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     expect(screen.getByTestId('wizard-next')).not.toBeDisabled();
 
     await userEvent.click(screen.getByTestId('wizard-next'));
-    expect(await screen.findByTestId('step-5')).toBeInTheDocument();
+    await fillAdminCredentialsOnStep5();
+    expect(await screen.findByTestId('step-6')).toBeInTheDocument();
     await userEvent.click(screen.getByTestId('wizard-finalize'));
     await screen.findByText('Admin Panel Home');
 
@@ -481,7 +533,8 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     await userEvent.click(screen.getByTestId('wizard-next'));
     await screen.findByTestId('step-4');
     await userEvent.click(screen.getByTestId('wizard-next'));
-    await screen.findByTestId('step-5');
+    await fillAdminCredentialsOnStep5();
+    await screen.findByTestId('step-6');
     await userEvent.click(screen.getByTestId('wizard-finalize'));
     await screen.findByText('Admin Panel Home');
 
@@ -657,7 +710,12 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     await userEvent.click(screen.getByTestId('wizard-next'));
     await screen.findByTestId('step-4');
     await userEvent.click(screen.getByTestId('wizard-next'));
+    // Re-edit (setup already complete) — step 5 is a read-only notice (no
+    // credentials form); advance to the review.
     await screen.findByTestId('step-5');
+    expect(screen.getByTestId('admin-readonly')).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-6');
     await userEvent.click(screen.getByTestId('wizard-finalize'));
     await screen.findByText('Admin Panel Home');
 
@@ -710,7 +768,10 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     await userEvent.click(screen.getByTestId('wizard-next'));
     await screen.findByTestId('step-4');
     await userEvent.click(screen.getByTestId('wizard-next'));
+    // Re-edit — step 5 read-only notice; advance to the review.
     await screen.findByTestId('step-5');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-6');
     await userEvent.click(screen.getByTestId('wizard-finalize'));
     await screen.findByText('Admin Panel Home');
 
@@ -729,8 +790,8 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     // Scope to the step bar so category-list <li>s don't pollute the query.
     const stepsBar = screen.getByRole('list', { name: 'Langkah wizard' });
     const dots = within(stepsBar).getAllByRole('listitem');
-    // The step bar carries exactly 5 dots.
-    expect(dots).toHaveLength(5);
+    // The step bar carries exactly 6 dots.
+    expect(dots).toHaveLength(6);
     // Exactly one dot carries aria-current="step", and it is the first (step 1).
     const current = dots.filter((d) => d.getAttribute('aria-current') === 'step');
     expect(current).toHaveLength(1);
@@ -834,7 +895,8 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     await userEvent.click(screen.getByTestId('wizard-next'));
     await screen.findByTestId('step-4');
     await userEvent.click(screen.getByTestId('wizard-next'));
-    await screen.findByTestId('step-5');
+    await fillAdminCredentialsOnStep5();
+    await screen.findByTestId('step-6');
     await userEvent.click(screen.getByTestId('wizard-finalize'));
     await screen.findByText('Admin Panel Home');
 
@@ -892,7 +954,7 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     expect(tzHint).toHaveTextContent(/Waktu setempat: .+ \(UTC[+-]\d{2}:\d{2}\)/);
   });
 
-  it('Step 5 daily-reset review includes the timezone label', async () => {
+  it('Step 6 daily-reset review includes the timezone label', async () => {
     const { api } = makeApi();
     renderWizard(api);
 
@@ -904,7 +966,8 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     await userEvent.click(screen.getByTestId('wizard-next'));
     await screen.findByTestId('step-4');
     await userEvent.click(screen.getByTestId('wizard-next'));
-    expect(await screen.findByTestId('step-5')).toBeInTheDocument();
+    await fillAdminCredentialsOnStep5();
+    expect(await screen.findByTestId('step-6')).toBeInTheDocument();
 
     const review = screen.getByTestId('review-daily-reset');
     expect(review).toHaveTextContent(/Otomatis/);

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { App } from './App';
-import type { IAdminApi } from './api/admin-api';
+import type { IAdminAppApi } from './api/admin-api';
 import type { SystemConfigurationDto } from './api/types';
 
 function makeConfig(brandColor = '#2563eb'): SystemConfigurationDto {
@@ -23,7 +23,7 @@ function makeConfig(brandColor = '#2563eb'): SystemConfigurationDto {
   };
 }
 
-function makeApi(config: SystemConfigurationDto, reject?: Error): IAdminApi {
+function makeApi(config: SystemConfigurationDto, reject?: Error): IAdminAppApi {
   return {
     getSystemConfig: reject ? vi.fn(() => Promise.reject(reject)) : vi.fn(() => Promise.resolve(config)),
     saveSystemConfig: vi.fn(() =>
@@ -38,10 +38,20 @@ function makeApi(config: SystemConfigurationDto, reject?: Error): IAdminApi {
     getAuditLog: vi.fn(),
     triggerManualReset: vi.fn(),
     cleanupTransactionLogs: vi.fn(),
+    // IAuthApi (QUE-43) — App wires an AuthProvider; with no token in jsdom it
+    // never probes /me, so these stay unused here but satisfy the interface.
+    login: vi.fn(),
+    logout: vi.fn(),
+    getMe: vi.fn(),
+    setupInitialAdmin: vi.fn(),
+    // IUsersApi (QUE-43) — unused by the App-level smoke tests; present for types.
+    listUsers: vi.fn(),
+    createUser: vi.fn(),
+    deleteUser: vi.fn(),
   };
 }
 
-function renderApp(api: IAdminApi) {
+function renderApp(api: IAdminAppApi) {
   return render(
     <MemoryRouter>
       <App api={api} />

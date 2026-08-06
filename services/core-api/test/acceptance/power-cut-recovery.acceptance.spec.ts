@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from '@jest/globals';
 import { Pool } from 'pg';
-import { prdWizardPayload } from './_helpers';
+import { authHeader, prdWizardPayload } from './_helpers';
 
 /**
  * DoD-4 — Power Interruption Recovery Test (FR-ENG-05, NFR-REL-02/03).
@@ -93,17 +93,18 @@ async function killProc(proc: ChildProcess | undefined): Promise<void> {
   await new Promise<void>((r) => proc.once('exit', () => r()));
 }
 
-/** JSON POST helper against the spawned server. */
-async function post(path: string, body?: unknown): Promise<Response> {
+/** JSON POST helper against the spawned server. `extraHeaders` threads the
+ * QUE-43 bearer onto authenticated endpoints (queue commands). */
+async function post(path: string, body?: unknown, extraHeaders?: Record<string, string>): Promise<Response> {
   return fetch(`${BASE}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...extraHeaders },
     body: body ? JSON.stringify(body) : undefined,
   });
 }
 
-async function getJson(path: string): Promise<Response> {
-  return fetch(`${BASE}${path}`);
+async function getJson(path: string, extraHeaders?: Record<string, string>): Promise<Response> {
+  return fetch(`${BASE}${path}`, { headers: extraHeaders });
 }
 
 describeOrSkip('DoD-4 — Power-cut recovery (FR-ENG-05, NFR-REL-02/03)', () => {
@@ -126,9 +127,28 @@ describeOrSkip('DoD-4 — Power-cut recovery (FR-ENG-05, NFR-REL-02/03)', () => 
     await waitForHealth();
     expect(proc.exitCode).toBeNull(); // still running
 
+    // QUE-43: the first-run wizard seeds the initial admin (setup-admin is open
+    // only while setup is incomplete) then logs in for a bearer. The session
+    // row commits to Postgres, so the SAME token survives the SIGKILL reboot
+    // below (P2 reads the session back from WAL) — proving auth state is
+    // power-loss resilient (NFR-REL-02), not just the queue state. Kiosk
+    // ticket creation stays public/tokenless.
+    const setupAdminRes = await post('/api/auth/setup-admin', {
+      username: 'admin',
+      password: 'password123',
+    });
+    expect(setupAdminRes.status).toBe(200);
+    const loginRes = await post('/api/auth/login', {
+      username: 'admin',
+      password: 'password123',
+    });
+    expect(loginRes.status).toBe(200);
+    const { token } = (await loginRes.json()) as { token: string };
+    const auth = authHeader(token);
+
     const cfg = await fetch(`${BASE}/api/system/config`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...auth },
       body: JSON.stringify(prdWizardPayload()),
     });
     expect(cfg.status).toBe(200);
@@ -147,8 +167,8 @@ describeOrSkip('DoD-4 — Power-cut recovery (FR-ENG-05, NFR-REL-02/03)', () => 
     expect(t2.ticket.ticketNumber).toBe('A-002');
 
     // Counter 1 -> category A (PRD §7). Call next (A-001) then serve -> SERVING.
-    await post('/api/queue/call-next', { counterId: 1 });
-    const serveRes = await post(`/api/queue/${t1.ticket.ticketId}/serve`);
+    await post('/api/queue/call-next', { counterId: 1 }, auth);
+    const serveRes = await post(`/api/queue/${t1.ticket.ticketId}/serve`, undefined, auth);
     expect(serveRes.status).toBe(201);
     const served = (await serveRes.json()) as { status: string };
     expect(served.status).toBe('serving');
@@ -161,8 +181,9 @@ describeOrSkip('DoD-4 — Power-cut recovery (FR-ENG-05, NFR-REL-02/03)', () => 
     proc = bootCoreApi();
     await waitForHealth();
 
-    // The SERVING ticket is recovered exactly (no loss — NFR-REL-02).
-    const snapRes = await getJson('/api/queue?counterId=1');
+    // The SERVING ticket is recovered exactly (no loss — NFR-REL-02). The
+    // bearer still works — the session row survived the reboot in WAL.
+    const snapRes = await getJson('/api/queue?counterId=1', auth);
     expect(snapRes.status).toBe(200);
     const snap = (await snapRes.json()) as {
       active: { ticketNumber: string; status: string }[];
@@ -181,7 +202,7 @@ describeOrSkip('DoD-4 — Power-cut recovery (FR-ENG-05, NFR-REL-02/03)', () => 
 
     // call-next serves the recovered oldest WAITING ticket (A-002), proving the
     // queue state — not just the sequence — recovered.
-    const callRes = await post('/api/queue/call-next', { counterId: 1 });
+    const callRes = await post('/api/queue/call-next', { counterId: 1 }, auth);
     expect(callRes.status).toBe(201);
     const call = (await callRes.json()) as { status: string; ticket?: { ticketNumber: string } };
     expect(call.status).toBe('called');

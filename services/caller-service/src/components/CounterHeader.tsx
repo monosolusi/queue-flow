@@ -1,5 +1,6 @@
 import type { BoundCounter } from '../state/counter-binding';
 import { ConnectionStatus } from './ConnectionStatus';
+import { UserMenu } from './UserMenu';
 
 export interface CounterHeaderProps {
   readonly bound: BoundCounter;
@@ -7,7 +8,8 @@ export interface CounterHeaderProps {
   readonly onUnbind: () => void;
 }
 
-/** Workspace header: bound counter identity + WS status + "Ganti Counter". */
+/** Workspace header: bound counter identity + WS status + "Ganti Counter" +
+ *  the signed-in user menu (Keluar, QUE-43). */
 export function CounterHeader({ bound, connection, onUnbind }: CounterHeaderProps) {
   return (
     <header className="counter-header">
@@ -20,6 +22,7 @@ export function CounterHeader({ bound, connection, onUnbind }: CounterHeaderProp
         <button type="button" className="btn btn--secondary" onClick={onUnbind}>
           Ganti Counter
         </button>
+        <UserMenu />
       </div>
     </header>
   );

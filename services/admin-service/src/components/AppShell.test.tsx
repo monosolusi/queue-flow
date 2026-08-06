@@ -32,11 +32,12 @@ describe('AppShell', () => {
     expect(screen.getByText('QMS Admin')).toBeInTheDocument();
   });
 
-  it('renders the three primary nav links', () => {
+  it('renders the four primary nav links', () => {
     renderShell('/');
     expect(screen.getByRole('link', { name: 'Status Antrian' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Konfigurasi' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Analitik & Laporan' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Pengguna' })).toBeInTheDocument();
   });
 
   it('marks the active link with nav-link--active + aria-current', () => {
@@ -90,6 +91,16 @@ describe('AppShell', () => {
     expect(screen.getByTestId('child')).toBeInTheDocument();
   });
 
+  it('bypasses the shell chrome on /login routes (QUE-43) but keeps the <main> landmark', () => {
+    renderShell('/login');
+    // No sidebar/nav chrome on the login page...
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
+    // ...but the skip-link target + single-<main> landmark invariant holds.
+    const main = screen.getByRole('main');
+    expect(main).toHaveAttribute('id', 'main-content');
+    expect(screen.getByTestId('child')).toBeInTheDocument();
+  });
+
   it('profile button has aria-haspopup=menu and toggles the menu on click', () => {
     renderShell('/');
     const toggle = screen.getByRole('button', { name: /Manajer/ });
@@ -98,9 +109,11 @@ describe('AppShell', () => {
 
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    // The menu renders two items.
+    // The menu renders three items — Pengaturan, Konfigurasi Awal (Wizard), and
+    // the QUE-43 Keluar (sign-out) action.
     expect(screen.getByRole('menuitem', { name: 'Pengaturan' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Konfigurasi Awal (Wizard)' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Keluar' })).toBeInTheDocument();
   });
 
   it('closes the profile menu on a second toggle click', () => {

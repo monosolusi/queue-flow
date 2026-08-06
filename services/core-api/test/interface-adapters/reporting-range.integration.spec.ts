@@ -1,6 +1,8 @@
 import { describe, expect, it, beforeAll, afterAll, beforeEach } from '@jest/globals';
 import {
   type BootedApp,
+  authHeader,
+  bootstrapAuthedAdmin,
   clearRepos,
   createApp,
   http,
@@ -16,10 +18,16 @@ import { StateMachine } from '../../src/domain/store-config';
  * are seeded directly into the queue repo with chosen `createdAt` epochs so the
  * per-day series can be asserted across two local days (the command surface
  * uses real `Date.now()`, so HTTP-driven tickets all land on "today").
+ *
+ * QUE-43 made `/api/reports/*` admin-only (`@UseGuards(AuthGuard, RolesGuard)`
+ * `@Roles(Role.ADMIN)` on `ReportingController`), so each request carries an
+ * authenticated admin bearer via {@link bootstrapAuthedAdmin}/{@link authHeader}
+ * (the reporting read side itself is unchanged — auth is an orthogonal layer).
  */
 describe('Range report REST surface (integration — FR-ADM-03 / QUE-44)', () => {
   let booted: BootedApp;
   let catAId: string;
+  let token: string;
   const policy = StateMachine.DEFAULT;
 
   /** Local-midnight epoch for a `YYYY-MM-DD` key. */
@@ -30,6 +38,9 @@ describe('Range report REST surface (integration — FR-ADM-03 / QUE-44)', () =>
 
   beforeAll(async () => {
     booted = await createApp();
+    // Idempotent: clearRepos does not wipe the Identity repos, so the seeded
+    // admin + session persist across the suite and the token stays valid.
+    token = await bootstrapAuthedAdmin(booted.app);
   });
 
   afterAll(async () => {
@@ -64,6 +75,7 @@ describe('Range report REST surface (integration — FR-ADM-03 / QUE-44)', () =>
 
     const res = await http(booted.app)
       .get('/api/reports/range?from=2026-08-01&to=2026-08-03')
+      .set(authHeader(token))
       .expect(200);
 
     expect(res.body.from).toBe('2026-08-01');
@@ -101,6 +113,7 @@ describe('Range report REST surface (integration — FR-ADM-03 / QUE-44)', () =>
   it('returns an empty-range shape with a per-day zero series when no tickets exist', async () => {
     const res = await http(booted.app)
       .get('/api/reports/range?from=2026-08-01&to=2026-08-02')
+      .set(authHeader(token))
       .expect(200);
 
     expect(res.body.totalTickets).toBe(0);
@@ -116,7 +129,7 @@ describe('Range report REST surface (integration — FR-ADM-03 / QUE-44)', () =>
   it('defaults from/to to today when omitted (single-day range)', async () => {
     const today = new Date();
     const key = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    const res = await http(booted.app).get('/api/reports/range').expect(200);
+    const res = await http(booted.app).get('/api/reports/range').set(authHeader(token)).expect(200);
     expect(res.body.from).toBe(key);
     expect(res.body.to).toBe(key);
     expect(res.body.perDay).toHaveLength(1);
@@ -125,12 +138,14 @@ describe('Range report REST surface (integration — FR-ADM-03 / QUE-44)', () =>
   it('rejects from > to with 400', async () => {
     await http(booted.app)
       .get('/api/reports/range?from=2026-08-02&to=2026-08-01')
+      .set(authHeader(token))
       .expect(400);
   });
 
   it('rejects a malformed date with 400', async () => {
     await http(booted.app)
       .get('/api/reports/range?from=2026-8-1&to=2026-08-02')
+      .set(authHeader(token))
       .expect(400);
   });
 
@@ -138,12 +153,14 @@ describe('Range report REST surface (integration — FR-ADM-03 / QUE-44)', () =>
     // 91-day span (2026-01-01 .. 2026-04-01 inclusive).
     await http(booted.app)
       .get('/api/reports/range?from=2026-01-01&to=2026-04-01')
+      .set(authHeader(token))
       .expect(400);
   });
 
   it('allows exactly a 90-day span', async () => {
     await http(booted.app)
       .get('/api/reports/range?from=2026-01-01&to=2026-03-31')
+      .set(authHeader(token))
       .expect(200);
   });
 });

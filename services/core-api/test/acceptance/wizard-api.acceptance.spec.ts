@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from '@jest/globals';
 import {
   type BootedApp,
+  authHeader,
+  bootstrapAuthedAdmin,
   clearRepos,
   createApp,
   http,
@@ -35,9 +37,16 @@ import {
  */
 describe('DoD-2 — First-Run Wizard API (FR-WZD-01..06)', () => {
   let booted: BootedApp;
+  // QUE-43: the bootstrap admin is created once (clearRepos does not wipe the
+  // Identity repos — auth is cross-cutting scaffolding) so a valid bearer is
+  // available for the authenticated endpoints exercised below
+  // (`/api/queue/call-next`, `/api/system/state-machine`). The first-run PUT
+  // itself stays tokenless — AdminOrSetupGuard allows the pre-setup wizard.
+  let token: string;
 
   beforeAll(async () => {
     booted = await createApp();
+    token = await bootstrapAuthedAdmin(booted.app);
   });
 
   afterAll(async () => {
@@ -83,15 +92,21 @@ describe('DoD-2 — First-Run Wizard API (FR-WZD-01..06)', () => {
     expect(cats.body).toEqual([]);
 
     // The caller command surface resolves the active transition policy, which
-    // reads SystemConfiguration — no config -> 409 SYSTEM_NOT_CONFIGURED.
+    // reads SystemConfiguration — no config -> 409 SYSTEM_NOT_CONFIGURED. The
+    // endpoint is authenticated (QUE-43), so the bearer must be present to
+    // reach the not-configured guard (a tokenless call would surface 401).
     const callRes = await http(booted.app)
       .post('/api/queue/call-next')
+      .set(authHeader(token))
       .send({ counterId: 1 });
     expect(callRes.status).toBe(409);
     expect(callRes.body.code).toBe('SYSTEM_NOT_CONFIGURED');
 
-    // The active state machine read (caller dynamic buttons) is blocked too.
-    const smRes = await http(booted.app).get('/api/system/state-machine');
+    // The active state machine read (caller dynamic buttons) is authenticated
+    // and blocked by the same not-configured guard post-auth.
+    const smRes = await http(booted.app)
+      .get('/api/system/state-machine')
+      .set(authHeader(token));
     expect(smRes.status).toBe(409);
     expect(smRes.body.code).toBe('SYSTEM_NOT_CONFIGURED');
   });
@@ -131,7 +146,11 @@ describe('DoD-2 — First-Run Wizard API (FR-WZD-01..06)', () => {
     expect(cats.body.map((c: { code: string }) => c.code).sort()).toEqual(['A', 'B']);
 
     // The caller reads the active state machine (FR-CLR-02 dynamic buttons).
-    const sm = await http(booted.app).get('/api/system/state-machine').expect(200);
+    // Authenticated (QUE-43) — the bootstrap bearer reaches the read.
+    const sm = await http(booted.app)
+      .get('/api/system/state-machine')
+      .set(authHeader(token))
+      .expect(200);
     expect(sm.body.transitions).toHaveLength(5);
 
     // The kiosk issues a ticket (FR-ENG-01) — now unblocked.

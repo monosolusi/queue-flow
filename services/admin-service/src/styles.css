@@ -1240,3 +1240,127 @@ fieldset {
     border-bottom-color: var(--accent);
   }
 }
+
+/* Login page (QUE-43) ----------------------------------------------------- */
+.login {
+  max-width: 420px;
+  margin: 3rem auto;
+  padding: 0 1rem;
+}
+.login__form {
+  background: var(--surface);
+  border: 1px solid var(--surface-2);
+  border-radius: var(--radius);
+  padding: 1.75rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.login__title {
+  margin: 0 0 0.25rem;
+  font-size: 1.6rem;
+}
+.login__subtitle {
+  margin: 0 0 1rem;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+.login__error {
+  color: var(--danger-on-dark);
+  margin: 0 0 0.75rem;
+  font-size: 0.95rem;
+}
+.login__submit {
+  width: 100%;
+  margin-top: 0.5rem;
+  min-height: 2.75rem; /* AC5 — ≥44px touch target */
+}
+
+/* Users page (QUE-43) ----------------------------------------------------- */
+.users {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+.users--denied {
+  max-width: 520px;
+}
+.users__header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.users__title {
+  margin: 0;
+  font-size: 1.75rem;
+}
+.users__subtitle {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 1rem;
+}
+.users__error {
+  color: var(--danger-on-dark);
+  margin: 0;
+}
+.users__create {
+  background: var(--surface);
+  border: 1px solid var(--surface-2);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.users__section-title {
+  margin: 0;
+  font-size: 1.15rem;
+}
+.users__form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.users__form .field {
+  margin-bottom: 0;
+}
+.users__hint {
+  margin: 0;
+  color: var(--text-muted);
+}
+.users__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.users__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 1rem;
+}
+.users__table th,
+.users__table td {
+  text-align: left;
+  padding: 0.6rem 0.5rem;
+  border-bottom: 1px solid var(--surface-2);
+}
+.users__table th {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.users__role {
+  font-weight: 600;
+}
+.users__confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.users__confirm-label {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}

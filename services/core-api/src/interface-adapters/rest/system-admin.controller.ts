@@ -1,10 +1,15 @@
-import { Body, Controller, Inject, Post } from '@nestjs/common';
+import { Body, Controller, Inject, Post, UseGuards } from '@nestjs/common';
 import { CleanupTransactionLogUseCase, ResetDailyQueueUseCase } from '../../application/queue';
 import {
   SYSTEM_CONFIGURATION_REPOSITORY,
   type ISystemConfigurationRepository,
 } from '../../domain/store-config';
 import { SystemNotConfiguredException } from '../../domain/shared';
+import { Role, type AuthenticatedPrincipal } from '../../domain/identity';
+import { AuthGuard } from '../auth/auth.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/roles.decorator';
+import { CurrentUser } from '../auth/current-user.decorator';
 
 /**
  * The body of `POST /api/system/cleanup-transaction-log` (QUE-25 / FR-ADM-02).
@@ -32,6 +37,8 @@ export interface CleanupTransactionLogRequestDto {
  * to 400.
  */
 @Controller('api/system')
+@UseGuards(AuthGuard, RolesGuard)
+@Roles(Role.ADMIN)
 export class SystemAdminController {
   constructor(
     private readonly resetDailyQueue: ResetDailyQueueUseCase,
@@ -42,14 +49,16 @@ export class SystemAdminController {
 
   /** `POST /api/system/daily-reset` → roll the sequence back to the configured start. */
   @Post('daily-reset')
-  async reset() {
+  async reset(@CurrentUser() principal: AuthenticatedPrincipal) {
     const system = await this.config.get();
     if (!system) {
       throw new SystemNotConfiguredException();
     }
     const policy = system.dailyResetPolicy;
-    // `actor` marks this as a manual, human-triggered reset so the use case
-    // records a `MANUAL_RESET` audit entry (NFR-SEC-02). The automatic
+    // `actor` is the authenticated admin's username (QUE-43) — it marks this as
+    // a manual, human-triggered reset so the use case records a `MANUAL_RESET`
+    // audit entry attributing the *actual* operator (NFR-SEC-02), replacing the
+    // former hardcoded `'admin'` literal (a forgery vector). The automatic
     // cron-driven reset omits `actor` and is therefore not audited.
     // `archivePreviousDay` translates `DailyResetPolicy.archivePreviousDayData`
     // (FR-WZD-05 / QUE-16) — prior-day tickets are relocated to the archive
@@ -57,22 +66,27 @@ export class SystemAdminController {
     return this.resetDailyQueue.execute({
       resetTo: policy.resetTicketNumberTo,
       archivePreviousDay: policy.archivePreviousDayData,
-      actor: 'admin',
+      actor: principal.username,
     });
   }
 
   /**
    * `POST /api/system/cleanup-transaction-log` → permanently delete archived
-   * transactions older than `retentionDays` (QUE-25 / FR-ADM-02). `actor` marks
-   * this as a manual, human-triggered cleanup so the use case records a
-   * `TRANSACTION_LOG_CLEANUP` audit entry (NFR-SEC-02). The `audit_log` table is
-   * never touched — only `archived_tickets`.
+   * transactions older than `retentionDays` (QUE-25 / FR-ADM-02). `actor` is the
+   * authenticated admin's username (QUE-43) — it marks this as a manual,
+   * human-triggered cleanup so the use case records a `TRANSACTION_LOG_CLEANUP`
+   * audit entry attributing the actual operator (NFR-SEC-02), replacing the
+   * former hardcoded `'admin'` literal. The `audit_log` table is never touched
+   * — only `archived_tickets`.
    */
   @Post('cleanup-transaction-log')
-  async cleanup(@Body() body: CleanupTransactionLogRequestDto) {
+  async cleanup(
+    @Body() body: CleanupTransactionLogRequestDto,
+    @CurrentUser() principal: AuthenticatedPrincipal,
+  ) {
     return this.cleanupTransactionLog.execute({
       retentionDays: body?.retentionDays,
-      actor: 'admin',
+      actor: principal.username,
     });
   }
 }

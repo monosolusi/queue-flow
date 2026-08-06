@@ -6,8 +6,10 @@ import {
 } from '@nestjs/common';
 import {
   DomainError,
+  DuplicateUserException,
   EntityNotFoundException,
   InvalidArgumentException,
+  InvalidCredentialsException,
   InvalidStateTransitionException,
   InvalidValueObjectException,
   SystemNotConfiguredException,
@@ -41,10 +43,16 @@ export class DomainExceptionFilter implements ExceptionFilter {
     if (exception instanceof EntityNotFoundException) {
       return HttpStatus.NOT_FOUND;
     }
+    if (exception instanceof InvalidCredentialsException) {
+      return HttpStatus.UNAUTHORIZED;
+    }
     if (exception instanceof InvalidStateTransitionException) {
       return HttpStatus.CONFLICT;
     }
     if (exception instanceof SystemNotConfiguredException) {
+      return HttpStatus.CONFLICT;
+    }
+    if (exception instanceof DuplicateUserException) {
       return HttpStatus.CONFLICT;
     }
     if (exception instanceof InvalidValueObjectException) {
