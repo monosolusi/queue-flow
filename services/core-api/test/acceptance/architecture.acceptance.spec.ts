@@ -32,6 +32,10 @@ const REQUIRED_RULES = [
   'domain-isolation',
   // Bounded-context anti-corruption: Queue must not import Store Config.
   'queue-no-store-config',
+  // Bounded-context anti-corruption (QUE-43): Identity must not import other
+  // contexts, and no other context may import Identity — both directions.
+  'identity-anti-corruption',
+  'no-context-imports-identity',
   // No circular imports within the domain.
   'domain-no-circular',
   // DIP: application layer depends on ports, never infrastructure concretions.
@@ -62,7 +66,7 @@ describe('DoD-1 — Architecture Verification (NFR-MNT-01)', () => {
     // A cheap direct sanity check on top of dep-cruiser: scan the domain tree
     // for any banned import. dep-cruiser is the authoritative gate; this is a
     // fast, readable second line of defense that fails loudly with the file.
-    const banned = /(@nestjs\/|typeorm|@prisma\/|^import .*['"]pg['"]|from ['"]express['"]|from ['"]ws['"]|reflect-metadata|mikro-orm|knex|sequelize|mongoose|from ['"]fastify['"])/;
+    const banned = /(@nestjs\/|typeorm|@prisma\/|^import .*['"]pg['"]|from ['"]express['"]|from ['"]ws['"]|reflect-metadata|mikro-orm|knex|sequelize|mongoose|from ['"]fastify['"]|from ['"]node:crypto['"]|from ['"]node:fs['"]|from ['"]node:net['"]|from ['"]node:http['"]|from ['"]node:https['"]|from ['"]node:tls['"]|from ['"]node:child_process['"]|from ['"]crypto['"]|from ['"]fs['"]|from ['"]net['"]|from ['"]http['"]|from ['"]child_process['"])/;
     const scan = (dir: string): string[] => {
       // Recursive walk without importing fs/promises helpers — keep it sync.
       const { readdirSync, statSync } = require('node:fs');

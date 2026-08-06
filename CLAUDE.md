@@ -87,7 +87,9 @@ abstractions (interfaces), never concrete infrastructure — see SOLID/DIP below
 
 ## Domain model (DDD bounded contexts)
 
-Three bounded contexts:
+Four bounded contexts (core-api): Queue, Store Config, Reporting, Identity.
+(Notification is a pure `tv-display-service` client concern — no core-api
+domain model.)
 
 - **Queue** — `QueueTicket` aggregate (`TicketId` UUID, `ticketNumber` e.g.
   "A-001", `categoryId`, `currentStatus`, `counterId`, timestamps). Events:
@@ -105,6 +107,9 @@ Three bounded contexts:
   an earlier `domain/notification` stub was removed as dead code). Adding a
   server-side audio model would be over-abstraction.
 - **Reporting** — `DailyQueueReport`, `CounterPerformance`.
+- **Identity (QUE-43)** — `User` entity (`Identifier` UUID, `Username`,
+  `PasswordHash`, `Role` ∈ {`admin`, `caller-staff`}, timestamps) + RBAC. See
+  the Identity section below.
 
 Default state machine: `WAITING → CALLING → SERVING → COMPLETED`, plus
 `SKIPPED` (reachable from `CALLING`, returns via "Panggil Ulang"). Custom
@@ -144,7 +149,10 @@ categories, routings) lives in PRD §7 — read it before touching config code.
 - **Local network only (NFR-SEC-01).** App access is restricted to the store LAN
   subnet.
 - **Audit trail (NFR-SEC-02).** Manual reset, state-schema changes, and routing
-  changes must be written to the local audit log.
+  changes must be written to the local audit log. The audit `actor` is the
+  **authenticated principal's username** (QUE-43) — never a client-supplied
+  field or a hardcoded literal; the first-run wizard path (no principal yet)
+  uses a `'system'` sentinel.
 - **Clean architecture layering (NFR-MNT-01).** Domain has no framework/ORM/IO
   imports — enforce this; a static-analysis check is an acceptance criterion.
 - **Single-host deployment readiness (NFR-MNT-02).** The whole stack — every
@@ -176,13 +184,15 @@ with no duplicate/lost ticket numbers.
   `feat/que-12-local-websocket-event-broadcaster`) — overrides Linear's
   suggested `franssiswanto/que-…` name.
 - **core-api (NestJS + TypeScript):** Clean Architecture layers in place;
-  Domain layer pure (dep-cruiser-enforced, `npm run arch:check`). Three bounded
-  contexts: Queue, Store Config, Reporting (the `Notification` stub was
-  removed — audio is a pure client concern). All queue command use cases,
+  Domain layer pure (dep-cruiser-enforced, `npm run arch:check`). Four bounded
+  contexts: Queue, Store Config, Reporting, Identity (the `Notification` stub
+  was removed — audio is a pure client concern). All queue command use cases,
   ticket generation (`POST /api/tickets`), the daily-reset engine, PostgreSQL
   persistence behind domain ports + `ITransactionManager`, the audit context,
-  and the system-config REST surface are landed. In-memory profile is the
-  dev/test default; `QMS_PERSISTENCE=postgres` activates Postgres.
+  the system-config REST surface, and the Identity/AuthN/AuthZ surface
+  (opaque session tokens + scrypt + RBAC guards, QUE-43) are landed. In-memory
+  profile is the dev/test default; `QMS_PERSISTENCE=postgres` activates
+  Postgres.
 - **Frontends (all Vite + React + TS PWAs):** `caller-service` (`/caller`),
   `kiosk-service` (`/kiosk`), `tv-display-service` (`/tv`), `admin-service`
   (`/admin`, `/wizard`). All four PWAs' `base`/`start_url`/`scope` are aligned
@@ -225,11 +235,15 @@ across bounded contexts (e.g. `PriorityPolicy`) live in `src/domain/shared/`.
 
 - **Domain purity is enforced by dependency-cruiser** — `npm run arch:check`
   (from `services/core-api`). It forbids `src/domain/**` from importing any
-  ORM/HTTP/IO library (NFR-MNT-01), forbids the Queue bounded context from
-  importing Store Config internals (anti-corruption), and forbids
-  `src/application/**` from importing `src/infrastructure/**`
+  ORM/HTTP/IO library (NFR-MNT-01) — **including Node I/O built-ins**
+  (`crypto|fs|net|http|https|tls|child_process`) — forbids the Queue bounded
+  context from importing Store Config internals (anti-corruption), forbids
+  any bounded context from importing the Identity context and vice versa
+  (`identity-anti-corruption` + `no-context-imports-identity`, QUE-43), and
+  forbids `src/application/**` from importing `src/infrastructure/**`
   (`application-no-infrastructure`) so use cases depend on domain ports, never
-  concrete repos (DIP).
+  concrete repos (DIP). Every named rule is asserted in
+  `test/acceptance/architecture.acceptance.spec.ts` `REQUIRED_RULES`.
 - **Verify a forbidden rule actually catches.** A rule that "passes" while a
   known framework import sits in `src/` is a red flag — temporarily add the bad
   import before trusting it. Two dep-cruiser gotchas:
@@ -245,7 +259,12 @@ across bounded contexts (e.g. `PriorityPolicy`) live in `src/domain/shared/`.
     Anchor against `node_modules/`, e.g.
     `^(node:)?(node_modules/)?(@nestjs/.*|pg|typeorm|…)` (the
     `domain-no-framework-imports` and `application-no-framework-imports` rules
-    both use this form).
+    both use this form). **Node built-ins must be in the inner alternation**
+    (`crypto|fs|net|…`) to actually catch — a bare `from 'crypto'` resolves to
+    `node_modules/crypto`-ish under dep-cruiser, and the `(node:)?` prefix
+    alone won't match it. QUE-43 hit this: `node:crypto` is the password-
+    hashing/token primitive, so it must stay in infrastructure behind the
+    `IPasswordHasher`/`ITokenGenerator` ports, banned from domain/application.
 - **Use cases inject only domain ports** — e.g. `IQueueRepository`,
   `ICounterRoutingRuleRepository`, `ITransitionPolicyResolver` — never
   infrastructure concretions. A use case returns a transport-agnostic **DTO**
@@ -482,7 +501,12 @@ the token into the `SaveSystemConfigurationUseCase` factory. No circular dep.
   six repo tokens + `TRANSACTION_MANAGER` + `PG_CONNECTION` (a `pg.Pool`
   factory) to Postgres concretions and **excludes `DevSeedService`** (the
   wizard is the real seed; a dev seed would write a config and block the
-  first-run redirect).
+  first-run redirect). **`TRANSACTION_MANAGER` is bound in BOTH profiles**
+  (postgres → `PostgresTransactionManager`, in-memory → `useClass:
+  NoOpTransactionManager`) so factories can inject it unconditionally — a
+  use-case that needs the tx envelope (e.g. `DeleteUserUseCase` last-admin +
+  delete + session-revoke atomicity, QUE-43) takes it as a constructor param
+  and the wired profile supplies the real manager.
 - **The migration runner (`PostgresMigrationRunner`, `OnModuleInit`) is the
   only schema authority** — no Prisma/TypeORM — applying `migrations/*.sql`
   idempotently into a `_migrations` table (SHA-256 checksums). **Build asset
@@ -700,9 +724,103 @@ numeric `Counter {id}`).
   `MANUAL_RESET`. `POST /api/system/cleanup-transaction-log` threads only
   scalars (`retentionDays`, `actor`). The audit READ surface is not duplicated
   here — `ListAuditEntriesUseCase` + `GET /api/audit/log` already ship (see
-  Reporting). `actor: 'admin'` is a hardcoded string literal — the audit trail
-  cannot distinguish which manager performed a destructive op; out of scope
-  until an auth/identity layer lands.
+  Reporting). `actor` is the authenticated principal's username (QUE-43) —
+  threaded from `@CurrentUser().username` in the controller; the use cases
+  still take `actor: string` unchanged. The first-run wizard path (no
+  principal) defaults the actor to a `'system'` sentinel.
+
+### Identity bounded context & AuthN/AuthZ (QUE-43)
+
+- **Opaque session tokens + a `sessions` table — NOT JWT.** Token =
+  `crypto.randomBytes(32).toString('hex')`; store only its SHA-256 hash in the
+  DB. On each protected request, hash the bearer and do an indexed PK lookup.
+  **Real logout** = `DELETE` the row (JWT can't truly invalidate without a
+  blocklist). A ~1ms PK lookup on LAN is within p99<100ms (NFR-PERF-01). No
+  signing secret to manage offline. Frontends store the token and send it as
+  `Bearer`; they never decode it — `GET /api/auth/me` returns the user.
+- **Password hashing via `node:crypto.scrypt` — not bcrypt/argon2.** Memory-
+  hard, built into Node 20 (no native build step for `node:20-alpine`).
+  Stored `scrypt:<saltHex>:<hashHex>` (N=2^14/r=8/p=1, keylen=64, saltlen=16);
+  `verify` re-derives + `crypto.timingSafeEqual` (guards the length-mismatch
+  throw). **Zero new runtime npm deps** — `node:crypto` (randomBytes + sha256
+  + scrypt) covers tokens + hashing; honors NFR-REL-01 + the minimal-
+  dependency ethos (audio-sequencer/hand-rolled-charts precedent). The
+  `offline-assets` acceptance gate stays green (no new bundle URLs).
+- **`node:crypto` stays behind domain ports.** `IPasswordHasher` +
+  `ITokenGenerator` (each with a co-located Symbol DI token) are the seam:
+  the domain/application layers depend on the ports, never `node:crypto`
+  directly (dep-cruiser bans the built-in — see Architecture enforcement).
+  `ScryptPasswordHasher` + `CryptoTokenGenerator` live in
+  `infrastructure/auth/`.
+- **NestJS guards, applied per-controller** (not globally — kiosk/TV/public
+  endpoints must stay unguarded): `AuthGuard` (any authenticated → attaches
+  `AuthenticatedPrincipal` to `req.user`, 401 if missing/invalid/expired),
+  `RolesGuard` + `@Roles(...roles)` (403 on wrong role), `AdminOrSetupGuard`
+  (allows the first-run wizard to `PUT /api/system/config` pre-setup, requires
+  admin post-setup). `@CurrentUser()` `createParamDecorator` reads `req.user`.
+  A `@Public()`-style escape is NOT used — guards are applied at the method
+  level where needed (e.g. `@Get('board')` on `QueueController` is unguarded
+  for TV; the rest of the controller is authenticated).
+- **Endpoint classification (load-bearing):** **public** (no guard) = kiosk
+  `POST /api/tickets`, `GET /api/categories`, `GET /api/system/config`,
+  `GET /api/queue/board`, `GET /api/system/setup-status`, `GET /api/health`,
+  `POST /api/auth/login`, `POST /api/auth/setup-admin` (self-gates on setup
+  status), `/ws` (broadcast-only); **authenticated (admin OR caller-staff)**
+  = caller workspace (`GET /api/queue`, `GET /api/counters`,
+  `GET /api/system/state-machine`, all `POST /api/queue/*` commands,
+  `GET /api/auth/me`, `POST /api/auth/logout`); **admin-only** =
+  `PUT /api/system/config` (via `AdminOrSetupGuard`), `daily-reset`,
+  `cleanup-transaction-log`, `/api/users` CRUD, `/api/reports/*`,
+  `/api/audit/log`. Kiosk + TV have **no login UI, no token handling**.
+- **Initial admin via a wizard "Admin credentials" step** calling a one-shot
+  public `POST /api/auth/setup-admin` (idempotent upsert while setup is
+  incomplete; 403 once `isInitialSetupCompleted`). **Lockout-free partial-
+  setup recovery:** a failed config-save leaves setup incomplete, so the
+  wizard can re-run setup-admin (the existing admin is kept, its password
+  replaced). The controller gates on `GetSetupStatusUseCase` — the
+  `SetupInitialAdminUseCase` imports **no** Store-Config type (anti-corruption,
+  mirrors `SystemAdminController` reading `DailyResetPolicy`).
+- **`DeleteUserUseCase` guards (last-admin + self-delete + TOCTOU):**
+  rejecting the deletion of the only remaining `admin` (lockout guard) and
+  rejecting a self-delete (`id === callerUserId`, threaded from
+  `@CurrentUser().userId`) are **use-case-level business guardrails** →
+  `InvalidArgumentException` (400). The last-admin count + user delete +
+  session revoke run inside **one `ITransactionManager.runInTransaction`** so
+  a concurrent admin-create can't race the count-then-delete (NFR-REL-02
+  TOCTOU pattern; needs `TRANSACTION_MANAGER` bound in both profiles — see
+  PostgreSQL persistence).
+- **Login timing side-channel (no username enumeration):** the unknown-
+  username branch runs a **dummy `hasher.verify`** against a
+  `PasswordHash.of('scrypt:<32-hex-salt>:<128-hex-hash>')` (128 hex = 64-byte
+  expected = KEY_LEN, so `verify` runs the full scrypt KDF and returns false
+  rather than short-circuiting on a length mismatch) **before** throwing
+  `InvalidCredentialsException` — equalizing timing with the wrong-password
+  branch. The result is discarded. Apply this dummy-verify pattern to any
+  login path where the user-lookup miss is faster than the hash verify.
+- **`InvalidCredentialsException`** (code `INVALID_CREDENTIALS` → 401 via
+  `DomainExceptionFilter`) and **`DuplicateUserException`** (→ 409) are new
+  `DomainError` subclasses for the Identity context. `Username`/`PasswordHash`/
+  `Role` VO construction failures throw `InvalidValueObjectException` (400) per
+  the QUE-31 source-owns-construction-failure rule.
+- **Audit-actor change-detector naming:** the bootstrap admin in
+  `test/acceptance/_helpers.ts` is named **`manager1`**, not `'admin'`. The
+  audit `actor === 'manager1'` assertions are real change-detectors for the
+  authenticated-principal-as-actor fix — naming the bootstrap admin `'admin'`
+  would mask a regression to the old hardcoded `'admin'` literal (the
+  assertion would pass whether the actor came from the principal or the old
+  literal). Apply this naming-as-detector pattern whenever a test asserts a
+  field that was previously a hardcoded literal: name the fixture differently
+  from the old literal so the assertion can't pass against the old behavior.
+- **`bootstrapAuthedAdmin(app)` + `authHeader(token)`** in
+  `test/acceptance/_helpers.ts` create the bootstrap admin (idempotent, via
+  `CreateUserUseCase` directly — not `POST /api/auth/setup-admin`, which 403s
+  post-setup) and log in, returning a bearer token; `authHeader` builds the
+  `{Authorization: 'Bearer <token>'}` object for supertest `.set(...)`. Every
+  integration spec hitting a protected endpoint calls
+  `bootstrapAuthedAdmin` in `beforeAll` and spreads `authHeader(token)` onto
+  its requests. **`clearRepos` deliberately does NOT clear the user/session
+  repos** — auth is cross-cutting test scaffolding, not domain data under
+  test; the seeded users + sessions persist across the suite.
 
 ### Reporting & analytics (FR-ADM-03)
 
@@ -1011,6 +1129,11 @@ config, proxied to `core-api:3000` by Vite in dev).
   `aria-expanded` + `aria-controls={chooserId}`, the chooser `<div>` carries
   `id={chooserId}` + `role="group"` + `aria-label="…"`. Apply to any "pick
   one of N, then fire" affordance.
+- **A `<select>` inside a wrapping `<label>` pollutes the accessible name with
+  the option text** — the `<select>`'s options get concatenated into the
+  label's accessible name. Use a **sibling `<label htmlFor={id}>`** + the
+  `<select id={id}>` alongside it, not a wrapping `<label>`. Apply to any
+  form control where the label must stay clean/short (auth + wizard steps).
 - **Skeleton loading-state a11y recipe.** A loading region is
   `role="status" aria-busy="true"` carrying a visually-hidden (`.sr-only`)
   text label for AT (e.g. "Memuat antrian…"); the placeholder shapes are

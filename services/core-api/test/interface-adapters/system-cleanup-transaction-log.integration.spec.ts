@@ -27,6 +27,7 @@ import {
   InMemorySystemConfigurationRepository,
 } from '../../src/infrastructure/persistence/in-memory';
 import { startOfLocalDay } from '../../src/application/shared';
+import { authHeader, bootstrapAuthedAdmin } from '../acceptance/_helpers';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -44,6 +45,7 @@ describe('System transaction-log cleanup REST surface (integration — QUE-25)',
   let queue: IQueueRepository;
   let systemConfig: ISystemConfigurationRepository;
   let auditLog: IAuditLogRepository;
+  let token: string;
 
   beforeAll(async () => {
     app = await NestFactory.create(AppModule, { logger: false });
@@ -52,6 +54,10 @@ describe('System transaction-log cleanup REST surface (integration — QUE-25)',
     queue = app.get(QUEUE_REPOSITORY);
     systemConfig = app.get(SYSTEM_CONFIGURATION_REPOSITORY);
     auditLog = app.get(AUDIT_LOG_REPOSITORY);
+    // QUE-43: POST /api/system/cleanup-transaction-log is admin-only. The
+    // bootstrap admin is named 'manager1' so audit actor === 'manager1' is a
+    // real change-detector for the authenticated-principal-as-actor fix.
+    token = await bootstrapAuthedAdmin(app);
   });
 
   afterAll(async () => {
@@ -87,7 +93,7 @@ describe('System transaction-log cleanup REST surface (integration — QUE-25)',
     expect((queue as InMemoryQueueRepository).archivedTickets()).toHaveLength(2);
 
     const res = await request(app.getHttpServer())
-      .post('/api/system/cleanup-transaction-log')
+      .post('/api/system/cleanup-transaction-log').set(authHeader(token))
       .send({ retentionDays: 90 });
 
     expect(res.status).toBe(201);
@@ -102,14 +108,14 @@ describe('System transaction-log cleanup REST surface (integration — QUE-25)',
     await seedArchivedDaysOld(100, 1);
 
     const res = await request(app.getHttpServer())
-      .post('/api/system/cleanup-transaction-log')
+      .post('/api/system/cleanup-transaction-log').set(authHeader(token))
       .send({ retentionDays: 90 });
     expect(res.status).toBe(201);
 
     const entries = await auditLog.list();
     expect(entries).toHaveLength(1);
     expect(entries[0].action).toBe(AuditAction.TRANSACTION_LOG_CLEANUP);
-    expect(entries[0].actor).toBe('admin');
+    expect(entries[0].actor).toBe('manager1');
     expect(entries[0].after.deletedCount).toBe(1);
     expect(entries[0].after.retentionDays).toBe(90);
   });
@@ -131,7 +137,7 @@ describe('System transaction-log cleanup REST surface (integration — QUE-25)',
     await seedArchivedDaysOld(100, 1);
 
     await request(app.getHttpServer())
-      .post('/api/system/cleanup-transaction-log')
+      .post('/api/system/cleanup-transaction-log').set(authHeader(token))
       .send({ retentionDays: 90 });
 
     // The pre-existing MANUAL_RESET entry plus the new TRANSACTION_LOG_CLEANUP.
@@ -144,7 +150,7 @@ describe('System transaction-log cleanup REST surface (integration — QUE-25)',
     await seedArchivedDaysOld(100, 1);
 
     const res = await request(app.getHttpServer())
-      .post('/api/system/cleanup-transaction-log')
+      .post('/api/system/cleanup-transaction-log').set(authHeader(token))
       .send({ retentionDays: 1 }); // below the 7-day floor
 
     expect(res.status).toBe(400);
@@ -156,7 +162,7 @@ describe('System transaction-log cleanup REST surface (integration — QUE-25)',
 
   it('rejects a missing retentionDays with 400 INVALID_ARGUMENT', async () => {
     const res = await request(app.getHttpServer())
-      .post('/api/system/cleanup-transaction-log')
+      .post('/api/system/cleanup-transaction-log').set(authHeader(token))
       .send({});
 
     expect(res.status).toBe(400);

@@ -1,4 +1,4 @@
-import type { DailyResetMode, PriorityPolicy } from '../api/types';
+import type { DailyResetMode, PriorityPolicy, UserRole } from '../api/types';
 
 /**
  * Friendly Bahasa Indonesia display labels for the enum values the manager
@@ -38,4 +38,26 @@ export const PRIORITY_POLICY_DESCRIPTIONS: Record<PriorityPolicy, string> = {
 export const DAILY_RESET_MODE_LABELS: Record<DailyResetMode, string> = {
   AUTOMATIC_CRON: 'Otomatis setiap hari',
   MANUAL: 'Manual (tombol reset)',
+};
+
+/**
+ * Friendly Bahasa Indonesia labels for the {@link UserRole} enum (QUE-43). The
+ * enum stays as the wire `value=` (`POST /api/users` sends `admin` /
+ * `caller-staff`, never the friendly text); these maps keep the human label
+ * next to the value so the two never drift. Mirrors the QUE-34 rule: no
+ * technical enum names in user-visible copy — "caller-staff" is a backend role
+ * name and must never appear as display text.
+ *
+ * `USER_ROLE_LABELS` is the short label shown in the users table + the create
+ * form `<select>`. `USER_ROLE_DESCRIPTIONS` is the longer companion surfaced as
+ * an `aria-describedby` hint under the create-form role select.
+ */
+export const USER_ROLE_LABELS: Record<UserRole, string> = {
+  admin: 'Administrator',
+  'caller-staff': 'Staf Loket',
+};
+
+export const USER_ROLE_DESCRIPTIONS: Record<UserRole, string> = {
+  admin: 'Akses penuh: konfigurasi, pengguna, analitik, dan audit.',
+  'caller-staff': 'Akses panel loket: melayani antrian dari counter yang ditugaskan.',
 };

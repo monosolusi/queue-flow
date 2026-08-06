@@ -1,5 +1,10 @@
-import { BadRequestException, Controller, Get, Query } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { GetBoardStateUseCase, GetQueueSnapshotUseCase } from '../../application/queue';
+import { Role } from '../../domain/identity';
+import { AuthGuard } from '../auth/auth.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/roles.decorator';
+import { Public } from '../auth/public.decorator';
 
 /**
  * Read-only REST surface for the live queue snapshot (FR-CLR-01 / QUE-19) and
@@ -17,6 +22,8 @@ import { GetBoardStateUseCase, GetQueueSnapshotUseCase } from '../../application
  * {@link DomainExceptionFilter} (the use case throws `EntityNotFoundException`).
  */
 @Controller('api/queue')
+@UseGuards(AuthGuard, RolesGuard)
+@Roles(Role.ADMIN, Role.CALLER_STAFF)
 export class QueueController {
   constructor(
     private readonly getSnapshot: GetQueueSnapshotUseCase,
@@ -45,6 +52,7 @@ export class QueueController {
    * current and to restore `nowServing` on a fresh page load.
    */
   @Get('board')
+  @Public()
   board() {
     return this.getBoardState.execute();
   }

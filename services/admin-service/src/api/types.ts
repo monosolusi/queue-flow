@@ -79,7 +79,13 @@ export interface WizardRoutingRuleDto {
   readonly priorityPolicy: PriorityPolicy;
 }
 
-/** The wizard / admin save payload for `PUT /api/system/config`. */
+/**
+ * The wizard / admin save payload for `PUT /api/system/config`. The `actor`
+ * field was removed (QUE-43): the server now derives the audit actor from the
+ * authenticated admin's bearer token, so the client never sends it. On the
+ * pre-setup wizard path there is no token, so the server uses a `'system'`
+ * sentinel — no client change is needed beyond omitting the field.
+ */
 export interface SaveSystemConfigurationPayload {
   readonly storeName: string;
   readonly stateMachine: StateMachineDto;
@@ -87,7 +93,6 @@ export interface SaveSystemConfigurationPayload {
   readonly categories: readonly WizardCategoryDto[];
   readonly routingRules: readonly WizardRoutingRuleDto[];
   readonly brandColor: string;
-  readonly actor?: string;
 }
 
 /** Result of `PUT /api/system/config`. */
@@ -226,4 +231,49 @@ export interface CleanupTransactionLogResultDto {
   readonly status: 'cleaned';
   readonly retentionDays: number;
   readonly deletedCount: number;
+}
+
+// --- Identity & access (QUE-43) ----------------------------------------------
+
+/**
+ * The role a {@link UserDto} / {@link AuthUserDto} may carry. Mirrors core-api's
+ * `UserRole` enum. The wire `value=` stays the enum; user-visible copy renders a
+ * friendly Indonesian label via {@link USER_ROLE_LABELS} (never the raw enum).
+ */
+export type UserRole = 'admin' | 'caller-staff';
+
+/**
+ * The authenticated principal, returned by `GET /api/auth/me` and embedded in
+ * the {@link LoginResponseDto}. Carries no `createdAt` (the `/me` projection is
+ * the minimal identity slice — the created-at timestamp lives on {@link UserDto}).
+ */
+export interface AuthUserDto {
+  readonly id: string;
+  readonly username: string;
+  readonly role: UserRole;
+}
+
+/**
+ * Result of `POST /api/auth/login`. The opaque bearer `token` is stored in
+ * `qms.admin.token` (see `auth/token-store`) and threaded as
+ * `Authorization: Bearer <token>` on every protected request. The client never
+ * decodes the token (no JWT lib — NFR-REL-01); it reads `/api/auth/me` for the
+ * current user.
+ */
+export interface LoginResponseDto {
+  readonly token: string;
+  readonly user: AuthUserDto;
+}
+
+/**
+ * One user account from `GET /api/users` / `POST /api/users` /
+ * `POST /api/auth/setup-admin`. Mirrors core-api's `UserDto`. `createdAt` is a
+ * Unix-epoch millisecond timestamp (the backend stores BIGINT ms, matching the
+ * audit-log + lifecycle timestamps convention).
+ */
+export interface UserDto {
+  readonly id: string;
+  readonly username: string;
+  readonly role: UserRole;
+  readonly createdAt: number;
 }

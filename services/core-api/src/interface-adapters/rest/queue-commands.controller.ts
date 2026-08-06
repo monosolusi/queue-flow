@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Param, Post } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Param, Post, UseGuards } from '@nestjs/common';
 import {
   ApplyTransitionUseCase,
   CallNextTicketUseCase,
@@ -11,6 +11,10 @@ import {
 } from '../../application/queue';
 import { toDateKey } from '../../application/shared/date';
 import { isCanonicalStatus, ticketIdOf } from '../../domain/queue';
+import { Role } from '../../domain/identity';
+import { AuthGuard } from '../auth/auth.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/roles.decorator';
 
 /**
  * Queue command REST surface (FR-ENG-03 / FR-CLR-03, QUE-2). The caller panel
@@ -25,6 +29,8 @@ import { isCanonicalStatus, ticketIdOf } from '../../domain/queue';
  * commands under one prefix, with commands as POST sub-paths.
  */
 @Controller('api/queue')
+@UseGuards(AuthGuard, RolesGuard)
+@Roles(Role.ADMIN, Role.CALLER_STAFF)
 export class QueueCommandsController {
   constructor(
     private readonly callNextUseCase: CallNextTicketUseCase,

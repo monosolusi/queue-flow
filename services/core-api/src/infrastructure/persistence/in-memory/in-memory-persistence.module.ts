@@ -10,6 +10,12 @@ import {
   SYSTEM_CONFIGURATION_REPOSITORY,
 } from '../../../domain/store-config';
 import { AUDIT_LOG_REPOSITORY } from '../../../domain/audit';
+import {
+  PASSWORD_HASHER,
+  SESSION_REPOSITORY,
+  TOKEN_GENERATOR,
+  USER_REPOSITORY,
+} from '../../../domain/identity';
 import { REPORT_QUERY_PORT } from '../../../domain/reporting';
 import { TRANSACTION_MANAGER, NoOpTransactionManager } from '../../../domain/shared';
 import {
@@ -19,8 +25,12 @@ import {
   InMemoryQueueRepository,
   InMemoryReportQueryRepository,
   InMemorySequenceRepository,
+  InMemorySessionRepository,
   InMemorySystemConfigurationRepository,
+  InMemoryUserRepository,
 } from '.';
+import { CryptoTokenGenerator } from '../../auth/crypto-token-generator';
+import { ScryptPasswordHasher } from '../../auth/scrypt-password-hasher';
 import { DevSeedService } from '../seed/dev-seed.service';
 
 /**
@@ -49,6 +59,14 @@ import { DevSeedService } from '../seed/dev-seed.service';
       useClass: InMemorySystemConfigurationRepository,
     },
     { provide: AUDIT_LOG_REPOSITORY, useClass: InMemoryAuditLogRepository },
+    // QUE-43 Identity context — in-memory repos (LSP-interchangeable with the
+    // Postgres concretions) + the node:crypto-backed hasher/token generator
+    // (no-arg constructors → `useClass` is fine, unlike the Postgres repos
+    // which take a `Pool` and must use `useFactory`).
+    { provide: USER_REPOSITORY, useClass: InMemoryUserRepository },
+    { provide: SESSION_REPOSITORY, useClass: InMemorySessionRepository },
+    { provide: PASSWORD_HASHER, useClass: ScryptPasswordHasher },
+    { provide: TOKEN_GENERATOR, useClass: CryptoTokenGenerator },
     // QUE-26 reporting read side. The in-memory report query scans the SAME
     // queue store the live queue uses (active tickets via allActive() + archived
     // via archivedTickets()), so it must share the QUEUE_REPOSITORY singleton —
@@ -74,6 +92,10 @@ import { DevSeedService } from '../seed/dev-seed.service';
     SEQUENCE_REPOSITORY,
     SYSTEM_CONFIGURATION_REPOSITORY,
     AUDIT_LOG_REPOSITORY,
+    USER_REPOSITORY,
+    SESSION_REPOSITORY,
+    PASSWORD_HASHER,
+    TOKEN_GENERATOR,
     REPORT_QUERY_PORT,
     TRANSACTION_MANAGER,
   ],

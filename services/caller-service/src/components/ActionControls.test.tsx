@@ -45,6 +45,12 @@ function makeApi(overrides: Partial<ICallerApi> = {}): ICallerApi {
     getBrandColor: vi.fn(() => Promise.resolve({ brandColor: '' })),
     listCounters: vi.fn(() => Promise.resolve([])),
     getQueueSnapshot: vi.fn(() => Promise.resolve({} as never)),
+    // Auth surface (QUE-43) — not invoked by action controls; stubs satisfy the type.
+    login: vi.fn(() =>
+      Promise.resolve({ token: 'tok', user: { id: 'u', username: 's', role: 'caller-staff' as const } }),
+    ),
+    logout: vi.fn(() => Promise.resolve()),
+    getMe: vi.fn(() => Promise.resolve(null)),
     ...overrides,
   };
 }

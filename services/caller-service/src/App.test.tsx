@@ -1,13 +1,25 @@
-import { describe, expect, it } from 'vitest';
-import { render, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { App } from './App';
 import type { ICallerApi } from './api/caller-api';
+import type { AuthUserDto } from './api/types';
 
-function makeApi(brandColor = '', reject?: Error): ICallerApi {
+const user: AuthUserDto = { id: 'u1', username: 'staff', role: 'caller-staff' };
+
+function makeApi(brandColor = '', reject?: Error, me: AuthUserDto | null = user): ICallerApi {
   return {
+    login: vi.fn(async () => ({ token: 'tok', user })),
+    logout: vi.fn(async () => {}),
+    getMe: () => Promise.resolve(me),
     listCounters: () => Promise.resolve([]),
-    getQueueSnapshot: () => Promise.resolve({ counterId: 0, active: [], waiting: [], waitingCount: 0 }),
+    getQueueSnapshot: () =>
+      Promise.resolve({
+        counterId: 1,
+        active: [{ ticketId: 'a1', ticketNumber: 'A-001', categoryId: 'cat-a', status: 'CALLING', counterId: 1 }],
+        waiting: [],
+        waitingCount: 0,
+      }),
     getActiveStateMachine: () => Promise.resolve({ states: [], transitions: [] }),
     callNext: () => Promise.resolve(),
     serve: () => Promise.resolve(),
@@ -21,13 +33,17 @@ function makeApi(brandColor = '', reject?: Error): ICallerApi {
   };
 }
 
-function renderApp(api: ICallerApi) {
+function renderApp(api: ICallerApi, initialEntry = '/') {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <App api={api} />
     </MemoryRouter>,
   );
 }
+
+beforeEach(() => {
+  localStorage.clear();
+});
 
 describe('App (caller — runtime brand color, QUE-37 AC6)', () => {
   it('applies the manager-configured brand color to --accent on mount', async () => {
@@ -53,5 +69,32 @@ describe('App (caller — runtime brand color, QUE-37 AC6)', () => {
     await waitFor(() =>
       expect(document.documentElement.style.getPropertyValue('--accent')).toBe('#2563eb'),
     );
+  });
+});
+
+describe('App routing cascade (QUE-43)', () => {
+  it('redirects an unauthenticated user to /login', async () => {
+    renderApp(makeApi('', undefined, null), '/workspace');
+    expect(await screen.findByText('Masuk Caller Panel')).toBeInTheDocument();
+  });
+
+  it('routes an authenticated + unbound user to the counter select page', async () => {
+    renderApp(makeApi('', undefined, user), '/');
+    expect(await screen.findByText('Pilih Loket')).toBeInTheDocument();
+  });
+
+  it('routes an authenticated + bound user to /workspace', async () => {
+    localStorage.setItem(
+      'qms.caller.counterBinding',
+      JSON.stringify({
+        counterId: 1,
+        counterName: 'Loket 1',
+        assignedCategoryIds: ['cat-a'],
+        assignedCategories: [{ id: 'cat-a', code: 'A', name: 'Customer Service' }],
+      }),
+    );
+    renderApp(makeApi('', undefined, user), '/workspace');
+    // The workspace renders the active ticket from the snapshot.
+    expect(await screen.findByText('A-001')).toBeInTheDocument();
   });
 });

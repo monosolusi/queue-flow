@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, HttpException, Put } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpException, Put, Req, UseGuards } from '@nestjs/common';
 import {
   GetActiveStateMachineUseCase,
   GetSetupStatusUseCase,
@@ -6,15 +6,27 @@ import {
   SaveSystemConfigurationUseCase,
   type SaveSystemConfigurationCommand,
 } from '../../application/store-config';
+import { Role, type AuthenticatedPrincipal } from '../../domain/identity';
+import { AuthGuard } from '../auth/auth.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/roles.decorator';
+import { AdminOrSetupGuard } from '../auth/admin-or-setup.guard';
+
+/** Minimal structural shape of an Express request with the guard-attached
+ *  principal — avoids a `@types/express` dep. */
+interface HttpRequestWithPrincipal {
+  user?: AuthenticatedPrincipal;
+}
 
 /**
  * Required top-level fields on a `PUT /api/system/config` payload. The value
  * objects / use case validate each field's *format* when present, but a missing
  * field dereferences `undefined` (e.g. `[...undefined]`, `undefined.trim()`)
  * and surfaces as a 500 `TypeError` — so the controller guards *presence* at
- * the transport boundary and returns 400 instead. `actor` defaults to
- * `'admin'`; `brandColor` is required on the wire (QUE-36 made it part of the
- * config graph).
+ * the transport boundary and returns 400 instead. `actor` is NOT a body field
+ * — it is the authenticated admin's username (QUE-43), threaded from the guard
+ * (or the `'system'` sentinel on the pre-setup wizard path). `brandColor` is
+ * required on the wire (QUE-36 made it part of the config graph).
  */
 const REQUIRED_CONFIG_FIELDS: ReadonlyArray<keyof SaveSystemConfigurationCommand> = [
   'storeName',
@@ -180,9 +192,19 @@ export class SystemConfigController {
     return this.getConfig.execute();
   }
 
-  /** `PUT /api/system/config` → persist the wizard / admin payload atomically. */
+  /**
+   * `PUT /api/system/config` → persist the wizard / admin payload atomically.
+   * Guarded by {@link AdminOrSetupGuard}: the first-run wizard may save while
+   * `isInitialSetupCompleted` is false (no session — the wizard runs before any
+   * user exists); post-setup, an authenticated `admin` session is required. The
+   * audit `actor` is the authenticated admin's username (QUE-43, replacing the
+   * former `body.actor` forgery vector); on the pre-setup wizard path there is
+   * no principal, so the actor falls back to the `'system'` sentinel — that
+   * first-save is the setup act itself, attributable to the system, not a user.
+   */
   @Put('config')
-  async save(@Body() body: Partial<SaveSystemConfigurationCommand> & { actor?: string }) {
+  @UseGuards(AdminOrSetupGuard)
+  async save(@Body() body: Partial<SaveSystemConfigurationCommand>, @Req() request: HttpRequestWithPrincipal) {
     // Guard presence of every required top-level field at the boundary so a
     // malformed payload yields 400 (not a 500 TypeError when the use case
     // dereferences `undefined`). Format validation stays in the value objects.
@@ -210,6 +232,7 @@ export class SystemConfigController {
     if (nestedErrors.length > 0) {
       throw new BadRequestException(`Malformed config field(s): ${nestedErrors.join(', ')}`);
     }
+    const principal = request.user as AuthenticatedPrincipal | undefined;
     const command: SaveSystemConfigurationCommand = {
       storeName: body.storeName!,
       stateMachine: body.stateMachine!,
@@ -217,13 +240,20 @@ export class SystemConfigController {
       categories: body.categories!,
       routingRules: body.routingRules!,
       brandColor: body.brandColor!,
-      actor: body.actor ?? 'admin',
+      actor: principal?.username ?? 'system',
     };
     return this.saveConfig.execute(command);
   }
 
-  /** `GET /api/system/state-machine` → active graph (409 until setup completes). */
+  /**
+   * `GET /api/system/state-machine` → active graph (409 until setup completes).
+   * Authenticated (admin or caller-staff) — the caller panel reads this on boot
+   * to render its dynamic action buttons (FR-CLR-02); pre-setup it 409s via the
+   * use case's `SystemNotConfiguredException` regardless of auth.
+   */
   @Get('state-machine')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.CALLER_STAFF)
   async stateMachine() {
     return this.getActiveStateMachine.execute();
   }
