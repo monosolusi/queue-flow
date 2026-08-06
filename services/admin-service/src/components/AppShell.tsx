@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthContext } from '../auth/auth-context';
+import { NAV_GROUPS } from './nav-config';
 
 /**
  * The persistent app shell (admin-service modernization): a fixed left
@@ -26,6 +27,7 @@ function pageTitleFor(pathname: string): string {
   if (pathname.startsWith('/config')) return 'Konfigurasi Operasional';
   if (pathname.startsWith('/analytics')) return 'Analitik & Laporan';
   if (pathname.startsWith('/users')) return 'Pengguna';
+  if (pathname.startsWith('/audit')) return 'Log Audit';
   return '';
 }
 
@@ -160,18 +162,30 @@ export function AppShell({
       <aside className="app-shell__sidebar">
         <div className="app-shell__brand">{storeName || 'QMS Admin'}</div>
         <nav aria-label="Navigasi utama">
-          <NavLink to="/" end className={navLinkClass}>
-            Status Antrian
-          </NavLink>
-          <NavLink to="/config" className={navLinkClass}>
-            Konfigurasi
-          </NavLink>
-          <NavLink to="/analytics" className={navLinkClass}>
-            Analitik &amp; Laporan
-          </NavLink>
-          <NavLink to="/users" className={navLinkClass}>
-            Pengguna
-          </NavLink>
+          {NAV_GROUPS.map((group) => (
+            <div className="nav-group" key={group.label}>
+              {/* Non-heading label: an <h2>/<h3> here would invert the heading
+                  order before the routed page's <h1> (AC8) — same rule the topbar
+                  title follows. The visible label is a visual grouping cue only
+                  (aria-hidden) — the grouping semantic for SR users is carried by
+                  the role="group" + aria-label on the items cluster below (the
+                  CLAUDE.md ARIA rule: a labelled cluster is role="group" +
+                  aria-label, never a bare flat list). */}
+              <div className="nav-group__label" aria-hidden="true">
+                {group.label}
+              </div>
+              <div className="nav-group__items" role="group" aria-label={group.label}>
+                {group.items.map((item) => (
+                  <NavLink key={item.label} to={item.to} end={item.end} className={navLinkClass}>
+                    <span className="nav-icon" aria-hidden="true">
+                      {item.icon}
+                    </span>
+                    <span>{item.label}</span>
+                  </NavLink>
+                ))}
+              </div>
+            </div>
+          ))}
         </nav>
       </aside>
       <div className="app-shell__main">

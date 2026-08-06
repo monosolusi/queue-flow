@@ -44,17 +44,18 @@ function formatKey(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-/** Renders an opaque audit snapshot as a compact JSON string (or `—` when null). */
-function formatSnapshot(snap: AuditLogEntryDto['before']): string {
-  return snap === null ? '—' : JSON.stringify(snap);
-}
-
 /**
  * The historical analytics view (FR-ADM-03 / QUE-44) — distinct from
  * {@link DashboardPage} (live status). The manager picks a date **range** and
  * sees multi-day trends, range-aggregated per-category + per-counter
- * performance, and the audit trail, then exports the whole view to a local
- * `.xlsx` (SheetJS, fully offline — NFR-REL-01). Defaults to the last 7 days.
+ * performance, then exports the whole view to a local `.xlsx` (SheetJS, fully
+ * offline — NFR-REL-01). Defaults to the last 7 days.
+ *
+ * The audit trail of sensitive administrative actions used to be an in-page
+ * section here; QUE-45 promoted it to its own dedicated `/audit` route (the
+ * "Audit" group in the grouped left-menu, and the "Lihat log audit" link in the
+ * header, both navigate there). The trail is still bundled into the `.xlsx`
+ * export (the manager's whole-range snapshot) — only the in-page section moved.
  *
  * The page consumes only the read-side slice of {@link IAdminApi} (range report
  * + audit + config-to-enumerate-counters) and owns no realtime/WS surface (SRP
@@ -154,7 +155,7 @@ export function AnalyticsPage({
     );
   }
 
-  const { report, counters, audit } = state.data;
+  const { report, counters } = state.data;
 
   return (
     <div className="analytics">
@@ -255,40 +256,11 @@ export function AnalyticsPage({
         </table>
       </section>
 
-      <section className="config-card" aria-label="Audit trail">
-        <h2 className="config-card__title">Audit Trail</h2>
-        {audit.length === 0 ? (
-          <p className="analytics__empty">Belum ada entri audit.</p>
-        ) : (
-          // AC4 — the 5-column audit table overflows on narrow viewports; wrap it
-          // in a horizontal-scroll container (the per-category/counter tables
-          // stay unwrapped — they are narrow enough).
-          <div className="data-table-scroll">
-            <table className="data-table data-table--audit">
-              <thead>
-                <tr>
-                  <th>Waktu</th>
-                  <th>Aktor</th>
-                  <th>Aksi</th>
-                  <th>Sebelum</th>
-                  <th>Sesudah</th>
-                </tr>
-              </thead>
-              <tbody>
-                {audit.map((a) => (
-                  <tr key={a.id}>
-                    <td>{new Date(a.occurredAt).toLocaleString()}</td>
-                    <td>{a.actor}</td>
-                    <td>{a.action}</td>
-                    <td className="data-table__snapshot">{formatSnapshot(a.before)}</td>
-                    <td className="data-table__snapshot">{formatSnapshot(a.after)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+      {/* The audit trail moved to its own route (`/audit`, QUE-45) — the
+          grouped left-menu "Audit" group resolves there, and the "Lihat log
+          audit" link in the header navigates to it. The trail is still exported
+          in the `.xlsx` (handleExport passes state.data.audit) — only the
+          in-page section moved. */}
 
       <Link className="btn btn--secondary" to="/" data-testid="analytics-to-dashboard">
         Kembali ke Status Antrian
@@ -354,6 +326,11 @@ function AnalyticsHeader({
         >
           {exporting ? 'Mengekspor…' : 'Ekspor .xlsx'}
         </button>
+        {/* QUE-45 — the audit trail now lives on its own `/audit` route; this
+            link is the bridge from the analytics view to it. */}
+        <Link className="btn btn--secondary" to="/audit" data-testid="analytics-audit-link">
+          Lihat log audit
+        </Link>
       </div>
     </header>
   );

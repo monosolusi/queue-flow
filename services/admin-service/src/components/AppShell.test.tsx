@@ -32,12 +32,22 @@ describe('AppShell', () => {
     expect(screen.getByText('QMS Admin')).toBeInTheDocument();
   });
 
-  it('renders the four primary nav links', () => {
+  it('renders the five enabled nav links (grouped, task-oriented IA)', () => {
     renderShell('/');
     expect(screen.getByRole('link', { name: 'Status Antrian' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Konfigurasi' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Analitik & Laporan' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Pengguna' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Log Audit' })).toBeInTheDocument();
+    // Pengguna resolves to the real /users surface (QUE-43 landed AuthN/AuthZ +
+    // user management, absorbing the disabled placeholder this ticket originally
+    // shipped). It is a normal enabled NavLink now — no disabled machinery.
+    expect(screen.getByRole('link', { name: 'Pengguna' })).toHaveAttribute('href', '/users');
+    // Group headings render as non-heading labels. The "Pengguna" group label
+    // and its single item both read "Pengguna", so scope the group assertion to
+    // the .nav-group__label element to disambiguate.
+    expect(screen.getByText('Operasional')).toBeInTheDocument();
+    expect(screen.getByText('Konfigurasi Sistem')).toBeInTheDocument();
+    expect(screen.getByText('Pengguna', { selector: '.nav-group__label' })).toBeInTheDocument();
   });
 
   it('marks the active link with nav-link--active + aria-current', () => {
@@ -58,27 +68,85 @@ describe('AppShell', () => {
     expect(screen.getByRole('link', { name: 'Status Antrian' })).not.toHaveClass('nav-link--active');
   });
 
-  it('marks the Analitik link active on /analytics', () => {
+  it('marks the Analitik & Laporan link active on /analytics', () => {
     renderShell('/analytics');
     const analytics = screen.getByRole('link', { name: 'Analitik & Laporan' });
     expect(analytics).toHaveClass('nav-link--active');
     expect(analytics).toHaveAttribute('aria-current', 'page');
   });
 
+  it('marks the Log Audit link active on /audit', () => {
+    renderShell('/audit');
+    const audit = screen.getByRole('link', { name: 'Log Audit' });
+    expect(audit).toHaveClass('nav-link--active');
+    expect(audit).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('marks the Pengguna link active on /users (QUE-43 real user-management surface)', () => {
+    renderShell('/users');
+    const users = screen.getByRole('link', { name: 'Pengguna' });
+    expect(users).toHaveClass('nav-link--active');
+    expect(users).toHaveAttribute('aria-current', 'page');
+    // No "segera hadir" hint — Pengguna is a real enabled link now, not a
+    // disabled placeholder. The disabled-placeholder machinery was removed when
+    // QUE-43 (AuthN/AuthZ + /users) merged first and absorbed this ticket's
+    // planned placeholder (cross-branch overlap: defer to the canonical surface).
+    expect(screen.queryByText('segera hadir')).not.toBeInTheDocument();
+  });
+
+  it('every nav icon is decorative (aria-hidden, no role/label)', () => {
+    renderShell('/');
+    // Assert via the .nav-icon container — every svg is decorative: the
+    // adjacent nav label is the accessible name, so the icon carries no
+    // role/aria-label of its own (deliberately different from chart SVGs).
+    const svgs = document.querySelectorAll('.nav-icon svg');
+    expect(svgs.length).toBeGreaterThan(0);
+    svgs.forEach((svg) => {
+      expect(svg).toHaveAttribute('aria-hidden', 'true');
+      expect(svg).not.toHaveAttribute('role');
+      expect(svg).not.toHaveAttribute('aria-label');
+    });
+  });
+
+  it('exposes nav grouping semantics: each items cluster is role="group" + aria-label (M1)', () => {
+    renderShell('/');
+    // The visible group label is aria-hidden (a visual cue), so the grouping
+    // structure for SR users must come from role="group" + aria-label on the
+    // items cluster — otherwise the nav is a flat 5-link list with no grouping
+    // (CLAUDE.md ARIA rule: a labelled cluster is role="group" + aria-label).
+    const groups = screen.getAllByRole('group');
+    const labels = groups.map((g) => g.getAttribute('aria-label'));
+    expect(labels).toContain('Operasional');
+    expect(labels).toContain('Analitik');
+    expect(labels).toContain('Konfigurasi Sistem');
+    expect(labels).toContain('Audit');
+    expect(labels).toContain('Pengguna');
+    // The group label elements themselves stay visual-only.
+    document.querySelectorAll('.nav-group__label').forEach((el) => {
+      expect(el).toHaveAttribute('aria-hidden', 'true');
+    });
+  });
+
   it('derives the topbar page title from the pathname (non-heading span)', () => {
-    const r1 = renderShell('/');
     // The topbar title is a non-heading <span> (NOT an <h2>) — the routed page
     // owns the h1, so the shell chrome must not introduce a heading (an <h2>
-    // before the page <h1> is a heading-level inversion).
+    // before the page <h1> is a heading-level inversion). Each render's unmount
+    // is captured so the previous shell is removed before the next render
+    // (otherwise two topbar titles coexist and getByTestId is ambiguous).
+    let { unmount } = renderShell('/');
     const title = screen.getByTestId('app-shell-page-title');
     expect(title).toHaveTextContent('Status Antrian');
     expect(screen.queryByRole('heading', { level: 2 })).not.toBeInTheDocument();
-    r1.unmount();
-    const r2 = renderShell('/config');
+    unmount();
+    ({ unmount } = renderShell('/config'));
     expect(screen.getByTestId('app-shell-page-title')).toHaveTextContent('Konfigurasi Operasional');
-    r2.unmount();
-    renderShell('/analytics');
+    unmount();
+    ({ unmount } = renderShell('/analytics'));
     expect(screen.getByTestId('app-shell-page-title')).toHaveTextContent('Analitik & Laporan');
+    unmount();
+    ({ unmount } = renderShell('/audit'));
+    expect(screen.getByTestId('app-shell-page-title')).toHaveTextContent('Log Audit');
+    unmount();
   });
 
   it('bypasses the shell chrome on /wizard routes but keeps the <main> landmark (AC8)', () => {

@@ -74,3 +74,37 @@ export const USER_ROLE_DESCRIPTIONS: Record<UserRole, string> = {
   admin: 'Akses penuh: konfigurasi, pengguna, analitik, dan audit.',
   'caller-staff': 'Akses panel loket: melayani antrian dari counter yang ditugaskan.',
 };
+
+/**
+ * Friendly Bahasa Indonesia labels for the audit-trail `action` values. The
+ * `action` field on {@link import('../api/types').AuditLogEntryDto} is the
+ * serialized core-api `AuditAction` enum string (`MANUAL_RESET`,
+ * `STATE_SCHEMA_CHANGE`, …) — a raw backend enum that must never appear as
+ * display text (same QUE-34 / QUE-45 rule as the priority/reset maps above).
+ * Surfaced wherever an audit entry is rendered to a manager: the `Log Audit`
+ * page table (QUE-45) and the Dashboard "Aktivitas Terbaru" feed.
+ *
+ * The map is intentionally `Record<string, string>` (not `Record<AuditAction,
+ * string>`) — the client types `action` as a plain `string` so an unknown /
+ * future action degrades to the raw value via {@link labelForAuditAction}
+ * rather than crashing or silently blanking. Adding a new action label is
+ * additive and never breaks a wire value the client doesn't know about yet.
+ */
+export const AUDIT_ACTION_LABELS: Record<string, string> = {
+  MANUAL_RESET: 'Reset Antrian Manual',
+  ARCHIVE_PREVIOUS_DAY: 'Arsip Data Hari Sebelumnya',
+  STATE_SCHEMA_CHANGE: 'Ubah Alur Status',
+  ROUTING_CHANGE: 'Ubah Routing Counter',
+  DAILY_RESET_POLICY_CHANGE: 'Ubah Kebijakan Reset Harian',
+  TRANSACTION_LOG_CLEANUP: 'Bersihkan Log Transaksi',
+  SYSTEM_RESET: 'Reset Sistem Harian',
+};
+
+/**
+ * Friendly label for an audit `action` wire value, falling back to the raw
+ * string for an unknown/future action (safe degradation — never blanks). Use
+ * this at every audit-action render site so the raw enum never leaks.
+ */
+export function labelForAuditAction(action: string): string {
+  return AUDIT_ACTION_LABELS[action] ?? action;
+}

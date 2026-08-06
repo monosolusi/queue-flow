@@ -134,7 +134,7 @@ function renderPage(api: IAdminApi, exporter?: RangeReportExporter) {
 }
 
 describe('AnalyticsPage (range analytics — FR-ADM-03 / QUE-44)', () => {
-  it('loads the range report and renders metrics, per-category + counter tables, and the audit trail', async () => {
+  it('loads the range report and renders metrics, per-category + counter tables', async () => {
     const { api } = makeApi();
     renderPage(api);
 
@@ -152,8 +152,12 @@ describe('AnalyticsPage (range analytics — FR-ADM-03 / QUE-44)', () => {
     const perf = screen.getByRole('region', { name: 'Performa counter' });
     expect(within(perf).getByText('2')).toBeInTheDocument();
 
-    expect(screen.getByText('MANUAL_RESET')).toBeInTheDocument();
-    expect(screen.getByText('STATE_SCHEMA_CHANGE')).toBeInTheDocument();
+    // QUE-45 — the audit trail moved to `/audit`; the in-page audit section no
+    // longer renders. A "Lihat log audit" link bridges to the dedicated page,
+    // and the raw enum strings must NOT leak here anymore.
+    expect(screen.queryByText('MANUAL_RESET')).not.toBeInTheDocument();
+    expect(screen.queryByText('STATE_SCHEMA_CHANGE')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Lihat log audit' })).toHaveAttribute('href', '/audit');
   });
 
   it('renders the range trend chart with one bar per day', async () => {
@@ -179,9 +183,9 @@ describe('AnalyticsPage (range analytics — FR-ADM-03 / QUE-44)', () => {
     expect(screen.getByRole('region', { name: 'Per kategori' })).toHaveTextContent(
       'Tidak ada tiket pada rentang ini.',
     );
-    expect(screen.getByRole('region', { name: 'Audit trail' })).toHaveTextContent(
-      'Belum ada entri audit.',
-    );
+    // QUE-45 — the audit trail moved to `/audit`; the empty-range state no
+    // longer renders an in-page audit section.
+    expect(screen.queryByRole('region', { name: 'Audit trail' })).not.toBeInTheDocument();
   });
 
   it('surfaces an error and a back-to-dashboard link when the load fails', async () => {

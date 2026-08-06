@@ -575,6 +575,13 @@ fieldset {
 .analytics__empty {
   color: var(--text-muted);
 }
+/* Loading status on a read page (mirrors .dashboard__status). */
+.analytics__status {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 1.25rem;
+  margin: 0;
+}
 /* AC10 — de-cardified Ringkasan: section heading on the page surface (no nested
    config-card wrapper; metric tiles sit on the page surface). */
 .analytics__summary {
@@ -954,15 +961,57 @@ fieldset {
   color: var(--text-muted);
 }
 
-/* Primary navigation — NavLink renders aria-current="page" on the active link. */
+/* Primary navigation — NavLink renders aria-current="page" on the active link.
+   QUE-45 — the nav is grouped (Operasional / Analitik / Konfigurasi Sistem /
+   Audit / Pengguna) with a decorative icon slot per item. */
+.nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.nav-group + .nav-group {
+  margin-top: 0.75rem;
+}
+/* Non-heading label (an <h2>/<h3> here would invert the page <h1> — AC8).
+   aria-hidden: a visual grouping cue; the item labels are the a11y names. */
+.nav-group__label {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 0 0.75rem;
+  margin-bottom: 0.15rem;
+}
+.nav-group__items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
 .nav-link {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 2.75rem;
   padding: 0.6rem 0.75rem;
   border-radius: 8px;
   color: var(--text-muted);
   text-decoration: none;
   font-weight: 500;
   border-left: 3px solid transparent;
+}
+.nav-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: 0 0 auto;
+}
+.nav-icon svg {
+  width: 1.25rem;
+  height: 1.25rem;
+  display: block;
 }
 .nav-link:hover {
   background: var(--surface-2);
@@ -1229,6 +1278,23 @@ fieldset {
     flex-direction: row;
     gap: 0.3rem;
     flex: 1 1 auto;
+  }
+  /* QUE-45 — grouped nav collapses to a flat horizontal row: group labels and
+     the "segera hadir" hint drop (the row is too short for them), groups flow
+     inline, items stay reachable via horizontal scroll of the sidebar. */
+  .nav-group {
+    flex-direction: row;
+    gap: 0.3rem;
+  }
+  .nav-group + .nav-group {
+    margin-top: 0;
+  }
+  .nav-group__label {
+    display: none;
+  }
+  .nav-group__items {
+    flex-direction: row;
+    gap: 0.3rem;
   }
   .nav-link {
     white-space: nowrap;
