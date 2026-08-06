@@ -10,6 +10,7 @@ import { AuthProvider } from './auth/auth-context';
 import { RequireAuth } from './auth/RequireAuth';
 import { AdminPanel } from './pages/AdminPanel';
 import { AnalyticsPage } from './pages/AnalyticsPage';
+import { AuditLogPage } from './pages/AuditLogPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { LoginPage } from './pages/LoginPage';
 import { UsersPage } from './pages/UsersPage';
@@ -31,8 +32,11 @@ import { WizardPage } from './pages/WizardPage';
  *               the first-run path has no token yet; the wizard creates the
  *               initial admin via setup-admin then logs in).
  * `/analytics` — the **historical analytics** view (multi-day range trends,
- *               per-category/counter performance, audit trail, local `.xlsx`
- *               export) (FR-ADM-03 / QUE-44), authed + setup-complete.
+ *               per-category/counter performance, local `.xlsx` export)
+ *               (FR-ADM-03 / QUE-44), authed + setup-complete.
+ * `/audit`    — the dedicated audit-log page (QUE-45), reusing
+ *               `GET /api/audit/log`; the "Audit" group of the grouped left
+ *               nav (QUE-45) resolves here. Authed + setup-complete.
  *
  * The admin app is a config/wizard/analytics/dashboard tool. QUE-44 expands it
  * into a read-only **operational monitor** for the live dashboard: it REST-polls
@@ -128,6 +132,16 @@ export function App({ api }: { api?: IAdminAppApi } = {}) {
               <RequireAuth>
                 <SetupGuard api={adminApi}>
                   <UsersPage api={adminApi} />
+                </SetupGuard>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/audit"
+            element={
+              <RequireAuth>
+                <SetupGuard api={adminApi}>
+                  <AuditLogPage api={adminApi} />
                 </SetupGuard>
               </RequireAuth>
             }

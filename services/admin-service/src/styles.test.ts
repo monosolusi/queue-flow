@@ -24,6 +24,26 @@ function rule(sel: string): string {
   return m[1];
 }
 
+/** Extracts the body of a named at-rule block (e.g. `@media (max-width: 900px)`).
+ *  The block may contain nested `{}` (CSS rules), so match balanced braces. */
+function atRuleBlock(prelude: string): string {
+  const escaped = prelude.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const start = css.search(new RegExp(`${escaped}\\s*\\{`));
+  if (start === -1) throw new Error(`at-rule not found: ${prelude}`);
+  let depth = 0;
+  let bodyStart = -1;
+  for (let i = start; i < css.length; i++) {
+    if (css[i] === '{') {
+      if (depth === 0) bodyStart = i + 1;
+      depth++;
+    } else if (css[i] === '}') {
+      depth--;
+      if (depth === 0) return css.slice(bodyStart, i);
+    }
+  }
+  throw new Error(`unbalanced braces in at-rule: ${prelude}`);
+}
+
 describe('styles.css AC guards', () => {
   it('wizard hint inside .field resets margin-top so it does not overlap the input above', () => {
     expect(rule('.field .wizard__hint')).toContain('margin-top: 0');
@@ -68,5 +88,32 @@ describe('styles.css AC guards', () => {
     expect(sr).toContain('clip: rect(0, 0, 0, 0)');
     expect(sr).toContain('position: absolute');
     expect(sr).toContain('width: 1px');
+  });
+
+  it('QUE-45 — grouped nav: .nav-group and .nav-group__label rules exist', () => {
+    expect(rule('.nav-group')).toContain('flex-direction: column');
+    expect(rule('.nav-group__label')).toContain('text-transform: uppercase');
+  });
+
+  it('QUE-45 — .nav-link is a flex row with a ≥44px touch target (AC5)', () => {
+    expect(rule('.nav-link')).toContain('display: flex');
+    expect(rule('.nav-link')).toContain('min-height: 2.75rem');
+  });
+
+  it('QUE-45 — nav icon slot sizes the inline svg', () => {
+    expect(rule('.nav-icon')).toContain('display: inline-flex');
+    expect(rule('.nav-icon svg')).toContain('width: 1.25rem');
+  });
+
+  it('QUE-45 — responsive ≤900px collapses grouped nav: labels hidden, groups inline', () => {
+    const media = atRuleBlock('@media (max-width: 900px)');
+    // Group labels drop in the horizontal row (the row is too short for them).
+    const labelMatch = media.match(/\.nav-group__label\s*\{([^}]*)\}/);
+    expect(labelMatch).not.toBeNull();
+    expect(labelMatch![1]).toContain('display: none');
+    // Groups flow inline.
+    const groupMatch = media.match(/\.nav-group\s*\{([^}]*)\}/);
+    expect(groupMatch).not.toBeNull();
+    expect(groupMatch![1]).toContain('flex-direction: row');
   });
 });
