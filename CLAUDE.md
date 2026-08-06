@@ -876,6 +876,25 @@ numeric `Counter {id}`).
   SRP/ISP). It is wired via `useFactory` injecting the `QUEUE_REPOSITORY`
   singleton + `CATEGORY_REPOSITORY`. The Postgres read side needs no such seam
   (it queries the tables directly via `withDbClient`).
+- **Read-side DTO: backend-include a denormalized name when the read model
+  already JOINs the entity, client-side join only when it doesn't (QUE-46/QUE-49):**
+  the report `CategoryBreakdown` carries `categoryName` (and `code`) denormalized
+  into the DTO by the backend — the Postgres impl already `JOIN categories` and
+  `GROUP BY c.name` for the per-category aggregation, and the in-memory impl
+  already has `ICategoryRepository.getAll()` access, so the name is a free
+  byproduct of a JOIN the read model performs anyway. The DTO stays
+  **self-contained** — a consumer (admin Analitik table, `.xlsx` export) renders
+  the name with no second fetch and no client-side id→name map. This is distinct
+  from `perCounter`, whose `counterNameById` is a **client-side join** via a
+  separate `GET /api/counters` — the range report does not JOIN `counters`, so
+  the counter name is not a free byproduct and is joined at the consumer.
+  **General rule — for a read-side DTO that needs a human-readable name from an
+  entity the read model already JOINs for aggregation, include the name
+  (denormalized) in the DTO; reserve a client-side name-map join for names from
+  an entity the read model does not touch.** Keeps the read model
+  anti-corruption-clean (the reporting context depends on the `IReportQueryPort`
+  only — it carries a primitive `string`, never a reference to the Queue
+  `Category` aggregate) and the DTO self-contained.
 - **Acceptance-test timing gotcha:** in-process supertest calls are
   sub-millisecond, so `completedAt === servedAt` and the service-time delta
   rounds to 0. Insert real `setTimeout` sleeps (`await sleep(2)`, jest real
@@ -921,6 +940,30 @@ numeric `Counter {id}`).
   collapses to a one-line summary (a 90-entry label is a wall of text for AT)
   and the per-bar `<title>` stays the granular channel; sparse date ticks
   (`Math.ceil(n/12)`) keep axis labels from overlapping.
+- **Per-category breakdown chart — horizontal layout is the structural
+  non-overlap fix (QUE-46/QUE-48):** `CategoryBreakdownChart` (admin-service,
+  mirroring the `RangeTrendChart`/`RoutingGraph` hand-rolled-offline-SVG
+  precedent) renders one **horizontal** bar per category fed by
+  `RangeReportDto.perCategory` — category **names** on the Y-axis (right-aligned
+  text, one row per category), bar extending rightward, value label at the bar
+  end. A vertical bar chart with per-category labels collides when there are
+  many categories or long names (the failing mode of the deleted `RecapCharts`,
+  QUE-48); the horizontal layout gives each name its own line so labels
+  **structurally never overlap** — no rotation, no wrapping, no collision,
+  regardless of count or name length. Names longer than the label column
+  truncate with `…` and the full name lives in the per-row `<title>` (the
+  granular a11y/tooltip channel — no data lost). Single-series magnitude → one
+  `--accent` hue; text never wears the data color (`--text`/`--text-muted`).
+  **General rule — for a categorical breakdown chart, prefer a horizontal bar
+  layout (one row per category) over vertical bars; it structurally prevents
+  the label-overlap failure mode** that vertical per-category charts hit under
+  wide names or many categories. The SVG `aria-label` enumerates per-category
+  values when there are few and **collapses to a one-line summary for >8
+  categories** (a long aria-label is a wall of text for AT; the per-row
+  `<title>` stays granular) — the same collapse principle as `RangeTrendChart`'s
+  >12-day threshold, tuned to the category-count domain. Returns `null` on
+  empty (defensive backstop; the page guard short-circuits first). Pure
+  presentational, fed by the page's `perCategory` slice (ISP/SRP).
 - **Range report read side (QUE-44, FR-ADM-03):** `GET /api/reports/range?from=&to=`
   (`ReportingController`, `api/reports`) is backed by `GetRangeReportUseCase`,
   which injects only `IReportQueryPort` (DIP) and returns a `RangeReportDto` or
@@ -1391,6 +1434,17 @@ core-api — not a separate project — to reuse its jest config + ts-jest +
   reset by re-spying in `beforeEach` (the jest config has no
   `restoreMocks`). Add `afterEach(() => jest.restoreAllMocks())` whenever a
   spec asserts call counts.
+- **`vi.hoisted` shared mutable accumulator must be reset per test:** a
+  `vi.hoisted(() => { const arr: unknown[][] = []; return { calls: () => arr, push: (r) => arr.push(r) } })`
+  holder is a single module-level closure **shared across every test in the
+  file** — it accumulates across tests and is NOT reset by re-running. If a test
+  asserts on the captured contents (e.g. a mocked `aoa_to_sheet`/`writeFile`
+  recording its args), reset it in `beforeEach(() => { calls().length = 0 })`
+  so the test sees only its own calls. Mirrors the jest spy-accumulation rule
+  above; hit in `export-range-report.test.ts` where a hoisted `aoaCalls` array
+  recorded SheetJS `aoa_to_sheet` rows across all three tests and the third
+  test's `aoaCalls()[2]` pointed into test #2's calls (empty-range category
+  sheet had no data row → `undefined`).
 
 ## Linear integration
 
