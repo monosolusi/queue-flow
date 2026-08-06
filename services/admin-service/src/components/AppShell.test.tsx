@@ -34,20 +34,20 @@ describe('AppShell', () => {
 
   it('renders the four primary nav links', () => {
     renderShell('/');
-    expect(screen.getByRole('link', { name: 'Dashboard' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Status Antrian' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Konfigurasi' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Analitik' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Analitik & Laporan' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Pengguna' })).toBeInTheDocument();
   });
 
   it('marks the active link with nav-link--active + aria-current', () => {
     renderShell('/');
-    const dashboard = screen.getByRole('link', { name: 'Dashboard' });
+    const dashboard = screen.getByRole('link', { name: 'Status Antrian' });
     expect(dashboard).toHaveClass('nav-link--active');
     expect(dashboard).toHaveAttribute('aria-current', 'page');
     // The other links are not active.
     expect(screen.getByRole('link', { name: 'Konfigurasi' })).not.toHaveClass('nav-link--active');
-    expect(screen.getByRole('link', { name: 'Analitik' })).not.toHaveClass('nav-link--active');
+    expect(screen.getByRole('link', { name: 'Analitik & Laporan' })).not.toHaveClass('nav-link--active');
   });
 
   it('marks the Konfigurasi link active on /config', () => {
@@ -55,27 +55,30 @@ describe('AppShell', () => {
     const config = screen.getByRole('link', { name: 'Konfigurasi' });
     expect(config).toHaveClass('nav-link--active');
     expect(config).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('link', { name: 'Dashboard' })).not.toHaveClass('nav-link--active');
+    expect(screen.getByRole('link', { name: 'Status Antrian' })).not.toHaveClass('nav-link--active');
   });
 
   it('marks the Analitik link active on /analytics', () => {
     renderShell('/analytics');
-    const analytics = screen.getByRole('link', { name: 'Analitik' });
+    const analytics = screen.getByRole('link', { name: 'Analitik & Laporan' });
     expect(analytics).toHaveClass('nav-link--active');
     expect(analytics).toHaveAttribute('aria-current', 'page');
   });
 
   it('derives the topbar page title from the pathname (non-heading span)', () => {
-    const { unmount } = renderShell('/');
+    const r1 = renderShell('/');
     // The topbar title is a non-heading <span> (NOT an <h2>) — the routed page
     // owns the h1, so the shell chrome must not introduce a heading (an <h2>
     // before the page <h1> is a heading-level inversion).
     const title = screen.getByTestId('app-shell-page-title');
-    expect(title).toHaveTextContent('Dashboard');
+    expect(title).toHaveTextContent('Status Antrian');
     expect(screen.queryByRole('heading', { level: 2 })).not.toBeInTheDocument();
-    unmount();
-    renderShell('/config');
+    r1.unmount();
+    const r2 = renderShell('/config');
     expect(screen.getByTestId('app-shell-page-title')).toHaveTextContent('Konfigurasi Operasional');
+    r2.unmount();
+    renderShell('/analytics');
+    expect(screen.getByTestId('app-shell-page-title')).toHaveTextContent('Analitik & Laporan');
   });
 
   it('bypasses the shell chrome on /wizard routes but keeps the <main> landmark (AC8)', () => {

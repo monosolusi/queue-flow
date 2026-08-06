@@ -22,9 +22,9 @@ import { useAuthContext } from '../auth/auth-context';
 
 /** Page title by pathname prefix (drives the topbar heading). */
 function pageTitleFor(pathname: string): string {
-  if (pathname === '/' || pathname === '') return 'Dashboard';
+  if (pathname === '/' || pathname === '') return 'Status Antrian';
   if (pathname.startsWith('/config')) return 'Konfigurasi Operasional';
-  if (pathname.startsWith('/analytics')) return 'Analitik Harian';
+  if (pathname.startsWith('/analytics')) return 'Analitik & Laporan';
   if (pathname.startsWith('/users')) return 'Pengguna';
   return '';
 }
@@ -161,13 +161,13 @@ export function AppShell({
         <div className="app-shell__brand">{storeName || 'QMS Admin'}</div>
         <nav aria-label="Navigasi utama">
           <NavLink to="/" end className={navLinkClass}>
-            Dashboard
+            Status Antrian
           </NavLink>
           <NavLink to="/config" className={navLinkClass}>
             Konfigurasi
           </NavLink>
           <NavLink to="/analytics" className={navLinkClass}>
-            Analitik
+            Analitik &amp; Laporan
           </NavLink>
           <NavLink to="/users" className={navLinkClass}>
             Pengguna

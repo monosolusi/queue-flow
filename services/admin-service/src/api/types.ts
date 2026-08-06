@@ -185,6 +185,95 @@ export interface CounterPerformanceDto {
   readonly avgServiceTimeMs: number;
 }
 
+// --- Range analytics read surface (FR-ADM-03 / QUE-44) -----------------------
+
+/**
+ * One day's aggregate within a {@link RangeReportDto}. Mirrors core-api's
+ * `DailyPointDto`. Days with no tickets surface as zero-point rows so the trend
+ * chart renders a continuous axis.
+ */
+export interface DailyPointDto {
+  readonly date: string;
+  readonly totalTickets: number;
+  readonly avgWaitTimeMs: number;
+  readonly avgServiceTimeMs: number;
+  readonly ticketsServed: number;
+}
+
+/** One counter's aggregate over a range. Mirrors core-api's `CounterRangeBreakdownDto`. */
+export interface CounterRangeBreakdownDto {
+  readonly counterId: number;
+  readonly ticketsServed: number;
+  readonly avgServiceTimeMs: number;
+}
+
+/**
+ * Range queue analytics report from `GET /api/reports/range?from=&to=`. Mirrors
+ * core-api's `RangeReportDto`. Range totals + a per-day series (for trend
+ * visualization) + per-category and per-counter aggregates over the range. The
+ * controller returns a zero-shape (with a per-day zero series) when no tickets
+ * exist in the range, so this DTO is never null over the wire.
+ */
+export interface RangeReportDto {
+  readonly from: string;
+  readonly to: string;
+  readonly totalTickets: number;
+  readonly avgWaitTimeMs: number;
+  readonly avgServiceTimeMs: number;
+  readonly perDay: readonly DailyPointDto[];
+  readonly perCategory: readonly CategoryBreakdownDto[];
+  readonly perCounter: readonly CounterRangeBreakdownDto[];
+}
+
+// --- Live queue state read surface (FR-ADM-03 / QUE-44 Dashboard) ------------
+
+/**
+ * Transport-agnostic projection of a live queue ticket. Mirrors core-api's
+ * `TicketStateDto` (`application/queue/ticket-state.dto`). `counterId` is null
+ * for a WAITING ticket (not yet called to a counter).
+ */
+export interface TicketStateDto {
+  readonly ticketId: string;
+  readonly ticketNumber: string;
+  readonly categoryId: string;
+  readonly status: string;
+  readonly counterId: number | null;
+}
+
+/**
+ * Live queue board state from `GET /api/queue/board`. Mirrors core-api's
+ * `TvBoardStateDto` (the `Tv` prefix is historical on the backend; the admin
+ * dashboard consumes the same read for its live operational status). `active`
+ * is every CALLING/SERVING ticket across all counters, oldest-updated first —
+ * the last entry is the most-recently-touched (the now-serving ticket).
+ */
+export interface QueueBoardStateDto {
+  readonly active: readonly TicketStateDto[];
+  readonly waiting: readonly TicketStateDto[];
+  readonly waitingCount: number;
+}
+
+/**
+ * A category assigned to a counter. Mirrors core-api's `AssignedCategoryDto`.
+ */
+export interface AssignedCategoryDto {
+  readonly id: string;
+  readonly code: string;
+  readonly name: string;
+}
+
+/**
+ * A configured counter from `GET /api/counters`. Mirrors core-api's
+ * `CounterDto` (`application/store-config/list-counters.use-case`). Used by the
+ * dashboard to label the counter-status list.
+ */
+export interface CounterDto {
+  readonly counterId: number;
+  readonly counterName: string;
+  readonly assignedCategories: readonly AssignedCategoryDto[];
+  readonly priorityPolicy: PriorityPolicy;
+}
+
 /**
  * Opaque before/after snapshot recorded with an audit entry (an arbitrary JSON
  * object on the server). Mirrors core-api's `AuditSnapshot`

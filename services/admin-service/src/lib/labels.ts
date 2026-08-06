@@ -41,6 +41,19 @@ export const DAILY_RESET_MODE_LABELS: Record<DailyResetMode, string> = {
 };
 
 /**
+ * Friendly Bahasa Indonesia labels for a counter's live operational status on
+ * the dashboard (QUE-44). `active` = a CALLING/SERVING ticket is at the counter
+ * ("Sedang melayani"); `idle` = the counter has no active ticket ("Siap"). The
+ * status is derived client-side from the live board, never sent to the backend
+ * (display only). No internal status names (CALLING/SERVING) leak into the
+ * label — mirroring the QUE-34 rule.
+ */
+export const COUNTER_STATUS_LABELS: Record<'active' | 'idle', string> = {
+  active: 'Sedang melayani',
+  idle: 'Siap',
+};
+
+/**
  * Friendly Bahasa Indonesia labels for the {@link UserRole} enum (QUE-43). The
  * enum stays as the wire `value=` (`POST /api/users` sends `admin` /
  * `caller-staff`, never the friendly text); these maps keep the human label

@@ -1,0 +1,64 @@
+import { describe, expect, it } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { RangeTrendChart } from './RangeTrendChart';
+import type { DailyPointDto } from '../api/types';
+
+function day(date: string, total: number): DailyPointDto {
+  return { date, totalTickets: total, avgWaitTimeMs: 0, avgServiceTimeMs: 0, ticketsServed: 0 };
+}
+
+describe('RangeTrendChart (QUE-44)', () => {
+  it('renders one bar per day with a per-bar testid + an accessible summary', () => {
+    render(
+      <RangeTrendChart
+        perDay={[day('2026-08-01', 3), day('2026-08-02', 5), day('2026-08-03', 0)]}
+      />,
+    );
+    expect(screen.getByTestId('range-trend-chart')).toBeInTheDocument();
+    expect(screen.getByTestId('range-trend-bar-0')).toBeInTheDocument();
+    expect(screen.getByTestId('range-trend-bar-1')).toBeInTheDocument();
+    expect(screen.getByTestId('range-trend-bar-2')).toBeInTheDocument();
+    expect(
+      screen.getByRole('img', {
+        name: /Total pengunjung per hari: 2026-08-01: 3, 2026-08-02: 5, 2026-08-03: 0/,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it('each bar carries a <title> with the date + count (hover/a11y channel)', () => {
+    render(<RangeTrendChart perDay={[day('2026-08-01', 4)]} />);
+    const bar = screen.getByTestId('range-trend-bar-0');
+    expect(bar.querySelector('title')?.textContent).toBe('2026-08-01: 4 pengunjung');
+  });
+
+  it('renders value labels above bars when there are <= 10 days', () => {
+    const { container } = render(
+      <RangeTrendChart perDay={[day('2026-08-01', 7), day('2026-08-02', 2)]} />,
+    );
+    // Value labels are <text> with class range-trend__value.
+    const valueLabels = container.querySelectorAll('.range-trend__value');
+    expect(valueLabels.length).toBe(2);
+    expect(valueLabels[0].textContent).toBe('7');
+  });
+
+  it('omits value labels for long ranges (> 10 days) to avoid collision', () => {
+    const perDay = Array.from({ length: 14 }, (_, i) => day(`2026-08-${String(i + 1).padStart(2, '0')}`, i + 1));
+    const { container } = render(<RangeTrendChart perDay={perDay} />);
+    expect(container.querySelectorAll('.range-trend__value').length).toBe(0);
+  });
+
+  it('renders nothing when the per-day series is empty', () => {
+    const { container } = render(<RangeTrendChart perDay={[]} />);
+    expect(container.firstChild).toBeNull();
+    expect(screen.queryByTestId('range-trend-chart')).not.toBeInTheDocument();
+  });
+
+  it('sparsifies date tick labels for long ranges so they never overlap', () => {
+    const perDay = Array.from({ length: 20 }, (_, i) => day(`2026-08-${String(i + 1).padStart(2, '0')}`, 1));
+    const { container } = render(<RangeTrendChart perDay={perDay} />);
+    const dateLabels = container.querySelectorAll('.range-trend__date');
+    // 20 days / step=ceil(20/12)=2 → ~10 labels, strictly fewer than 20.
+    expect(dateLabels.length).toBeLessThan(20);
+    expect(dateLabels.length).toBeGreaterThan(0);
+  });
+});

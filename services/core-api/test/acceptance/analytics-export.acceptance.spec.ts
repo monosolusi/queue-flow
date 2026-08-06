@@ -213,4 +213,42 @@ describe('DoD-5 — Daily analytics & local export (FR-ADM-03 / QUE-26)', () => 
       .expect(200);
     expect(res.body.totalTickets).toBe(1);
   });
+
+  it('range report agrees with the daily report for a single day and rejects an over-90-day span (QUE-44)', async () => {
+    await seed();
+    await createAndComplete(catAId, 1);
+    await createAndComplete(catAId, 1);
+    await createAndComplete(catBId, 2);
+
+    // A same-day range (from == to == today) must match the daily totals.
+    const daily = await http(booted.app)
+      .get(`/api/reports/daily?date=${today}`)
+      .set(authHeader(token))
+      .expect(200);
+    const range = await http(booted.app)
+      .get(`/api/reports/range?from=${today}&to=${today}`)
+      .set(authHeader(token))
+      .expect(200);
+
+    expect(range.body.totalTickets).toBe(daily.body.totalTickets);
+    expect(range.body.avgWaitTimeMs).toBe(daily.body.avgWaitTimeMs);
+    expect(range.body.avgServiceTimeMs).toBe(daily.body.avgServiceTimeMs);
+    expect(range.body.perDay).toHaveLength(1);
+    expect(range.body.perDay[0].totalTickets).toBe(daily.body.totalTickets);
+    // Per-category over the range matches the daily per-category totals.
+    const rangeByCode = new Map(
+      (range.body.perCategory as Array<{ code: string; totalTickets: number }>).map((c) => [
+        c.code,
+        c.totalTickets,
+      ]),
+    );
+    expect(rangeByCode.get('A')).toBe(2);
+    expect(rangeByCode.get('B')).toBe(1);
+
+    // A span over 90 days is rejected at the use case (→ 400).
+    await http(booted.app)
+      .get('/api/reports/range?from=2026-01-01&to=2026-04-01')
+      .set(authHeader(token))
+      .expect(400);
+  });
 });

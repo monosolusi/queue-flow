@@ -56,7 +56,7 @@ docker compose up -d
 | `kiosk-service` | React / Next.js / Vue | 3001 | `/kiosk` | Visitor touchscreen ticket UI + silent thermal printing |
 | `tv-display-service` | React / HTML5 Audio API | 3002 | `/tv` | TV queue board + offline audio synthesizer |
 | `caller-service` | React / Web PWA | 3003 | `/caller` | Counter staff panel, dynamic action buttons from state machine |
-| `admin-service` | React / Next.js | 3004 | `/admin`, `/wizard` | Manager control panel, setup wizard, analytics, master data |
+| `admin-service` | React / Next.js | 3004 | `/admin`, `/wizard` | Manager control panel, setup wizard, analytics, master data, live operational status (Dashboard) |
 | `db-service` | PostgreSQL 15 / SQLite | 5432 | internal only | Queue transactions, system config, audit trail |
 
 ### Clean Architecture (in `core-api-service`)
@@ -221,6 +221,13 @@ throughout (frontends are React-family TS). Backend stack for
 Node.js/NestJS vs Go open). The Domain layer (`src/domain/**`) is pure
 TypeScript with zero framework/ORM/IO imports; the Clean Architecture layering
 rules apply identically.
+
+**No workspace manager** — each service owns its own `package.json` + install,
+and `node_modules` is gitignored, so a **fresh git worktree needs a per-service
+`npm install`** for every service the root `npm run verify` gate touches
+(`core-api`, `admin-service`, `tv-display-service`, `caller-service`,
+`kiosk-service`) before the gate can run; only the service you previously
+worked in will have deps.
 
 `core-api` internal layout: `src/domain` (pure, framework-free entities/VOs/
 aggregates/events/ports), `src/application` (use cases), `src/infrastructure`
@@ -904,13 +911,47 @@ numeric `Counter {id}`).
 - **Hand-roll small visualizations from the DTO the page already loads rather
   than vendoring a chart library** (Recharts/d3 would bloat the bundle for a
   2–3-bar chart and would need offline vetting, NFR-REL-01) — mirroring the
-  audio-sequencer minimal-dependency precedent. `RecapCharts` renders three
-  hand-rolled offline SVG bar charts (one per metric, one bar per category) fed
-  by the existing `DailyReportDto.perCategory` slice. Single-series magnitude →
-  one accent hue (`--accent`) for all bars, length encodes value, category code
-  labels it; text never wears the data color (labels in `--text`/`--text-muted`);
-  per-bar `<title>` is the hover/a11y channel; the sibling Per Kategori table is
-  the always-available table view.
+  audio-sequencer minimal-dependency precedent. `RangeTrendChart` (QUE-44,
+  mirroring the `RoutingGraph` hand-rolled-SVG precedent) renders one vertical
+  bar per day fed by `RangeReportDto.perDay`. Single-series magnitude → one
+  accent hue (`--accent`) for all bars, length encodes value, date labels it;
+  text never wears the data color (labels in `--text`/`--text-muted`); per-bar
+  `<title>` is the hover/a11y channel; the sibling Per Kategori table is the
+  always-available table view. For long ranges (>12 days) the SVG `aria-label`
+  collapses to a one-line summary (a 90-entry label is a wall of text for AT)
+  and the per-bar `<title>` stays the granular channel; sparse date ticks
+  (`Math.ceil(n/12)`) keep axis labels from overlapping.
+- **Range report read side (QUE-44, FR-ADM-03):** `GET /api/reports/range?from=&to=`
+  (`ReportingController`, `api/reports`) is backed by `GetRangeReportUseCase`,
+  which injects only `IReportQueryPort` (DIP) and returns a `RangeReportDto` or
+  an empty shape (zero totals + a zero per-day series for every day in
+  `[from..to]` so the trend axis renders on an empty range). The 90-day
+  `MAX_RANGE_DAYS` cap is a **use-case-level `InvalidArgumentException`**
+  thrown **before any SQL** (NFR-REL-02 pattern — distinct from
+  `InvalidValueObjectException`); the use-case also rejects `from > to` and
+  malformed `YYYY-MM-DD` before touching the port. The per-day date key is
+  derived in TS via `toDateKey` (`application/shared/date`), NOT SQL `to_char`
+  (TZ-agnostic, single on-premise box, NFR-SEC-01). The Postgres impl uses a
+  recursive day-window CTE bounded by `toEnd` + the 90-day cap so it can't run
+  away; the in-memory impl groups via `toDateKey` and emits zero-point rows for
+  empty days. `RangeQueueReport` is a pure-domain read model (NFR-MNT-01). The
+  range `.xlsx` export extends SheetJS to 5 sheets (Ringkasan, Per Hari, Per
+  Kategori, Performa Counter, Audit Trail) and stays in its own lazy Vite chunk.
+- **admin-service Dashboard vs Analitik split (QUE-44):** the two `/admin` views
+  are non-overlapping. **Dashboard** (`/`) is a **live operational monitor** —
+  now-serving card, waiting counts per category, per-counter active/idle status
+  — refreshed by a REST poll every 8 s of `GET /api/queue/board` +
+  `GET /api/counters` (**no WebSocket** — admin stays a read-only REST consumer;
+  SRP/ISP), with a `visibilitychange` pause/resume, a stale-result guard, and a
+  manual "Muat Ulang". **Analitik** (`/analytics`) is the **historical** view —
+  date range (default last 7 days), range-totals KPIs, `RangeTrendChart`,
+  range-aggregated per-category + counter tables, the audit trail, and the
+  range `.xlsx` export. Each widget lives on exactly one view. The SRP expansion
+  (config/wizard/analytics tool → read-only operational monitor, still no WS) is
+  documented in `App.tsx` + `test/setup.ts` comments to pre-empt the
+  arch-reviewer; the poll machinery lives in one `usePoll` hook (SRP) so the
+  page is a thin view over `{ data, error, loading, refresh, lastUpdated }`.
+  Sidebar labels: "Status Antrian" / "Konfigurasi" / "Analitik & Laporan".
 
 ### REST surface separation
 
@@ -1101,6 +1142,12 @@ config, proxied to `core-api:3000` by Vite in dev).
   an "update not wrapped in act" warning when the unresolved promise settles
   after the test body — stub the mount-fetch to `new Promise(() => {})` (never
   resolves).
+- **RTL: capture each render's `unmount` separately when re-rendering in one
+  test.** A `const { unmount } = render(x)` reused across a later
+  `render(y)` is a stale binding — calling it again is a no-op on the already
+  unmounted tree, so the second render's DOM is never torn down and the next
+  `getByTestId` throws "Found multiple elements". Destructure `unmount` from
+  each `render(...)` call and call that instance.
 - **Static CSS guards + both-mounted overlays under `css: false`.** jsdom
   (`css: false` in every frontend vitest config) does NOT apply stylesheets,
   so computed visibility/opacity/contrast are not testable. Two patterns:
@@ -1121,7 +1168,10 @@ config, proxied to `core-api:3000` by Vite in dev).
   `toBeVisible()` (css:false doesn't compute visibility). When the hidden
   layer retains content, scope text queries to `within(visibleLayer)` — a
   global `queryByText('A-005').not.toBeInTheDocument()` fails because the
-  hidden layer still renders the retained item in the DOM.
+  hidden layer still renders the retained item in the DOM. **`@media` regex
+  anchor:** when regex-asserting an `@media (prefers-reduced-motion: reduce)`
+  block, anchor `reduce\)\s*\{` — the `@media` parenthetical `)` sits between
+  the keyword and the block brace, so `reduce\s*\{` silently never matches.
 - **ARIA: a labelled cluster of immediate-action buttons is `role="group"` +
   `aria-label`, never `role="option"`.** `role="option"` implies a `listbox`
   parent + `aria-selected` semantics; it is wrong for buttons that fire a

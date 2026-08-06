@@ -4,6 +4,7 @@ import { AUDIT_LOG_REPOSITORY } from '../../domain/audit';
 import {
   GetCounterPerformanceUseCase,
   GetDailyReportUseCase,
+  GetRangeReportUseCase,
 } from '../../application/reporting';
 import { ListAuditEntriesUseCase } from '../../application/audit';
 import { PersistenceModule } from '../../infrastructure/persistence/persistence.module';
@@ -37,6 +38,11 @@ import { AuditLogController } from './audit-log.controller';
       provide: GetCounterPerformanceUseCase,
       inject: [REPORT_QUERY_PORT],
       useFactory: (reportQuery) => new GetCounterPerformanceUseCase(reportQuery),
+    },
+    {
+      provide: GetRangeReportUseCase,
+      inject: [REPORT_QUERY_PORT],
+      useFactory: (reportQuery) => new GetRangeReportUseCase(reportQuery),
     },
     {
       provide: ListAuditEntriesUseCase,
