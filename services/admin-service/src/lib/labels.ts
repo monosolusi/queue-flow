@@ -39,3 +39,16 @@ export const DAILY_RESET_MODE_LABELS: Record<DailyResetMode, string> = {
   AUTOMATIC_CRON: 'Otomatis setiap hari',
   MANUAL: 'Manual (tombol reset)',
 };
+
+/**
+ * Friendly Bahasa Indonesia labels for a counter's live operational status on
+ * the dashboard (QUE-44). `active` = a CALLING/SERVING ticket is at the counter
+ * ("Sedang melayani"); `idle` = the counter has no active ticket ("Siap"). The
+ * status is derived client-side from the live board, never sent to the backend
+ * (display only). No internal status names (CALLING/SERVING) leak into the
+ * label — mirroring the QUE-34 rule.
+ */
+export const COUNTER_STATUS_LABELS: Record<'active' | 'idle', string> = {
+  active: 'Sedang melayani',
+  idle: 'Siap',
+};

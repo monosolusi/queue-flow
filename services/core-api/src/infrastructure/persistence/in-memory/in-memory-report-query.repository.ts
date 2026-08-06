@@ -1,8 +1,17 @@
 import { Identifier } from '../../../domain/shared/identifier';
 import type { ICategoryRepository } from '../../../domain/queue';
-import { CounterPerformance, DailyQueueReport } from '../../../domain/reporting';
-import type { CategoryBreakdown, IReportQueryPort } from '../../../domain/reporting';
-import { startOfLocalDayFromKey } from '../../../application/shared/date';
+import {
+  CounterPerformance,
+  DailyQueueReport,
+  RangeQueueReport,
+} from '../../../domain/reporting';
+import type {
+  CategoryBreakdown,
+  CounterRangeBreakdown,
+  DailyPoint,
+  IReportQueryPort,
+} from '../../../domain/reporting';
+import { startOfLocalDayFromKey, toDateKey } from '../../../application/shared/date';
 import { InMemoryQueueRepository } from './in-memory-queue.repository';
 
 /** The subset of a ticket the metrics computation reads (keeps the helper typed). */
@@ -87,6 +96,81 @@ export class InMemoryReportQueryRepository implements IReportQueryPort {
       date,
       served.length,
       avgMs(services),
+    );
+  }
+
+  async rangeReport(from: string, to: string): Promise<RangeQueueReport | null> {
+    const fromStart = startOfLocalDayFromKey(from);
+    const toEnd = startOfLocalDayFromKey(to) + MS_PER_DAY;
+    const inRange = [...this.queue.allActive(), ...this.queue.archivedTickets()].filter(
+      (t) => t.createdAt >= fromStart && t.createdAt < toEnd,
+    );
+    if (inRange.length === 0) return null;
+
+    // Per-day series — emit a zero-point row for every day in the range so the
+    // trend visualization renders a continuous axis (an empty day is still a
+    // day in the range, not a gap).
+    const perDay: DailyPoint[] = [];
+    for (let dayStart = fromStart; dayStart < toEnd; dayStart += MS_PER_DAY) {
+      const dayEnd = dayStart + MS_PER_DAY;
+      const inDay = inRange.filter((t) => t.createdAt >= dayStart && t.createdAt < dayEnd);
+      const waits = inDay
+        .filter((t) => t.calledAt !== null)
+        .map((t) => t.calledAt! - t.createdAt);
+      const services = inDay
+        .filter((t) => t.servedAt !== null && t.completedAt !== null)
+        .map((t) => t.completedAt! - t.servedAt!);
+      const served = inDay.filter((t) => t.servedAt !== null && t.completedAt !== null);
+      perDay.push({
+        date: toDateKey(dayStart),
+        totalTickets: inDay.length,
+        avgWaitTimeMs: avgMs(waits),
+        avgServiceTimeMs: avgMs(services),
+        ticketsServed: served.length,
+      });
+    }
+
+    // Range totals.
+    const waits = inRange
+      .filter((t) => t.calledAt !== null)
+      .map((t) => t.calledAt! - t.createdAt);
+    const services = inRange
+      .filter((t) => t.servedAt !== null && t.completedAt !== null)
+      .map((t) => t.completedAt! - t.servedAt!);
+
+    const perCategory = await this.breakdownByCategory(inRange);
+
+    // Per-counter aggregates over the range (counters with no served tickets
+    // are omitted — the admin client backfills zero rows from the config).
+    const byCounter = new Map<number, TicketMetrics[]>();
+    for (const t of inRange) {
+      if (t.counterId === null) continue;
+      const list = byCounter.get(t.counterId) ?? [];
+      list.push(t);
+      byCounter.set(t.counterId, list);
+    }
+    const perCounter: CounterRangeBreakdown[] = [];
+    for (const [counterId, list] of byCounter) {
+      const served = list.filter((t) => t.servedAt !== null && t.completedAt !== null);
+      const svc = served.map((t) => t.completedAt! - t.servedAt!);
+      perCounter.push({
+        counterId,
+        ticketsServed: served.length,
+        avgServiceTimeMs: avgMs(svc),
+      });
+    }
+    perCounter.sort((a, b) => a.counterId - b.counterId);
+
+    return new RangeQueueReport(
+      Identifier.generate(),
+      from,
+      to,
+      inRange.length,
+      avgMs(waits),
+      avgMs(services),
+      perDay,
+      perCategory,
+      perCounter,
     );
   }
 

@@ -1,9 +1,12 @@
 import type {
   AuditLogEntryDto,
   CleanupTransactionLogResultDto,
+  CounterDto,
   CounterPerformanceDto,
   DailyReportDto,
   ManualResetResultDto,
+  QueueBoardStateDto,
+  RangeReportDto,
   SaveSystemConfigurationPayload,
   SaveSystemConfigurationResult,
   StateMachineDto,
@@ -12,10 +15,12 @@ import type {
 
 /**
  * The slice of core-api the admin panel consumes (ISP — only config read/save,
- * the active state-machine read, the reporting / audit-trail read surface, and
- * the two manual override operations; never leaks caller/kiosk/tv DTOs).
- * Implementations live behind this interface so tests can substitute a fake
- * without touching the network.
+ * the active state-machine read, the reporting / audit-trail read surface, the
+ * live queue-board + counters read for the operational dashboard (QUE-44), and
+ * the two manual override operations; never leaks caller/kiosk/tv-snapshot
+ * DTOs beyond the board + counters the dashboard needs). Implementations live
+ * behind this interface so tests can substitute a fake without touching the
+ * network.
  */
 export interface IAdminApi {
   getSystemConfig(): Promise<SystemConfigurationDto>;
@@ -25,6 +30,12 @@ export interface IAdminApi {
   getDailyReport(date: string): Promise<DailyReportDto>;
   /** One counter's served count + avg service time for a date. */
   getCounterPerformance(counterId: number, date: string): Promise<CounterPerformanceDto>;
+  /** Range queue analytics (totals + per-day series + per-category/counter over `[from, to]`). */
+  getRangeReport(from: string, to: string): Promise<RangeReportDto>;
+  /** Live queue board state — active (now-serving) + waiting tickets across all counters. */
+  getQueueBoard(): Promise<QueueBoardStateDto>;
+  /** Every configured counter with its assigned categories (for the dashboard counter-status list). */
+  getCounters(): Promise<readonly CounterDto[]>;
   /** The local audit trail (human-initiated mutations), oldest-first. */
   getAuditLog(): Promise<readonly AuditLogEntryDto[]>;
   /** Manual daily-reset override — `POST /api/system/daily-reset` (FR-ADM-02). */
@@ -110,6 +121,17 @@ export class AdminApi implements IAdminApi {
     return getJson<CounterPerformanceDto>(
       `/reports/counters/${encodeURIComponent(counterId)}?date=${encodeURIComponent(date)}`,
     );
+  }
+  getRangeReport(from: string, to: string): Promise<RangeReportDto> {
+    return getJson<RangeReportDto>(
+      `/reports/range?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    );
+  }
+  getQueueBoard(): Promise<QueueBoardStateDto> {
+    return getJson<QueueBoardStateDto>('/queue/board');
+  }
+  getCounters(): Promise<readonly CounterDto[]> {
+    return getJson<readonly CounterDto[]>('/counters');
   }
   getAuditLog(): Promise<readonly AuditLogEntryDto[]> {
     return getJson<readonly AuditLogEntryDto[]>('/audit/log');

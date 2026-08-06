@@ -1,35 +1,43 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { IAdminApi } from '../api/admin-api';
-import type {
-  AuditLogEntryDto,
-  DailyReportDto,
-} from '../api/types';
-import { exportDailyReport } from '../lib/export-daily-report';
+import type { AuditLogEntryDto, RangeReportDto } from '../api/types';
+import { exportRangeReport } from '../lib/export-range-report';
 import { formatSeconds } from '../lib/format';
-import { RecapCharts } from '../components/RecapCharts';
-import { isOverviewEmpty, loadDailyOverview, type OverviewData } from '../lib/analytics-loader';
+import { loadRangeOverview, type RangeOverviewData } from '../lib/analytics-loader';
+import { RangeTrendChart } from '../components/RangeTrendChart';
 
 type ViewState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
-  | { status: 'ready'; data: OverviewData }
-  | { status: 'empty'; date: string };
+  | { status: 'ready'; data: RangeOverviewData };
 
 /** The seam the page uses to write the .xlsx export. Injected so tests can
  *  assert the export wiring without invoking SheetJS in jsdom. Defaults to the
- *  real SheetJS-backed {@link exportDailyReport} (offline, no network).
+ *  real SheetJS-backed {@link exportRangeReport} (offline, no network).
  *  `Promise<void>` — SheetJS is lazily `import()`-ed so the heavy dependency
  *  splits into its own chunk and never enters the main bundle (QUE-41 AC9). */
-export type DailyReportExporter = (
-  report: DailyReportDto,
+export type RangeReportExporter = (
+  report: RangeReportDto,
   audit: readonly AuditLogEntryDto[],
+  counterNameById: ReadonlyMap<number, string>,
   fileName: string,
 ) => Promise<void>;
 
 /** Today's date as the store's local `YYYY-MM-DD` (single on-premise box, NFR-SEC-01). */
 function todayLocalKey(): string {
   const d = new Date();
+  return formatKey(d);
+}
+
+/** `n` days before today as the store's local `YYYY-MM-DD`. */
+function daysAgoLocalKey(n: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return formatKey(d);
+}
+
+function formatKey(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
@@ -42,35 +50,38 @@ function formatSnapshot(snap: AuditLogEntryDto['before']): string {
 }
 
 /**
- * The daily analytics dashboard + local export (FR-ADM-03 / QUE-26). The manager
- * picks a date and sees the day's queue performance — total visitors, average
- * wait time, average service time, a per-category breakdown, per-counter
- * performance, and the audit trail of sensitive administrative actions — then
- * exports the whole view to a local `.xlsx` (SheetJS, fully offline — NFR-REL-01).
+ * The historical analytics view (FR-ADM-03 / QUE-44) — distinct from
+ * {@link DashboardPage} (live status). The manager picks a date **range** and
+ * sees multi-day trends, range-aggregated per-category + per-counter
+ * performance, and the audit trail, then exports the whole view to a local
+ * `.xlsx` (SheetJS, fully offline — NFR-REL-01). Defaults to the last 7 days.
  *
- * The page consumes only the read-side slice of {@link IAdminApi} (reporting +
- * audit + config-to-enumerate-counters) and owns no realtime/WS surface (SRP /
- * ISP — never touches caller/kiosk/tv DTOs). `exporter` is an optional seam so
+ * The page consumes only the read-side slice of {@link IAdminApi} (range report
+ * + audit + config-to-enumerate-counters) and owns no realtime/WS surface (SRP
+ * / ISP — never touches caller/kiosk/tv DTOs). `exporter` is an optional seam so
  * tests can assert the export wiring without running SheetJS in jsdom.
  */
 export function AnalyticsPage({
   api,
-  exporter = exportDailyReport,
+  exporter = exportRangeReport,
 }: {
   api: IAdminApi;
-  exporter?: DailyReportExporter;
+  exporter?: RangeReportExporter;
 }) {
-  const [date, setDate] = useState<string>(todayLocalKey());
+  const [from, setFrom] = useState<string>(daysAgoLocalKey(6));
+  const [to, setTo] = useState<string>(todayLocalKey());
   const [state, setState] = useState<ViewState>({ status: 'loading' });
   const [exporting, setExporting] = useState(false);
 
+  const rangeInvalid = from > to;
+
   useEffect(() => {
+    if (rangeInvalid) return;
     let cancelled = false;
     setState({ status: 'loading' });
-    loadDailyOverview(api, date)
+    loadRangeOverview(api, from, to)
       .then((data) => {
-        if (cancelled) return;
-        setState(isOverviewEmpty(data) ? { status: 'empty', date } : { status: 'ready', data });
+        if (!cancelled) setState({ status: 'ready', data });
       })
       .catch((err) => {
         if (!cancelled) {
@@ -80,45 +91,65 @@ export function AnalyticsPage({
     return () => {
       cancelled = true;
     };
-  }, [api, date]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api, from, to]);
 
   async function handleExport() {
-    if (state.status !== 'ready') return;
-    if (exporting) return;
+    if (state.status !== 'ready' || exporting || rangeInvalid) return;
     setExporting(true);
     try {
-      await exporter(state.data.report, state.data.audit, `qms-report-${state.data.date}.xlsx`);
+      await exporter(
+        state.data.report,
+        state.data.audit,
+        state.data.counterNameById,
+        `qms-report-${state.data.from}_${state.data.to}.xlsx`,
+      );
     } finally {
       setExporting(false);
     }
   }
 
   if (state.status === 'loading') {
-    return <div className="analytics analytics--loading">Memuat analitik…</div>;
-  }
-  if (state.status === 'error') {
     return (
       <div className="analytics">
-        <p className="admin-panel__error">Gagal memuat analitik: {state.message}</p>
-        <Link className="btn btn--primary" to="/">
-          Kembali ke Dashboard
+        <AnalyticsHeader
+          from={from}
+          to={to}
+          onFromChange={setFrom}
+          onToChange={setTo}
+          onExport={handleExport}
+          exportDisabled={true}
+          exporting={exporting}
+          rangeInvalid={rangeInvalid}
+        />
+        <p className="analytics__loading" role="status" aria-live="polite">
+          Memuat analitik…
+        </p>
+        <Link className="btn btn--secondary" to="/" data-testid="analytics-to-dashboard">
+          Kembali ke Status Antrian
         </Link>
       </div>
     );
   }
-  if (state.status === 'empty') {
+  if (state.status === 'error') {
     return (
       <div className="analytics">
         <AnalyticsHeader
-          date={date}
-          onDateChange={setDate}
+          from={from}
+          to={to}
+          onFromChange={setFrom}
+          onToChange={setTo}
           onExport={handleExport}
           exportDisabled={true}
           exporting={exporting}
+          rangeInvalid={rangeInvalid}
         />
-        <p className="analytics__empty" data-testid="analytics-empty">
-          Belum ada data antrian untuk {state.date}.
+        <p className="admin-panel__error" data-testid="analytics-error">
+          Gagal memuat analitik: {state.message}
         </p>
+        <Link className="btn btn--secondary" to="/" data-testid="analytics-to-dashboard">
+          Kembali ke Status Antrian
+        </Link>
       </div>
     );
   }
@@ -128,15 +159,26 @@ export function AnalyticsPage({
   return (
     <div className="analytics">
       <AnalyticsHeader
-        date={date}
-        onDateChange={setDate}
+        from={from}
+        to={to}
+        onFromChange={setFrom}
+        onToChange={setTo}
         onExport={handleExport}
         exportDisabled={false}
         exporting={exporting}
+        rangeInvalid={rangeInvalid}
       />
 
-      <section className="analytics__summary" aria-label="Ringkasan harian">
-        <h2 className="analytics__section-title">Ringkasan — {report.date}</h2>
+      {rangeInvalid && (
+        <p className="admin-panel__error" data-testid="analytics-range-invalid">
+          Tanggal mulai harus sebelum atau sama dengan tanggal akhir.
+        </p>
+      )}
+
+      <section className="analytics__summary" aria-label="Ringkasan rentang">
+        <h2 className="analytics__section-title">
+          Ringkasan — {report.from} s/d {report.to}
+        </h2>
         <div className="metric-grid">
           <div className="metric-tile">
             <span className="metric-tile__label">Total Pengunjung</span>
@@ -159,12 +201,12 @@ export function AnalyticsPage({
         </div>
       </section>
 
-      <RecapCharts report={report} />
+      <RangeTrendChart perDay={report.perDay} />
 
       <section className="config-card" aria-label="Per kategori">
         <h2 className="config-card__title">Per Kategori</h2>
         {report.perCategory.length === 0 ? (
-          <p className="analytics__empty">Tidak ada tiket pada tanggal ini.</p>
+          <p className="analytics__empty">Tidak ada tiket pada rentang ini.</p>
         ) : (
           <table className="data-table">
             <thead>
@@ -205,8 +247,8 @@ export function AnalyticsPage({
                 <td>
                   {c.counterName} (#{c.counterId})
                 </td>
-                <td>{c.perf.ticketsServed}</td>
-                <td>{formatSeconds(c.perf.avgServiceTimeMs)}</td>
+                <td>{c.ticketsServed}</td>
+                <td>{formatSeconds(c.avgServiceTimeMs)}</td>
               </tr>
             ))}
           </tbody>
@@ -247,46 +289,67 @@ export function AnalyticsPage({
           </div>
         )}
       </section>
+
+      <Link className="btn btn--secondary" to="/" data-testid="analytics-to-dashboard">
+        Kembali ke Status Antrian
+      </Link>
     </div>
   );
 }
 
 function AnalyticsHeader({
-  date,
-  onDateChange,
+  from,
+  to,
+  onFromChange,
+  onToChange,
   onExport,
   exportDisabled,
   exporting,
+  rangeInvalid,
 }: {
-  date: string;
-  onDateChange: (d: string) => void;
+  from: string;
+  to: string;
+  onFromChange: (d: string) => void;
+  onToChange: (d: string) => void;
   onExport: () => void;
   exportDisabled: boolean;
   exporting: boolean;
+  rangeInvalid: boolean;
 }) {
   return (
     <header className="analytics__header">
       <div>
-        <h1 className="analytics__title">Analitik Harian</h1>
+        <h1 className="analytics__title">Analitik &amp; Laporan</h1>
         <p className="analytics__subtitle">Ekspor laporan lokal (.xlsx)</p>
       </div>
       <div className="analytics__controls">
         <label className="field">
-          <span className="field__label">Tanggal</span>
+          <span className="field__label">Dari</span>
           <input
             className="field__input"
             type="date"
-            value={date}
-            onChange={(e) => onDateChange(e.target.value)}
-            aria-label="Tanggal laporan"
-            data-testid="analytics-date"
+            value={from}
+            onChange={(e) => onFromChange(e.target.value)}
+            aria-label="Tanggal mulai"
+            data-testid="analytics-from"
+          />
+        </label>
+        <label className="field">
+          <span className="field__label">Sampai</span>
+          <input
+            className="field__input"
+            type="date"
+            value={to}
+            onChange={(e) => onToChange(e.target.value)}
+            aria-label="Tanggal akhir"
+            data-testid="analytics-to"
           />
         </label>
         <button
           type="button"
           className="btn btn--primary"
           onClick={onExport}
-          disabled={exportDisabled || exporting}
+          disabled={exportDisabled || exporting || rangeInvalid}
           data-testid="analytics-export"
         >
           {exporting ? 'Mengekspor…' : 'Ekspor .xlsx'}

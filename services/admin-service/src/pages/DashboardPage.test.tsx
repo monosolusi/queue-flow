@@ -1,17 +1,17 @@
-import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { DashboardPage } from './DashboardPage';
 import type { IAdminApi } from '../api/admin-api';
 import type {
-  AuditLogEntryDto,
-  CounterPerformanceDto,
-  DailyReportDto,
+  CounterDto,
+  QueueBoardStateDto,
   SystemConfigurationDto,
+  TicketStateDto,
 } from '../api/types';
 import { DEFAULT_STATE_MACHINE, DEFAULT_BRAND_COLOR } from '../api/types';
 
-/** A configured store with two categories + two counters (mirrors AnalyticsPage fixtures). */
+/** A configured store with two categories + two counters. */
 function configuredStore(): SystemConfigurationDto {
   return {
     isInitialSetupCompleted: true,
@@ -36,211 +36,261 @@ function configuredStore(): SystemConfigurationDto {
   };
 }
 
-function dailyReport(date: string): DailyReportDto {
-  return {
-    date,
-    totalTickets: 4,
-    avgWaitTimeMs: 12000,
-    avgServiceTimeMs: 30000,
-    perCategory: [
-      { categoryId: 'cat-a', code: 'A', totalTickets: 3, avgWaitTimeMs: 10000, avgServiceTimeMs: 28000 },
-      { categoryId: 'cat-b', code: 'B', totalTickets: 1, avgWaitTimeMs: 2000, avgServiceTimeMs: 40000 },
+const COUNTERS: readonly CounterDto[] = [
+  {
+    counterId: 1,
+    counterName: 'Counter 1',
+    assignedCategories: [{ id: 'cat-a', code: 'A', name: 'Customer Service' }],
+    priorityPolicy: 'FIFO_GLOBAL',
+  },
+  {
+    counterId: 2,
+    counterName: 'Counter 2',
+    assignedCategories: [
+      { id: 'cat-a', code: 'A', name: 'Customer Service' },
+      { id: 'cat-b', code: 'B', name: 'Kasir' },
     ],
+    priorityPolicy: 'CATEGORY_PRIORITY',
+  },
+];
+
+function ticket(
+  id: string,
+  number: string,
+  categoryId: string,
+  status: string,
+  counterId: number | null,
+): TicketStateDto {
+  return { ticketId: id, ticketNumber: number, categoryId, status, counterId };
+}
+
+/** A board with one active call at counter 1 + 3 waiting (2×A, 1×B). */
+function liveBoard(): QueueBoardStateDto {
+  return {
+    active: [ticket('t1', 'A-001', 'cat-a', 'CALLING', 1)],
+    waiting: [
+      ticket('t2', 'A-002', 'cat-a', 'WAITING', null),
+      ticket('t3', 'A-003', 'cat-a', 'WAITING', null),
+      ticket('t4', 'B-001', 'cat-b', 'WAITING', null),
+    ],
+    waitingCount: 3,
   };
 }
 
-function emptyDailyReport(date: string): DailyReportDto {
-  return { date, totalTickets: 0, avgWaitTimeMs: 0, avgServiceTimeMs: 0, perCategory: [] };
-}
-
-function counterPerf(counterId: number, date: string, served: number, avg: number): CounterPerformanceDto {
-  return { counterId, date, ticketsServed: served, avgServiceTimeMs: avg };
-}
-
-function auditEntries(): AuditLogEntryDto[] {
-  return [
-    {
-      id: 'aud-1',
-      actor: 'admin',
-      action: 'MANUAL_RESET',
-      before: null,
-      after: { resetTo: 1 },
-      occurredAt: 1_700_000_000_000,
-    },
-    {
-      id: 'aud-2',
-      actor: 'admin',
-      action: 'STATE_SCHEMA_CHANGE',
-      before: { states: ['WAITING'] },
-      after: { states: ['WAITING', 'CALLING'] },
-      occurredAt: 1_700_000_001_000,
-    },
-  ];
-}
-
 interface ApiStubs {
-  getDailyReport: ReturnType<typeof vi.fn>;
-  getCounterPerformance: ReturnType<typeof vi.fn>;
-  getAuditLog: ReturnType<typeof vi.fn>;
+  getQueueBoard: ReturnType<typeof vi.fn>;
+  getCounters: ReturnType<typeof vi.fn>;
 }
 
 function makeApi(
   overrides: {
-    config?: SystemConfigurationDto;
-    daily?: (date: string) => DailyReportDto;
-    counter?: (counterId: number, date: string) => CounterPerformanceDto;
-    audit?: AuditLogEntryDto[];
+    board?: QueueBoardStateDto | (() => Promise<QueueBoardStateDto>);
+    counters?: readonly CounterDto[];
   } = {},
 ): { api: IAdminApi; stubs: ApiStubs } {
-  const config = overrides.config ?? configuredStore();
-  const daily = overrides.daily ?? dailyReport;
-  const counter = overrides.counter ?? ((id: number, date: string) => counterPerf(id, date, id === 1 ? 2 : 1, 33000));
-  const audit = overrides.audit ?? auditEntries();
-  const getDailyReport = vi.fn((date: string) => Promise.resolve(daily(date)));
-  const getCounterPerformance = vi.fn((id: number, date: string) => Promise.resolve(counter(id, date)));
-  const getAuditLog = vi.fn(() => Promise.resolve(audit));
-  const getSystemConfig = vi.fn(() => Promise.resolve(config));
+  const board = overrides.board ?? liveBoard();
+  const counters = overrides.counters ?? COUNTERS;
+  const getQueueBoard = vi.fn(() =>
+    board instanceof Function ? board() : Promise.resolve(board),
+  );
+  const getCounters = vi.fn(() => Promise.resolve(counters));
   const api: IAdminApi = {
-    getSystemConfig,
+    getSystemConfig: vi.fn(),
     saveSystemConfig: vi.fn(),
-    getActiveStateMachine: vi.fn(() => Promise.resolve(config.stateMachine)),
-    getDailyReport,
-    getCounterPerformance,
-    getAuditLog,
+    getActiveStateMachine: vi.fn(),
+    getDailyReport: vi.fn(),
+    getCounterPerformance: vi.fn(),
+    getRangeReport: vi.fn(),
+    getQueueBoard,
+    getCounters,
+    getAuditLog: vi.fn(),
     triggerManualReset: vi.fn(),
     cleanupTransactionLogs: vi.fn(),
   };
-  return { api, stubs: { getDailyReport, getCounterPerformance, getAuditLog } };
+  return { api, stubs: { getQueueBoard, getCounters } };
 }
 
-function renderPage(api: IAdminApi) {
+function renderPage(api: IAdminApi, config: SystemConfigurationDto | null = configuredStore()) {
   return render(
     <MemoryRouter>
-      <DashboardPage api={api} />
+      <DashboardPage api={api} config={config} />
     </MemoryRouter>,
   );
 }
 
-describe('DashboardPage', () => {
-  it('shows a loading state, then renders the 4 KPI tiles', async () => {
+describe('DashboardPage (live operational status — QUE-44)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+  });
+
+  it('renders the now-serving card + waiting counts + counter statuses', async () => {
     const { api } = makeApi();
     renderPage(api);
 
-    expect(screen.getByText('Memuat dashboard…')).toBeInTheDocument();
-    expect(await screen.findByTestId('kpi-total')).toHaveTextContent('4');
-    expect(screen.getByTestId('kpi-wait')).toHaveTextContent('12.0 s');
-    expect(screen.getByTestId('kpi-service')).toHaveTextContent('30.0 s');
-    // counters: counter 1 served 2, counter 2 served 1 → 3.
-    expect(screen.getByTestId('kpi-served')).toHaveTextContent('3');
+    // Now-serving: last active ticket → A-001 at Counter 1.
+    expect(await screen.findByTestId('now-serving-number')).toHaveTextContent('A-001');
+    expect(screen.getByTestId('now-serving-counter')).toHaveTextContent('Counter 1');
+
+    // Waiting per category: 2×A, 1×B.
+    expect(screen.getByTestId('waiting-count-A')).toHaveTextContent('2');
+    expect(screen.getByTestId('waiting-count-B')).toHaveTextContent('1');
+
+    // Counter statuses: counter 1 active, counter 2 idle.
+    expect(screen.getByTestId('counter-status-1')).toHaveTextContent('Sedang melayani');
+    expect(screen.getByTestId('counter-status-2')).toHaveTextContent('Siap');
+    expect(screen.getByTestId('counter-ticket-1')).toHaveTextContent('A-001');
+    expect(screen.queryByTestId('counter-ticket-2')).not.toBeInTheDocument();
   });
 
-  it('renders the four charts with their per-mark testids', async () => {
-    const { api } = makeApi();
-    renderPage(api);
-
-    await screen.findByTestId('kpi-total');
-    // Chart 1 — total tiket per kategori (one bar per category code).
-    expect(screen.getByTestId('dashboard-bar-cat-A')).toBeInTheDocument();
-    expect(screen.getByTestId('dashboard-bar-cat-B')).toBeInTheDocument();
-    // Chart 2 — tiket dilayani per counter (testid keyed by counterId).
-    expect(screen.getByTestId('dashboard-bar-counter-1')).toBeInTheDocument();
-    expect(screen.getByTestId('dashboard-bar-counter-2')).toBeInTheDocument();
-    // Chart 3 — donut slices (one circle per category).
-    expect(screen.getByTestId('dashboard-donut-A')).toBeInTheDocument();
-    expect(screen.getByTestId('dashboard-donut-B')).toBeInTheDocument();
-    // Chart 4 — paired wait + service bars per category.
-    expect(screen.getByTestId('dashboard-bar-wait-A')).toBeInTheDocument();
-    expect(screen.getByTestId('dashboard-bar-service-A')).toBeInTheDocument();
-    expect(screen.getByTestId('dashboard-bar-wait-B')).toBeInTheDocument();
-    expect(screen.getByTestId('dashboard-bar-service-B')).toBeInTheDocument();
-  });
-
-  it('renders the donut accessible summary with formatted percentages', async () => {
-    const { api } = makeApi();
-    renderPage(api);
-    await screen.findByTestId('kpi-total');
-    expect(
-      screen.getByRole('img', { name: /Distribusi kategori: A 3 \(75%\), B 1 \(25%\)/ }),
-    ).toBeInTheDocument();
-  });
-
-  it('renders recent activity (last 5 audit entries, most-recent-first)', async () => {
-    const { api } = makeApi();
-    renderPage(api);
-    await screen.findByTestId('kpi-total');
-    // The most-recent entry (STATE_SCHEMA_CHANGE) renders first.
-    // The donut legend also uses <li>; scope to the activity list instead.
-    const activity = screen.getByRole('region', { name: 'Aktivitas terbaru' });
-    const rows = within(activity).getAllByRole('listitem');
-    expect(rows[0]).toHaveTextContent('STATE_SCHEMA_CHANGE');
-    expect(rows[1]).toHaveTextContent('MANUAL_RESET');
-  });
-
-  it('renders the empty state when there is no data for the date', async () => {
+  it('renders the empty now-serving state + all-idle counters when the board is quiet', async () => {
     const { api } = makeApi({
-      daily: emptyDailyReport,
-      counter: (_id, date) => counterPerf(_id, date, 0, 0),
-      audit: [],
+      board: { active: [], waiting: [], waitingCount: 0 },
     });
     renderPage(api);
 
-    expect(await screen.findByTestId('dashboard-empty')).toBeInTheDocument();
-    // No KPI tiles in the empty state (the page short-circuits before them).
-    expect(screen.queryByTestId('kpi-total')).not.toBeInTheDocument();
+    expect(await screen.findByTestId('now-serving-empty')).toHaveTextContent(
+      'Tidak ada panggilan aktif.',
+    );
+    expect(screen.getByTestId('counter-status-1')).toHaveTextContent('Siap');
+    expect(screen.getByTestId('counter-status-2')).toHaveTextContent('Siap');
   });
 
-  it('surfaces an error message when the load fails (no misleading wizard CTA)', async () => {
+  it('renders the skeleton a11y state while the first fetch is pending', () => {
+    // A fetch that never resolves keeps `loading` true → skeleton (CLAUDE.md recipe).
+    const { api } = makeApi({ board: () => new Promise<QueueBoardStateDto>(() => {}) });
+    renderPage(api);
+
+    const region = screen.getByRole('status');
+    expect(region).toHaveAttribute('aria-busy', 'true');
+    expect(region).toHaveTextContent('Memuat status antrian…');
+    expect(screen.getByTestId('dashboard-skeleton')).toBeInTheDocument();
+    // No live widgets leak before the snapshot resolves.
+    expect(screen.queryByTestId('now-serving-number')).not.toBeInTheDocument();
+  });
+
+  it('renders the skeleton while config is still loading (not yet threaded)', () => {
     const { api } = makeApi();
-    api.getDailyReport = vi.fn(() => Promise.reject(new Error('core-api down')));
+    renderPage(api, null);
+
+    expect(screen.getByRole('status')).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByTestId('dashboard-skeleton')).toBeInTheDocument();
+    // Poll is gated on config — no fetch fires yet.
+    expect(screen.queryByTestId('now-serving-number')).not.toBeInTheDocument();
+  });
+
+  it('surfaces an error message (no wizard CTA) when the load fails', async () => {
+    const { api } = makeApi();
+    api.getQueueBoard = vi.fn(() => Promise.reject(new Error('core-api down')));
     renderPage(api);
 
     expect(await screen.findByTestId('dashboard-error')).toHaveTextContent(
-      /Gagal memuat dashboard: core-api down/i,
+      /Gagal memuat status antrian: core-api down/i,
     );
-    // SetupGuard already guarantees setup is complete, so the error path must
-    // not offer a first-run wizard CTA (wrong recovery for a transient outage).
     expect(screen.queryByRole('link', { name: /Buka Wizard/i })).not.toBeInTheDocument();
   });
 
-  it('renders the page <h1> on the loading and error states (page owns the h1)', async () => {
-    // The AppShell topbar title is a non-heading <span>, so the routed page must
-    // provide the <h1> on EVERY view — including loading/error — or a screen-reader
-    // user navigating by headings finds no top-level heading (arch-review finding).
+  it('keeps showing the last board when a refresh fails (stale-data banner)', async () => {
+    const { api, stubs } = makeApi();
+    renderPage(api);
+    await screen.findByTestId('now-serving-number');
+
+    // The next poll fails.
+    api.getQueueBoard = vi.fn(() => Promise.reject(new Error('timeout')));
+    fireEvent.click(screen.getByTestId('dashboard-refresh'));
+
+    // Stale banner appears, but the last board stays visible.
+    expect(await screen.findByTestId('dashboard-stale')).toBeInTheDocument();
+    expect(screen.getByTestId('now-serving-number')).toHaveTextContent('A-001');
+    expect(stubs.getQueueBoard).toHaveBeenCalled();
+  });
+
+  it('renders the page <h1> on the loading + error states', async () => {
     const { api } = makeApi();
-    api.getDailyReport = vi.fn(() => Promise.reject(new Error('core-api down')));
+    api.getQueueBoard = vi.fn(() => Promise.reject(new Error('core-api down')));
     renderPage(api);
 
-    // Loading state renders the h1 immediately (the header is synchronous; the
-    // status message settles async).
-    expect(screen.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeInTheDocument();
-    // Error state still renders the h1 alongside the error message.
+    // Loading state renders the h1 immediately (synchronous header).
+    expect(screen.getByRole('heading', { level: 1, name: 'Status Antrian' })).toBeInTheDocument();
     await screen.findByTestId('dashboard-error');
-    expect(screen.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'Status Antrian' })).toBeInTheDocument();
   });
 
-  it('reloads when the date changes', async () => {
+  it('Muat Ulang triggers a re-fetch', async () => {
     const { api, stubs } = makeApi();
     renderPage(api);
-    await screen.findByTestId('kpi-total');
-    expect(stubs.getDailyReport).toHaveBeenLastCalledWith(expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/));
+    await screen.findByTestId('now-serving-number');
+    expect(stubs.getQueueBoard).toHaveBeenCalledTimes(1);
 
-    fireEvent.change(screen.getByTestId('dashboard-date'), { target: { value: '2026-07-31' } });
-    await waitFor(() => expect(stubs.getDailyReport).toHaveBeenLastCalledWith('2026-07-31'));
+    fireEvent.click(screen.getByTestId('dashboard-refresh'));
+    await screen.findByTestId('now-serving-number');
+    expect(stubs.getQueueBoard).toHaveBeenCalledTimes(2);
   });
 
-  it('requests per-counter performance for every configured counter', async () => {
+  it('polls the board on the 8 s interval (fake timers)', async () => {
+    vi.useFakeTimers();
     const { api, stubs } = makeApi();
     renderPage(api);
-    await screen.findByTestId('kpi-total');
+    // Flush the initial fetch microtask (fake timers don't auto-flush).
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(stubs.getQueueBoard).toHaveBeenCalledTimes(1);
 
-    expect(stubs.getCounterPerformance).toHaveBeenCalledWith(1, expect.any(String));
-    expect(stubs.getCounterPerformance).toHaveBeenCalledWith(2, expect.any(String));
+    // First interval tick → one more fetch.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8000);
+    });
+    expect(stubs.getQueueBoard).toHaveBeenCalledTimes(2);
+    // Second tick → another.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8000);
+    });
+    expect(stubs.getQueueBoard).toHaveBeenCalledTimes(3);
   });
 
-  it('renders the analytics link in the header', async () => {
+  it('pauses polling when the tab is hidden and re-fetches on return (fake timers)', async () => {
+    vi.useFakeTimers();
+    const { api, stubs } = makeApi();
+    renderPage(api);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(stubs.getQueueBoard).toHaveBeenCalledTimes(1);
+
+    // Hide the tab → advancing the interval must NOT fetch.
+    Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+    fireEvent(document, new Event('visibilitychange'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8000);
+    });
+    expect(stubs.getQueueBoard).toHaveBeenCalledTimes(1);
+
+    // Return to the tab → an immediate fetch fires + the interval resumes.
+    Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+    fireEvent(document, new Event('visibilitychange'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(stubs.getQueueBoard).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8000);
+    });
+    expect(stubs.getQueueBoard).toHaveBeenCalledTimes(3);
+  });
+
+  it('renders the analytics link', async () => {
     const { api } = makeApi();
     renderPage(api);
-    await screen.findByTestId('kpi-total');
-    expect(screen.getByRole('link', { name: 'Lihat analitik lengkap' })).toHaveAttribute('href', '/analytics');
+    await screen.findByTestId('now-serving-number');
+    expect(screen.getByTestId('dashboard-to-analytics')).toHaveAttribute('href', '/analytics');
+  });
+
+  it('shows the configured category name (not the raw id) on the waiting tile', async () => {
+    const { api } = makeApi();
+    renderPage(api);
+    const grid = await screen.findByTestId('waiting-grid');
+    expect(within(grid).getByText('Customer Service')).toBeInTheDocument();
+    expect(within(grid).getByText('Kasir')).toBeInTheDocument();
   });
 });

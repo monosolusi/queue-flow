@@ -1,5 +1,6 @@
 import type { DailyQueueReport } from '../daily-queue-report';
 import type { CounterPerformance } from '../counter-performance';
+import type { RangeQueueReport } from '../range-queue-report';
 
 /**
  * NestJS DI token for {@link IReportQueryPort}. Interface ports are erased at
@@ -23,4 +24,13 @@ export const REPORT_QUERY_PORT = Symbol('REPORT_QUERY_PORT');
 export interface IReportQueryPort {
   dailyReport(date: string): Promise<DailyQueueReport | null>;
   counterPerformance(counterId: number, date: string): Promise<CounterPerformance | null>;
+  /**
+   * Aggregates queue metrics over a `[from, to]` local-day range (inclusive of
+   * both days). Returns range totals, a per-day series (zero-point rows for
+   * days with no tickets), per-category aggregates, and per-counter aggregates
+   * over the range (FR-ADM-03 / QUE-44). Returns `null` when no tickets exist
+   * in the range. The 90-day max-span guardrail is enforced by the use case,
+   * not here.
+   */
+  rangeReport(from: string, to: string): Promise<RangeQueueReport | null>;
 }

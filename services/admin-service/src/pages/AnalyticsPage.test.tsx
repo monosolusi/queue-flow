@@ -1,17 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { AnalyticsPage, type DailyReportExporter } from './AnalyticsPage';
+import { AnalyticsPage, type RangeReportExporter } from './AnalyticsPage';
 import type { IAdminApi } from '../api/admin-api';
 import type {
   AuditLogEntryDto,
-  CounterPerformanceDto,
-  DailyReportDto,
+  RangeReportDto,
   SystemConfigurationDto,
 } from '../api/types';
 import { DEFAULT_STATE_MACHINE, DEFAULT_BRAND_COLOR } from '../api/types';
 
-/** A configured store with two categories + two counters (mirrors AdminPanel fixtures). */
+/** A configured store with two categories + two counters. */
 function configuredStore(): SystemConfigurationDto {
   return {
     isInitialSetupCompleted: true,
@@ -36,25 +35,39 @@ function configuredStore(): SystemConfigurationDto {
   };
 }
 
-function dailyReport(date: string): DailyReportDto {
+function rangeReport(from: string, to: string): RangeReportDto {
   return {
-    date,
+    from,
+    to,
     totalTickets: 4,
     avgWaitTimeMs: 12000,
     avgServiceTimeMs: 30000,
+    perDay: [
+      { date: from, totalTickets: 2, avgWaitTimeMs: 10000, avgServiceTimeMs: 28000, ticketsServed: 2 },
+      { date: to, totalTickets: 2, avgWaitTimeMs: 14000, avgServiceTimeMs: 32000, ticketsServed: 2 },
+    ],
     perCategory: [
       { categoryId: 'cat-a', code: 'A', totalTickets: 3, avgWaitTimeMs: 10000, avgServiceTimeMs: 28000 },
       { categoryId: 'cat-b', code: 'B', totalTickets: 1, avgWaitTimeMs: 2000, avgServiceTimeMs: 40000 },
     ],
+    perCounter: [{ counterId: 1, ticketsServed: 2, avgServiceTimeMs: 33000 }],
   };
 }
 
-function emptyDailyReport(date: string): DailyReportDto {
-  return { date, totalTickets: 0, avgWaitTimeMs: 0, avgServiceTimeMs: 0, perCategory: [] };
-}
-
-function counterPerf(counterId: number, date: string, served: number, avg: number): CounterPerformanceDto {
-  return { counterId, date, ticketsServed: served, avgServiceTimeMs: avg };
+function emptyRangeReport(from: string, to: string): RangeReportDto {
+  return {
+    from,
+    to,
+    totalTickets: 0,
+    avgWaitTimeMs: 0,
+    avgServiceTimeMs: 0,
+    perDay: [
+      { date: from, totalTickets: 0, avgWaitTimeMs: 0, avgServiceTimeMs: 0, ticketsServed: 0 },
+      { date: to, totalTickets: 0, avgWaitTimeMs: 0, avgServiceTimeMs: 0, ticketsServed: 0 },
+    ],
+    perCategory: [],
+    perCounter: [],
+  };
 }
 
 function auditEntries(): AuditLogEntryDto[] {
@@ -79,41 +92,40 @@ function auditEntries(): AuditLogEntryDto[] {
 }
 
 interface ApiStubs {
-  getDailyReport: ReturnType<typeof vi.fn>;
-  getCounterPerformance: ReturnType<typeof vi.fn>;
+  getRangeReport: ReturnType<typeof vi.fn>;
   getAuditLog: ReturnType<typeof vi.fn>;
 }
 
 function makeApi(
   overrides: {
     config?: SystemConfigurationDto;
-    daily?: (date: string) => DailyReportDto;
-    counter?: (counterId: number, date: string) => CounterPerformanceDto;
+    range?: (from: string, to: string) => RangeReportDto;
     audit?: AuditLogEntryDto[];
   } = {},
 ): { api: IAdminApi; stubs: ApiStubs } {
   const config = overrides.config ?? configuredStore();
-  const daily = overrides.daily ?? dailyReport;
-  const counter = overrides.counter ?? ((id: number, date: string) => counterPerf(id, date, id === 1 ? 2 : 1, 33000));
+  const range = overrides.range ?? rangeReport;
   const audit = overrides.audit ?? auditEntries();
-  const getDailyReport = vi.fn((date: string) => Promise.resolve(daily(date)));
-  const getCounterPerformance = vi.fn((id: number, date: string) => Promise.resolve(counter(id, date)));
+  const getRangeReport = vi.fn((from: string, to: string) => Promise.resolve(range(from, to)));
   const getAuditLog = vi.fn(() => Promise.resolve(audit));
   const getSystemConfig = vi.fn(() => Promise.resolve(config));
   const api: IAdminApi = {
     getSystemConfig,
     saveSystemConfig: vi.fn(),
     getActiveStateMachine: vi.fn(() => Promise.resolve(config.stateMachine)),
-    getDailyReport,
-    getCounterPerformance,
+    getDailyReport: vi.fn(),
+    getCounterPerformance: vi.fn(),
+    getRangeReport,
+    getQueueBoard: vi.fn(),
+    getCounters: vi.fn(),
     getAuditLog,
     triggerManualReset: vi.fn(),
     cleanupTransactionLogs: vi.fn(),
   };
-  return { api, stubs: { getDailyReport, getCounterPerformance, getAuditLog } };
+  return { api, stubs: { getRangeReport, getAuditLog } };
 }
 
-function renderPage(api: IAdminApi, exporter?: DailyReportExporter) {
+function renderPage(api: IAdminApi, exporter?: RangeReportExporter) {
   return render(
     <MemoryRouter>
       <AnalyticsPage api={api} exporter={exporter ?? (async () => {})} />
@@ -121,109 +133,116 @@ function renderPage(api: IAdminApi, exporter?: DailyReportExporter) {
   );
 }
 
-describe('AnalyticsPage (FR-ADM-03 / QUE-26)', () => {
-  it('shows a loading state, then renders the daily metrics, per-category + counter tables, and the audit trail', async () => {
+describe('AnalyticsPage (range analytics — FR-ADM-03 / QUE-44)', () => {
+  it('loads the range report and renders metrics, per-category + counter tables, and the audit trail', async () => {
     const { api } = makeApi();
     renderPage(api);
 
     expect(screen.getByText('Memuat analitik…')).toBeInTheDocument();
-    // Metrics render (totals + averages formatted as seconds).
     expect(await screen.findByTestId('metric-total')).toHaveTextContent('4');
     expect(screen.getByTestId('metric-wait')).toHaveTextContent('12.0 s');
     expect(screen.getByTestId('metric-service')).toHaveTextContent('30.0 s');
-    // Per-category rows — the breakdown carries the category code, not the name.
-    // Scoped to the "Per kategori" region so the recap-chart code labels (also A/B)
-    // don't make `getByText` match multiple nodes.
+
     const perCategory = screen.getByRole('region', { name: 'Per kategori' });
     expect(within(perCategory).getByText('A')).toBeInTheDocument();
     expect(within(perCategory).getByText('B')).toBeInTheDocument();
-    // Counter performance rows are labelled by name + #id.
+
+    // Counter 1 served 2 (from perCounter); Counter 2 backfilled to 0.
     expect(screen.getByText(/Counter 1 \(#1\)/)).toBeInTheDocument();
-    expect(screen.getByText(/Counter 2 \(#2\)/)).toBeInTheDocument();
-    // Audit trail rows — the action strings render.
+    const perf = screen.getByRole('region', { name: 'Performa counter' });
+    expect(within(perf).getByText('2')).toBeInTheDocument();
+
     expect(screen.getByText('MANUAL_RESET')).toBeInTheDocument();
     expect(screen.getByText('STATE_SCHEMA_CHANGE')).toBeInTheDocument();
   });
 
-  it('renders a per-category bar chart for each FR-ADM-03 metric (Total/Wait/Service)', async () => {
+  it('renders the range trend chart with one bar per day', async () => {
     const { api } = makeApi();
     renderPage(api);
 
-    // The recap section renders one bar per category per metric (3 metrics x 2
-    // categories = 6 bars). Each bar carries its metric + category code in the
-    // testid so the chart is assertable without SheetJS or a pixel diff.
-    await screen.findByTestId('recap-charts');
-    for (const metric of ['total', 'wait', 'service'] as const) {
-      expect(screen.getByTestId(`recap-bar-${metric}-A`)).toBeInTheDocument();
-      expect(screen.getByTestId(`recap-bar-${metric}-B`)).toBeInTheDocument();
-    }
-    // The accessible summary carries the formatted values, so a chart that
-    // rendered six zero-width bars for any input would fail this — it verifies
-    // the value-formatting wiring (count vs `formatSeconds`) without a pixel diff.
+    await screen.findByTestId('range-trend-chart');
+    expect(screen.getByTestId('range-trend-bar-0')).toBeInTheDocument();
+    expect(screen.getByTestId('range-trend-bar-1')).toBeInTheDocument();
+    // Accessible summary carries the per-day values.
     expect(
-      screen.getByRole('img', { name: /Total Pengunjung per kategori: A 3, B 1/ }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('img', { name: /Rata-rata Waktu Tunggu per kategori: A 10\.0 s, B 2\.0 s/ }),
+      screen.getByRole('img', { name: /Total pengunjung per hari:/ }),
     ).toBeInTheDocument();
   });
 
-  it('renders the empty state when there is no data for the date and disables export', async () => {
-    const { api } = makeApi({
-      daily: emptyDailyReport,
-      counter: (_id, date) => counterPerf(_id, date, 0, 0),
-      audit: [],
-    });
+  it('renders the zero state (no tickets) without short-circuiting the chart', async () => {
+    const { api } = makeApi({ range: emptyRangeReport, audit: [] });
     renderPage(api);
 
-    expect(await screen.findByTestId('analytics-empty')).toBeInTheDocument();
-    expect(screen.getByTestId('analytics-export')).toBeDisabled();
-    // No recap charts in the empty state (the page short-circuits before them).
-    expect(screen.queryByTestId('recap-charts')).not.toBeInTheDocument();
+    expect(await screen.findByTestId('metric-total')).toHaveTextContent('0');
+    // The per-day zero series still renders bars (the backend materializes zero rows).
+    expect(screen.getByTestId('range-trend-bar-0')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Per kategori' })).toHaveTextContent(
+      'Tidak ada tiket pada rentang ini.',
+    );
+    expect(screen.getByRole('region', { name: 'Audit trail' })).toHaveTextContent(
+      'Belum ada entri audit.',
+    );
   });
 
-  it('surfaces an error and a back-to-admin link when the load fails', async () => {
+  it('surfaces an error and a back-to-dashboard link when the load fails', async () => {
     const { api } = makeApi();
-    // Force the daily report read to fail.
-    api.getDailyReport = vi.fn(() => Promise.reject(new Error('core-api down')));
+    api.getRangeReport = vi.fn(() => Promise.reject(new Error('core-api down')));
     renderPage(api);
 
-    expect(await screen.findByText(/Gagal memuat analitik: core-api down/i)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Kembali ke Dashboard' })).toBeInTheDocument();
+    expect(await screen.findByTestId('analytics-error')).toHaveTextContent(
+      /Gagal memuat analitik: core-api down/i,
+    );
+    expect(screen.getByTestId('analytics-to-dashboard')).toHaveAttribute('href', '/');
   });
 
-  it('invokes the exporter with the loaded report, audit trail, and a date-stamped file name', async () => {
+  it('invokes the exporter with the report, audit, counter-name map, and a range-stamped file name', async () => {
     const { api } = makeApi();
-    const exporter = vi.fn();
+    const exporter = vi.fn<RangeReportExporter>();
     renderPage(api, exporter);
 
     await screen.findByTestId('metric-total');
-    fireEvent.click(screen.getByTestId('analytics-export'));
+    // Pin the range so the file name is deterministic.
+    fireEvent.change(screen.getByTestId('analytics-from'), { target: { value: '2026-07-01' } });
+    fireEvent.change(screen.getByTestId('analytics-to'), { target: { value: '2026-07-07' } });
+    await waitFor(() => expect(api.getRangeReport).toHaveBeenLastCalledWith('2026-07-01', '2026-07-07'));
 
+    fireEvent.click(screen.getByTestId('analytics-export'));
     await waitFor(() => expect(exporter).toHaveBeenCalledTimes(1));
-    const [report, audit, fileName] = exporter.mock.calls[0];
+    const [report, audit, counterNameById, fileName] = exporter.mock.calls[0];
     expect(report.totalTickets).toBe(4);
     expect(audit).toHaveLength(2);
-    expect(fileName).toMatch(/^qms-report-\d{4}-\d{2}-\d{2}\.xlsx$/);
+    expect(counterNameById.get(1)).toBe('Counter 1');
+    expect(counterNameById.get(2)).toBe('Counter 2');
+    expect(fileName).toBe('qms-report-2026-07-01_2026-07-07.xlsx');
   });
 
-  it('reloads when the date changes', async () => {
+  it('reloads when the from/to inputs change', async () => {
     const { api, stubs } = makeApi();
     renderPage(api);
     await screen.findByTestId('metric-total');
-    expect(stubs.getDailyReport).toHaveBeenLastCalledWith(expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/));
+    expect(stubs.getRangeReport).toHaveBeenLastCalledWith(
+      expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+      expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+    );
 
-    // Change the date — the report read is called again with the new key.
-    fireEvent.change(screen.getByTestId('analytics-date'), { target: { value: '2026-07-31' } });
-    await waitFor(() => expect(stubs.getDailyReport).toHaveBeenLastCalledWith('2026-07-31'));
+    fireEvent.change(screen.getByTestId('analytics-from'), { target: { value: '2026-07-01' } });
+    await waitFor(() =>
+      expect(stubs.getRangeReport).toHaveBeenLastCalledWith('2026-07-01', expect.any(String)),
+    );
   });
 
-  it('requests per-counter performance for every configured counter', async () => {
+  it('rejects an inverted range (from > to): no load, export disabled, validation message', async () => {
     const { api, stubs } = makeApi();
     renderPage(api);
     await screen.findByTestId('metric-total');
+    const initialCalls = stubs.getRangeReport.mock.calls.length;
 
-    expect(stubs.getCounterPerformance).toHaveBeenCalledWith(1, expect.any(String));
-    expect(stubs.getCounterPerformance).toHaveBeenCalledWith(2, expect.any(String));
+    fireEvent.change(screen.getByTestId('analytics-from'), { target: { value: '2026-12-31' } });
+    fireEvent.change(screen.getByTestId('analytics-to'), { target: { value: '2026-01-01' } });
+
+    expect(await screen.findByTestId('analytics-range-invalid')).toBeInTheDocument();
+    expect(screen.getByTestId('analytics-export')).toBeDisabled();
+    // The inverted range must not trigger a load.
+    expect(stubs.getRangeReport.mock.calls.length).toBe(initialCalls);
   });
 });

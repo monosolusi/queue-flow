@@ -14,6 +14,7 @@ function fakeReportQuery(overrides: Partial<IReportQueryPort> = {}): IReportQuer
   return {
     dailyReport: async () => null,
     counterPerformance: async () => null,
+    rangeReport: async () => null,
     ...overrides,
   };
 }

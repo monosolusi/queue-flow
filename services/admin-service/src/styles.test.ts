@@ -32,4 +32,41 @@ describe('styles.css AC guards', () => {
   it('standalone wizard hints keep the intentional negative top margin', () => {
     expect(rule('.wizard__hint')).toContain('margin-top: -0.5rem');
   });
+
+  it('now-serving number uses the accent token (re-themes with the store brand color)', () => {
+    expect(rule('.now-serving__number')).toContain('color: var(--accent)');
+  });
+
+  it('counter-status active badge uses the success token (semantic "busy")', () => {
+    expect(rule('.counter-status__badge--active')).toContain('var(--success)');
+  });
+
+  it('counter-status idle badge uses muted surface (semantic "ready, not busy")', () => {
+    const idle = rule('.counter-status__badge--idle');
+    expect(idle).toContain('var(--surface-2)');
+    expect(idle).toContain('var(--text-muted)');
+  });
+
+  it('skeleton shimmer is a pure opacity pulse (no background-position gradient)', () => {
+    expect(rule('@keyframes skeleton-pulse')).toContain('opacity:');
+    // The skeleton keyframes must not animate background-position (the
+    // CLAUDE.md recipe is an opacity pulse, not a sliding gradient).
+    expect(rule('@keyframes skeleton-pulse')).not.toContain('background-position');
+  });
+
+  it('skeleton animation is disabled under prefers-reduced-motion', () => {
+    // The reduced-motion block collapses `.skeleton { animation: none }`. The
+    // `@media (...)` parenthetical sits between `reduce` and the block brace, so
+    // the matcher tolerates a `)` before `{`.
+    const reduced = css.match(/prefers-reduced-motion:\s*reduce\)\s*\{[^}]*\.skeleton\s*\{([^}]*)\}/);
+    expect(reduced).not.toBeNull();
+    expect(reduced![1]).toContain('animation: none');
+  });
+
+  it('sr-only clips the label to a 1px AT-only box', () => {
+    const sr = rule('.sr-only');
+    expect(sr).toContain('clip: rect(0, 0, 0, 0)');
+    expect(sr).toContain('position: absolute');
+    expect(sr).toContain('width: 1px');
+  });
 });
