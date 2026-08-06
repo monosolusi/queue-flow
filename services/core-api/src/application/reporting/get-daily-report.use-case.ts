@@ -14,6 +14,7 @@ export interface GetDailyReportCommand {
 export interface CategoryBreakdownDto {
   readonly categoryId: string;
   readonly code: string;
+  readonly categoryName: string;
   readonly totalTickets: number;
   readonly avgWaitTimeMs: number;
   readonly avgServiceTimeMs: number;
@@ -43,6 +44,7 @@ export function projectDailyReport(report: DailyQueueReport): DailyReportDto {
     perCategory: report.perCategory.map((c) => ({
       categoryId: c.categoryId,
       code: c.code,
+      categoryName: c.categoryName,
       totalTickets: c.totalTickets,
       avgWaitTimeMs: c.avgWaitTimeMs,
       avgServiceTimeMs: c.avgServiceTimeMs,

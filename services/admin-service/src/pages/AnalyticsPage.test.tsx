@@ -47,8 +47,8 @@ function rangeReport(from: string, to: string): RangeReportDto {
       { date: to, totalTickets: 2, avgWaitTimeMs: 14000, avgServiceTimeMs: 32000, ticketsServed: 2 },
     ],
     perCategory: [
-      { categoryId: 'cat-a', code: 'A', totalTickets: 3, avgWaitTimeMs: 10000, avgServiceTimeMs: 28000 },
-      { categoryId: 'cat-b', code: 'B', totalTickets: 1, avgWaitTimeMs: 2000, avgServiceTimeMs: 40000 },
+      { categoryId: 'cat-a', code: 'A', categoryName: 'Customer Service', totalTickets: 3, avgWaitTimeMs: 10000, avgServiceTimeMs: 28000 },
+      { categoryId: 'cat-b', code: 'B', categoryName: 'Kasir', totalTickets: 1, avgWaitTimeMs: 2000, avgServiceTimeMs: 40000 },
     ],
     perCounter: [{ counterId: 1, ticketsServed: 2, avgServiceTimeMs: 33000 }],
   };
@@ -144,8 +144,14 @@ describe('AnalyticsPage (range analytics — FR-ADM-03 / QUE-44)', () => {
     expect(screen.getByTestId('metric-service')).toHaveTextContent('30.0 s');
 
     const perCategory = screen.getByRole('region', { name: 'Per kategori' });
-    expect(within(perCategory).getByText('A')).toBeInTheDocument();
-    expect(within(perCategory).getByText('B')).toBeInTheDocument();
+    // QUE-49 — the per-category view shows human-readable NAMES, not raw codes.
+    // Each name now appears twice: in the chart label and the table cell.
+    expect(within(perCategory).getAllByText('Customer Service')).toHaveLength(2);
+    expect(within(perCategory).getAllByText('Kasir')).toHaveLength(2);
+    // The raw codes must NOT leak as visible category labels anymore (exact
+    // match — a bare 'A'/'B' text node was the pre-fix table cell).
+    expect(within(perCategory).queryByText('A')).not.toBeInTheDocument();
+    expect(within(perCategory).queryByText('B')).not.toBeInTheDocument();
 
     // Counter 1 served 2 (from perCounter); Counter 2 backfilled to 0.
     expect(screen.getByText(/Counter 1 \(#1\)/)).toBeInTheDocument();

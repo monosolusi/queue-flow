@@ -5,6 +5,7 @@ import { InvalidValueObjectException } from '../shared/errors';
 export interface CategoryBreakdown {
   readonly categoryId: string;
   readonly code: string;
+  readonly categoryName: string;
   readonly totalTickets: number;
   readonly avgWaitTimeMs: number;
   readonly avgServiceTimeMs: number;

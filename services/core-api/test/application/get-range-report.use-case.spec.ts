@@ -35,8 +35,8 @@ function sampleRange(): RangeQueueReport {
       { date: '2026-08-02', totalTickets: 1, avgWaitTimeMs: 2000, avgServiceTimeMs: 40000, ticketsServed: 1 },
     ],
     [
-      { categoryId: 'cat-a-id', code: 'A', totalTickets: 3, avgWaitTimeMs: 1000, avgServiceTimeMs: 28000 },
-      { categoryId: 'cat-b-id', code: 'B', totalTickets: 1, avgWaitTimeMs: 2000, avgServiceTimeMs: 40000 },
+      { categoryId: 'cat-a-id', code: 'A', categoryName: 'Loket Umum', totalTickets: 3, avgWaitTimeMs: 1000, avgServiceTimeMs: 28000 },
+      { categoryId: 'cat-b-id', code: 'B', categoryName: 'Prioritas Lansia', totalTickets: 1, avgWaitTimeMs: 2000, avgServiceTimeMs: 40000 },
     ],
     [{ counterId: 1, ticketsServed: 3, avgServiceTimeMs: 30000 }],
   );
@@ -66,8 +66,8 @@ describe('GetRangeReportUseCase (FR-ADM-03 / QUE-44)', () => {
         { date: '2026-08-02', totalTickets: 1, avgWaitTimeMs: 2000, avgServiceTimeMs: 40000, ticketsServed: 1 },
       ],
       perCategory: [
-        { categoryId: 'cat-a-id', code: 'A', totalTickets: 3, avgWaitTimeMs: 1000, avgServiceTimeMs: 28000 },
-        { categoryId: 'cat-b-id', code: 'B', totalTickets: 1, avgWaitTimeMs: 2000, avgServiceTimeMs: 40000 },
+        { categoryId: 'cat-a-id', code: 'A', categoryName: 'Loket Umum', totalTickets: 3, avgWaitTimeMs: 1000, avgServiceTimeMs: 28000 },
+        { categoryId: 'cat-b-id', code: 'B', categoryName: 'Prioritas Lansia', totalTickets: 1, avgWaitTimeMs: 2000, avgServiceTimeMs: 40000 },
       ],
       perCounter: [{ counterId: 1, ticketsServed: 3, avgServiceTimeMs: 30000 }],
     });

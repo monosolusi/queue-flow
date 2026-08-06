@@ -96,10 +96,16 @@ describe('Range report REST surface (integration — FR-ADM-03 / QUE-44)', () =>
       ticketsServed: 0,
     });
 
-    // Per-category over the range: A has 2.
-    const perCat = res.body.perCategory as Array<{ code: string; totalTickets: number }>;
+    // Per-category over the range: A has 2. The DTO carries the category NAME
+    // (QUE-49 — backend-include so the frontend needs no code→name join).
+    const perCat = res.body.perCategory as Array<{
+      code: string;
+      categoryName: string;
+      totalTickets: number;
+    }>;
     expect(perCat).toHaveLength(1);
     expect(perCat[0].code).toBe('A');
+    expect(perCat[0].categoryName).toBe('Customer Service');
     expect(perCat[0].totalTickets).toBe(2);
 
     // Per-counter over the range: counter 1 served 2.

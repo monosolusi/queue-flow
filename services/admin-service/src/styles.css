@@ -670,6 +670,31 @@ fieldset {
   font-size: 10px;
 }
 
+/* CategoryBreakdownChart — hand-rolled offline SVG horizontal bars (no chart
+ * library, NFR-REL-01). One row per category (the no-overlap layout, QUE-48);
+ * one accent hue per single-series magnitude chart; text never wears the data
+ * color. Mirrors the .range-trend__* precedent. */
+.category-breakdown__svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.category-breakdown__axis {
+  stroke: var(--surface-2);
+  stroke-width: 1;
+}
+.category-breakdown__bar {
+  fill: var(--accent);
+}
+.category-breakdown__label {
+  fill: var(--text);
+  font-size: 11px;
+}
+.category-breakdown__value {
+  fill: var(--text-muted);
+  font-size: 10px;
+}
+
 /* Analytics loading line (QUE-44 — replaces the former full-viewport loading). */
 .analytics__loading {
   color: var(--text-muted);
