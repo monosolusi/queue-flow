@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Get, Param, Query } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import {
   GetCounterPerformanceUseCase,
   GetDailyReportUseCase,
@@ -6,6 +6,10 @@ import {
   type CounterPerformanceDto,
 } from '../../application/reporting';
 import { toDateKey } from '../../application/shared/date';
+import { Role } from '../../domain/identity';
+import { AuthGuard } from '../auth/auth.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/roles.decorator';
 
 /** `YYYY-MM-DD` — the only date shape the reporting read side accepts. */
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -43,6 +47,8 @@ const EMPTY_COUNTER = (counterId: number, date: string): CounterPerformanceDto =
  *   count + avg service time.
  */
 @Controller('api/reports')
+@UseGuards(AuthGuard, RolesGuard)
+@Roles(Role.ADMIN)
 export class ReportingController {
   constructor(
     private readonly getDailyReport: GetDailyReportUseCase,

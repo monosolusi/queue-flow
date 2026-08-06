@@ -39,6 +39,7 @@ import {
   InMemorySystemConfigurationRepository,
 } from '../../src/infrastructure/persistence/in-memory';
 import { toDateKey, startOfLocalDay } from '../../src/application/queue';
+import { authHeader, bootstrapAuthedAdmin } from '../acceptance/_helpers';
 
 /**
  * Integration: boots the real Nest app (in-memory persistence) and exercises the
@@ -59,6 +60,7 @@ describe('System daily-reset REST surface (integration — QUE-2)', () => {
   let auditLog: IAuditLogRepository;
   let port: number;
   let catAId: string;
+  let token: string;
 
   beforeAll(async () => {
     app = await NestFactory.create(AppModule, { logger: false });
@@ -70,6 +72,10 @@ describe('System daily-reset REST surface (integration — QUE-2)', () => {
     sequences = app.get(SEQUENCE_REPOSITORY);
     systemConfig = app.get(SYSTEM_CONFIGURATION_REPOSITORY);
     auditLog = app.get(AUDIT_LOG_REPOSITORY);
+    // QUE-43: POST /api/system/daily-reset is admin-only. The bootstrap admin is
+    // named 'manager1' so the audit actor === 'manager1' assertions are real
+    // change-detectors for the authenticated-principal-as-actor fix.
+    token = await bootstrapAuthedAdmin(app);
   });
 
   afterAll(async () => {
@@ -128,7 +134,7 @@ describe('System daily-reset REST surface (integration — QUE-2)', () => {
     const expectedDate = toDateKey(Date.now());
 
     const received = await collectMessages(1, () =>
-      request(app.getHttpServer()).post('/api/system/daily-reset'),
+      request(app.getHttpServer()).post('/api/system/daily-reset').set(authHeader(token)),
     );
 
     expect(received).toHaveLength(1);
@@ -137,7 +143,7 @@ describe('System daily-reset REST surface (integration — QUE-2)', () => {
   });
 
   it('daily-reset returns the reset result DTO', async () => {
-    const res = await request(app.getHttpServer()).post('/api/system/daily-reset');
+    const res = await request(app.getHttpServer()).post('/api/system/daily-reset').set(authHeader(token));
 
     expect(res.status).toBe(201);
     // The default policy has archivePreviousDayData = true, so the result
@@ -156,7 +162,7 @@ describe('System daily-reset REST surface (integration — QUE-2)', () => {
     await request(app.getHttpServer()).post('/api/tickets').send({ categoryId: catAId });
 
     // Reset the daily sequence.
-    await request(app.getHttpServer()).post('/api/system/daily-reset');
+    await request(app.getHttpServer()).post('/api/system/daily-reset').set(authHeader(token));
 
     // The next ticket mints fresh from the configured resetTo (1) -> A-001.
     const after = await request(app.getHttpServer()).post('/api/tickets').send({ categoryId: catAId });
@@ -181,7 +187,7 @@ describe('System daily-reset REST surface (integration — QUE-2)', () => {
     // Issue one ticket first so today's sequence counter exists (A-001, value 1).
     await request(app.getHttpServer()).post('/api/tickets').send({ categoryId: catAId });
 
-    const res = await request(app.getHttpServer()).post('/api/system/daily-reset');
+    const res = await request(app.getHttpServer()).post('/api/system/daily-reset').set(authHeader(token));
     expect(res.status).toBe(201);
     expect(res.body.resetTo).toBe(5);
 
@@ -193,7 +199,7 @@ describe('System daily-reset REST surface (integration — QUE-2)', () => {
   it('daily-reset before the system is configured surfaces as 409 SYSTEM_NOT_CONFIGURED', async () => {
     (systemConfig as InMemorySystemConfigurationRepository).clear(); // pre-wizard state
 
-    const res = await request(app.getHttpServer()).post('/api/system/daily-reset');
+    const res = await request(app.getHttpServer()).post('/api/system/daily-reset').set(authHeader(token));
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('SYSTEM_NOT_CONFIGURED');
   });
@@ -206,7 +212,7 @@ describe('System daily-reset REST surface (integration — QUE-2)', () => {
     await sequences.nextTicketNumber(catAId, 'A', today);
     expect(await sequences.currentSequence(catAId, today)).toBe(3);
 
-    await request(app.getHttpServer()).post('/api/system/daily-reset');
+    await request(app.getHttpServer()).post('/api/system/daily-reset').set(authHeader(token));
 
     // Today's counter rolled back to resetTo (1) means the next mint is A-001.
     expect(await sequences.currentSequence(catAId, today)).toBe(0); // resetDaily sets to resetTo - 1
@@ -215,7 +221,7 @@ describe('System daily-reset REST surface (integration — QUE-2)', () => {
   it('a manual daily-reset records ARCHIVE_PREVIOUS_DAY then MANUAL_RESET audit entries (NFR-SEC-02)', async () => {
     expect(await auditLog.list()).toHaveLength(0);
 
-    const res = await request(app.getHttpServer()).post('/api/system/daily-reset');
+    const res = await request(app.getHttpServer()).post('/api/system/daily-reset').set(authHeader(token));
     expect(res.status).toBe(201);
 
     // The default policy has archivePreviousDayData = true, so the manual reset
@@ -223,12 +229,12 @@ describe('System daily-reset REST surface (integration — QUE-2)', () => {
     const entries = await auditLog.list();
     expect(entries).toHaveLength(2);
     expect(entries[0].action).toBe(AuditAction.ARCHIVE_PREVIOUS_DAY);
-    expect(entries[0].actor).toBe('admin');
+    expect(entries[0].actor).toBe('manager1');
     expect(entries[0].before).toBeNull();
     expect(typeof entries[0].after.date).toBe('string');
     expect(entries[0].after.archivedCount).toBe(0);
     expect(entries[1].action).toBe(AuditAction.MANUAL_RESET);
-    expect(entries[1].actor).toBe('admin');
+    expect(entries[1].actor).toBe('manager1');
     expect(entries[1].after.resetTo).toBe(1);
     expect(typeof entries[1].after.date).toBe('string');
     expect(entries[1].before).toBeNull();
@@ -257,7 +263,7 @@ describe('System daily-reset REST surface (integration — QUE-2)', () => {
     const today = await request(app.getHttpServer()).post('/api/tickets').send({ categoryId: catAId });
     expect(today.body.ticket.ticketNumber).toBe('A-001');
 
-    const res = await request(app.getHttpServer()).post('/api/system/daily-reset');
+    const res = await request(app.getHttpServer()).post('/api/system/daily-reset').set(authHeader(token));
     expect(res.status).toBe(201);
     expect(res.body.archivedCount).toBe(1);
 

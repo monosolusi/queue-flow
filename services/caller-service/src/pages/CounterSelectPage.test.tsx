@@ -39,6 +39,11 @@ function makeApi(list: CounterDto[] = counters, reject?: Error): ICallerApi {
     transfer: () => Promise.resolve(),
     applyTransition: () => Promise.resolve(),
     getBrandColor: () => Promise.resolve({ brandColor: '' }),
+    // Auth surface (QUE-43) — not invoked by this page; stubs satisfy the type.
+    login: () =>
+      Promise.resolve({ token: 'tok', user: { id: 'u', username: 's', role: 'caller-staff' as const } }),
+    logout: () => Promise.resolve(),
+    getMe: () => Promise.resolve(null),
   };
 }
 

@@ -6,6 +6,26 @@
  * of the API it consumes (never admin/reporting DTOs).
  */
 
+/** Auth role wire values (core-api Identity context, QUE-43). The wire value is
+ *  the enum; user-visible copy never shows this string raw (friendly labels
+ *  live in the UI). `admin` and `caller-staff` both permit the caller workspace. */
+export type UserRole = 'admin' | 'caller-staff';
+
+/** The authenticated user, returned by `POST /api/auth/login` and
+ *  `GET /api/auth/me`. Stored only in memory (resolved per session); the token
+ *  is the persisted credential. */
+export interface AuthUserDto {
+  readonly id: string;
+  readonly username: string;
+  readonly role: UserRole;
+}
+
+/** `POST /api/auth/login` success body — the bearer token + the resolved user. */
+export interface LoginResponseDto {
+  readonly token: string;
+  readonly user: AuthUserDto;
+}
+
 /** A category assigned to a counter, with the master-data fields the UI needs. */
 export interface AssignedCategoryDto {
   readonly id: string;

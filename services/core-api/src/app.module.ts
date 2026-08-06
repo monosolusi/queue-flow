@@ -8,6 +8,7 @@ import { SystemApiModule } from './interface-adapters/rest/system-api.module';
 import { SystemConfigApiModule } from './interface-adapters/rest/system-config-api.module';
 import { ReportingApiModule } from './interface-adapters/rest/reporting-api.module';
 import { HealthModule } from './interface-adapters/rest/health.module';
+import { AuthApiModule } from './interface-adapters/auth/auth-api.module';
 import { SchedulerModule } from './infrastructure/scheduler/scheduler.module';
 import { BootstrapModule } from './infrastructure/bootstrap/bootstrap.module';
 
@@ -26,6 +27,10 @@ import { BootstrapModule } from './infrastructure/bootstrap/bootstrap.module';
  * checker that re-reads + logs the persisted setup status at boot. QUE-26 adds
  * the analytics + audit-trail read surface (`GET /api/reports/daily`,
  * `GET /api/reports/counters/:id`, `GET /api/audit/log`) for the admin dashboard.
+ * QUE-43 adds the `@Global()` `AuthApiModule` — the Identity auth REST surface
+ * (login/logout/me/setup-admin + user CRUD) and the cross-cutting `AuthGuard` /
+ * `RolesGuard` / `AdminOrSetupGuard`, wired as a global module so the guards
+ * resolve on every feature controller's `@UseGuards` without per-module imports.
  */
 @Module({
   imports: [
@@ -38,6 +43,7 @@ import { BootstrapModule } from './infrastructure/bootstrap/bootstrap.module';
     SystemConfigApiModule,
     ReportingApiModule,
     HealthModule,
+    AuthApiModule,
     SchedulerModule,
     BootstrapModule,
   ],

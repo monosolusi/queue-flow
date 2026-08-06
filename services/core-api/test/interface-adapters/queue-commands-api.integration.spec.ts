@@ -38,6 +38,7 @@ import {
   InMemorySequenceRepository,
   InMemorySystemConfigurationRepository,
 } from '../../src/infrastructure/persistence/in-memory';
+import { authHeader, bootstrapAuthedAdmin } from '../acceptance/_helpers';
 
 /**
  * Integration: boots the real Nest app (in-memory persistence) and exercises
@@ -60,6 +61,7 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
   let port: number;
   let catAId: string;
   let catBId: string;
+  let token: string;
 
   beforeAll(async () => {
     app = await NestFactory.create(AppModule, { logger: false });
@@ -71,6 +73,11 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
     categories = app.get(CATEGORY_REPOSITORY);
     sequences = app.get(SEQUENCE_REPOSITORY);
     systemConfig = app.get(SYSTEM_CONFIGURATION_REPOSITORY);
+    // QUE-43: every queue command endpoint requires an authenticated admin or
+    // caller-staff bearer. Bootstrap the admin once (the Identity repos are not
+    // cleared per test — auth state is cross-cutting scaffolding) and reuse the
+    // token across tests; the 12h session TTL far outlasts the suite.
+    token = await bootstrapAuthedAdmin(app);
   });
 
   afterAll(async () => {
@@ -162,7 +169,7 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
     await seedWaitingTicket(catAId, 'A', 1);
 
     const received = await collectMessages(2, () =>
-      request(app.getHttpServer()).post('/api/queue/call-next').send({ counterId: 1 }),
+      request(app.getHttpServer()).post('/api/queue/call-next').set(authHeader(token)).send({ counterId: 1 }),
     );
 
     const types = received.map((m) => m.type);
@@ -179,7 +186,7 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
     await seedWaitingTicket(catAId, 'A', 7);
 
     const res = await request(app.getHttpServer())
-      .post('/api/queue/call-next')
+      .post('/api/queue/call-next').set(authHeader(token))
       .send({ counterId: 1 });
 
     expect(res.status).toBe(201);
@@ -193,7 +200,7 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
   it('call-next returns `empty` (no broadcast) when no WAITING ticket matches the counter', async () => {
     const received = await collectMessages(1, async () => {
       const res = await request(app.getHttpServer())
-        .post('/api/queue/call-next')
+        .post('/api/queue/call-next').set(authHeader(token))
         .send({ counterId: 1 });
       expect(res.status).toBe(201);
       expect(res.body).toEqual({ status: 'empty' });
@@ -206,12 +213,12 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
     // Advance a WAITING ticket to CALLING first (call-next drains its events).
     await seedWaitingTicket(catAId, 'A', 1);
     const callRes = await request(app.getHttpServer())
-      .post('/api/queue/call-next')
+      .post('/api/queue/call-next').set(authHeader(token))
       .send({ counterId: 1 });
     const ticketId = callRes.body.ticket.ticketId;
 
     const received = await collectMessages(1, () =>
-      request(app.getHttpServer()).post(`/api/queue/${ticketId}/serve`),
+      request(app.getHttpServer()).post(`/api/queue/${ticketId}/serve`).set(authHeader(token)),
     );
 
     expect(received).toHaveLength(1);
@@ -263,6 +270,7 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
     const received = await collectMessages(2, () =>
       request(app.getHttpServer())
         .post(`/api/queue/${calling.id.value}/transfer`)
+        .set(authHeader(token))
         .send({ targetCategoryId: catBId }),
     );
 
@@ -285,7 +293,7 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
     const ticket = await seedWaitingTicket(catAId, 'A', 1); // WAITING has no -> SKIPPED edge
 
     const received = await collectMessages(1, async () => {
-      const res = await request(app.getHttpServer()).post(`/api/queue/${ticket.id.value}/skip`);
+      const res = await request(app.getHttpServer()).post(`/api/queue/${ticket.id.value}/skip`).set(authHeader(token));
       expect(res.status).toBe(409);
       expect(res.body.code).toBe('INVALID_STATE_TRANSITION');
     });
@@ -297,7 +305,7 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
     (systemConfig as InMemorySystemConfigurationRepository).clear(); // pre-wizard state
 
     const res = await request(app.getHttpServer())
-      .post('/api/queue/call-next')
+      .post('/api/queue/call-next').set(authHeader(token))
       .send({ counterId: 1 });
 
     expect(res.status).toBe(409);
@@ -305,7 +313,7 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
   });
 
   it('rejects a missing/invalid counterId on call-next with 400', async () => {
-    const res = await request(app.getHttpServer()).post('/api/queue/call-next').send({});
+    const res = await request(app.getHttpServer()).post('/api/queue/call-next').set(authHeader(token)).send({});
     expect(res.status).toBe(400);
   });
 
@@ -353,7 +361,7 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
 
     const received = await collectMessages(1, async () => {
       const res = await request(app.getHttpServer())
-        .post(`/api/queue/${serving.id.value}/transition`)
+        .post(`/api/queue/${serving.id.value}/transition`).set(authHeader(token))
         .send({ targetStatus: 'PREPARING' });
       expect(res.status).toBe(201);
       expect(res.body).toMatchObject({
@@ -394,7 +402,7 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
 
     const received = await collectMessages(1, async () => {
       const res = await request(app.getHttpServer())
-        .post(`/api/queue/${serving.id.value}/transition`)
+        .post(`/api/queue/${serving.id.value}/transition`).set(authHeader(token))
         .send({ targetStatus: 'PREPARING' });
       expect(res.status).toBe(409);
       expect(res.body.code).toBe('INVALID_STATE_TRANSITION');
@@ -419,7 +427,7 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
     await queue.save(serving);
 
     const res = await request(app.getHttpServer())
-      .post(`/api/queue/${serving.id.value}/transition`)
+      .post(`/api/queue/${serving.id.value}/transition`).set(authHeader(token))
       .send({});
     expect(res.status).toBe(400);
   });
@@ -444,7 +452,7 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
     await queue.save(serving);
 
     const res = await request(app.getHttpServer())
-      .post(`/api/queue/${serving.id.value}/transition`)
+      .post(`/api/queue/${serving.id.value}/transition`).set(authHeader(token))
       .send({ targetStatus: 'COMPLETED' });
     expect(res.status).toBe(400);
     // The ticket is unchanged — no bypass occurred.

@@ -10,8 +10,16 @@ import {
   SYSTEM_CONFIGURATION_REPOSITORY,
 } from '../../../domain/store-config';
 import { AUDIT_LOG_REPOSITORY } from '../../../domain/audit';
+import {
+  PASSWORD_HASHER,
+  SESSION_REPOSITORY,
+  TOKEN_GENERATOR,
+  USER_REPOSITORY,
+} from '../../../domain/identity';
 import { REPORT_QUERY_PORT } from '../../../domain/reporting';
 import { TRANSACTION_MANAGER } from '../../../domain/shared';
+import { CryptoTokenGenerator } from '../../auth/crypto-token-generator';
+import { ScryptPasswordHasher } from '../../auth/scrypt-password-hasher';
 import { PG_CONNECTION, createPgPool } from './postgres-connection.provider';
 import { PostgresQueueRepository } from './postgres-queue.repository';
 import { PostgresSequenceRepository } from './postgres-sequence.repository';
@@ -20,6 +28,8 @@ import { PostgresCounterRoutingRuleRepository } from './postgres-counter-routing
 import { PostgresSystemConfigurationRepository } from './postgres-system-configuration.repository';
 import { PostgresAuditLogRepository } from './postgres-audit-log.repository';
 import { PostgresReportQueryRepository } from './postgres-report-query.repository';
+import { PostgresUserRepository } from './postgres-user.repository';
+import { PostgresSessionRepository } from './postgres-session.repository';
 import { PostgresTransactionManager } from './postgres-transaction-manager';
 import { PostgresMigrationRunner } from './migration-runner';
 import { PostgresDurabilityProbe } from './durability-probe';
@@ -84,6 +94,22 @@ import { PostgresDurabilityProbe } from './durability-probe';
       useFactory: (pool) => new PostgresAuditLogRepository(pool),
       inject: [PG_CONNECTION],
     },
+    // QUE-43 Identity context — Postgres repos (take a `Pool`, so `useFactory`
+    // injecting the PG_CONNECTION Symbol, same as the other Postgres repos) +
+    // the node:crypto-backed hasher/token generator (no-arg constructors →
+    // `useClass`).
+    {
+      provide: USER_REPOSITORY,
+      useFactory: (pool) => new PostgresUserRepository(pool),
+      inject: [PG_CONNECTION],
+    },
+    {
+      provide: SESSION_REPOSITORY,
+      useFactory: (pool) => new PostgresSessionRepository(pool),
+      inject: [PG_CONNECTION],
+    },
+    { provide: PASSWORD_HASHER, useClass: ScryptPasswordHasher },
+    { provide: TOKEN_GENERATOR, useClass: CryptoTokenGenerator },
     // QUE-26 reporting read side — raw-SQL CQRS read over tickets + archived_tickets.
     {
       provide: REPORT_QUERY_PORT,
@@ -111,6 +137,10 @@ import { PostgresDurabilityProbe } from './durability-probe';
     COUNTER_ROUTING_RULE_REPOSITORY,
     SYSTEM_CONFIGURATION_REPOSITORY,
     AUDIT_LOG_REPOSITORY,
+    USER_REPOSITORY,
+    SESSION_REPOSITORY,
+    PASSWORD_HASHER,
+    TOKEN_GENERATOR,
     REPORT_QUERY_PORT,
     TRANSACTION_MANAGER,
   ],

@@ -1,5 +1,9 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, UseGuards } from '@nestjs/common';
 import { ListCountersUseCase } from '../../application/store-config';
+import { Role } from '../../domain/identity';
+import { AuthGuard } from '../auth/auth.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/roles.decorator';
 
 /**
  * Read-only REST surface for counter master data (FR-CLR-01 / QUE-19). The
@@ -12,6 +16,8 @@ import { ListCountersUseCase } from '../../application/store-config';
  * origin fronted by NGINX.
  */
 @Controller('api/counters')
+@UseGuards(AuthGuard, RolesGuard)
+@Roles(Role.ADMIN, Role.CALLER_STAFF)
 export class CountersController {
   constructor(private readonly listCounters: ListCountersUseCase) {}
 

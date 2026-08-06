@@ -212,7 +212,6 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
         // never travels on the wire — `WizardRoutingRuleDto` carries no
         // `rowKey`, and the PUT payload type is `readonly WizardRoutingRuleDto[]`.
         routingRules: form.routingRules.map(({ rowKey, ...rest }) => rest),
-        actor: 'admin',
       });
       setSavedAt(Date.now());
       // Reload so newly added categories get their server-minted ids into the

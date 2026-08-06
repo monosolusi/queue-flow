@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { WorkspacePage } from './WorkspacePage';
+import { AuthProvider } from '../auth/useAuth';
 import { QueueStoreProvider } from '../state/queue-store';
 import type { BoundCounter } from '../state/counter-binding';
 import type { ICallerApi } from '../api/caller-api';
@@ -75,6 +77,11 @@ function makeApi(snap: QueueSnapshotDto = snapshot): ICallerApi {
     transfer: vi.fn(() => Promise.resolve()),
     applyTransition: vi.fn(() => Promise.resolve()),
     getBrandColor: () => Promise.resolve({ brandColor: '' }),
+    // Auth surface (QUE-43) — not invoked by the workspace; stubs satisfy the type.
+    login: () =>
+      Promise.resolve({ token: 'tok', user: { id: 'u', username: 's', role: 'caller-staff' as const } }),
+    logout: () => Promise.resolve(),
+    getMe: () => Promise.resolve(null),
   };
 }
 
@@ -91,9 +98,13 @@ function wireEvent(
 function renderWorkspace(snap: QueueSnapshotDto = snapshot, onUnbind = vi.fn()) {
   const api = makeApi(snap);
   render(
-    <QueueStoreProvider bound={bound} api={api} socketOptions={socketOptions}>
-      <WorkspacePage bound={bound} onUnbind={onUnbind} />
-    </QueueStoreProvider>,
+    <MemoryRouter>
+      <AuthProvider api={api}>
+        <QueueStoreProvider bound={bound} api={api} socketOptions={socketOptions}>
+          <WorkspacePage bound={bound} onUnbind={onUnbind} />
+        </QueueStoreProvider>
+      </AuthProvider>
+    </MemoryRouter>,
   );
   return { api };
 }
@@ -136,9 +147,13 @@ describe('WorkspacePage', () => {
     const api = makeApi(snapshot);
     api.getQueueSnapshot = vi.fn(() => new Promise<QueueSnapshotDto>(() => {}));
     render(
-      <QueueStoreProvider bound={bound} api={api} socketOptions={socketOptions}>
-        <WorkspacePage bound={bound} onUnbind={vi.fn()} />
-      </QueueStoreProvider>,
+      <MemoryRouter>
+        <AuthProvider api={api}>
+          <QueueStoreProvider bound={bound} api={api} socketOptions={socketOptions}>
+            <WorkspacePage bound={bound} onUnbind={vi.fn()} />
+          </QueueStoreProvider>
+        </AuthProvider>
+      </MemoryRouter>,
     );
     const loading = await screen.findByTestId('workspace-loading');
     expect(loading).toHaveAttribute('aria-busy', 'true');

@@ -1,5 +1,9 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, UseGuards } from '@nestjs/common';
 import { ListAuditEntriesUseCase, type AuditLogEntryDto } from '../../application/audit';
+import { Role } from '../../domain/identity';
+import { AuthGuard } from '../auth/auth.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/roles.decorator';
 
 /**
  * Audit-trail REST surface for the admin analytics dashboard (NFR-SEC-02 /
@@ -10,6 +14,8 @@ import { ListAuditEntriesUseCase, type AuditLogEntryDto } from '../../applicatio
  * anti-corruption translation point, not a domain concern.
  */
 @Controller('api/audit')
+@UseGuards(AuthGuard, RolesGuard)
+@Roles(Role.ADMIN)
 export class AuditLogController {
   constructor(private readonly listAuditEntries: ListAuditEntriesUseCase) {}
 

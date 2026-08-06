@@ -23,6 +23,8 @@ import {
 } from '../../src/domain/store-config';
 import { Identifier } from '../../src/domain/shared';
 import { PriorityPolicy } from '../../src/domain/shared/priority-policy';
+import { Role, USER_REPOSITORY, type IUserRepository } from '../../src/domain/identity';
+import { CreateUserUseCase } from '../../src/application/identity';
 import {
   InMemoryCategoryRepository,
   InMemoryCounterRoutingRuleRepository,
@@ -84,7 +86,10 @@ export function prdWizardPayload() {
       },
     ],
     brandColor: '#2563eb',
-    actor: 'admin',
+    // QUE-43: `actor` is no longer a wire field — the server derives the audit
+    // actor from the authenticated principal (or the 'system' sentinel on the
+    // pre-setup wizard path). The wizard client stopped sending it; this fixture
+    // mirrors the real wire body.
   };
 }
 
@@ -121,6 +126,57 @@ export function repos(app: INestApplication) {
     systemConfig: app.get(SYSTEM_CONFIGURATION_REPOSITORY) as ISystemConfigurationRepository,
     publisher: app.get(QUEUE_EVENT_PUBLISHER) as IQueueEventPublisher,
   };
+}
+
+/**
+ * The bootstrap admin credentials every authed spec shares (QUE-43). The
+ * username `manager1` is load-bearing as a **change-detector**: the audit
+ * `actor` on an authenticated admin op is the principal's username (the
+ * pre-QUE-43 forgery vector was a hardcoded `'admin'` literal). If the
+ * controller regressed to hardcoding `actor: 'admin'`, the assertions
+ * `actor === 'manager1'` would fail — naming the bootstrap admin `admin`
+ * would mask the regression (the assertion would pass whether the actor came
+ * from the principal or from the old literal). So the seeded admin is named
+ * `manager1` to make the forgery-fix assertions real change-detectors.
+ */
+const BOOTSTRAP_ADMIN_USERNAME = 'manager1';
+const BOOTSTRAP_ADMIN_PASSWORD = 'password123';
+
+/**
+ * Creates the bootstrap admin user (if absent) and logs in, returning an opaque
+ * bearer token the caller spreads onto protected requests via
+ * {@link authHeader}. Idempotent: if the admin already exists (e.g. a spec
+ * bootstraps once in `beforeAll` and `clearRepos` does not wipe the Identity
+ * repos — auth state is cross-cutting test scaffolding, not domain data under
+ * test), it skips creation and just logs in. The user is created directly
+ * through {@link CreateUserUseCase} (not `POST /api/auth/setup-admin`, which
+ * 403s once setup is complete) so this works both pre- and post-setup.
+ */
+export async function bootstrapAuthedAdmin(app: INestApplication): Promise<string> {
+  const userRepo = app.get(USER_REPOSITORY) as IUserRepository;
+  const existing = await userRepo.findByUsername(BOOTSTRAP_ADMIN_USERNAME);
+  if (!existing) {
+    const createUser = app.get(CreateUserUseCase);
+    await createUser.execute({
+      username: BOOTSTRAP_ADMIN_USERNAME,
+      password: BOOTSTRAP_ADMIN_PASSWORD,
+      role: Role.ADMIN,
+    });
+  }
+  const res = await request(app.getHttpServer())
+    .post('/api/auth/login')
+    .send({ username: BOOTSTRAP_ADMIN_USERNAME, password: BOOTSTRAP_ADMIN_PASSWORD });
+  expect(res.status).toBe(200);
+  return res.body.token as string;
+}
+
+/**
+ * Builds the `Authorization: Bearer <token>` header object for supertest's
+ * `.set({...})`. Spread onto any protected request:
+ * `http(app).post('/api/queue/call-next').set(authHeader(token)).send(...)`.
+ */
+export function authHeader(token: string): { Authorization: string } {
+  return { Authorization: `Bearer ${token}` };
 }
 
 /** Seeds the PRD §7 config + 2 categories + 2 routings directly through the

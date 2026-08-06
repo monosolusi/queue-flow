@@ -339,3 +339,133 @@ button {
   white-space: nowrap;
   border: 0;
 }
+
+/* Auth guard loading state (mirrors admin-service SetupGuard). */
+.guard-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
+  padding: 2rem;
+  color: var(--text-muted);
+  font-size: 1.1rem;
+}
+
+/* Login (QUE-43) --------------------------------------------------------- */
+.login {
+  max-width: 420px;
+  margin: 0 auto;
+  padding: 3rem 1rem;
+  display: flex;
+}
+.login__form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding: 2rem;
+  background: var(--surface);
+  border-radius: var(--radius);
+}
+.login__title {
+  margin: 0;
+  font-size: 1.75rem;
+}
+.login__hint {
+  margin: -0.5rem 0 0;
+  color: var(--text-muted);
+  font-size: 1rem;
+}
+.login__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.login__label {
+  font-size: 0.95rem;
+  color: var(--text-muted);
+}
+.login__input {
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--surface-2);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 1.05rem;
+}
+.login__input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.login__input:disabled {
+  opacity: 0.6;
+}
+.login__error {
+  margin: 0;
+  color: var(--danger-on-dark);
+  font-size: 0.95rem;
+}
+.login__submit {
+  width: 100%;
+  min-height: 3rem;
+  font-size: 1.1rem;
+}
+
+/* User menu (QUE-43) ----------------------------------------------------- */
+.user-menu {
+  position: relative;
+}
+.user-menu__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.user-menu__user {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.user-menu__chevron {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.user-menu__popup {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.4rem);
+  min-width: 12rem;
+  display: flex;
+  flex-direction: column;
+  padding: 0.5rem;
+  background: var(--surface);
+  border: 1px solid var(--surface-2);
+  border-radius: var(--radius);
+  box-shadow: 0 0.4rem 1rem rgba(0, 0, 0, 0.25);
+  z-index: 10;
+}
+.user-menu__info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.5rem 0.75rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+.user-menu__info-name {
+  color: var(--text);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+.user-menu__item {
+  text-align: left;
+  padding: 0.65rem 0.75rem;
+  border: none;
+  border-radius: calc(var(--radius) * 0.6);
+  background: transparent;
+  color: var(--text);
+  font-size: 1rem;
+}
+.user-menu__item:hover {
+  background: var(--surface-2);
+}

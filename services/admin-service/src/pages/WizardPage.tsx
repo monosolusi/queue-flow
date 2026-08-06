@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { IAdminApi } from '../api/admin-api';
+import type { IAdminApi, IAuthApi } from '../api/admin-api';
 import {
   type DailyResetMode,
   type PriorityPolicy,
@@ -12,6 +12,7 @@ import {
   type WizardCategoryDto,
   type WizardRoutingRuleDto,
 } from '../api/types';
+import { writeToken } from '../auth/token-store';
 import { validateCronExpression } from '../lib/cron';
 import { validateBrandColor, isValidBrandColor } from '../lib/brand-color';
 import { DAILY_RESET_MODE_LABELS } from '../lib/labels';
@@ -78,9 +79,17 @@ interface WizardForm {
     /** IANA timezone the daily-reset cron fires in (QUE-42). */
     timezone: string;
   };
+  /** First-run admin credentials (QUE-43). Only entered on the first-run path;
+   *  on a re-edit (setup already complete) the step-5 form is hidden and these
+   *  fields are ignored by finalize. The username/password invariants mirror
+   *  core-api's `Username` VO + password-≥8 guard so the wizard never submits a
+   *  shape the `POST /api/auth/setup-admin` endpoint would 400. */
+  adminUsername: string;
+  adminPassword: string;
+  adminPasswordConfirm: string;
 }
 
-const TOTAL_STEPS = 5;
+const TOTAL_STEPS = 6;
 
 /**
  * Computes the UTC offset (`UTC±HH:MM`, zero-padded) of a given IANA timezone
@@ -149,6 +158,9 @@ function emptyForm(): WizardForm {
       cronExpression: DEFAULT_DAILY_RESET.cronExpression ?? '',
       timezone: BROWSER_TIMEZONE,
     },
+    adminUsername: '',
+    adminPassword: '',
+    adminPasswordConfirm: '',
   };
 }
 
@@ -232,6 +244,30 @@ function referencedStates(form: StateMachineForm): Set<string> {
   return refs;
 }
 
+/** Username invariant mirror (QUE-43 — mirrors core-api's `Username` VO). */
+const ADMIN_USERNAME_RE = /^[a-zA-Z0-9_.-]{3,32}$/;
+const ADMIN_PASSWORD_MIN = 8;
+
+/**
+ * Validates the first-run admin credentials (step 5), mirroring the backend
+ * `Username` / password invariants so the wizard never submits credentials the
+ * `POST /api/auth/setup-admin` endpoint would 400. Returns a list of Indonesian
+ * error strings; empty means valid. Mirrors the per-step validation pattern.
+ */
+function validateAdminCredentials(form: WizardForm): string[] {
+  const errors: string[] = [];
+  if (!ADMIN_USERNAME_RE.test(form.adminUsername)) {
+    errors.push('Username 3–32 karakter (huruf, angka, titik, garis bawah, strip).');
+  }
+  if (form.adminPassword.length < ADMIN_PASSWORD_MIN) {
+    errors.push(`Kata sandi minimal ${ADMIN_PASSWORD_MIN} karakter.`);
+  }
+  if (form.adminPassword !== form.adminPasswordConfirm) {
+    errors.push('Konfirmasi kata sandi tidak cocok.');
+  }
+  return errors;
+}
+
 /**
  * AC6 — wire a field error message to its input via `aria-describedby` +
  * `aria-invalid`. Returns a spreadable props object (empty when there is no
@@ -248,7 +284,7 @@ function describedBy(
 }
 
 /**
- * The first-run setup wizard (FR-WZD-02..06). Five steps:
+ * The first-run setup wizard (FR-WZD-02..06). Six steps:
  *  1. Store profile + categories — store name, active counter count, and the
  *     category list with a PRD §7 Default / Custom preset template (FR-WZD-02).
  *     The counter count drives the routing-rule rows edited on step 2; the
@@ -262,23 +298,35 @@ function describedBy(
  *  4. Daily-reset policy — mode/cron/resetTo/archive (FR-WZD-05). The cron field
  *     is validated client-side ({@link validateCronExpression}) so the wizard
  *     never submits an expression the boot-time scheduler would reject.
- *  5. Review — a read-only summary of the whole assembled configuration before
+ *  5. Admin credentials (QUE-43) — first-run only: the manager picks the initial
+ *     administrator username + password (mirrors the backend `Username` /
+ *     password-≥8 invariants). On a re-edit (setup already complete) the step is
+ *     a read-only notice and finalize skips setup-admin + login.
+ *  6. Review — a read-only summary of the whole assembled configuration before
  *     the manager activates it (FR-WZD-06). No API call; renders from the
  *     in-memory form. The `Simpan & Aktifkan` button lives here.
  *
  * On mount it loads the current config (`GET /api/system/config`) to prefill the
  * form, so the wizard also serves as a re-editor after initial setup. On
- * finalize it calls `PUT /api/system/config` (which flips
- * `isInitialSetupCompleted` server-side via `completeInitialSetup`) and
- * navigates to `/admin`. The wizard owns no realtime/WS surface (SRP).
+ * finalize (first-run) it calls `POST /api/auth/setup-admin` (before the config
+ * save, since setup-admin only works while setup is incomplete), then
+ * `PUT /api/system/config` (which flips `isInitialSetupCompleted` server-side),
+ * then `POST /api/auth/login` + stores the token, and navigates to `/`. On a
+ * re-edit it just saves the config (the admin is already authenticated). The
+ * wizard owns no realtime/WS surface (SRP).
  */
-export function WizardPage({ api }: { api: IAdminApi }) {
+export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
   const [form, setForm] = useState<WizardForm>(emptyForm);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Whether this is a first-run (setup not yet complete) vs a re-edit (setup
+  // already complete). Decides whether finalize runs the setup-admin + login
+  // dance (first-run) or just saves the config (re-edit — the admin is already
+  // authenticated). Read from the prefill config's `isInitialSetupCompleted`.
+  const isFirstRun = useRef(true);
   // The categories as loaded from the store at prefill (with their persisted
   // ids). The default-mode force-reset (radio onChange + finalize) draws its id
   // pool from THIS, not the live `form.categories`, so a custom detour that
@@ -305,6 +353,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
             ? config.categories.map((c) => ({ id: c.id, code: c.code, name: c.name }))
             : DEFAULT_CATEGORIES.map((c) => ({ ...c }));
         loadedCategoriesRef.current = loadedCategories;
+        isFirstRun.current = !config.isInitialSetupCompleted;
         const routingRules =
           config.routingRules.length > 0
             ? config.routingRules.map((r) => ({
@@ -345,6 +394,12 @@ export function WizardPage({ api }: { api: IAdminApi }) {
             archivePreviousDayData: config.dailyResetPolicy.archivePreviousDayData,
             timezone: config.dailyResetPolicy.timezone,
           },
+          // The admin credentials are only entered on the first-run path; on a
+          // re-edit (setup already complete) the step-5 form is hidden and
+          // finalize ignores these fields, so blank them on prefill.
+          adminUsername: '',
+          adminPassword: '',
+          adminPasswordConfirm: '',
         });
         setLoading(false);
       })
@@ -441,6 +496,17 @@ export function WizardPage({ api }: { api: IAdminApi }) {
   );
   const step4Valid = cronError === null && resetToError === null;
 
+  // Step 5 admin credentials (first-run only). On a re-edit (setup already
+  // complete) the step is a read-only notice and always valid — there is nothing
+  // to enter and finalize never calls setup-admin. On first-run the
+  // username/password/confirm invariants (mirroring the backend VOs) drive both
+  // the inline UI and the Lanjut guard.
+  const adminCredErrors = useMemo(
+    () => (isFirstRun.current ? validateAdminCredentials(form) : []),
+    [form],
+  );
+  const step5Valid = adminCredErrors.length === 0;
+
   const next = () => {
     // Block advancing past step 1 while the custom category list is invalid so
     // the manager never reaches the routing matrix with categories the backend
@@ -457,6 +523,10 @@ export function WizardPage({ api }: { api: IAdminApi }) {
     // Block advancing past step 4 while the cron is malformed so the manager
     // never reaches the review step with a cron the scheduler would reject.
     if (step === 4 && !step4Valid) return;
+    // Block advancing past step 5 while the first-run admin credentials are
+    // invalid so the manager never reaches the review step with credentials the
+    // setup-admin endpoint would 400.
+    if (step === 5 && !step5Valid) return;
     setStep((s) => Math.min(TOTAL_STEPS, s + 1));
   };
   const back = () => setStep((s) => Math.max(1, s - 1));
@@ -484,6 +554,19 @@ export function WizardPage({ api }: { api: IAdminApi }) {
       // adapted for load-bearing ids.
       const categories =
         form.categoriesMode === 'default' ? defaultCategoriesWithIds(loadedCategoriesRef.current) : form.categories;
+      // On first-run, create the initial admin BEFORE saving the config —
+      // `POST /api/auth/setup-admin` only works while `isInitialSetupCompleted`
+      // is false, and `PUT /api/system/config` flips it true server-side, so the
+      // order is load-bearing (setup-admin first, then the config save that
+      // completes setup). The audit actor is now the authenticated admin's
+      // username (server-derived from the bearer token), so the PUT payload no
+      // longer carries `actor` — on this pre-setup path there is no token yet,
+      // so the server uses a 'system' sentinel (no client change needed beyond
+      // dropping the field). On a re-edit (setup already complete) the admin is
+      // already authenticated, so skip setup-admin + login and just save.
+      if (isFirstRun.current) {
+        await api.setupInitialAdmin(form.adminUsername, form.adminPassword);
+      }
       await api.saveSystemConfig({
         storeName: form.storeName,
         stateMachine: sm,
@@ -497,8 +580,14 @@ export function WizardPage({ api }: { api: IAdminApi }) {
         categories,
         routingRules: form.routingRules,
         brandColor: form.brandColor,
-        actor: 'admin',
       });
+      if (isFirstRun.current) {
+        // Now that setup-admin created the account and the config save completed
+        // setup, log in with the just-created credentials and store the token so
+        // the operational routes (gated by RequireAuth) admit the manager.
+        const { token } = await api.login(form.adminUsername, form.adminPassword);
+        writeToken(token);
+      }
       navigate('/');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -520,7 +609,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
       </header>
 
       <ol className="wizard__steps-bar" aria-label="Langkah wizard">
-        {[1, 2, 3, 4, 5].map((n) => (
+        {[1, 2, 3, 4, 5, 6].map((n) => (
           <li
             key={n}
             className={`wizard__step-dot ${n === step ? 'is-current' : ''} ${n < step ? 'is-done' : ''}`}
@@ -989,6 +1078,81 @@ export function WizardPage({ api }: { api: IAdminApi }) {
 
         {step === 5 && (
           <section className="wizard__step" data-testid="step-5">
+            <h2 className="wizard__step-title">Kredensial Administrator</h2>
+            {isFirstRun.current ? (
+              <>
+                <p className="wizard__hint">
+                  Buat akun administrator pertama. Kredensial ini dipakai untuk masuk setelah setup selesai.
+                </p>
+                <label className="field" htmlFor="admin-username">
+                  <span className="field__label">
+                    Username<span aria-hidden="true"> *</span>
+                  </span>
+                  <input
+                    id="admin-username"
+                    className="field__input"
+                    type="text"
+                    value={form.adminUsername}
+                    onChange={(e) => setForm({ ...form, adminUsername: e.target.value })}
+                    autoComplete="off"
+                    required
+                    aria-required="true"
+                    {...describedBy('admin-cred-errors', adminCredErrors.length > 0)}
+                    data-testid="admin-username"
+                  />
+                </label>
+                <label className="field" htmlFor="admin-password">
+                  <span className="field__label">
+                    Kata sandi<span aria-hidden="true"> *</span>
+                  </span>
+                  <input
+                    id="admin-password"
+                    className="field__input"
+                    type="password"
+                    value={form.adminPassword}
+                    onChange={(e) => setForm({ ...form, adminPassword: e.target.value })}
+                    autoComplete="new-password"
+                    required
+                    aria-required="true"
+                    {...describedBy('admin-cred-errors', adminCredErrors.length > 0)}
+                    data-testid="admin-password"
+                  />
+                </label>
+                <label className="field" htmlFor="admin-password-confirm">
+                  <span className="field__label">
+                    Konfirmasi kata sandi<span aria-hidden="true"> *</span>
+                  </span>
+                  <input
+                    id="admin-password-confirm"
+                    className="field__input"
+                    type="password"
+                    value={form.adminPasswordConfirm}
+                    onChange={(e) => setForm({ ...form, adminPasswordConfirm: e.target.value })}
+                    autoComplete="new-password"
+                    required
+                    aria-required="true"
+                    {...describedBy('admin-cred-errors', adminCredErrors.length > 0)}
+                    data-testid="admin-password-confirm"
+                  />
+                </label>
+                {adminCredErrors.length > 0 && (
+                  <ul className="wizard__errors" id="admin-cred-errors" data-testid="admin-cred-errors">
+                    {adminCredErrors.map((msg) => (
+                      <li key={msg}>{msg}</li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            ) : (
+              <p className="wizard__hint" data-testid="admin-readonly">
+                Akun administrator sudah dibuat saat setup awal. Kelola pengguna di halaman Pengguna.
+              </p>
+            )}
+          </section>
+        )}
+
+        {step === 6 && (
+          <section className="wizard__step" data-testid="step-6">
             <h2 className="wizard__step-title">Tinjau &amp; Aktifkan</h2>
             <p className="wizard__hint">
               Tinjau konfigurasi sebelum disimpan. Setelah aktif, sistem keluar dari mode setup awal.
@@ -1052,6 +1216,15 @@ export function WizardPage({ api }: { api: IAdminApi }) {
                   {' · '}arsip hari sebelumnya: {form.dailyReset.archivePreviousDayData ? 'aktif' : 'nonaktif'}
                 </p>
               </div>
+
+              {isFirstRun.current && (
+                <div className="wizard__review-block">
+                  <h3 className="wizard__review-label">Administrator</h3>
+                  <p className="wizard__review-value" data-testid="review-admin-username">
+                    {form.adminUsername || '—'}
+                  </p>
+                </div>
+              )}
             </div>
           </section>
         )}
@@ -1068,7 +1241,7 @@ export function WizardPage({ api }: { api: IAdminApi }) {
             type="button"
             className="btn btn--primary"
             onClick={next}
-            disabled={(step === 1 && !step1Valid) || (step === 2 && !step2Valid) || (step === 3 && !step3Valid) || (step === 4 && !step4Valid) || submitting}
+            disabled={(step === 1 && !step1Valid) || (step === 2 && !step2Valid) || (step === 3 && !step3Valid) || (step === 4 && !step4Valid) || (step === 5 && !step5Valid) || submitting}
             data-testid="wizard-next"
           >
             Lanjut

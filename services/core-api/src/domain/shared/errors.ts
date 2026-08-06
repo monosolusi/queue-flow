@@ -77,3 +77,26 @@ export class InvalidArgumentException extends DomainError {
     super(`Invalid argument: ${detail}`, 'INVALID_ARGUMENT');
   }
 }
+
+/**
+ * Thrown by `LoginUseCase` when the supplied credentials do not match a known
+ * user (unknown username OR wrong password). A single, deliberately vague
+ * message avoids leaking which of the two failed (username enumeration
+ * mitigation). Maps to 401 Unauthorized via `DomainExceptionFilter`.
+ */
+export class InvalidCredentialsException extends DomainError {
+  constructor() {
+    super('Invalid username or password.', 'INVALID_CREDENTIALS');
+  }
+}
+
+/**
+ * Thrown by `CreateUserUseCase` / `SetupInitialAdminUseCase` when a username
+ * is already taken — a well-formed value that violates a uniqueness
+ * constraint. Maps to 409 Conflict via `DomainExceptionFilter`.
+ */
+export class DuplicateUserException extends DomainError {
+  constructor(username: string) {
+    super(`Username '${username}' is already taken.`, 'DUPLICATE_USER');
+  }
+}
