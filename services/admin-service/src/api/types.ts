@@ -154,6 +154,7 @@ export const DEFAULT_BRAND_COLOR = '#2563eb';
 export interface CategoryBreakdownDto {
   readonly categoryId: string;
   readonly code: string;
+  readonly categoryName: string;
   readonly totalTickets: number;
   readonly avgWaitTimeMs: number;
   readonly avgServiceTimeMs: number;

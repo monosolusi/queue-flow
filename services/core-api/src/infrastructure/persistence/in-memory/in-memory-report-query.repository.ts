@@ -179,7 +179,10 @@ export class InMemoryReportQueryRepository implements IReportQueryPort {
     tickets: readonly TicketMetrics[],
   ): Promise<readonly CategoryBreakdown[]> {
     const allCats = await this.categories.getAll();
-    const codeById = new Map(allCats.map((c) => [c.id.value, c.code]));
+    // Resolve both `code` and `name` from the category aggregate so the report
+    // DTO is self-contained (no client-side code→name join). Mirrors the
+    // PostgreSQL read side's `JOIN categories c` (FR-ADM-03 / QUE-49).
+    const catById = new Map(allCats.map((c) => [c.id.value, { code: c.code, name: c.name }]));
 
     const groups = new Map<string, TicketMetrics[]>();
     for (const t of tickets) {
@@ -194,9 +197,11 @@ export class InMemoryReportQueryRepository implements IReportQueryPort {
       const services = list
         .filter((t) => t.servedAt !== null && t.completedAt !== null)
         .map((t) => t.completedAt! - t.servedAt!);
+      const cat = catById.get(categoryId);
       result.push({
         categoryId,
-        code: codeById.get(categoryId) ?? '?',
+        code: cat?.code ?? '?',
+        categoryName: cat?.name ?? '?',
         totalTickets: list.length,
         avgWaitTimeMs: avgMs(waits),
         avgServiceTimeMs: avgMs(services),

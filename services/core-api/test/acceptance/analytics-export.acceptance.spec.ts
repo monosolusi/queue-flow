@@ -138,12 +138,19 @@ describe('DoD-5 — Daily analytics & local export (FR-ADM-03 / QUE-26)', () => 
     expect(res.body.avgServiceTimeMs).toBeGreaterThan(0);
     expect(res.body.date).toBe(today);
 
-    // Per-category breakdown: A has 2 tickets, B has 1 (sorted by code).
-    const perCat = res.body.perCategory as Array<{ code: string; totalTickets: number }>;
+    // Per-category breakdown: A has 2 tickets, B has 1 (sorted by code). The
+    // DTO carries the category NAME (QUE-49 — backend-include, no client join).
+    const perCat = res.body.perCategory as Array<{
+      code: string;
+      categoryName: string;
+      totalTickets: number;
+    }>;
     expect(perCat).toHaveLength(2);
-    const byCode = new Map(perCat.map((c) => [c.code, c.totalTickets]));
-    expect(byCode.get('A')).toBe(2);
-    expect(byCode.get('B')).toBe(1);
+    const byCode = new Map(perCat.map((c) => [c.code, c]));
+    expect(byCode.get('A')!.totalTickets).toBe(2);
+    expect(byCode.get('A')!.categoryName).toBe('Customer Service');
+    expect(byCode.get('B')!.totalTickets).toBe(1);
+    expect(byCode.get('B')!.categoryName).toBe('Kasir & Pembayaran');
   });
 
   it('reports per-counter served count + avg service time', async () => {
@@ -235,15 +242,19 @@ describe('DoD-5 — Daily analytics & local export (FR-ADM-03 / QUE-26)', () => 
     expect(range.body.avgServiceTimeMs).toBe(daily.body.avgServiceTimeMs);
     expect(range.body.perDay).toHaveLength(1);
     expect(range.body.perDay[0].totalTickets).toBe(daily.body.totalTickets);
-    // Per-category over the range matches the daily per-category totals.
+    // Per-category over the range matches the daily per-category totals, and
+    // carries the category NAME (QUE-49).
     const rangeByCode = new Map(
-      (range.body.perCategory as Array<{ code: string; totalTickets: number }>).map((c) => [
-        c.code,
-        c.totalTickets,
-      ]),
+      (range.body.perCategory as Array<{
+        code: string;
+        categoryName: string;
+        totalTickets: number;
+      }>).map((c) => [c.code, c]),
     );
-    expect(rangeByCode.get('A')).toBe(2);
-    expect(rangeByCode.get('B')).toBe(1);
+    expect(rangeByCode.get('A')!.totalTickets).toBe(2);
+    expect(rangeByCode.get('A')!.categoryName).toBe('Customer Service');
+    expect(rangeByCode.get('B')!.totalTickets).toBe(1);
+    expect(rangeByCode.get('B')!.categoryName).toBe('Kasir & Pembayaran');
 
     // A span over 90 days is rejected at the use case (→ 400).
     await http(booted.app)

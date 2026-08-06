@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuditLogEntryDto, RangeReportDto } from '../api/types';
 
 /**
@@ -14,12 +14,17 @@ import type { AuditLogEntryDto, RangeReportDto } from '../api/types';
  * zone and the factory cannot close over it. `vi.hoisted` returns a stable
  * mutable holder the hoisted factory CAN close over (the QUE-36 precedent).
  */
-const { xlsxLoaded, markXlsxLoaded } = vi.hoisted(() => {
+const { xlsxLoaded, markXlsxLoaded, aoaCalls, pushAoa } = vi.hoisted(() => {
   let loaded = false;
+  const calls: unknown[][] = [];
   return {
     xlsxLoaded: () => loaded,
     markXlsxLoaded: () => {
       loaded = true;
+    },
+    aoaCalls: () => calls,
+    pushAoa: (rows: unknown[]) => {
+      calls.push(rows);
     },
   };
 });
@@ -29,7 +34,10 @@ vi.mock('xlsx', () => {
   return {
     utils: {
       book_new: () => ({ Sheets: {}, SheetNames: [] }),
-      aoa_to_sheet: () => ({}),
+      aoa_to_sheet: (rows: unknown[]) => {
+        pushAoa(rows);
+        return {};
+      },
       book_append_sheet: () => {},
     },
     writeFile: () => {},
@@ -48,6 +56,13 @@ const emptyRange: RangeReportDto = {
 };
 
 describe('exportRangeReport (QUE-41 AC9 — lazy SheetJS)', () => {
+  // The hoisted `aoaCalls` accumulator is shared across tests; reset it before
+  // each so a test that asserts on the captured aoa_to_sheet rows sees only its
+  // own calls (pre-empts future contamination if more tests assert on it).
+  beforeEach(() => {
+    aoaCalls().length = 0;
+  });
+
   it('does not load xlsx merely on importing the lib module', async () => {
     // This test runs first (definition order); the factory has not been hit.
     expect(xlsxLoaded()).toBe(false);
@@ -69,5 +84,42 @@ describe('exportRangeReport (QUE-41 AC9 — lazy SheetJS)', () => {
     );
 
     expect(xlsxLoaded()).toBe(true);
+  });
+
+  it('writes the Per Kategori sheet with a "Kategori" header + the category NAME (QUE-49)', async () => {
+    const { exportRangeReport } = await import('./export-range-report');
+    const report: RangeReportDto = {
+      ...emptyRange,
+      perCategory: [
+        {
+          categoryId: 'cat-a',
+          code: 'A',
+          categoryName: 'Customer Service',
+          totalTickets: 3,
+          avgWaitTimeMs: 1000,
+          avgServiceTimeMs: 2000,
+        },
+      ],
+    };
+
+    await exportRangeReport(
+      report,
+      [] as readonly AuditLogEntryDto[],
+      new Map<number, string>(),
+      'qms-report.xlsx',
+    );
+
+    // The Per Kategori sheet is the 3rd aoa_to_sheet call (Ringkasan, Per Hari, …).
+    const categorySheet = aoaCalls()[2] as unknown[][];
+    expect(categorySheet[0]).toEqual([
+      'Kategori',
+      'Kode',
+      'Total Tiket',
+      'Rata Waktu Tunggu (ms)',
+      'Rata Waktu Layanan (ms)',
+    ]);
+    // The data row carries the human-readable NAME, not the raw code — the
+    // actual QUE-49 fix (names in the export, codes demoted to a column).
+    expect(categorySheet[1]).toEqual(['Customer Service', 'A', 3, 1000, 2000]);
   });
 });

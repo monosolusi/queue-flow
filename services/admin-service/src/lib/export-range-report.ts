@@ -56,8 +56,9 @@ export async function exportRangeReport(
   XLSX.utils.book_append_sheet(wb, perDaySheet, 'Per Hari');
 
   const categorySheet = XLSX.utils.aoa_to_sheet([
-    ['Kode', 'Total Tiket', 'Rata Waktu Tunggu (ms)', 'Rata Waktu Layanan (ms)'],
+    ['Kategori', 'Kode', 'Total Tiket', 'Rata Waktu Tunggu (ms)', 'Rata Waktu Layanan (ms)'],
     ...report.perCategory.map((c) => [
+      c.categoryName,
       c.code,
       c.totalTickets,
       c.avgWaitTimeMs,

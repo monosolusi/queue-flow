@@ -68,11 +68,12 @@ export class PostgresReportQueryRepository implements IReportQueryPort {
           SELECT
             c.id AS category_id,
             c.code AS code,
+            c.name AS category_name,
             COUNT(*)::int AS total_tickets,
             COALESCE(AVG(t.called_at - t.created_at) FILTER (WHERE t.called_at IS NOT NULL), 0)::bigint AS avg_wait_ms,
             COALESCE(AVG(t.completed_at - t.served_at) FILTER (WHERE t.served_at IS NOT NULL AND t.completed_at IS NOT NULL), 0)::bigint AS avg_service_ms
           FROM day_tickets t JOIN categories c ON c.id = t.category_id
-          GROUP BY c.id, c.code
+          GROUP BY c.id, c.code, c.name
           ORDER BY c.code ASC`,
         [dayStart, dayEnd],
       );
@@ -80,6 +81,7 @@ export class PostgresReportQueryRepository implements IReportQueryPort {
       const perCategory: CategoryBreakdown[] = perCat.rows.map((r) => ({
         categoryId: r.category_id,
         code: r.code,
+        categoryName: r.category_name,
         totalTickets: Number(r.total_tickets),
         avgWaitTimeMs: Number(r.avg_wait_ms),
         avgServiceTimeMs: Number(r.avg_service_ms),
@@ -205,17 +207,19 @@ export class PostgresReportQueryRepository implements IReportQueryPort {
           SELECT
             c.id AS category_id,
             c.code AS code,
+            c.name AS category_name,
             COUNT(*)::int AS total_tickets,
             COALESCE(AVG(t.called_at - t.created_at) FILTER (WHERE t.called_at IS NOT NULL), 0)::bigint AS avg_wait_ms,
             COALESCE(AVG(t.completed_at - t.served_at) FILTER (WHERE t.served_at IS NOT NULL AND t.completed_at IS NOT NULL), 0)::bigint AS avg_service_ms
           FROM range_tickets t JOIN categories c ON c.id = t.category_id
-          GROUP BY c.id, c.code
+          GROUP BY c.id, c.code, c.name
           ORDER BY c.code ASC`,
         [fromStart, toEnd],
       );
       const perCategory: CategoryBreakdown[] = perCat.rows.map((r) => ({
         categoryId: r.category_id,
         code: r.code,
+        categoryName: r.category_name,
         totalTickets: Number(r.total_tickets),
         avgWaitTimeMs: Number(r.avg_wait_ms),
         avgServiceTimeMs: Number(r.avg_service_ms),
@@ -287,6 +291,7 @@ interface TotalsRow {
 interface CategoryRow {
   category_id: string;
   code: string;
+  category_name: string;
   total_tickets: string | number;
   avg_wait_ms: string | number;
   avg_service_ms: string | number;

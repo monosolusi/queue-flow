@@ -6,6 +6,7 @@ import { exportRangeReport } from '../lib/export-range-report';
 import { formatSeconds } from '../lib/format';
 import { loadRangeOverview, type RangeOverviewData } from '../lib/analytics-loader';
 import { RangeTrendChart } from '../components/RangeTrendChart';
+import { CategoryBreakdownChart } from '../components/CategoryBreakdownChart';
 
 type ViewState =
   | { status: 'loading' }
@@ -209,26 +210,29 @@ export function AnalyticsPage({
         {report.perCategory.length === 0 ? (
           <p className="analytics__empty">Tidak ada tiket pada rentang ini.</p>
         ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Kode</th>
-                <th>Total Tiket</th>
-                <th>Rata Waktu Tunggu</th>
-                <th>Rata Waktu Layanan</th>
-              </tr>
-            </thead>
-            <tbody>
-              {report.perCategory.map((c) => (
-                <tr key={c.categoryId}>
-                  <td>{c.code}</td>
-                  <td>{c.totalTickets}</td>
-                  <td>{formatSeconds(c.avgWaitTimeMs)}</td>
-                  <td>{formatSeconds(c.avgServiceTimeMs)}</td>
+          <>
+            <CategoryBreakdownChart perCategory={report.perCategory} />
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Kategori</th>
+                  <th>Total Tiket</th>
+                  <th>Rata Waktu Tunggu</th>
+                  <th>Rata Waktu Layanan</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {report.perCategory.map((c) => (
+                  <tr key={c.categoryId}>
+                    <td>{c.categoryName}</td>
+                    <td>{c.totalTickets}</td>
+                    <td>{formatSeconds(c.avgWaitTimeMs)}</td>
+                    <td>{formatSeconds(c.avgServiceTimeMs)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
         )}
       </section>
 

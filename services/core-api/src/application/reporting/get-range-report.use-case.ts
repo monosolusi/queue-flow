@@ -97,6 +97,7 @@ export function projectRangeReport(report: RangeQueueReport): RangeReportDto {
     perCategory: report.perCategory.map((c) => ({
       categoryId: c.categoryId,
       code: c.code,
+      categoryName: c.categoryName,
       totalTickets: c.totalTickets,
       avgWaitTimeMs: c.avgWaitTimeMs,
       avgServiceTimeMs: c.avgServiceTimeMs,

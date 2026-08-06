@@ -78,6 +78,7 @@ describe('InMemoryReportQueryRepository (QUE-26 CQRS read side)', () => {
     expect(byCode.get('A')!).toEqual({
       categoryId: catA.id.value,
       code: 'A',
+      categoryName: 'Customer Service',
       totalTickets: 2,
       avgWaitTimeMs: 10000, // only t1 was called
       avgServiceTimeMs: 30000,
@@ -85,6 +86,7 @@ describe('InMemoryReportQueryRepository (QUE-26 CQRS read side)', () => {
     expect(byCode.get('B')!).toEqual({
       categoryId: catB.id.value,
       code: 'B',
+      categoryName: 'Kasir',
       totalTickets: 1,
       avgWaitTimeMs: 5000,
       avgServiceTimeMs: 0, // none served
@@ -257,6 +259,7 @@ describe('InMemoryReportQueryRepository (QUE-26 CQRS read side)', () => {
       expect(byCode.get('A')!).toEqual({
         categoryId: catA.id.value,
         code: 'A',
+        categoryName: 'Customer Service',
         totalTickets: 2,
         avgWaitTimeMs: 10000, // only t1 was called
         avgServiceTimeMs: 30000, // only t1 was served
@@ -264,6 +267,7 @@ describe('InMemoryReportQueryRepository (QUE-26 CQRS read side)', () => {
       expect(byCode.get('B')!).toEqual({
         categoryId: catB.id.value,
         code: 'B',
+        categoryName: 'Kasir',
         totalTickets: 1,
         avgWaitTimeMs: 10000,
         avgServiceTimeMs: 40000,
