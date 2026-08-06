@@ -1121,6 +1121,17 @@ config, proxied to `core-api:3000` by Vite in dev).
   numeric input whose `value` is derived from state cannot be set with
   `userEvent.clear` + `type`; use
   `fireEvent.change(input, { target: { value: '3' } })` to set it cleanly.
+- **RTL: capture `unmount` per `render()` when a single `it` renders the same
+  component multiple times.** RTL's auto-cleanup runs after each `it`, NOT
+  between multiple `render()` calls in the same test, so the previous render's
+  DOM lingers. `const { unmount } = renderShell('/'); … unmount();
+  renderShell('/config');` calls the FIRST render's `unmount` (already a no-op
+  after the first call) — the `/config` shell is never unmounted, two
+  `app-shell-page-title` nodes coexist, and `getByTestId` throws ambiguous.
+  Re-destructure on every render: `let { unmount } = renderShell('/');
+  … unmount(); ({ unmount } = renderShell('/config')); …`. Also disambiguate
+  `getByText` when a group label and its single item share text (e.g. a
+  "Pengguna" group with one "Pengguna" item) via `{ selector: '.nav-group__label' }`.
 - **RTL: decorative media + fake-timer state updates.** An `<img alt="">`
   has the `presentation`/`none` ARIA role, not `img`, so
   `screen.getByRole('img', { hidden: true })` will not find it — query by tag
@@ -1184,6 +1195,16 @@ config, proxied to `core-api:3000` by Vite in dev).
   label's accessible name. Use a **sibling `<label htmlFor={id}>`** + the
   `<select id={id}>` alongside it, not a wrapping `<label>`. Apply to any
   form control where the label must stay clean/short (auth + wizard steps).
+- **ARIA: a labelled cluster of nav links is `role="group"` + `aria-label` on
+  the items container, too — a visible group label that is `aria-hidden` must
+  be paired with the grouping semantic on the cluster, else SRs hear a flat
+  ungrouped list.** The nav's visible group heading (e.g. "Operasional") is a
+  non-heading `<div aria-hidden="true">` (a visual cue; an `<h2>`/`<h3>` there
+  would invert the page `<h1>` — AC8), so the grouping structure for SR users
+  must come from `role="group" + aria-label={groupLabel}` on the items `<div>`.
+  Hiding the visible label alone drops the grouping — `aria-hidden` removes the
+  text from the a11y tree, leaving the links ungrouped. Same principle as the
+  chooser rule above; applies to any grouped nav/menu.
 - **Skeleton loading-state a11y recipe.** A loading region is
   `role="status" aria-busy="true"` carrying a visually-hidden (`.sr-only`)
   text label for AT (e.g. "Memuat antrian…"); the placeholder shapes are
