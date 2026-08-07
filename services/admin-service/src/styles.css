@@ -682,7 +682,7 @@ fieldset {
   color: var(--text-muted);
 }
 .metric-tile__value {
-  font-size: 1.6rem;
+  font-size: 1.35rem;
   font-weight: 700;
 }
 .data-table {
@@ -726,6 +726,10 @@ fieldset {
   display: block;
 }
 .range-trend__axis {
+  stroke: var(--surface-2);
+  stroke-width: 1;
+}
+.range-trend__gridline {
   stroke: var(--surface-2);
   stroke-width: 1;
 }

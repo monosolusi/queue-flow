@@ -141,8 +141,8 @@ describe('AnalyticsPage (range analytics — FR-ADM-03 / QUE-44)', () => {
 
     expect(screen.getByText('Memuat analitik…')).toBeInTheDocument();
     expect(await screen.findByTestId('metric-total')).toHaveTextContent('4');
-    expect(screen.getByTestId('metric-wait')).toHaveTextContent('12.0 s');
-    expect(screen.getByTestId('metric-service')).toHaveTextContent('30.0 s');
+    expect(screen.getByTestId('metric-wait')).toHaveTextContent('12.0 detik');
+    expect(screen.getByTestId('metric-service')).toHaveTextContent('30.0 detik');
 
     const perCategory = screen.getByRole('region', { name: 'Per kategori' });
     // QUE-49 — the per-category view shows human-readable NAMES, not raw codes.
