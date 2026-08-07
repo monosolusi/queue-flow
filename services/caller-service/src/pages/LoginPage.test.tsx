@@ -18,7 +18,7 @@ function makeApi(loginImpl: ICallerApi['login']): ICallerApi {
     listCounters: vi.fn(async () => []),
     getQueueSnapshot: vi.fn(async () => ({ counterId: 0, active: [], waiting: [], waitingCount: 0 })),
     getActiveStateMachine: vi.fn(async () => ({ states: [], transitions: [] })),
-    getBrandColor: vi.fn(async () => ({ brandColor: '' })),
+    getBrandColor: vi.fn(async () => ({ brandColor: '', themeMode: 'light' as const })),
     callNext: vi.fn(async () => {}),
     serve: vi.fn(async () => {}),
     complete: vi.fn(async () => {}),

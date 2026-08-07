@@ -56,6 +56,7 @@ function wizardPayload() {
       },
     ],
     brandColor: '#aabbcc',
+    serviceThemes: { kiosk: 'light', tv: 'light', caller: 'light', admin: 'light' },
   };
 }
 

@@ -107,7 +107,7 @@ body,
 }
 .now-serving__counter {
   font-size: 2.5rem;
-  color: var(--accent-on-dark); /* AC2: #60a5fa 5.75:1 (QUE-37) */
+  color: var(--accent-on-surface); /* AC2: #60a5fa 5.75:1 (QUE-37) */
   font-weight: 700;
 }
 
@@ -292,7 +292,7 @@ body,
   color: var(--success);
 }
 .connection-status--closed {
-  color: var(--danger-on-dark);
+  color: var(--danger-on-surface);
 }
 
 /* 4K tier (AC3): scale the board typography up for large displays. The first

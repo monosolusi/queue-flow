@@ -12,6 +12,21 @@ import { BROWSER_TIMEZONE } from '../lib/timezone';
 export type PriorityPolicy = 'FIFO_GLOBAL' | 'CATEGORY_PRIORITY';
 export type DailyResetMode = 'AUTOMATIC_CRON' | 'MANUAL';
 
+/** A per-surface light/dark choice (QUE-47). Light is the default. */
+export type ThemeMode = 'light' | 'dark';
+/** The four deployable frontend surfaces a manager can theme independently. */
+export type ServiceSurface = 'kiosk' | 'tv' | 'caller' | 'admin';
+/** Persisted shape: one {@link ThemeMode} per {@link ServiceSurface}. */
+export type ServiceThemesMap = Record<ServiceSurface, ThemeMode>;
+/** All-light default — matches `ServiceThemes.DEFAULT` and the CSS `:root`
+ *  light default (zero visual regression / clean-store prefill). */
+export const DEFAULT_SERVICE_THEMES: ServiceThemesMap = {
+  kiosk: 'light',
+  tv: 'light',
+  caller: 'light',
+  admin: 'light',
+};
+
 export interface StateTransitionDto {
   readonly from: string;
   readonly to: string;
@@ -56,6 +71,9 @@ export interface SystemConfigurationDto {
   readonly categories: readonly ConfigCategoryDto[];
   readonly routingRules: readonly ConfigRoutingRuleDto[];
   readonly brandColor: string;
+  /** Per-service light/dark theme map (QUE-47). Admin reads + edits the full
+   *  map; each other service reads only its own surface key (ISP). */
+  readonly serviceThemes: ServiceThemesMap;
 }
 
 /**
@@ -93,6 +111,7 @@ export interface SaveSystemConfigurationPayload {
   readonly categories: readonly WizardCategoryDto[];
   readonly routingRules: readonly WizardRoutingRuleDto[];
   readonly brandColor: string;
+  readonly serviceThemes: ServiceThemesMap;
 }
 
 /** Result of `PUT /api/system/config`. */
@@ -100,6 +119,7 @@ export interface SaveSystemConfigurationResult {
   readonly isInitialSetupCompleted: boolean;
   readonly storeName: string;
   readonly brandColor: string;
+  readonly serviceThemes: ServiceThemesMap;
 }
 
 /**

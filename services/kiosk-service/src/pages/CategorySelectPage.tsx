@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { CategoryDto, CreatedTicketDto } from '../api/types';
 import type { IKioskApi } from '../api/kiosk-api';
-import { applyBrandColor } from '../lib/theme';
+import { applyBrandColor, applyThemeMode } from '../lib/theme';
 import type { IPrintProvider, PrintPayload } from '../print/print-provider';
 
 export interface CategorySelectPageProps {
@@ -85,6 +85,7 @@ export function CategorySelectPage({ api, printProvider }: CategorySelectPagePro
       if (profileRes.status === 'fulfilled') {
         setStoreName(profileRes.value.storeName ?? '');
         applyBrandColor(profileRes.value.brandColor);
+        applyThemeMode(profileRes.value.themeMode);
       }
     });
     return () => {

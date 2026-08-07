@@ -35,6 +35,7 @@ const REQUIRED_CONFIG_FIELDS: ReadonlyArray<keyof SaveSystemConfigurationCommand
   'categories',
   'routingRules',
   'brandColor',
+  'serviceThemes',
 ];
 
 /**
@@ -58,6 +59,7 @@ const CONFIG_FIELD_SHAPES: ReadonlyArray<{
   { field: 'dailyReset', kind: 'object' },
   { field: 'categories', kind: 'array' },
   { field: 'routingRules', kind: 'array' },
+  { field: 'serviceThemes', kind: 'object' },
 ];
 
 /** True when `value` does not match the expected `kind` (object = plain object, not array). */
@@ -240,6 +242,7 @@ export class SystemConfigController {
       categories: body.categories!,
       routingRules: body.routingRules!,
       brandColor: body.brandColor!,
+      serviceThemes: body.serviceThemes!,
       actor: principal?.username ?? 'system',
     };
     return this.saveConfig.execute(command);

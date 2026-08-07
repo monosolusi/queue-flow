@@ -37,7 +37,12 @@ function makeApi(
 ): ITvApi {
   return {
     getSystemConfig: vi.fn(() =>
-      Promise.resolve({ isInitialSetupCompleted: true, storeName: 'Apotek Sehat', brandColor }),
+      Promise.resolve({
+        isInitialSetupCompleted: true,
+        storeName: 'Apotek Sehat',
+        brandColor,
+        serviceThemes: { tv: 'light' as const },
+      }),
     ),
     getCategories: vi.fn(() =>
       Promise.resolve([
@@ -505,7 +510,12 @@ describe('TV board state refetch (server owns the read model)', () => {
   it('a board-state-fetch failure degrades gracefully — board still boots, waiting stays []', async () => {
     const api: ITvApi = {
       getSystemConfig: vi.fn(() =>
-        Promise.resolve({ isInitialSetupCompleted: true, storeName: 'Apotek Sehat', brandColor: '' }),
+        Promise.resolve({
+          isInitialSetupCompleted: true,
+          storeName: 'Apotek Sehat',
+          brandColor: '',
+          serviceThemes: { tv: 'light' as const },
+        }),
       ),
       getCategories: vi.fn(() => Promise.resolve([{ id: 'cat-a', code: 'A', name: 'CS' }])),
       getBoardState: vi.fn(() => Promise.reject(new Error('boom'))),

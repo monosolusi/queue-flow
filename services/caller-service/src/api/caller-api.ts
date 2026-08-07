@@ -267,10 +267,17 @@ export class CallerApi implements ICallerApi {
   }
   getBrandColor(): Promise<BrandConfigSlice> {
     // Reuses the existing `GET /api/system/config` read surface (DRY); the
-    // caller consumes only the `{ brandColor }` slice (ISP). The endpoint is
-    // public so it never 401s; the bearer token (when present) is harmlessly
-    // ignored by the server.
-    return getJson<BrandConfigSlice>('/system/config', { onUnauthorized: this.onUnauthorized });
+    // caller consumes only the `{ brandColor, themeMode }` slice (ISP). The
+    // endpoint is public so it never 401s; the bearer token (when present) is
+    // harmlessly ignored by the server. `themeMode` is this service's surface
+    // key from the `serviceThemes` map (QUE-47).
+    return getJson<{ brandColor: string; serviceThemes?: { caller?: string } }>(
+      '/system/config',
+      { onUnauthorized: this.onUnauthorized },
+    ).then((c) => ({
+      brandColor: c.brandColor,
+      themeMode: c.serviceThemes?.caller === 'dark' ? 'dark' : 'light',
+    }));
   }
   callNext(counterId: number): Promise<void> {
     return postJson(`/queue/call-next`, { counterId }, { onUnauthorized: this.onUnauthorized }).then(

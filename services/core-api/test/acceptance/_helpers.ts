@@ -86,6 +86,10 @@ export function prdWizardPayload() {
       },
     ],
     brandColor: '#2563eb',
+    // QUE-47: per-service light/dark theme map is now a required wire field.
+    // All-light matches ServiceThemes.DEFAULT and the CSS `:root` light default,
+    // so the standard wizard payload keeps the existing light look.
+    serviceThemes: { kiosk: 'light', tv: 'light', caller: 'light', admin: 'light' },
     // QUE-43: `actor` is no longer a wire field — the server derives the audit
     // actor from the authenticated principal (or the 'system' sentinel on the
     // pre-setup wizard path). The wizard client stopped sending it; this fixture

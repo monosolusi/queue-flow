@@ -4,17 +4,21 @@ import type { IAdminApi } from '../api/admin-api';
 import type {
   DailyResetMode,
   PriorityPolicy,
+  ServiceSurface,
+  ServiceThemesMap,
   StateMachineDto,
   SystemConfigurationDto,
+  ThemeMode,
 } from '../api/types';
-import { DEFAULT_BRAND_COLOR } from '../api/types';
+import { DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES } from '../api/types';
 import { validateCronExpression } from '../lib/cron';
 import { validateBrandColor, isValidBrandColor } from '../lib/brand-color';
 import { validateRetentionDays } from '../lib/retention';
-import { DAILY_RESET_MODE_LABELS } from '../lib/labels';
+import { DAILY_RESET_MODE_LABELS, SERVICE_SURFACE_LABELS, SERVICE_THEME_LABELS } from '../lib/labels';
+import { SERVICE_SURFACES, validateServiceThemes, coerceServiceThemes } from '../lib/service-themes';
 import { timeToCron, cronToTime } from '../lib/daily-reset';
 import { BROWSER_TIMEZONE, timezoneSelectOptions } from '../lib/timezone';
-import { applyBrandColor } from '../lib/theme';
+import { applyBrandColor, applyThemeMode } from '../lib/theme';
 import { validateCustomCategories, validateResetTo } from '../lib/categories';
 import { CounterRoutingEditor } from '../components/CounterRoutingEditor';
 
@@ -56,6 +60,9 @@ interface AdminForm {
   stateMachine: StateMachineDto;
   /** Editable brand color (QUE-36) — the manager re-themes `--accent` post-setup. */
   brandColor: string;
+  /** Editable per-service light/dark theme map (QUE-47) — the manager sets each
+   *  service's theme from this one panel; each service applies its own key at boot. */
+  serviceThemes: ServiceThemesMap;
   categories: CategoryRow[];
   routingRules: RoutingRow[];
   dailyReset: {
@@ -178,6 +185,11 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
   // truth, same pattern as the cron guard above).
   const brandColorErrors = validateBrandColor(form.brandColor);
   const brandColorValid = brandColorErrors.length === 0;
+  // Per-service theme validation (QUE-47) — the selects are constrained to
+  // light/dark so this is defense-in-depth for a corrupt prefill; the error
+  // list drives the inline message and disables the save button.
+  const serviceThemesErrors = validateServiceThemes(form.serviceThemes);
+  const serviceThemesValid = serviceThemesErrors.length === 0;
   // Category invariants (code `^[A-Z]+$`, non-empty name, no dupes) — mirrors
   // the wizard step-1 guard via the shared `validateCustomCategories` helper so
   // the operational panel cannot save a list the backend would 400. Drives the
@@ -195,6 +207,7 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
         storeName: form.storeName,
         stateMachine: form.stateMachine,
         brandColor: form.brandColor,
+        serviceThemes: form.serviceThemes,
         dailyReset: {
           mode: form.dailyReset.mode,
           cronExpression:
@@ -220,6 +233,9 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
       // Re-apply the runtime `--accent` so a manager who changed the brand color
       // sees it take effect immediately, without a full page reload (QUE-35).
       applyBrandColor(config.brandColor);
+      // Re-apply this panel's own theme so the admin UI reflects an admin-theme
+      // change immediately (QUE-47 — mirrors the brandColor re-apply).
+      applyThemeMode(config.serviceThemes.admin);
       setState({ status: 'ready', form: toForm(config) });
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err));
@@ -375,6 +391,55 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
             style={{ marginTop: '0.75rem' }}
           >
             {brandColorErrors.map((msg) => (
+              <li key={msg}>{msg}</li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* Per-service light/dark theme (QUE-47) — the manager sets each service's
+          theme from this one panel; each service applies its own surface key at
+          boot via applyThemeMode. Constrained selects (light/dark) make an
+          invalid value unconstructable through the UI. */}
+      <section className="config-card" data-testid="service-themes-section">
+        <h2 className="config-card__title">Tema Layanan</h2>
+        <p className="admin-panel__hint">
+          Pilih mode tampilan untuk masing-masing layanan. Pilihan diterapkan
+          saat layanan tersebut dimuat ulang.
+        </p>
+        <div className="service-themes__grid">
+          {SERVICE_SURFACES.map((surface: ServiceSurface) => (
+            <div className="service-themes__row" key={surface}>
+              <label htmlFor={`theme-${surface}`} className="service-themes__label">
+                {SERVICE_SURFACE_LABELS[surface]}
+              </label>
+              <select
+                id={`theme-${surface}`}
+                className="field__input"
+                value={form.serviceThemes[surface]}
+                onChange={(e) =>
+                  setState({
+                    status: 'ready',
+                    form: {
+                      ...form,
+                      serviceThemes: { ...form.serviceThemes, [surface]: e.target.value as ThemeMode },
+                    },
+                  })
+                }
+                data-testid={`theme-select-${surface}`}
+              >
+                {(Object.keys(SERVICE_THEME_LABELS) as ThemeMode[]).map((mode) => (
+                  <option key={mode} value={mode}>
+                    {SERVICE_THEME_LABELS[mode]}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ))}
+        </div>
+        {serviceThemesErrors.length > 0 && (
+          <ul className="wizard__errors" data-testid="service-themes-errors" style={{ marginTop: '0.75rem' }}>
+            {serviceThemesErrors.map((msg) => (
               <li key={msg}>{msg}</li>
             ))}
           </ul>
@@ -611,6 +676,7 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
             submitting ||
             !dailyResetValid ||
             !brandColorValid ||
+            !serviceThemesValid ||
             !categoriesValid
           }
           data-testid="admin-save"
@@ -632,6 +698,9 @@ function toForm(config: SystemConfigurationDto): AdminForm {
     storeName: config.storeName,
     stateMachine: config.stateMachine,
     brandColor: config.brandColor || DEFAULT_BRAND_COLOR,
+    // Coerce a partial/degraded GET projection into a complete 4-surface map
+    // (defaults an unknown surface to light — mirrors the backend VO).
+    serviceThemes: coerceServiceThemes(config.serviceThemes ?? DEFAULT_SERVICE_THEMES),
     categories:
       config.categories.length > 0
         ? config.categories.map((c) => ({ id: c.id, rowKey: `cat-${c.id}`, code: c.code, name: c.name }))

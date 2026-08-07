@@ -73,7 +73,14 @@ export class KioskApi implements IKioskApi {
     // Reuses the existing `GET /api/system/config` read surface (QUE-30 — it
     // returns `storeName`/`brandColor` even pre-setup as `''`) rather than adding
     // a dedicated endpoint (DRY). The kiosk consumes only the store-profile
-    // slice (ISP): store name + brand color.
-    return getJson<StoreProfileSlice>('/system/config');
+    // slice (ISP): store name + brand color + this service's theme (the kiosk
+    // surface key from `serviceThemes`, QUE-47).
+    return getJson<{ storeName: string; brandColor: string; serviceThemes?: { kiosk?: string } }>(
+      '/system/config',
+    ).then((c) => ({
+      storeName: c.storeName,
+      brandColor: c.brandColor,
+      themeMode: c.serviceThemes?.kiosk === 'dark' ? 'dark' : 'light',
+    }));
   }
 }

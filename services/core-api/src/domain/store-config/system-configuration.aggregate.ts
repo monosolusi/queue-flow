@@ -3,6 +3,7 @@ import { Identifier } from '../shared/identifier';
 import { InvalidValueObjectException } from '../shared/errors';
 import { BrandColor } from './value-objects/brand-color';
 import { DailyResetPolicy } from './value-objects/daily-reset-policy';
+import { ServiceThemes } from './value-objects/service-themes';
 import { StateMachine } from './state-machine';
 
 /**
@@ -17,6 +18,7 @@ export class SystemConfiguration extends AggregateRoot {
   private readonly _stateMachine: StateMachine;
   private _dailyResetPolicy: DailyResetPolicy;
   private _brandColor: BrandColor;
+  private _serviceThemes: ServiceThemes;
 
   private constructor(
     id: Identifier,
@@ -25,6 +27,7 @@ export class SystemConfiguration extends AggregateRoot {
     stateMachine: StateMachine,
     dailyResetPolicy: DailyResetPolicy,
     brandColor: BrandColor,
+    serviceThemes: ServiceThemes,
   ) {
     super(id);
     this._storeName = storeName;
@@ -32,15 +35,17 @@ export class SystemConfiguration extends AggregateRoot {
     this._stateMachine = stateMachine;
     this._dailyResetPolicy = dailyResetPolicy;
     this._brandColor = brandColor;
+    this._serviceThemes = serviceThemes;
   }
 
-  /** Creates a fresh, not-yet-configured instance with the default state machine
-   * and brand color. `brandColor` defaults to {@link BrandColor.DEFAULT} so the
-   * dev seed and acceptance `seedPrdConfig` (2-arg calls) need no change. */
+  /** Creates a fresh, not-yet-configured instance with the default state machine,
+   * brand color, and service themes. `brandColor` + `serviceThemes` default so
+   * the dev seed and acceptance `seedPrdConfig` (2-arg calls) need no change. */
   public static create(
     id: Identifier,
     storeName = '',
     brandColor: BrandColor = BrandColor.DEFAULT,
+    serviceThemes: ServiceThemes = ServiceThemes.DEFAULT,
   ): SystemConfiguration {
     return new SystemConfiguration(
       id,
@@ -49,6 +54,7 @@ export class SystemConfiguration extends AggregateRoot {
       StateMachine.DEFAULT,
       DailyResetPolicy.DEFAULT,
       brandColor,
+      serviceThemes,
     );
   }
 
@@ -59,6 +65,7 @@ export class SystemConfiguration extends AggregateRoot {
     stateMachine: StateMachine;
     dailyResetPolicy: DailyResetPolicy;
     brandColor: BrandColor;
+    serviceThemes: ServiceThemes;
   }): SystemConfiguration {
     return new SystemConfiguration(
       params.id,
@@ -67,6 +74,7 @@ export class SystemConfiguration extends AggregateRoot {
       params.stateMachine,
       params.dailyResetPolicy,
       params.brandColor,
+      params.serviceThemes,
     );
   }
 
@@ -88,6 +96,10 @@ export class SystemConfiguration extends AggregateRoot {
 
   public get brandColor(): BrandColor {
     return this._brandColor;
+  }
+
+  public get serviceThemes(): ServiceThemes {
+    return this._serviceThemes;
   }
 
   public setStoreName(name: string): void {

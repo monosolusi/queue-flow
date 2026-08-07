@@ -122,6 +122,8 @@ function prdWizardPayload() {
       { counterId: 1, counterName: 'Counter 1 (CS)', assignedCategoryCodes: ['A'], priorityPolicy: 'FIFO_GLOBAL' },
       { counterId: 2, counterName: 'Counter 2 (Serbaguna)', assignedCategoryCodes: ['A', 'B'], priorityPolicy: 'CATEGORY_PRIORITY' },
     ],
+    brandColor: '#2563eb',
+    serviceThemes: { kiosk: 'light', tv: 'light', caller: 'light', admin: 'light' },
     actor: 'admin',
   };
 }

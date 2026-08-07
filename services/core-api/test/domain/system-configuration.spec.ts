@@ -4,6 +4,7 @@ import {
   BrandColor,
   DailyResetMode,
   DailyResetPolicy,
+  ServiceThemes,
   StateMachine,
   StateSchema,
   SystemConfiguration,
@@ -187,6 +188,17 @@ describe('SystemConfiguration aggregate', () => {
     expect(config.brandColor).toBe(BrandColor.DEFAULT);
   });
 
+  it('defaults serviceThemes to all-light (zero visual regression)', () => {
+    const config = SystemConfiguration.create(Identifier.generate());
+    expect(config.serviceThemes).toBe(ServiceThemes.DEFAULT);
+    expect(config.serviceThemes.toDto()).toEqual({
+      kiosk: 'light',
+      tv: 'light',
+      caller: 'light',
+      admin: 'light',
+    });
+  });
+
   it('reconstitute carries a custom brand color through', () => {
     const config = SystemConfiguration.reconstitute({
       id: Identifier.generate(),
@@ -195,8 +207,27 @@ describe('SystemConfiguration aggregate', () => {
       stateMachine: StateMachine.DEFAULT,
       dailyResetPolicy: DailyResetPolicy.DEFAULT,
       brandColor: BrandColor.of('#aabbcc'),
+      serviceThemes: ServiceThemes.DEFAULT,
     });
     expect(config.brandColor.value).toBe('#aabbcc');
+  });
+
+  it('reconstitute carries custom per-service themes through', () => {
+    const config = SystemConfiguration.reconstitute({
+      id: Identifier.generate(),
+      storeName: 'Toko Brand',
+      isInitialSetupCompleted: true,
+      stateMachine: StateMachine.DEFAULT,
+      dailyResetPolicy: DailyResetPolicy.DEFAULT,
+      brandColor: BrandColor.DEFAULT,
+      serviceThemes: ServiceThemes.of({ kiosk: 'light', tv: 'dark', caller: 'dark', admin: 'light' }),
+    });
+    expect(config.serviceThemes.toDto()).toEqual({
+      kiosk: 'light',
+      tv: 'dark',
+      caller: 'dark',
+      admin: 'light',
+    });
   });
 
   it('cannot complete setup without a store name', () => {

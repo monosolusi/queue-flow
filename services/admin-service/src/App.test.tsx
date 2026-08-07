@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { App } from './App';
 import type { IAdminAppApi } from './api/admin-api';
 import type { SystemConfigurationDto } from './api/types';
+import { DEFAULT_SERVICE_THEMES } from './api/types';
 
 function makeConfig(brandColor = '#2563eb'): SystemConfigurationDto {
   return {
@@ -20,6 +21,7 @@ function makeConfig(brandColor = '#2563eb'): SystemConfigurationDto {
     categories: [],
     routingRules: [],
     brandColor,
+    serviceThemes: { ...DEFAULT_SERVICE_THEMES },
   };
 }
 
@@ -27,7 +29,7 @@ function makeApi(config: SystemConfigurationDto, reject?: Error): IAdminAppApi {
   return {
     getSystemConfig: reject ? vi.fn(() => Promise.reject(reject)) : vi.fn(() => Promise.resolve(config)),
     saveSystemConfig: vi.fn(() =>
-      Promise.resolve({ isInitialSetupCompleted: true, storeName: config.storeName, brandColor: config.brandColor }),
+      Promise.resolve({ isInitialSetupCompleted: true, storeName: config.storeName, brandColor: config.brandColor, serviceThemes: config.serviceThemes }),
     ),
     getActiveStateMachine: vi.fn(() => Promise.resolve(config.stateMachine)),
     getDailyReport: vi.fn(),

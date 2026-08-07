@@ -4,37 +4,74 @@
  * by `scripts/sync-design-tokens.mjs` as `src/styles/_tokens.css` (generated;
  * do not edit the per-service copy — edit THIS file and re-run sync).
  *
+ * QUE-47 — light/dark mode. `:root` is the LIGHT palette (the default, so the
+ * default case never flashes a dark-then-light swap — no FOUC for the default,
+ * mirroring the BrandColor fallback model). Dark mode is opt-in: a per-service
+ * `data-theme="dark"` attribute on <html> (set by each service's `theme.ts`
+ * `applyThemeMode` from SystemConfiguration.serviceThemes) overrides the
+ * surface/text/on-surface tokens. The manager picks each service's theme from
+ * the admin panel; `ServiceThemes.DEFAULT` is all-light, matching this `:root`,
+ * so an unconfigured/upgraded store keeps the light look (zero visual regression
+ * vs. the prior single-dark-palette ONLY when the manager has opted a service
+ * into dark — the default flips to light, which is the QUE-47 AC).
+ *
  * OKLCH color space (AC1) for perceptual uniformity, EXCEPT:
  *   - `--accent` stays hex `#2563eb` so a JS-injected hex/oklch brandColor
  *     (SystemConfiguration.brandColor, QUE-36) overrides it cleanly at runtime
  *     via document.documentElement.style.setProperty. The static value is the
  *     deliberate fixed-brand-palette fallback (AC6) — it equals BrandColor.DEFAULT
- *     so a pre-fetch / fetch-failure produces no flash of the wrong color.
- *   - `--text-muted` stays hex `#94a3b8` (AC5: verified 5.71:1, passes — do not touch).
+ *     so a pre-fetch / fetch-failure produces no flash of the wrong color. The
+ *     same `--accent` serves both modes (the brand color does not change with
+ *     theme), so it is NOT redeclared in `[data-theme="dark"]`.
+ *   - `--accent-on-surface` is a fixed contrast-safe accent-TEXT color (not a
+ *     brandColor interop target — `applyBrandColor` only sets `--accent`).
+ *     Light mode declares it hex `#1d4ed8` blue-700 (~6.9:1 on white) for
+ *     consistency with the `--accent`/`--text-muted` hex holdouts; dark mode
+ *     redeclares it as the OKLCH blue-400 (5.75:1 on the dark bg).
  *   - `--accent-contrast` stays hex `#ffffff` (white-on-accent). Documented
  *     limitation: a manager-picked light brandColor could fail WCAG contrast
  *     with white button text; a runtime contrast algorithm is intentionally
- *     out of scope for QUE-37 (no over-engineering).
+ *     out of scope for QUE-37 (no over-engineering). Unchanged by theme.
+ *   - `--text-muted` is hex in BOTH modes (the values differ, so both blocks
+ *     declare it): `#64748b` slate-500 in light (~4.6:1 on white) and
+ *     `#94a3b8` slate-400 in dark (5.71:1 on slate-900 — AC5, unchanged).
  *
  * `--radius` is intentionally NOT defined here — it is a per-service override
  * (kiosk/tv 18px, caller/admin 14px) kept in each service's own `styles.css`.
  * OKLCH values are exact sRGB→OKLCH conversions of the original Tailwind slate
- * palette so the refactor introduces zero visual regression.
+ * palette. The semantic `--accent-on-surface` / `--danger-on-surface` tokens
+ * replace the former mode-pinned `--accent-on-dark` / `--danger-on-dark` names
+ * (those became misnomers once a light palette existed); service styles use
+ * `var(--token)` exclusively so the rename is a bounded sweep.
  */
 :root {
-  --bg:             oklch(0.208 0.040 265.8);  /* #0f172a slate-900 */
-  --surface:        oklch(0.279 0.037 260.0);  /* #1e293b slate-800 */
-  --surface-2:      oklch(0.372 0.039 257.3);  /* #334155 slate-700 */
-  --text:           oklch(0.968 0.007 247.9);  /* #f1f5f9 slate-100 */
-  --text-muted:     #94a3b8;                   /* AC5: verified 5.71:1 — unchanged */
-  --accent:         #2563eb;                  /* runtime override target (brandColor) */
-  --accent-contrast:#ffffff;                  /* white-on-accent; fixed (AC4) */
-  --success:        oklch(0.627 0.170 149.2); /* #16a34a green-600 */
-  --warn:           oklch(0.666 0.157 58.3);   /* #d97706 amber-600 (also fixes kiosk drift) */
-  --danger:         oklch(0.577 0.215 27.3);   /* #dc2626 red-600 */
-  /* AC5 — accent / danger TEXT on the dark surface (≥4.5:1). Use these for any
+  /* LIGHT palette (default — no FOUC for the default case). */
+  --bg:             oklch(1 0 0);                /* #ffffff white */
+  --surface:        oklch(0.985 0.002 247.0);    /* #f8fafc slate-50 */
+  --surface-2:      oklch(0.967 0.003 247.0);    /* #f1f5f9 slate-100 */
+  --text:           oklch(0.208 0.040 265.8);    /* #0f172a slate-900 */
+  --text-muted:     #64748b;                     /* slate-500, ~4.6:1 on white */
+  --accent:         #2563eb;                     /* runtime override target (brandColor) */
+  --accent-contrast:#ffffff;                     /* white-on-accent; fixed (AC4) */
+  --success:        oklch(0.627 0.170 149.2);    /* #16a34a green-600 */
+  --warn:           oklch(0.666 0.157 58.3);     /* #d97706 amber-600 (also fixes kiosk drift) */
+  --danger:         oklch(0.577 0.215 27.3);     /* #dc2626 red-600 */
+  /* AC5 — accent / danger TEXT on the light surface (≥4.5:1). Use these for any
      accent/danger text rendered on --bg / --surface / --surface-2. */
-  --accent-on-dark: oklch(0.714 0.143 254.6);  /* #60a5fa blue-400 → 5.75:1 */
-  --danger-on-dark: oklch(0.711 0.166 22.2);   /* #f87171 red-400  → 6.45:1 */
+  --accent-on-surface: #1d4ed8;                  /* blue-700, ~6.9:1 on white */
+  --danger-on-surface: oklch(0.577 0.215 27.3);  /* red-600, ~4.9:1 on white (== --danger) */
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* DARK palette (opt-in via <html data-theme="dark">). Only the tokens that
+   change are redeclared — --accent / --accent-contrast / --success / --warn /
+   --danger are theme-invariant and inherited from :root. */
+[data-theme="dark"] {
+  --bg:               oklch(0.208 0.040 265.8);  /* #0f172a slate-900 */
+  --surface:          oklch(0.279 0.037 260.0);  /* #1e293b slate-800 */
+  --surface-2:        oklch(0.372 0.039 257.3);  /* #334155 slate-700 */
+  --text:             oklch(0.968 0.007 247.9);  /* #f1f5f9 slate-100 */
+  --text-muted:       #94a3b8;                   /* slate-400, 5.71:1 on slate-900 — AC5, unchanged */
+  --accent-on-surface: oklch(0.714 0.143 254.6); /* #60a5fa blue-400 → 5.75:1 */
+  --danger-on-surface: oklch(0.711 0.166 22.2);  /* #f87171 red-400  → 6.45:1 */
 }

@@ -9,6 +9,7 @@ import { StateSchema } from '../../domain/store-config';
 import { StateTransitionRule } from '../../domain/store-config';
 import { DailyResetPolicy, DailyResetMode } from '../../domain/store-config';
 import { BrandColor } from '../../domain/store-config';
+import { ServiceThemes, type ServiceThemesMap } from '../../domain/store-config';
 import { type IDailyResetSchedulerPort } from '../../domain/store-config';
 import {
   Identifier,
@@ -76,6 +77,10 @@ export interface SaveSystemConfigurationCommand {
   readonly categories: readonly WizardCategoryDto[];
   readonly routingRules: readonly WizardRoutingRuleDto[];
   readonly brandColor: string;
+  /** Per-service light/dark theme map (QUE-47). Required on the wire; the VO
+   *  defaults any missing surface to `'light'` and rejects a present-but-invalid
+   *  value. Not change-gated (like `brandColor`). */
+  readonly serviceThemes: ServiceThemesMap;
   readonly actor: string;
 }
 
@@ -83,6 +88,7 @@ export interface SaveSystemConfigurationResult {
   readonly isInitialSetupCompleted: boolean;
   readonly storeName: string;
   readonly brandColor: string;
+  readonly serviceThemes: ServiceThemesMap;
 }
 
 /** Minimal projection used only for audit before/after snapshots. */
@@ -176,6 +182,9 @@ export class SaveSystemConfigurationUseCase {
     // change-gating flag or post-commit re-arm (unlike the daily-reset policy).
     // Validated here (fail-fast, pre-tx) so a malformed color never acquires a tx.
     const brandColor = BrandColor.of(command.brandColor);
+    // Per-service themes — same shape: pure appearance, not change-gated, no
+    // post-commit side-effect. Validated pre-tx so a malformed map fails fast.
+    const serviceThemes = ServiceThemes.of(command.serviceThemes);
     const newCategories = this.buildCategories(command.categories);
     const codeToId = new Map(newCategories.map((c) => [c.code, c.id.value]));
     const newRules = this.buildRoutingRules(command.routingRules, codeToId);
@@ -220,6 +229,7 @@ export class SaveSystemConfigurationUseCase {
         stateMachine,
         dailyResetPolicy,
         brandColor,
+        serviceThemes,
       });
       system.completeInitialSetup(); // idempotent — validates store name, flips the flag
 
@@ -268,6 +278,7 @@ export class SaveSystemConfigurationUseCase {
         isInitialSetupCompleted: system.isInitialSetupCompleted,
         storeName: system.storeName,
         brandColor: system.brandColor.value,
+        serviceThemes: system.serviceThemes.toDto(),
       };
     });
 

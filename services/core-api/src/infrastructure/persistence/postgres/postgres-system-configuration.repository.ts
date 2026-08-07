@@ -9,6 +9,10 @@ import {
   DailyResetPolicy,
   type DailyResetPolicyProps,
 } from '../../../domain/store-config/value-objects/daily-reset-policy';
+import {
+  ServiceThemes,
+  type ServiceThemesMap,
+} from '../../../domain/store-config/value-objects/service-themes';
 import { StateMachine } from '../../../domain/store-config/state-machine';
 import { StateSchema } from '../../../domain/store-config/value-objects/state-schema';
 import { StateTransitionRule } from '../../../domain/store-config/value-objects/state-transition-rule';
@@ -22,6 +26,7 @@ interface ConfigRow {
   state_machine: { states: string[]; transitions: { from: string; to: string; actionLabel: string }[] };
   daily_reset_policy: DailyResetPolicyProps;
   brand_color: string;
+  service_themes: ServiceThemesMap | null;
 }
 
 /**
@@ -48,14 +53,15 @@ export class PostgresSystemConfigurationRepository implements ISystemConfigurati
   async save(config: SystemConfiguration): Promise<void> {
     await withDbClient(this.pool, async (client) => {
       await client.query(
-        `INSERT INTO system_configuration (id, store_name, is_initial_setup_completed, state_machine, daily_reset_policy, brand_color)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO system_configuration (id, store_name, is_initial_setup_completed, state_machine, daily_reset_policy, brand_color, service_themes)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT (id) DO UPDATE SET
            store_name                = EXCLUDED.store_name,
            is_initial_setup_completed = EXCLUDED.is_initial_setup_completed,
            state_machine             = EXCLUDED.state_machine,
            daily_reset_policy        = EXCLUDED.daily_reset_policy,
-           brand_color               = EXCLUDED.brand_color`,
+           brand_color               = EXCLUDED.brand_color,
+           service_themes            = EXCLUDED.service_themes`,
         [
           config.id.value,
           config.storeName,
@@ -69,6 +75,7 @@ export class PostgresSystemConfigurationRepository implements ISystemConfigurati
             timezone: config.dailyResetPolicy.timezone,
           }),
           config.brandColor.value,
+          JSON.stringify(config.serviceThemes.toDto()),
         ],
       );
     });
@@ -100,6 +107,11 @@ function toConfig(row: ConfigRow): SystemConfiguration {
     // fallback is belt-and-suspenders — it prevents a 500 instead of surfacing a
     // malformed (missing) column value.
     brandColor: BrandColor.of(row.brand_color ?? BrandColor.DEFAULT.value),
+    // Same boot-window fallback for service_themes (0007 migration). `of()`
+    // recovers a null/undefined column to all-light, and a pre-migration row's
+    // SELECT * simply lacks the column (pg returns undefined here) — both paths
+    // reconstitute ServiceThemes.DEFAULT. Mirrors the brandColor fallback.
+    serviceThemes: ServiceThemes.of(row.service_themes ?? undefined),
   });
 }
 

@@ -8,7 +8,7 @@ import type {
   RangeReportDto,
   SystemConfigurationDto,
 } from '../api/types';
-import { DEFAULT_STATE_MACHINE, DEFAULT_BRAND_COLOR } from '../api/types';
+import { DEFAULT_STATE_MACHINE, DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES } from '../api/types';
 
 /** A configured store with two categories + two counters. */
 function configuredStore(): SystemConfigurationDto {
@@ -32,6 +32,7 @@ function configuredStore(): SystemConfigurationDto {
       { counterId: 2, counterName: 'Counter 2', assignedCategoryIds: ['cat-a', 'cat-b'], priorityPolicy: 'CATEGORY_PRIORITY' },
     ],
     brandColor: DEFAULT_BRAND_COLOR,
+    serviceThemes: { ...DEFAULT_SERVICE_THEMES },
   };
 }
 

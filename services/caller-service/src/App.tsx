@@ -4,7 +4,7 @@ import { CallerApi } from './api/caller-api';
 import type { ICallerApi } from './api/caller-api';
 import { AuthProvider } from './auth/useAuth';
 import { RequireAuth } from './auth/RequireAuth';
-import { applyBrandColor } from './lib/theme';
+import { applyBrandColor, applyThemeMode } from './lib/theme';
 import { CounterSelectPage } from './pages/CounterSelectPage';
 import { LoginPage } from './pages/LoginPage';
 import { WorkspacePage } from './pages/WorkspacePage';
@@ -34,7 +34,10 @@ export function App({ api }: { api?: ICallerApi } = {}) {
   useEffect(() => {
     callerApi
       .getBrandColor()
-      .then((c) => applyBrandColor(c.brandColor))
+      .then((c) => {
+        applyBrandColor(c.brandColor);
+        applyThemeMode(c.themeMode);
+      })
       .catch(() => {
         /* keep the static `#2563eb` default on fetch failure */
       });

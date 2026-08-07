@@ -11,7 +11,7 @@ import type { CategoryDto, QueueLifecycleWireEvent, TvTicketDto } from '../api/t
 import type { ITvApi } from '../api/tv-api';
 import { type AudioProvider } from '../audio/audio-provider';
 import { buildCallFragments } from '../audio/audio-provider';
-import { applyBrandColor } from '../lib/theme';
+import { applyBrandColor, applyThemeMode } from '../lib/theme';
 import { QueueSocket, type ConnectionStatus, type QueueSocketOptions } from '../realtime/queue-socket';
 
 export interface NowServing {
@@ -305,6 +305,7 @@ export function TvStoreProvider({ api, audio, children, socketOptions }: TvStore
         if (cancelled) return;
         if (configRes.status === 'fulfilled' && categoriesRes.status === 'fulfilled') {
           applyBrandColor(configRes.value.brandColor);
+          applyThemeMode(configRes.value.serviceThemes.tv);
           dispatch({
             type: 'BOOT_LOADED',
             storeName: configRes.value.storeName,

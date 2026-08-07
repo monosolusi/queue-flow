@@ -14,3 +14,26 @@ export function applyBrandColor(brandColor: string | undefined | null): void {
     document.documentElement.style.setProperty('--accent', brandColor.trim());
   }
 }
+
+/**
+ * Applies this service's light/dark theme (QUE-47 `SystemConfiguration.serviceThemes`)
+ * by toggling a `data-theme="dark"` attribute on <html>. Light is the CSS `:root`
+ * default in `_tokens.css`, so the default case is applied by *omission* — no
+ * `data-theme` attribute, no FOUC for the default (mirrors the `applyBrandColor`
+ * fallback model: the static light palette shows until a real `dark` lands, and
+ * a fetch failure / light value leaves the light default in place). Only `'dark'`
+ * opts into the `[data-theme="dark"]` overrides; any other value (light,
+ * undefined, null, an unknown string) removes the attribute → light.
+ *
+ * Per-service leaf (not synced) — the ~3-line `applyBrandColor` precedent
+ * duplicated 4×. Each service calls this with its own surface key from the
+ * `serviceThemes` map it fetches at boot (ISP — one key per service).
+ */
+export function applyThemeMode(mode: string | undefined | null): void {
+  const el = document.documentElement;
+  if (mode === 'dark') {
+    el.setAttribute('data-theme', 'dark');
+  } else {
+    el.removeAttribute('data-theme');
+  }
+}
