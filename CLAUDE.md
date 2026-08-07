@@ -1340,7 +1340,7 @@ config, proxied to `core-api:3000` by Vite in dev).
   always-visible (no overlay, no crossfade, no `--hidden` modifier), and the
   empty card renders inside it. The waiting queue + call history stay mounted
   alongside the empty card. `src/standby/`, `src/components/StandbyMedia.tsx`,
-  `public/media/`, the `RunningText` marquee, the `.standby`/`.standby__grid`/
+  `public/media/`, the promo `RunningText` marquee, the `.standby`/`.standby__grid`/
   `.tv-board__marquee`/`@keyframes marquee` CSS, and the promo-media
   `globPatterns` extensions (svg/png/jpg/jpeg/gif/webm/mp4) were all removed;
   only `mp3` is precached now (audio announcements stay). Audio remains a pure
@@ -1349,6 +1349,41 @@ config, proxied to `core-api:3000` by Vite in dev).
   (the `live={false}` standby duplicate is gone; `aria-live="polite"` is now
   unconditional). The `tv-store` reducer's `nowServing: null` behavior is
   unchanged — it is the idle state, not the standby feature.
+- **TV running-text disclaimer marquee (manager feedback, re-added as a
+  distinct non-promo element):** a fixed, always-visible
+  `src/components/RunningText.tsx` marquee strip was added back as the board
+  footer (`<footer className="tv-board__footer">`) — a disclaimer that queue
+  numbers may not be in order ("Nomor antrian tidak selalu berurutan — harap
+  perhatikan panggilan nomor Anda dan counter yang dituju."). It is **distinct
+  from the removed promo standby overlay**: no media assets, no crossfade, no
+  `--hidden` modifier, no ticket-count conditionality, and reduced-motion
+  guarded (`@media (prefers-reduced-motion: reduce) { .running-text__track {
+  animation: none; } }` inlined in `styles.css` — the TV does NOT import
+  `_interactions.css`). Pure presentational (SRP — no state, no effect, no
+  store wiring); the message is a UI constant, NOT wired to
+  `SystemConfiguration` (mirrors the "audio is a pure client concern / no
+  speculative ports" precedent — no `domain/notification` bounded context).
+  BEM structure: `.running-text` (overflow:hidden viewport) >
+  `.running-text__track` (`animation: marquee 30s linear infinite`, two
+  identical `.running-text__item` spans → `translateX(-50%)` seamless loop) +
+  `@keyframes marquee`. The parent carries `role="marquee"` + `aria-label`;
+  both `.running-text__item` spans are `aria-hidden="true"` (the `aria-label`
+  is the sole AT channel — the moving text is not exposed as navigable
+  content, so the disclaimer is announced once, not duplicated per item). The
+  board layout
+  stays a fixed flex column (header + `main(flex:1)` + `footer(flex:0 0
+  auto)`) regardless of ticket count — the marquee is always visible, never a
+  conditionally-shown overlay. The `styles.test.ts` AC6 guard distinguishes
+  the two: the promo standby overlay negations (`.standby`/`--hidden`/`position:
+  absolute`/`transition: opacity`) stay, but the marquee/reduced-motion
+  negations were replaced with POSITIVE guards for the intentional disclaimer
+  marquee (`@keyframes marquee` + the reduced-motion pause anchored
+  `reduce\)\s*\{` per the @media regex-anchor gotcha + `.running-text`
+  `overflow: hidden` + `.running-text__track` `animation: marquee`). The
+  now-serving eyebrow wording was also changed from "SEDANG DILAYANI" to
+  "PERGI KE COUNTER" (manager: customers didn't realize their ticket was
+  called) — `h2`/`role="status"`/`aria-live="assertive"`/`aria-atomic="true"`
+  unchanged.
 
 ### Shared design-token system + a11y/interaction baseline (all 4 frontends)
 

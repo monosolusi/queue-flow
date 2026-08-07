@@ -3,6 +3,7 @@ import { NowServingCard } from '../components/NowServingCard';
 import { CallHistory } from '../components/CallHistory';
 import { WaitingQueue } from '../components/WaitingQueue';
 import { ConnectionStatusBadge } from '../components/ConnectionStatus';
+import { RunningText } from '../components/RunningText';
 
 /**
  * The TV queue board (FR-TV-01..02). Shows the big now-serving number + the
@@ -37,6 +38,8 @@ export function TvBoardPage() {
           </div>
         </div>
       </main>
+
+      <RunningText />
     </div>
   );
 }

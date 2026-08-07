@@ -116,7 +116,11 @@ describe('styles.css AC guards', () => {
   it('AC6: the active board is the single always-visible layer (no standby/crossfade)', () => {
     // The standby/promosi panel was removed (it flickered on the crossfade);
     // the active board is now a plain flex column filling the main area — no
-    // overlay, no --hidden modifier, no crossfade.
+    // overlay, no --hidden modifier, no crossfade. The promo standby overlay
+    // (full-screen media crossfade, conditionally shown) stays REMOVED — these
+    // negations guard that. The intentional running-text disclaimer marquee
+    // (fixed, always-visible, no media, reduced-motion guarded) is a distinct
+    // element and is asserted positively in the dedicated test below.
     expect(css).not.toContain('.standby');
     expect(css).not.toContain('--hidden');
     expect(css).not.toContain('position: absolute');
@@ -126,9 +130,28 @@ describe('styles.css AC guards', () => {
     expect(active).toContain('flex-direction: column');
     expect(active).toContain('height: 100%');
     expect(active).toContain('min-height: 0');
-    // No marquee/standby keyframes remain.
-    expect(css).not.toContain('@keyframes marquee');
-    expect(css).not.toMatch(/prefers-reduced-motion/);
+  });
+
+  it('RunningText disclaimer marquee: fixed, always-visible, reduced-motion guarded', () => {
+    // The disclaimer marquee (manager feedback) is intentional and distinct
+    // from the removed promo standby overlay. Positive guards for its presence
+    // + the a11y/interaction baseline (reduced-motion pause). The TV does NOT
+    // import _interactions.css, so the reduced-motion guard is inlined in
+    // styles.css (anchor `reduce\)\s*\{` — the `)` sits between the keyword
+    // and the block brace, so `reduce\s*\{` would silently never match).
+    expect(css).toContain('@keyframes marquee');
+    expect(css).toMatch(
+      /prefers-reduced-motion:\s*reduce\)\s*\{[^}]*\.running-text__track/,
+    );
+    const viewport = rule('.running-text');
+    expect(viewport).toContain('overflow: hidden');
+    expect(viewport).toContain('white-space: nowrap');
+    const track = rule('.running-text__track');
+    expect(track).toContain('animation: marquee');
+    // The footer is a fixed bottom strip (flex: 0 0 auto) — the board layout
+    // stays fixed regardless of ticket count (the marquee is NOT a
+    // conditionally-shown overlay).
+    expect(rule('.tv-board__footer')).toContain('flex: 0 0 auto');
   });
 
   it('AC8: now-serving eyebrow letter-spacing ≤ 0.08em', () => {

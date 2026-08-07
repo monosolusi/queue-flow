@@ -18,7 +18,7 @@ describe('NowServingCard (AC1 aria-live, AC9 h2)', () => {
   it('exposes the label as a level-2 heading so the AT outline is h1→h2→h3 (AC9)', () => {
     render(<NowServingCard nowServing={t1} />);
     const heading = screen.getByRole('heading', { level: 2 });
-    expect(heading).toHaveTextContent('SEDANG DILAYANI');
+    expect(heading).toHaveTextContent('PERGI KE COUNTER');
     expect(heading).toHaveClass('now-serving__label');
   });
 
