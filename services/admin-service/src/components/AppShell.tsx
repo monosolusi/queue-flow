@@ -2,6 +2,7 @@ import { useEffect, useId, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthContext } from '../auth/auth-context';
 import { NAV_GROUPS } from './nav-config';
+import { ConfigIcon } from './nav-icons';
 
 /**
  * The persistent app shell (admin-service modernization): a fixed left
@@ -96,6 +97,20 @@ function ProfileMenu() {
         <span className="profile__name" data-testid="profile-name">
           {displayName}
         </span>
+        <svg
+          className="profile__chevron"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.8}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+          focusable="false"
+          data-open={open}
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
       </button>
       {open && (
         <div id={menuId} role="menu" className="profile__menu">
@@ -105,12 +120,15 @@ function ProfileMenu() {
             className="profile__menuitem"
             onClick={() => setOpen(false)}
           >
+            <span className="profile__menuicon" aria-hidden="true">
+              <ConfigIcon />
+            </span>
             Pengaturan
           </Link>
           <button
             type="button"
             role="menuitem"
-            className="profile__menuitem"
+            className="profile__menuitem profile__menuitem--danger"
             disabled={signingOut}
             aria-busy={signingOut}
             data-testid="profile-logout"
@@ -128,6 +146,22 @@ function ProfileMenu() {
               });
             }}
           >
+            <span className="profile__menuicon" aria-hidden="true">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.8}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+                focusable="false"
+              >
+                <path d="M15 17l5-5-5-5" />
+                <path d="M20 12H9" />
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              </svg>
+            </span>
             {signingOut ? 'Keluar…' : 'Keluar'}
           </button>
         </div>

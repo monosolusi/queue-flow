@@ -411,7 +411,10 @@ button {
   font-size: 1.1rem;
 }
 
-/* User menu (QUE-43) ----------------------------------------------------- */
+/* User menu (QUE-43) -----------------------------------------------------
+   Quiet identity control: a monochrome chip + truncated username + a hand-rolled
+   stroke chevron that flips 180deg when open. NO saturated --accent avatar pill
+   (the "AI slop" tell) — the chip uses --surface-2 + --text. */
 .user-menu {
   position: relative;
 }
@@ -419,16 +422,53 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
+  background: transparent;
+  border: 1px solid var(--surface-2);
+  border-radius: var(--radius);
+  padding: 0.35rem 0.6rem;
+  color: var(--text);
+  font: inherit;
+  min-height: 2.75rem; /* ≥44px touch target (AC5) */
+}
+.user-menu__toggle:hover {
+  background: var(--surface-2);
+  border-color: var(--surface-2);
+}
+.user-menu__toggle:focus-visible {
+  outline: 2px solid var(--accent-on-surface);
+  outline-offset: 2px;
+}
+.user-menu__chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: calc(var(--radius) * 0.5);
+  background: var(--surface-2);
+  color: var(--text);
+  font-weight: 700;
+  font-size: 0.85rem;
+  flex: 0 0 auto;
 }
 .user-menu__user {
   max-width: 12rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-weight: 600;
+  font-size: 0.95rem;
 }
 .user-menu__chevron {
-  font-size: 0.8rem;
+  width: 1.1rem;
+  height: 1.1rem;
+  display: block;
+  flex: 0 0 auto;
   color: var(--text-muted);
+  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.user-menu__chevron[data-open="true"] {
+  transform: rotate(180deg);
 }
 .user-menu__popup {
   position: absolute;
@@ -441,7 +481,7 @@ button {
   background: var(--surface);
   border: 1px solid var(--surface-2);
   border-radius: var(--radius);
-  box-shadow: 0 0.4rem 1rem rgba(0, 0, 0, 0.25);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
   z-index: 10;
 }
 .user-menu__info {
@@ -458,14 +498,43 @@ button {
   font-weight: 600;
 }
 .user-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
   text-align: left;
   padding: 0.65rem 0.75rem;
   border: none;
-  border-radius: calc(var(--radius) * 0.6);
+  border-top: 1px solid var(--surface-2); /* hairline divider after the info header */
+  border-radius: 0;
   background: transparent;
   color: var(--text);
   font-size: 1rem;
+  min-height: 2.75rem; /* ≥44px touch target (AC5) */
 }
 .user-menu__item:hover {
   background: var(--surface-2);
+}
+.user-menu__item:focus-visible {
+  outline: 2px solid var(--accent-on-surface);
+  outline-offset: 2px;
+}
+.user-menu__item--danger:hover,
+.user-menu__item--danger:focus-visible {
+  color: var(--danger-on-surface);
+}
+.user-menu__menuicon {
+  display: inline-flex;
+  width: 1.1rem;
+  height: 1.1rem;
+  flex: 0 0 auto;
+}
+.user-menu__menuicon > svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+@media (prefers-reduced-motion: reduce) {
+  .user-menu__chevron {
+    transition: none;
+  }
 }
