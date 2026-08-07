@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import type { IAdminApi } from '../api/admin-api';
 import type { AuditLogEntryDto, RangeReportDto } from '../api/types';
 import { exportRangeReport } from '../lib/export-range-report';
-import { formatSeconds } from '../lib/format';
+import { formatDuration } from '../lib/format';
 import { loadRangeOverview, type RangeOverviewData } from '../lib/analytics-loader';
 import { RangeTrendChart } from '../components/RangeTrendChart';
 import { CategoryBreakdownChart } from '../components/CategoryBreakdownChart';
@@ -191,13 +191,13 @@ export function AnalyticsPage({
           <div className="metric-tile">
             <span className="metric-tile__label">Rata-rata Waktu Tunggu</span>
             <span className="metric-tile__value" data-testid="metric-wait">
-              {formatSeconds(report.avgWaitTimeMs)}
+              {formatDuration(report.avgWaitTimeMs)}
             </span>
           </div>
           <div className="metric-tile">
             <span className="metric-tile__label">Rata-rata Waktu Layanan</span>
             <span className="metric-tile__value" data-testid="metric-service">
-              {formatSeconds(report.avgServiceTimeMs)}
+              {formatDuration(report.avgServiceTimeMs)}
             </span>
           </div>
         </div>
@@ -226,8 +226,8 @@ export function AnalyticsPage({
                   <tr key={c.categoryId}>
                     <td>{c.categoryName}</td>
                     <td>{c.totalTickets}</td>
-                    <td>{formatSeconds(c.avgWaitTimeMs)}</td>
-                    <td>{formatSeconds(c.avgServiceTimeMs)}</td>
+                    <td>{formatDuration(c.avgWaitTimeMs)}</td>
+                    <td>{formatDuration(c.avgServiceTimeMs)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -253,7 +253,7 @@ export function AnalyticsPage({
                   {c.counterName} (#{c.counterId})
                 </td>
                 <td>{c.ticketsServed}</td>
-                <td>{formatSeconds(c.avgServiceTimeMs)}</td>
+                <td>{formatDuration(c.avgServiceTimeMs)}</td>
               </tr>
             ))}
           </tbody>

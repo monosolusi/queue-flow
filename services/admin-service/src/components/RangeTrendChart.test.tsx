@@ -9,7 +9,7 @@ function day(date: string, total: number): DailyPointDto {
 
 describe('RangeTrendChart (QUE-44)', () => {
   it('renders one bar per day with a per-bar testid + an accessible summary', () => {
-    render(
+    const { container } = render(
       <RangeTrendChart
         perDay={[day('2026-08-01', 3), day('2026-08-02', 5), day('2026-08-03', 0)]}
       />,
@@ -23,6 +23,8 @@ describe('RangeTrendChart (QUE-44)', () => {
         name: /Total pengunjung per hari: 2026-08-01: 3, 2026-08-02: 5, 2026-08-03: 0/,
       }),
     ).toBeInTheDocument();
+    // QUE-51 — three subtle gridlines at 25/50/75% of the plot height.
+    expect(container.querySelectorAll('.range-trend__gridline').length).toBe(3);
   });
 
   it('each bar carries a <title> with the date + count (hover/a11y channel)', () => {
