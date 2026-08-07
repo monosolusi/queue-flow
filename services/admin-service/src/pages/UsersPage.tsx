@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { IUsersApi } from '../api/admin-api';
 import type { UserDto, UserRole } from '../api/types';
 import { useAuthContext } from '../auth/auth-context';
@@ -39,104 +39,78 @@ function validateCreate(form: CreateForm): string[] {
 }
 
 /**
- * The user-management page (QUE-43, `/users`). Admin-only: the route is wrapped
- * in {@link RequireAuth}, and the backend `GET /api/users` / `POST /api/users` /
- * `DELETE /api/users/:id` are admin-only (Bearer); a non-admin caller-staff who
- * reaches this page sees an access-denied notice (progressive enhancement — the
- * backend 403 is the authority). Lists every account with its friendly role
- * label, lets the manager create a new account (username/password/role), and
- * delete one with an inline two-step confirm. Self-delete is blocked
- * client-side (compare the current principal's id from {@link useAuthContext})
- * — the backend's last-admin guard (400) is the safety net for the admin role
- * itself.
+ * Hand-rolled overlay modal for creating a new user. Mirrors the canonical
+ * {@link RoutingEditModal} markup exactly (`.modal__overlay` → `.modal` with
+ * `role="dialog"`/`aria-modal`/`aria-labelledby`, Escape + overlay-click close,
+ * Batal discards the draft). NOT native `<dialog>` — jsdom does not implement
+ * `showModal()`, so an overlay div pattern works identically in tests and real
+ * browsers (NFR-MNT-01). A local draft (seeded from `emptyForm()`) lets Batal
+ * discard; the caller drives mount/unmount via `showCreate`.
+ *
+ * A11y (WCAG 2.4.3): `returnFocusTo` was captured by the caller's `onClick`
+ * (NOT here via `document.activeElement`, which by mount time has already
+ * moved into the modal's `autoFocus` input); the modal restores focus to it on
+ * unmount. Batal / Simpan / Escape / overlay-click all unmount the modal.
  */
-export function UsersPage({ api }: { api: IUsersApi }) {
-  const { user: me } = useAuthContext();
-  const [users, setUsers] = useState<readonly UserDto[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+function UserCreateModal({
+  returnFocusTo,
+  onClose,
+  onSubmit,
+  submitting,
+  error,
+}: {
+  returnFocusTo: HTMLElement | null;
+  onClose: () => void;
+  onSubmit: (form: CreateForm) => Promise<void>;
+  submitting: boolean;
+  error: string | null;
+}) {
   const [form, setForm] = useState<CreateForm>(emptyForm);
-  const [creating, setCreating] = useState(false);
-  const [confirmingId, setConfirmingId] = useState<string | null>(null);
 
-  const isAdmin = me?.role === 'admin';
-
-  async function reload() {
-    setLoading(true);
-    setError(null);
-    try {
-      setUsers(await api.listUsers());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }
-
+  // A11y (WCAG 2.4.3): return focus to the trigger (the "Tambah Pengguna"
+  // button) when the modal unmounts. `returnFocusTo` was captured by the
+  // caller's `onClick` (before `autoFocus` moves focus into the modal).
   useEffect(() => {
-    void reload();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [api]);
+    return () => {
+      returnFocusTo?.focus?.();
+    };
+  }, [returnFocusTo]);
 
   const createErrors = useMemo(() => validateCreate(form), [form]);
-  const canCreate = createErrors.length === 0 && !creating;
-
-  async function onCreate(e: FormEvent) {
-    e.preventDefault();
-    if (!canCreate) return;
-    setCreating(true);
-    setError(null);
-    try {
-      await api.createUser(form);
-      setForm(emptyForm());
-      await reload();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setCreating(false);
-    }
-  }
-
-  async function onDelete(id: string) {
-    setError(null);
-    try {
-      await api.deleteUser(id);
-      setConfirmingId(null);
-      await reload();
-    } catch (err) {
-      // The backend guards the last admin with 400; surface the message so the
-      // manager sees why the delete was refused.
-      setError(err instanceof Error ? err.message : String(err));
-      setConfirmingId(null);
-    }
-  }
-
-  if (!isAdmin) {
-    return (
-      <div className="users users--denied">
-        <h1 className="users__title">Pengguna</h1>
-        <p className="users__error" role="alert" data-testid="users-denied">
-          Akses ditolak. Halaman ini hanya untuk administrator.
-        </p>
-      </div>
-    );
-  }
+  const canSubmit = createErrors.length === 0 && !submitting;
+  const titleId = 'users-create-title';
 
   return (
-    <div className="users">
-      <header className="users__header">
-        <h1 className="users__title">Pengguna</h1>
-        <p className="users__subtitle">Kelola akun administrator dan staf loket.</p>
-      </header>
+    <div
+      className="modal__overlay"
+      role="presentation"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        data-testid="user-create-modal"
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') onClose();
+        }}
+      >
+        <h3 className="modal__title" id={titleId}>
+          Tambah Pengguna
+        </h3>
 
-      {error && (
-        <p className="users__error" role="alert" data-testid="users-error">
-          {error}
-        </p>
-      )}
-
-      <section className="users__create" data-testid="users-create">
-        <h2 className="users__section-title">Tambah Pengguna</h2>
-        <form className="users__form" onSubmit={onCreate} noValidate>
+        <form
+          className="users__form"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (!canSubmit) return;
+            await onSubmit(form);
+          }}
+          noValidate
+        >
           <label className="field" htmlFor="create-username">
             <span className="field__label">Username</span>
             <input
@@ -149,6 +123,7 @@ export function UsersPage({ api }: { api: IUsersApi }) {
               aria-required="true"
               aria-describedby={createErrors.length > 0 ? 'create-errors' : undefined}
               aria-invalid={createErrors.length > 0}
+              autoFocus
             />
           </label>
           <label className="field" htmlFor="create-password">
@@ -192,16 +167,263 @@ export function UsersPage({ api }: { api: IUsersApi }) {
               ))}
             </ul>
           )}
-          <button
-            type="submit"
-            className="btn btn--primary"
-            disabled={!canCreate}
-            aria-busy={creating}
-            data-testid="create-submit"
-          >
-            {creating ? 'Menambah…' : 'Tambah Pengguna'}
-          </button>
+          {error && (
+            <p className="users__error" role="alert" data-testid="users-create-error">
+              {error}
+            </p>
+          )}
+          <div className="modal__actions">
+            <button type="button" className="btn btn--secondary" onClick={onClose}>
+              Batal
+            </button>
+            <button
+              type="submit"
+              className="btn btn--primary"
+              disabled={!canSubmit}
+              aria-busy={submitting}
+              data-testid="create-submit"
+            >
+              {submitting ? 'Menambah…' : 'Tambah Pengguna'}
+            </button>
+          </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Hand-rolled overlay modal confirming the deletion of one user. Mirrors the
+ * canonical {@link RoutingEditModal} overlay pattern. Replaces the prior inline
+ * two-step confirm (`confirmingId`) — the "Aksi" column now always renders a
+ * single "Hapus" button so its width is stable (the column no longer shifts
+ * when the manager presses "Hapus", which was the user-reported feedback).
+ *
+ * Same a11y pattern as {@link UserCreateModal}: `returnFocusTo` is captured at
+ * the trigger's click time and focus is restored on unmount.
+ */
+function ConfirmDeleteUserModal({
+  user,
+  returnFocusTo,
+  onClose,
+  onConfirm,
+  submitting,
+  error,
+}: {
+  user: UserDto;
+  returnFocusTo: HTMLElement | null;
+  onClose: () => void;
+  onConfirm: () => Promise<void>;
+  submitting: boolean;
+  error: string | null;
+}) {
+  // A11y (WCAG 2.4.3): return focus to the trigger (the row's "Hapus" button)
+  // when the modal unmounts. Captured by the caller's `onClick` before focus
+  // moves into the modal.
+  useEffect(() => {
+    return () => {
+      returnFocusTo?.focus?.();
+    };
+  }, [returnFocusTo]);
+
+  const titleId = 'users-delete-title';
+  const descId = 'users-delete-desc';
+
+  return (
+    <div
+      className="modal__overlay"
+      role="presentation"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descId}
+        data-testid={`user-confirm-${user.id}`}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') onClose();
+        }}
+      >
+        <h3 className="modal__title" id={titleId}>
+          Hapus Pengguna
+        </h3>
+        <p id={descId}>
+          Hapus pengguna &ldquo;{user.username}&rdquo;? Tindakan ini tidak dapat
+          dibatalkan.
+        </p>
+        {error && (
+          <p className="users__error" role="alert" data-testid="users-delete-error">
+            {error}
+          </p>
+        )}
+        <div className="modal__actions">
+          <button
+            type="button"
+            className="btn btn--secondary"
+            onClick={onClose}
+            data-testid={`user-confirm-cancel-${user.id}`}
+            autoFocus
+          >
+            Batal
+          </button>
+          <button
+            type="button"
+            className="btn btn--ghost"
+            onClick={() => {
+              void onConfirm();
+            }}
+            disabled={submitting}
+            aria-busy={submitting}
+            data-testid={`user-confirm-delete-${user.id}`}
+          >
+            {submitting ? 'Menghapus…' : 'Hapus'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The user-management page (QUE-43, `/users`). Admin-only: the route is wrapped
+ * in {@link RequireAuth}, and the backend `GET /api/users` / `POST /api/users` /
+ * `DELETE /api/users/:id` are admin-only (Bearer); a non-admin caller-staff who
+ * reaches this page sees an access-denied notice (progressive enhancement — the
+ * backend 403 is the authority). Lists every account with its friendly role
+ * label. Adding and deleting users happen via overlay modals (mirrors the
+ * counter-routing `RoutingEditModal` pattern) so the "Aksi" column width stays
+ * stable — it always renders a single "Hapus" button (user feedback: the prior
+ * inline two-step confirm widened the column and shifted the table on press).
+ * Self-delete is blocked client-side (compare the current principal's id from
+ * {@link useAuthContext}) — the backend's last-admin guard (400) is the safety
+ * net for the admin role itself.
+ */
+export function UsersPage({ api }: { api: IUsersApi }) {
+  const { user: me } = useAuthContext();
+  const [users, setUsers] = useState<readonly UserDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Create modal state. `createTrigger` captures the "Tambah Pengguna" button at
+  // click time so the modal can return focus to it on close (a11y WCAG 2.4.3).
+  const [showCreate, setShowCreate] = useState(false);
+  const [createTrigger, setCreateTrigger] = useState<HTMLElement | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  // Delete modal state. `deletingUser` replaces the prior inline `confirmingId`
+  // — the table now always renders one "Hapus" button. `deleteTrigger` captures
+  // the row's "Hapus" button at click time for focus restoration.
+  const [deletingUser, setDeletingUser] = useState<UserDto | null>(null);
+  const [deleteTrigger, setDeleteTrigger] = useState<HTMLElement | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  // Stable focus host for the delete-success path — the toolbar "Tambah
+  // Pengguna" button survives the list `reload()` (unlike the deleted row's
+  // "Hapus" button), so focus is retained instead of falling to <body>.
+  const addBtnRef = useRef<HTMLButtonElement | null>(null);
+
+  const isAdmin = me?.role === 'admin';
+
+  async function reload() {
+    setLoading(true);
+    setError(null);
+    try {
+      setUsers(await api.listUsers());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api]);
+
+  async function onCreate(form: CreateForm) {
+    setCreating(true);
+    setCreateError(null);
+    try {
+      await api.createUser(form);
+      setShowCreate(false);
+      setCreateError(null);
+      await reload();
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function onDelete(id: string) {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await api.deleteUser(id);
+      // A11y (WCAG 2.4.3): the modal's `returnFocusTo` (the row's "Hapus"
+      // button) is detached by the `reload()` below — React 18 batches the
+      // modal unmount + the table unmount (`loading=true`) into one commit, so
+      // the cleanup's `returnFocusTo.focus()` is a no-op and focus would fall
+      // to <body>. Focus a stable host that survives the reload (the toolbar
+      // "Tambah Pengguna" button) BEFORE unmounting the modal. The modal
+      // cleanup then no-ops on the detached row button and focus stays here.
+      addBtnRef.current?.focus();
+      setDeletingUser(null);
+      setDeleteError(null);
+      await reload();
+    } catch (err) {
+      // The backend guards the last admin with 400; surface the message so the
+      // manager sees why the delete was refused. The modal stays open.
+      setDeleteError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  if (!isAdmin) {
+    return (
+      <div className="users users--denied">
+        <h1 className="users__title">Pengguna</h1>
+        <p className="users__error" role="alert" data-testid="users-denied">
+          Akses ditolak. Halaman ini hanya untuk administrator.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="users">
+      <header className="users__header">
+        <h1 className="users__title">Pengguna</h1>
+        <p className="users__subtitle">Kelola akun administrator dan staf loket.</p>
+      </header>
+
+      {error && (
+        <p className="users__error" role="alert" data-testid="users-error">
+          {error}
+        </p>
+      )}
+
+      <section className="users__toolbar" data-testid="users-toolbar">
+        <button
+          ref={addBtnRef}
+          type="button"
+          className="btn btn--primary"
+          onClick={(e) => {
+            setCreateTrigger(e.currentTarget as HTMLElement);
+            setShowCreate(true);
+          }}
+          data-testid="users-add-btn"
+        >
+          + Tambah Pengguna
+        </button>
       </section>
 
       <section className="users__list" data-testid="users-list">
@@ -218,7 +440,7 @@ export function UsersPage({ api }: { api: IUsersApi }) {
               <tr>
                 <th scope="col">Username</th>
                 <th scope="col">Peran</th>
-                <th scope="col">Aksi</th>
+                <th scope="col" className="users__action">Aksi</th>
               </tr>
             </thead>
             <tbody>
@@ -230,39 +452,21 @@ export function UsersPage({ api }: { api: IUsersApi }) {
                     <td>
                       <span className="users__role">{USER_ROLE_LABELS[u.role]}</span>
                     </td>
-                    <td>
-                      {confirmingId === u.id ? (
-                        <span className="users__confirm" data-testid={`user-confirm-${u.id}`}>
-                          <span className="users__confirm-label">Yakin?</span>
-                          <button
-                            type="button"
-                            className="btn btn--ghost users__confirm-delete"
-                            onClick={() => onDelete(u.id)}
-                            data-testid={`user-confirm-delete-${u.id}`}
-                          >
-                            Hapus
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn--secondary"
-                            onClick={() => setConfirmingId(null)}
-                            data-testid={`user-confirm-cancel-${u.id}`}
-                          >
-                            Batal
-                          </button>
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          className="btn btn--ghost"
-                          onClick={() => setConfirmingId(u.id)}
-                          disabled={isSelf}
-                          title={isSelf ? 'Tidak dapat menghapus akun sendiri' : 'Hapus pengguna'}
-                          data-testid={`user-delete-${u.id}`}
-                        >
-                          Hapus
-                        </button>
-                      )}
+                    <td className="users__action">
+                      <button
+                        type="button"
+                        className="btn btn--ghost"
+                        onClick={(e) => {
+                          setDeleteTrigger(e.currentTarget as HTMLElement);
+                          setDeletingUser(u);
+                          setDeleteError(null);
+                        }}
+                        disabled={isSelf}
+                        title={isSelf ? 'Tidak dapat menghapus akun sendiri' : 'Hapus pengguna'}
+                        data-testid={`user-delete-${u.id}`}
+                      >
+                        Hapus
+                      </button>
                     </td>
                   </tr>
                 );
@@ -271,6 +475,34 @@ export function UsersPage({ api }: { api: IUsersApi }) {
           </table>
         )}
       </section>
+
+      {showCreate && (
+        <UserCreateModal
+          returnFocusTo={createTrigger}
+          onClose={() => {
+            setShowCreate(false);
+            setCreateError(null);
+          }}
+          onSubmit={onCreate}
+          submitting={creating}
+          error={createError}
+        />
+      )}
+
+      {deletingUser && (
+        <ConfirmDeleteUserModal
+          key={deletingUser.id}
+          user={deletingUser}
+          returnFocusTo={deleteTrigger}
+          onClose={() => {
+            setDeletingUser(null);
+            setDeleteError(null);
+          }}
+          onConfirm={() => onDelete(deletingUser.id)}
+          submitting={deleting}
+          error={deleteError}
+        />
+      )}
     </div>
   );
 }

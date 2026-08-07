@@ -1515,14 +1515,10 @@ fieldset {
   color: var(--danger-on-surface);
   margin: 0;
 }
-.users__create {
-  background: var(--surface);
-  border: 1px solid var(--surface-2);
-  border-radius: var(--radius);
-  padding: 1.25rem;
+.users__toolbar {
   display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
+  align-items: center;
+  gap: 0.5rem;
 }
 .users__section-title {
   margin: 0;
@@ -1561,15 +1557,14 @@ fieldset {
   font-weight: 600;
   font-size: 0.9rem;
 }
+/* Stable action column: width:1% + nowrap shrinks the column to its content
+   and never reflows when the (single) "Hapus" button is rendered — the column
+   width is constant regardless of hover/press state (user feedback: the prior
+   inline two-step confirm widened the column and shifted the table). */
+.users__action {
+  width: 1%;
+  white-space: nowrap;
+}
 .users__role {
   font-weight: 600;
-}
-.users__confirm {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-.users__confirm-label {
-  font-size: 0.9rem;
-  color: var(--text-muted);
 }
