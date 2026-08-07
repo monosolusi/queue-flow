@@ -16,7 +16,7 @@ export function NowServingCard({ nowServing }: { nowServing: NowServing | null }
       aria-live="assertive"
       aria-atomic="true"
     >
-      <h2 className="now-serving__label">SEDANG DILAYANI</h2>
+      <h2 className="now-serving__label">PERGI KE COUNTER</h2>
       <span className="now-serving__number">{nowServing.ticketNumber}</span>
       <span className="now-serving__counter">Counter {nowServing.counterId}</span>
     </div>

@@ -44,10 +44,19 @@ body,
   flex: 1;
   min-height: 0;
 }
+/* The fixed, always-visible running-text disclaimer footer (manager feedback).
+   Distinct from the removed promo standby overlay: no media, no crossfade, no
+   ticket-count conditionality — a plain bottom strip. The board stays a fixed
+   flex column (header + main(flex:1) + footer) regardless of ticket count. */
+.tv-board__footer {
+  flex: 0 0 auto;
+}
 /* The active board is the single always-visible layer (the standby/promosi
    panel was removed — it flickered "kadang hilang kadang ada" on the
    crossfade; the NowServingCard empty state is now the sole idle state). It
-   is a plain flex column filling the main area — no overlay, no crossfade. */
+   is a plain flex column filling the main area — no overlay, no crossfade.
+   A fixed running-text disclaimer footer (above) was added back as a
+   distinct, non-promo element. */
 .tv-board__active {
   display: flex;
   flex-direction: column;
@@ -293,6 +302,48 @@ body,
 }
 .connection-status--closed {
   color: var(--danger-on-surface);
+}
+
+/* Running-text disclaimer marquee (manager feedback) --------------------- */
+/* A fixed, always-visible bottom strip. Pure presentational (the RunningText
+   component owns no state). Uses var(--surface)/var(--text-muted)/var(--radius)
+   directly — no new shared tokens, no hardcoded color literals. Text never
+   wears the data/accent color (board convention). */
+.running-text {
+  overflow: hidden;
+  white-space: nowrap;
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 0.5rem 1rem;
+  color: var(--text-muted);
+}
+.running-text__track {
+  display: inline-flex;
+  min-width: 100%;
+  animation: marquee 30s linear infinite;
+}
+.running-text__item {
+  flex: 0 0 auto;
+  padding-right: 3rem; /* gap between the two items across the loop seam */
+}
+/* The two identical items make translateX(-50%) seamless: as the first item
+   exits the viewport, the second is already in place, so the loop is
+   visually continuous. */
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+/* a11y/interaction baseline: the TV does NOT import _interactions.css, so the
+   reduced-motion guard is inlined here. Pauses the marquee; the first item
+   stays visible (overflow hidden + inline-flex keeps it in the viewport). */
+@media (prefers-reduced-motion: reduce) {
+  .running-text__track {
+    animation: none;
+  }
 }
 
 /* 4K tier (AC3): scale the board typography up for large displays. The first
