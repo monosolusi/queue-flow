@@ -60,21 +60,37 @@ export function UserMenu() {
     await logout();
   }
 
+  const initial = (user.username.charAt(0) || 'S').toUpperCase();
+
   return (
     <div className="user-menu" ref={containerRef}>
       <button
         type="button"
-        className="btn btn--secondary user-menu__toggle"
+        className="user-menu__toggle"
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={menuId}
         aria-label={`Akun, ${user.username}`}
         onClick={() => setOpen((v) => !v)}
       >
-        <span className="user-menu__user">{user.username}</span>
-        <span className="user-menu__chevron" aria-hidden="true">
-          ▾
+        <span className="user-menu__chip" aria-hidden="true">
+          {initial}
         </span>
+        <span className="user-menu__user">{user.username}</span>
+        <svg
+          className="user-menu__chevron"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.8}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+          focusable="false"
+          data-open={open}
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
       </button>
       {open && (
         <div id={menuId} className="user-menu__popup" role="menu">
@@ -82,7 +98,28 @@ export function UserMenu() {
             <span className="user-menu__info-name">{user.username}</span>
             <span className="user-menu__info-role">{roleLabel(user.role)}</span>
           </div>
-          <button type="button" className="user-menu__item" role="menuitem" onClick={handleLogout}>
+          <button
+            type="button"
+            className="user-menu__item user-menu__item--danger"
+            role="menuitem"
+            onClick={handleLogout}
+          >
+            <span className="user-menu__menuicon" aria-hidden="true">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.8}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+                focusable="false"
+              >
+                <path d="M15 17l5-5-5-5" />
+                <path d="M20 12H9" />
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              </svg>
+            </span>
             Keluar
           </button>
         </div>

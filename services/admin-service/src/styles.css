@@ -1127,7 +1127,11 @@ fieldset {
   outline-offset: 2px;
 }
 
-/* Profile area — presentational dropdown (no identity/auth layer; see AppShell). */
+/* Profile area — presentational dropdown (no identity/auth layer; see AppShell).
+   The toggle is a quiet identity chip (monochrome, square-ish, service --radius)
+   + truncated username + a hand-rolled stroke chevron that flips 180deg when
+   open. NO saturated --accent avatar pill (the "AI slop" tell) — the chip uses
+   --surface-2 + --text so it reads as a structural label, not a badge. */
 .profile {
   position: relative;
 }
@@ -1135,16 +1139,17 @@ fieldset {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  background: var(--bg);
+  background: transparent;
   border: 1px solid var(--surface-2);
-  border-radius: 999px;
-  padding: 0.3rem 0.75rem 0.3rem 0.35rem;
+  border-radius: var(--radius);
+  padding: 0.35rem 0.6rem;
   color: var(--text);
   font: inherit;
   min-height: 2.75rem; /* ≥44px touch target (AC5) */
 }
 .profile__toggle:hover {
-  border-color: var(--accent);
+  background: var(--surface-2);
+  border-color: var(--surface-2);
 }
 .profile__toggle:focus-visible {
   outline: 2px solid var(--accent-on-surface);
@@ -1154,17 +1159,33 @@ fieldset {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  border-radius: 50%;
-  background: var(--accent);
-  color: var(--accent-contrast);
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: calc(var(--radius) * 0.5);
+  background: var(--surface-2);
+  color: var(--text);
   font-weight: 700;
-  font-size: 0.95rem;
+  font-size: 0.85rem;
+  flex: 0 0 auto;
 }
 .profile__name {
   font-weight: 600;
   font-size: 0.95rem;
+  max-width: 10rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.profile__chevron {
+  width: 1.1rem;
+  height: 1.1rem;
+  display: block;
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.profile__chevron[data-open="true"] {
+  transform: rotate(180deg);
 }
 .profile__menu {
   position: absolute;
@@ -1178,13 +1199,15 @@ fieldset {
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
   z-index: 20;
 }
 .profile__menuitem {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
   padding: 0.6rem 0.75rem;
-  border-radius: 8px;
+  border-radius: calc(var(--radius) * 0.6);
   color: var(--text);
   text-decoration: none;
   font-size: 0.95rem;
@@ -1196,6 +1219,26 @@ fieldset {
 .profile__menuitem:focus-visible {
   outline: 2px solid var(--accent-on-surface);
   outline-offset: 2px;
+}
+.profile__menuitem--danger:hover,
+.profile__menuitem--danger:focus-visible {
+  color: var(--danger-on-surface);
+}
+.profile__menuicon {
+  display: inline-flex;
+  width: 1.1rem;
+  height: 1.1rem;
+  flex: 0 0 auto;
+}
+.profile__menuicon > svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+@media (prefers-reduced-motion: reduce) {
+  .profile__chevron {
+    transition: none;
+  }
 }
 
 /* Live operational dashboard (FR-ADM-03 / QUE-44) ------------------------- */
