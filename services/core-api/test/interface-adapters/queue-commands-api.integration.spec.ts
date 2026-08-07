@@ -23,6 +23,7 @@ import {
   SYSTEM_CONFIGURATION_REPOSITORY,
   CounterRoutingRule,
   BrandColor,
+  ServiceThemes,
   DailyResetPolicy,
   StateMachine,
   StateSchema,
@@ -249,6 +250,7 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
         stateMachine: transferMachine,
         dailyResetPolicy: DailyResetPolicy.DEFAULT,
         brandColor: BrandColor.DEFAULT,
+        serviceThemes: ServiceThemes.DEFAULT,
       }),
     );
 
@@ -341,6 +343,7 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
         stateMachine: customMachine,
         dailyResetPolicy: DailyResetPolicy.DEFAULT,
         brandColor: BrandColor.DEFAULT,
+        serviceThemes: ServiceThemes.DEFAULT,
       }),
     );
 

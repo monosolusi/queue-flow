@@ -76,7 +76,7 @@ function makeApi(snap: QueueSnapshotDto = snapshot): ICallerApi {
     reannounce: vi.fn(() => Promise.resolve()),
     transfer: vi.fn(() => Promise.resolve()),
     applyTransition: vi.fn(() => Promise.resolve()),
-    getBrandColor: () => Promise.resolve({ brandColor: '' }),
+    getBrandColor: () => Promise.resolve({ brandColor: '', themeMode: 'light' as const }),
     // Auth surface (QUE-43) — not invoked by the workspace; stubs satisfy the type.
     login: () =>
       Promise.resolve({ token: 'tok', user: { id: 'u', username: 's', role: 'caller-staff' as const } }),

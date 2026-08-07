@@ -617,6 +617,19 @@ manager, so user-visible text must never leak internal terms ("PRD §7",
 `FIFO_GLOBAL`/`CATEGORY_PRIORITY`, "cron expression", "State Machine", a raw
 numeric `Counter {id}`).
 
+- **The wizard PUT is a full save — adding a required `SystemConfiguration`
+  field means the wizard `WizardForm` must carry it even with NO UI
+  (payload-only), so `finalize()` always sends the required field.** Prefill
+  it from `GET /api/system/config` (defaulting to the VO `DEFAULT` on a
+  pre-setup / missing field) and passthrough it unchanged in `finalize()`.
+  The settings UI for the new field lives only in the operational `AdminPanel`
+  (the AC surface); the wizard is the guided first-run and carries required
+  fields as payload, not as steps. Instance (QUE-47): `serviceThemes` has no
+  wizard step — `WizardForm.serviceThemes` defaults to `DEFAULT_SERVICE_THEMES`,
+  prefills from `config.serviceThemes`, and is passthrough in the PUT payload;
+  without this the wizard finalize 400s on the new required field. Same shape
+  as `brandColor` (a step-1 input) but for a field with no wizard UI.
+
 - **Render enum values via a friendly label map, never raw enum/internal text in
   user-visible copy; constrain cron input to a time picker and derive the cron
   client-side rather than making the manager type one.** Two shared pure
@@ -1076,6 +1089,16 @@ does **not** join routing data (anti-corruption).
     use Node's `http` module, not `fetch` (`redirect: 'manual'` returns an
     opaqueredirect response with status 0 and filtered headers, hiding the
     301).
+  - **`prdWizardPayload()` must carry every `REQUIRED_CONFIG_FIELDS` entry.**
+    The inline `prdWizardPayload()` PUTs a wizard finalize through the live
+    gateway expecting 200; it had silently drifted (missing `brandColor` since
+    QUE-36, only caught when QUE-47 added `serviceThemes` and the PUT 400'd
+    "Missing required config field(s)"). Its comment says "keep in sync with
+    PRD §7" but the real sync target is the backend's
+    `REQUIRED_CONFIG_FIELDS` (`system-config.controller.ts`) — whenever a new
+    required `SystemConfiguration` field lands, add it to `prdWizardPayload()`
+    (and to `test/acceptance/_helpers.ts` `prdWizardPayload()`) in the same
+    PR, or tier 2 fails post-setup with a 400.
 
 ### Frontend service conventions
 
@@ -1088,6 +1111,18 @@ config, proxied to `core-api:3000` by Vite in dev).
   from `vitest/config` (not `vite`) whenever it carries a `test` field —
   otherwise `tsc -b` fails with `'test' does not exist in type
   'UserConfigExport'`.
+- **Test-fixture TS literal widening — `tsc -b` catches what vitest silently
+  passes.** When a config DTO gains a literal-union field (e.g.
+  `ThemeMode = 'light' | 'dark'`), a mock fixture constructing the object
+  literal widens `'light'` → `string`, which is NOT assignable to the
+  literal-union field. Vitest runs via esbuild (no type-check) so `npm test`
+  passes, but `tsc -b` / `npm run build` fails with TS2322. Fix with
+  `'light' as const` at the literal site (or type the mock return as the DTO).
+  Hit QUE-47 across caller (7 files), kiosk, tv (3 sites) — every
+  `serviceThemes`/`themeMode` mock fixture needed `as const`. Generalizes:
+  any time you add a literal-union field to a DTO consumed by frontend test
+  fixtures, grep the test mocks for that field and add `as const` (or the
+  build breaks while the tests stay green).
 - **PWA `base`/`start_url`/`scope` must match the NGINX route** (e.g.
   `/kiosk/`, `/caller/`) — otherwise an installed PWA's `start_url` resolves to
   the gateway root, not the service, breaking offline launch. Set them when
@@ -1343,19 +1378,37 @@ standalone-container ethos + NFR-MNT-02; the drift gate makes the 4× copies
 machine-consistent.
 
 Token conventions:
+- **Light is the default; dark is opt-in (QUE-47).** Canonical `tokens.css`
+  `:root` is the LIGHT palette; dark is a `[data-theme="dark"]` block on
+  `<html>` that overrides only the surface/text/on-surface tokens
+  (`--accent`/`--accent-contrast`/`--success`/`--warn`/`--danger` are
+  theme-invariant and inherited from `:root`, NOT redeclared in the dark
+  block). **No-FOUC for the default case:** CSS `:root` default = light =
+  `ServiceThemes.DEFAULT` = migration 0007 backfill = the client
+  `coerceServiceThemes` default, so the default never flashes a dark→light
+  swap; dark is JS-applied post-fetch (same accepted brief-pre-fetch flash
+  model as a changed `brandColor`). `--text-muted` is hex in BOTH modes (the
+  values differ, so both blocks declare it: `#64748b` light ~4.6:1, `#94a3b8`
+  dark 5.71:1).
 - `--accent` is kept **hex `#2563eb`** (not OKLCH) so a JS-injected
   hex/oklch `brandColor` overrides cleanly at runtime (the runtime-injection
-  interop point); `--text-muted` is hex and unchanged (5.71:1 passes WCAG
-  1.4.3); `--accent-contrast` is `#ffffff` with a **documented limitation** —
+  interop point); `--accent-contrast` is `#ffffff` with a **documented limitation** —
   a light manager-picked brandColor could fail contrast with white text, and
   there is no contrast algorithm in scope (a downstream remediation ticket
   owns that).
-- Accent/danger **TEXT on the dark surface** uses the dedicated
-  `--accent-on-dark` (`oklch(0.714 0.143 254.6)`, ~`#60a5fa`, 5.75:1) and
-  `--danger-on-dark` (`oklch(0.711 0.166 22.2)`, ~`#f87171`, 6.45:1) tokens —
-  swap only `color:` (text) usages to the `-on-dark` variants; leave
-  `background:`/`fill:` usages of `--accent`/`--danger` intact (a fill is not
-  text).
+- Accent/danger **TEXT on the surface** uses the semantic
+  `--accent-on-surface` (light: hex `#1d4ed8` blue-700 ~6.9:1 on white; dark:
+  OKLCH blue-400 ~5.75:1) and `--danger-on-surface` (light: red-600 ~4.9:1;
+  dark: red-400 ~6.45:1) tokens — **defined per-mode** (each block declares
+  its own value; light mode holds `--accent-on-surface` hex for consistency
+  with the `--accent`/`--text-muted` hex holdouts). Swap only `color:` (text)
+  usages to the `-on-surface` variants; leave `background:`/`fill:` usages of
+  `--accent`/`--danger` intact (a fill is not text). These **replace the
+  former mode-pinned `--accent-on-dark`/`--danger-on-dark` names** (those
+  became misnomers once a light palette existed); service styles use
+  `var(--token)` exclusively (zero hardcoded color literals) so the rename is
+  a bounded sweep — `grep -rn "accent-on-dark\|danger-on-dark" services` must
+  stay empty.
 - The focus baseline uses `:where(...):focus-visible` for **zero
   specificity** so service overrides win; `.pressable` is the opt-in `:active`
   pressed-state utility for cards.
@@ -1377,6 +1430,36 @@ side effect — NOT in the reducer; caller adds a `BrandConfigSlice` +
 `getBrandColor()` on `ICallerApi` (ISP slice — brandColor only) + a
 top-level `useEffect` in `App.tsx`; admin reuses the existing `getSystemConfig()`
 in a top-level `useEffect`).
+
+**Runtime light/dark mode from `SystemConfiguration.serviceThemes` (QUE-47):**
+the same `src/lib/theme.ts` leaf gains a sibling `applyThemeMode(mode)` →
+sets/removes `data-theme="dark"` on `<html>` (no-op on `'light'`/undefined/invalid
+→ the CSS `:root` light default wins, no flash). Duplicated 4× like
+`applyBrandColor` (NOT synced — same QUE-37 leaf-duplication ethos). Applied at
+boot **next to** `applyBrandColor` in each service's existing
+`GET /api/system/config` fetch — **no new REST endpoint** (DRY/ISP): each
+service reads only its own key from the returned `serviceThemes` map (admin
+reads/edits the full map; caller grows `BrandConfigSlice` with `themeMode =
+serviceThemes.caller`; kiosk grows `StoreProfileSlice` with `themeMode =
+serviceThemes.kiosk`; tv reads `serviceThemes.tv` in its `tv-store.tsx` boot
+`.then` as a DOM side effect — NOT in the reducer). After an admin save, admin
+re-`applyThemeMode(config.serviceThemes.admin)` so its own UI reflects the
+theme immediately (mirror the brandColor re-apply).
+
+**`ServiceThemes` VO = JSONB map column (QUE-47 precedent):** a per-service
+map VO (`{ kiosk, tv, caller, admin }` each `'light'|'dark'`) stored as a
+**JSONB column** like `daily_reset_policy` (NOT a scalar TEXT like
+`brandColor`). Reconstituted `ServiceThemes.of(row.service_themes ?? undefined)`
+→ all-light defensive default, mirroring `BrandColor.of(row.brand_color ??
+DEFAULT)`. `of()` throws `InvalidValueObjectException` only for a non-object
+raw; a missing/invalid surface defaults to `'light'` (lazy-key reconstitution,
+boot-window-safe across a missing column). **NOT change-gated for audit**
+(like `brandColor` — NFR-SEC-02's audited list is manual reset / state-schema /
+routing; theme is not in it; no new `AuditAction`, no `equals`-based gate).
+Migration `0007` backfills all-light (the default). Light is the default (the
+QUE-47 AC). The backend `REQUIRED_CONFIG_FIELDS` includes `serviceThemes`
+(`kind: 'object'` — present + is-object; the VO owns the deeper 4-surface
+validation → 400 on malformed).
 
 ### General
 

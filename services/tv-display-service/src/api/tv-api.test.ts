@@ -34,7 +34,12 @@ describe('TvApi (wire contract)', () => {
   });
 
   it('getSystemConfig GETs /api/system/config', async () => {
-    const config = { isInitialSetupCompleted: true, storeName: 'Apotek Sehat', brandColor: '#a1b2c3' };
+    const config = {
+      isInitialSetupCompleted: true,
+      storeName: 'Apotek Sehat',
+      brandColor: '#a1b2c3',
+      serviceThemes: { tv: 'light' as const },
+    };
     const fetchMock = fetchReturning(config);
     vi.stubGlobal('fetch', fetchMock);
 

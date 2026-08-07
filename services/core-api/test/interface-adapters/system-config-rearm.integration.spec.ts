@@ -55,6 +55,7 @@ describe('System-config scheduler re-arm + cron enforcement (integration — QUE
         },
       ],
       brandColor: '#2563eb',
+      serviceThemes: { kiosk: 'light', tv: 'light', caller: 'light', admin: 'light' },
     };
   }
 

@@ -1,4 +1,4 @@
-import type { DailyResetMode, PriorityPolicy, UserRole } from '../api/types';
+import type { DailyResetMode, PriorityPolicy, ServiceSurface, ThemeMode, UserRole } from '../api/types';
 
 /**
  * Friendly Bahasa Indonesia display labels for the enum values the manager
@@ -38,6 +38,31 @@ export const PRIORITY_POLICY_DESCRIPTIONS: Record<PriorityPolicy, string> = {
 export const DAILY_RESET_MODE_LABELS: Record<DailyResetMode, string> = {
   AUTOMATIC_CRON: 'Otomatis setiap hari',
   MANUAL: 'Manual (tombol reset)',
+};
+
+/**
+ * Friendly Bahasa Indonesia labels for the per-service light/dark theme choice
+ * (QUE-47). The enum stays as the wire `value=` (`PUT /api/system/config` sends
+ * `light`/`dark`, never the friendly text); these maps keep the human label next
+ * to the value so the two never drift. Mirrors the QUE-34 rule: no technical
+ * terms in user-visible copy.
+ */
+export const SERVICE_THEME_LABELS: Record<ThemeMode, string> = {
+  light: 'Mode terang',
+  dark: 'Mode gelap',
+};
+
+/**
+ * Friendly Bahasa Indonesia labels for the four themable service surfaces
+ * (QUE-47). The surface key stays as the wire identifier (`kiosk`/`tv`/…); this
+ * map is the display name shown as the row label in the admin "Tema Layanan"
+ * section. Never sent to the backend (display only).
+ */
+export const SERVICE_SURFACE_LABELS: Record<ServiceSurface, string> = {
+  kiosk: 'Kiosk Antrian',
+  tv: 'TV Display',
+  caller: 'Panel Loket (Caller)',
+  admin: 'Panel Admin',
 };
 
 /**

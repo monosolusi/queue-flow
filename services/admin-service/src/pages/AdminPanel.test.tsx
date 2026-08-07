@@ -7,9 +7,11 @@ import type { IAdminApi } from '../api/admin-api';
 import {
   DEFAULT_STATE_MACHINE,
   DEFAULT_BRAND_COLOR,
+  DEFAULT_SERVICE_THEMES,
   type CleanupTransactionLogResultDto,
   type ManualResetResultDto,
   type SaveSystemConfigurationPayload,
+  type ServiceThemesMap,
   type SystemConfigurationDto,
 } from '../api/types';
 
@@ -38,12 +40,13 @@ function configuredStore(): SystemConfigurationDto {
       { counterId: 1, counterName: 'Counter 1', assignedCategoryIds: ['cat-a'], priorityPolicy: 'FIFO_GLOBAL' },
     ],
     brandColor: DEFAULT_BRAND_COLOR,
+    serviceThemes: { ...DEFAULT_SERVICE_THEMES },
   };
 }
 
 function makeApi(
   config: SystemConfigurationDto = configuredStore(),
-  saveImpl?: (payload: SaveSystemConfigurationPayload) => Promise<{ isInitialSetupCompleted: boolean; storeName: string; brandColor: string }>,
+  saveImpl?: (payload: SaveSystemConfigurationPayload) => Promise<{ isInitialSetupCompleted: boolean; storeName: string; brandColor: string; serviceThemes: ServiceThemesMap }>,
   overrides?: {
     manualReset?: () => Promise<ManualResetResultDto>;
     cleanup?: (retentionDays: number) => Promise<CleanupTransactionLogResultDto>;
@@ -52,7 +55,7 @@ function makeApi(
   const save = vi.fn(
     saveImpl ??
       ((payload: SaveSystemConfigurationPayload) =>
-        Promise.resolve({ isInitialSetupCompleted: true, storeName: payload.storeName, brandColor: payload.brandColor })),
+        Promise.resolve({ isInitialSetupCompleted: true, storeName: payload.storeName, brandColor: payload.brandColor, serviceThemes: payload.serviceThemes })),
   );
   // The panel reloads the config after a successful save; default to returning
   // the same config (with ids preserved) so the post-save repopulate succeeds.
@@ -255,6 +258,37 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
 
     // Cleanup so the inline style does not leak into sibling tests.
     document.documentElement.style.removeProperty('--accent');
+  });
+
+  it('renders the per-service theme section prefilled from the loaded config (QUE-47)', async () => {
+    const { api } = makeApi();
+    renderPanel(api);
+    await screen.findByText('Apotek Sehat');
+
+    // One constrained <select> per surface, all prefilled to the default light.
+    expect(screen.getByTestId('service-themes-section')).toBeTruthy();
+    for (const surface of ['kiosk', 'tv', 'caller', 'admin'] as const) {
+      expect((screen.getByTestId(`theme-select-${surface}`) as HTMLSelectElement).value).toBe('light');
+    }
+  });
+
+  it('edits a per-service theme and the new value reaches the save payload (QUE-47)', async () => {
+    const { api, save } = makeApi();
+    renderPanel(api);
+    await screen.findByText('Apotek Sehat');
+
+    // Switch the TV surface to dark via its constrained select.
+    fireEvent.change(screen.getByTestId('theme-select-tv'), { target: { value: 'dark' } });
+
+    await userEvent.click(screen.getByTestId('admin-save'));
+    await screen.findByText('Konfigurasi tersimpan.');
+
+    const payload = save.mock.calls[0][0] as SaveSystemConfigurationPayload;
+    expect(payload.serviceThemes.tv).toBe('dark');
+    // The untouched surfaces stay light (passthrough preserves the rest).
+    expect(payload.serviceThemes.kiosk).toBe('light');
+    expect(payload.serviceThemes.caller).toBe('light');
+    expect(payload.serviceThemes.admin).toBe('light');
   });
 
   it('disables save and shows an error for a malformed brand color (QUE-36)', async () => {

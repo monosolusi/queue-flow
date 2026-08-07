@@ -11,6 +11,8 @@ import {
   type StateMachineDto,
   type WizardCategoryDto,
   type WizardRoutingRuleDto,
+  type ServiceThemesMap,
+  DEFAULT_SERVICE_THEMES,
 } from '../api/types';
 import { writeToken } from '../auth/token-store';
 import { validateCronExpression } from '../lib/cron';
@@ -60,6 +62,11 @@ interface StateMachineForm {
 interface WizardForm {
   storeName: string;
   brandColor: string;
+  // Per-service light/dark theme map (QUE-47). Payload-only here — the wizard
+  // carries no theme UI (the admin panel owns the per-service settings surface);
+  // the field is prefilled from GET and passed through finalize so the required
+  // `serviceThemes` wire field is always sent on the PUT (never dropped).
+  serviceThemes: ServiceThemesMap;
   categories: WizardCategoryDto[];
   categoriesMode: 'default' | 'custom';
   /** Raw text value of the step-1 "Jumlah counter aktif" input (digits only,
@@ -148,6 +155,7 @@ function emptyForm(): WizardForm {
   return {
     storeName: '',
     brandColor: DEFAULT_BRAND_COLOR,
+    serviceThemes: { ...DEFAULT_SERVICE_THEMES },
     categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })),
     categoriesMode: 'default',
     counterCount: '1',
@@ -375,6 +383,9 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
         setForm({
           storeName: config.storeName,
           brandColor: config.brandColor || DEFAULT_BRAND_COLOR,
+          serviceThemes: config.serviceThemes
+            ? { ...DEFAULT_SERVICE_THEMES, ...config.serviceThemes }
+            : { ...DEFAULT_SERVICE_THEMES },
           categories: loadedCategories,
           // Infer the preset by code+name deep-equal (id-agnostic) so a re-edit
           // of a store that kept the default template stays in default mode and
@@ -580,6 +591,7 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
         categories,
         routingRules: form.routingRules,
         brandColor: form.brandColor,
+        serviceThemes: form.serviceThemes,
       });
       if (isFirstRun.current) {
         // Now that setup-admin created the account and the config save completed

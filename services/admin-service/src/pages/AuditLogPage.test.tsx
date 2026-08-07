@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { AuditLogPage } from './AuditLogPage';
 import type { IAdminApi } from '../api/admin-api';
 import type { AuditLogEntryDto, SystemConfigurationDto } from '../api/types';
-import { DEFAULT_STATE_MACHINE, DEFAULT_BRAND_COLOR } from '../api/types';
+import { DEFAULT_STATE_MACHINE, DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES } from '../api/types';
 
 /** Local `YYYY-MM-DD` for an epoch-ms timestamp — mirrors the page helper so the
  *  date-filter test is TZ-independent (the runner's local TZ determines the civil
@@ -38,6 +38,7 @@ function configuredStore(): SystemConfigurationDto {
       { counterId: 2, counterName: 'Counter 2', assignedCategoryIds: ['cat-a', 'cat-b'], priorityPolicy: 'CATEGORY_PRIORITY' },
     ],
     brandColor: DEFAULT_BRAND_COLOR,
+    serviceThemes: { ...DEFAULT_SERVICE_THEMES },
   };
 }
 

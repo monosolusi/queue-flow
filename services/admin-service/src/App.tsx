@@ -3,7 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { AdminApi } from './api/admin-api';
 import type { IAdminAppApi } from './api/admin-api';
 import type { SystemConfigurationDto } from './api/types';
-import { applyBrandColor } from './lib/theme';
+import { applyBrandColor, applyThemeMode } from './lib/theme';
 import { SetupGuard } from './components/SetupGuard';
 import { AppShell } from './components/AppShell';
 import { AuthProvider } from './auth/auth-context';
@@ -72,6 +72,7 @@ export function App({ api }: { api?: IAdminAppApi } = {}) {
       .getSystemConfig()
       .then((c) => {
         applyBrandColor(c.brandColor);
+        applyThemeMode(c.serviceThemes.admin);
         setStoreName(c.storeName);
         setConfig(c);
       })

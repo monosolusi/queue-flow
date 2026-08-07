@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { CategorySelectPage } from './CategorySelectPage';
-import type { CategoryDto, CreatedTicketDto } from '../api/types';
+import type { CategoryDto, CreatedTicketDto, StoreProfileSlice } from '../api/types';
 import type { IKioskApi } from '../api/kiosk-api';
 import type { IPrintProvider, PrintPayload } from '../print/print-provider';
 
@@ -31,7 +31,7 @@ function makeApi(
   return {
     listCategories: () => Promise.resolve(list),
     createTicket: createImpl ?? ((id: string) => Promise.resolve(ticket(id))),
-    getStoreProfile: () => Promise.resolve({ storeName, brandColor }),
+    getStoreProfile: () => Promise.resolve({ storeName, brandColor, themeMode: 'light' as const }),
   };
 }
 
@@ -67,7 +67,7 @@ describe('CategorySelectPage (kiosk — FR-KSK-01 / QUE-17)', () => {
     renderSelect({
       listCategories: () => Promise.reject(new Error('jaringan terputus')),
       createTicket: () => Promise.resolve(ticket('cat-a')),
-      getStoreProfile: () => Promise.resolve({ storeName: '', brandColor: '' }),
+      getStoreProfile: () => Promise.resolve({ storeName: '', brandColor: '', themeMode: 'light' as const }),
     });
     expect(await screen.findByText(/jaringan terputus/i)).toBeInTheDocument();
   });
@@ -76,7 +76,7 @@ describe('CategorySelectPage (kiosk — FR-KSK-01 / QUE-17)', () => {
     renderSelect({
       listCategories: () => Promise.reject(new Error('jaringan terputus')),
       createTicket: () => Promise.resolve(ticket('cat-a')),
-      getStoreProfile: () => Promise.resolve({ storeName: '', brandColor: '' }),
+      getStoreProfile: () => Promise.resolve({ storeName: '', brandColor: '', themeMode: 'light' as const }),
     });
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent(/jaringan terputus/i);
@@ -89,7 +89,7 @@ describe('CategorySelectPage (kiosk — FR-KSK-01 / QUE-17)', () => {
     renderSelect({
       listCategories: () => new Promise<CategoryDto[]>(() => {}),
       createTicket: () => Promise.resolve(ticket('cat-a')),
-      getStoreProfile: () => Promise.resolve({ storeName: '', brandColor: '' }),
+      getStoreProfile: () => Promise.resolve({ storeName: '', brandColor: '', themeMode: 'light' as const }),
     });
     const hint = screen.getByText('Memuat kategori…');
     expect(hint).toHaveAttribute('aria-live', 'polite');
@@ -257,12 +257,12 @@ describe('CategorySelectPage (kiosk — FR-KSK-01 / QUE-17)', () => {
     // Store name resolves *after* categories; the category buttons stay
     // loading until both settle so a fast tap can never print a headerless
     // receipt. Categories resolve immediately, the store name on a later tick.
-    let resolveName: ((v: { storeName: string; brandColor: string }) => void) | undefined;
+    let resolveName: ((v: StoreProfileSlice) => void) | undefined;
     const api: IKioskApi = {
       listCategories: () => Promise.resolve(categories),
       createTicket: (id: string) => Promise.resolve(ticket(id, 'A-001')),
       getStoreProfile: () =>
-        new Promise<{ storeName: string; brandColor: string }>((resolve) => {
+        new Promise<StoreProfileSlice>((resolve) => {
           resolveName = resolve;
         }),
     };
@@ -280,7 +280,7 @@ describe('CategorySelectPage (kiosk — FR-KSK-01 / QUE-17)', () => {
     expect(await screen.findByText('Memuat kategori…')).toBeInTheDocument();
 
     // Releasing the store-profile fetch lets the load state flip to `loaded`.
-    resolveName!({ storeName: 'Toko Lambat', brandColor: '' });
+    resolveName!({ storeName: 'Toko Lambat', brandColor: '', themeMode: 'light' as const });
     expect(await screen.findByText('Customer Service')).toBeInTheDocument();
 
     await userEvent.click(screen.getByText('Customer Service'));

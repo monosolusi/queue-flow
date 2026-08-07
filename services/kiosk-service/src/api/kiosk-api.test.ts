@@ -100,8 +100,19 @@ describe('KioskApi (wire contract — FR-ENG-01 / QUE-9)', () => {
   });
 
   it('getStoreProfile GETs /api/system/config and returns the store-profile slice', async () => {
-    const profile: StoreProfileSlice = { storeName: 'Toko Contoh', brandColor: '#2563eb' };
-    const fetchMock = fetchReturning(profile);
+    // QUE-47: the raw config carries `serviceThemes`; getStoreProfile maps the
+    // kiosk surface key into the `themeMode` slice field.
+    const rawConfig = {
+      storeName: 'Toko Contoh',
+      brandColor: '#2563eb',
+      serviceThemes: { kiosk: 'light', tv: 'dark', caller: 'dark', admin: 'light' },
+    };
+    const expected: StoreProfileSlice = {
+      storeName: 'Toko Contoh',
+      brandColor: '#2563eb',
+      themeMode: 'light',
+    };
+    const fetchMock = fetchReturning(rawConfig);
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await api.getStoreProfile();
@@ -110,6 +121,6 @@ describe('KioskApi (wire contract — FR-ENG-01 / QUE-9)', () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe('/api/system/config');
     expect(init?.method).toBeUndefined();
-    expect(result).toEqual(profile);
+    expect(result).toEqual(expected);
   });
 });

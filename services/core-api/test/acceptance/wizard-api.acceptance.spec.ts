@@ -118,6 +118,21 @@ describe('DoD-2 — First-Run Wizard API (FR-WZD-01..06)', () => {
       .expect(200);
     expect(res.body.isInitialSetupCompleted).toBe(true);
     expect(res.body.storeName).toBe('Toko Utama Surabaya');
+    // QUE-47: the required serviceThemes field round-trips through the save.
+    expect(res.body.serviceThemes).toEqual({
+      kiosk: 'light',
+      tv: 'light',
+      caller: 'light',
+      admin: 'light',
+    });
+    // The GET projection carries the persisted map too (admin prefills from it).
+    const cfg = await http(booted.app).get('/api/system/config').expect(200);
+    expect(cfg.body.serviceThemes).toEqual({
+      kiosk: 'light',
+      tv: 'light',
+      caller: 'light',
+      admin: 'light',
+    });
   });
 
   it('a bad wizard payload (duplicate category codes) is rejected 400 — setup is NOT silently completed', async () => {
@@ -131,6 +146,54 @@ describe('DoD-2 — First-Run Wizard API (FR-WZD-01..06)', () => {
     // Setup must not flip to true on a rejected save.
     const cfg = await http(booted.app).get('/api/system/config').expect(200);
     expect(cfg.body.isInitialSetupCompleted).toBe(false);
+  });
+
+  it('a bad wizard payload (malformed serviceThemes) is rejected 400 (QUE-47)', async () => {
+    // A present-but-invalid surface value fails fast in the domain VO before the
+    // tx opens (NFR-REL-02 — no illegal theme burns a write), surfacing as a
+    // clean InvalidValueObjectException → 400 (not a 500 TypeError).
+    const bad = prdWizardPayload();
+    bad.serviceThemes = { kiosk: 'blue', tv: 'light', caller: 'light', admin: 'light' };
+    const res = await http(booted.app).put('/api/system/config').send(bad);
+    expect(res.status).toBe(400);
+    // Setup must not flip to true on a rejected save.
+    const cfg = await http(booted.app).get('/api/system/config').expect(200);
+    expect(cfg.body.isInitialSetupCompleted).toBe(false);
+  });
+
+  it('persists a custom per-service theme map and returns it on GET (QUE-47)', async () => {
+    const payload = prdWizardPayload();
+    payload.serviceThemes = { kiosk: 'light', tv: 'dark', caller: 'dark', admin: 'light' };
+    const res = await http(booted.app)
+      .put('/api/system/config')
+      .send(payload)
+      .expect(200);
+    expect(res.body.serviceThemes).toEqual({
+      kiosk: 'light',
+      tv: 'dark',
+      caller: 'dark',
+      admin: 'light',
+    });
+    const cfg = await http(booted.app).get('/api/system/config').expect(200);
+    expect(cfg.body.serviceThemes).toEqual({
+      kiosk: 'light',
+      tv: 'dark',
+      caller: 'dark',
+      admin: 'light',
+    });
+  });
+
+  it('rejects a non-object serviceThemes at the transport boundary with 400 (QUE-47)', async () => {
+    // The controller shape guard (CONFIG_FIELD_SHAPES kind:'object') catches a
+    // present-but-wrong-type value before the use case, mirroring the
+    // stateMachine/categories/routingRules shape guards.
+    const bad = prdWizardPayload();
+    // Widen just this field so a deliberately-malformed string is assignable
+    // (the typed payload otherwise rejects it at compile time); the wire body
+    // still carries `serviceThemes: 'light'`, exercising the controller guard.
+    (bad as { serviceThemes: unknown }).serviceThemes = 'light';
+    const res = await http(booted.app).put('/api/system/config').send(bad);
+    expect(res.status).toBe(400);
   });
 
   it('after setup, normal operations open: categories list + ticket creation + state-machine read', async () => {

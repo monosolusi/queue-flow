@@ -58,7 +58,7 @@ button {
   text-align: center;
 }
 .kiosk-select__hint--error {
-  color: var(--danger-on-dark);
+  color: var(--danger-on-surface);
 }
 .kiosk-select__list {
   list-style: none;
@@ -131,7 +131,7 @@ button {
 }
 .kiosk-result__category {
   font-size: 2rem;
-  color: var(--accent-on-dark);
+  color: var(--accent-on-surface);
   font-weight: 600;
   margin: 0 0 2rem;
 }

@@ -72,6 +72,7 @@ describe('SaveSystemConfigurationUseCase — daily-reset policy audit + re-arm (
         },
       ],
       brandColor: '#2563eb',
+      serviceThemes: { kiosk: 'light', tv: 'light', caller: 'light', admin: 'light' },
       actor: 'admin',
       ...overrides,
     };

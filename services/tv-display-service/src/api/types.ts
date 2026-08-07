@@ -47,13 +47,18 @@ export interface TvBoardStateDto {
   readonly waitingCount: number;
 }
 
+/** A per-surface light/dark choice (QUE-47). Light is the default. */
+export type ThemeMode = 'light' | 'dark';
+
 /** Store profile, returned by `GET /api/system/config`. The TV needs the store
  * name (running text) + the manager-configured brand color (QUE-36) applied to
- * the runtime `--accent` (QUE-37 AC6). */
+ * the runtime `--accent` (QUE-37 AC6) + this service's theme (the tv surface
+ * key from `serviceThemes`, QUE-47). */
 export interface SystemConfigurationDto {
   readonly isInitialSetupCompleted: boolean;
   readonly storeName: string;
   readonly brandColor: string;
+  readonly serviceThemes: { readonly tv: ThemeMode };
 }
 
 /** WebSocket lifecycle event types broadcast by core-api (FR-ENG-04). */

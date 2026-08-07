@@ -39,7 +39,12 @@ export interface CreatedTicketDto {
  * `SystemConfigurationDto`), reusing the existing config read surface rather
  * than a dedicated endpoint (DRY, matching the QUE-24 reuse precedent).
  */
+/** A per-surface light/dark choice (QUE-47). Light is the default. */
+export type ThemeMode = 'light' | 'dark';
+
 export interface StoreProfileSlice {
   readonly storeName: string;
   readonly brandColor: string;
+  /** This service's theme (the kiosk surface key from `serviceThemes`). */
+  readonly themeMode: ThemeMode;
 }

@@ -6,6 +6,7 @@ import {
 import { TicketStatus } from '../../../src/domain/queue';
 import {
   BrandColor,
+  ServiceThemes,
   StateMachine,
   StateSchema,
   StateTransitionRule,
@@ -90,6 +91,7 @@ describe('StateTransitionValidator (active-policy resolver — QUE-10 AC#1)', ()
       stateMachine: transferMachine,
       dailyResetPolicy: SystemConfiguration.create(Identifier.generate()).dailyResetPolicy,
       brandColor: BrandColor.DEFAULT,
+      serviceThemes: ServiceThemes.DEFAULT,
     });
     await config.save(system);
 

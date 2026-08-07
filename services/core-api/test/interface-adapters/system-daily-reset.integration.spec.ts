@@ -21,6 +21,7 @@ import {
   type ISystemConfigurationRepository,
   SYSTEM_CONFIGURATION_REPOSITORY,
   BrandColor,
+  ServiceThemes,
   DailyResetPolicy,
   DailyResetMode,
   SystemConfiguration,
@@ -181,6 +182,7 @@ describe('System daily-reset REST surface (integration — QUE-2)', () => {
         stateMachine: SystemConfiguration.create(Identifier.generate()).stateMachine,
         dailyResetPolicy: DailyResetPolicy.of(DailyResetMode.MANUAL, null, 5),
         brandColor: BrandColor.DEFAULT,
+        serviceThemes: ServiceThemes.DEFAULT,
       }),
     );
 

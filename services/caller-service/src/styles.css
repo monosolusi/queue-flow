@@ -42,7 +42,7 @@ button {
   font-size: 1.25rem;
 }
 .counter-select__hint--error {
-  color: var(--danger-on-dark);
+  color: var(--danger-on-surface);
 }
 .counter-select__list {
   list-style: none;
@@ -95,7 +95,7 @@ button {
   color: var(--text-muted);
 }
 .workspace__hint--error {
-  color: var(--danger-on-dark);
+  color: var(--danger-on-surface);
 }
 .workspace__body {
   display: flex;
@@ -162,7 +162,7 @@ button {
   color: var(--success);
 }
 .connection-status--closed {
-  color: var(--danger-on-dark);
+  color: var(--danger-on-surface);
 }
 
 .active-ticket {
@@ -190,7 +190,7 @@ button {
   letter-spacing: 0.05em;
 }
 .active-ticket__status {
-  color: var(--accent-on-dark);
+  color: var(--accent-on-surface);
   font-weight: 600;
 }
 .active-ticket__empty-text {
@@ -259,7 +259,7 @@ button {
 }
 .action-controls__error {
   flex-basis: 100%;
-  color: var(--danger-on-dark);
+  color: var(--danger-on-surface);
   font-size: 0.95rem;
   margin: 0;
 }
@@ -402,7 +402,7 @@ button {
 }
 .login__error {
   margin: 0;
-  color: var(--danger-on-dark);
+  color: var(--danger-on-surface);
   font-size: 0.95rem;
 }
 .login__submit {
