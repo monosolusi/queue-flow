@@ -12,8 +12,11 @@ type GuardState =
  * it shows a loading state; once resolved, a `null` user redirects to `/login`
  * and a resolved user renders the children. Mirrors SetupGuard's
  * loading/redirect/ready state machine so the two guards compose uniformly —
- * {@link App} nests them: `<RequireAuth><SetupGuard>…</SetupGuard></RequireAuth>`
- * (auth first — no token → login — then setup — incomplete → wizard).
+ * {@link App} nests them: `<SetupGuard><RequireAuth>…</RequireAuth></SetupGuard>`
+ * (setup first — incomplete → wizard — then auth — no token → login). The
+ * setup-first order is load-bearing: a first-run visitor has no account, so
+ * the setup check must precede the auth check or a clean visitor is bounced to
+ * `/login` with no way to create an account.
  *
  * The guard reads auth state from the shared {@link useAuthContext} (resolved
  * once by {@link AuthProvider}), so wrapping multiple routes does not multiply

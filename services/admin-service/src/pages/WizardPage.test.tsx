@@ -333,13 +333,13 @@ describe('WizardPage (FR-WZD-02..06)', () => {
     expect(screen.getByTestId('sm-editor')).toBeInTheDocument();
 
     // Add a PREPARING state, then a transition SERVING → PREPARING ("Siapkan").
-    await userEvent.click(screen.getByRole('button', { name: '+ Tambah State' }));
-    const stateInputs = screen.getAllByLabelText(/^State \d+$/);
+    await userEvent.click(screen.getByRole('button', { name: '+ Tambah Status' }));
+    const stateInputs = screen.getAllByLabelText(/^Status \d+$/);
     await userEvent.type(stateInputs[stateInputs.length - 1], 'PREPARING');
 
     await userEvent.click(screen.getByRole('button', { name: '+ Tambah Transisi' }));
-    const fromSelects = screen.getAllByLabelText(/Transisi \d+ from/);
-    const toSelects = screen.getAllByLabelText(/Transisi \d+ to/);
+    const fromSelects = screen.getAllByLabelText(/Transisi \d+ dari/);
+    const toSelects = screen.getAllByLabelText(/Transisi \d+ ke/);
     const lastFrom = fromSelects[fromSelects.length - 1];
     const lastTo = toSelects[toSelects.length - 1];
     await userEvent.selectOptions(lastFrom, 'SERVING');
@@ -380,7 +380,7 @@ describe('WizardPage (FR-WZD-02..06)', () => {
 
     // Custom → add a stray state → back to default → finalize sends the PRD default.
     await userEvent.click(screen.getByLabelText(/Susun alur status sendiri/));
-    await userEvent.click(screen.getByRole('button', { name: '+ Tambah State' }));
+    await userEvent.click(screen.getByRole('button', { name: '+ Tambah Status' }));
     await userEvent.click(screen.getByLabelText(/Gunakan alur status standar/));
     await userEvent.click(screen.getByTestId('wizard-next'));
     expect(await screen.findByTestId('step-4')).toBeInTheDocument();

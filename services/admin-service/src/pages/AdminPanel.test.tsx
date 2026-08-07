@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { AdminPanel } from './AdminPanel';
-import type { IAdminApi } from '../api/admin-api';
+import { SystemConfigProvider, useSystemConfigContext } from '../config/system-config-context';
+import type { IAdminApi, ISystemConfigApi } from '../api/admin-api';
 import {
   DEFAULT_STATE_MACHINE,
   DEFAULT_BRAND_COLOR,
@@ -123,8 +124,11 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     // inline checkbox group; opening the Edit modal would show the selection in
     // SearchableCategorySelect).
     expect(screen.getByTestId('routing-categories-0')).toHaveTextContent('Customer Service');
-    // State machine is read-only (no editable transition inputs).
-    expect(screen.getByText('Alur Status Tiket (hanya lihat)')).toBeInTheDocument();
+    // State machine is editable now (migrated from the wizard; the wizard is
+    // first-run only). The heading carries no "(hanya lihat)" suffix, and the
+    // shared StateMachineEditor's mode fieldset renders.
+    expect(screen.getByText('Alur Status Tiket')).toBeInTheDocument();
+    expect(screen.getByTestId('sm-mode')).toBeInTheDocument();
   });
 
   it('preserves existing category ids and omits id for newly added ones on save', async () => {
@@ -207,7 +211,7 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     expect(payload.dailyReset.resetTicketNumberTo).toBe(10);
   });
 
-  it('passes storeName and stateMachine through unchanged', async () => {
+  it('sends storeName + stateMachine on the wire with the client-only mode stripped', async () => {
     const { api, save } = makeApi();
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
@@ -219,8 +223,36 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     expect(payload.storeName).toBe('Apotek Sehat');
     expect(payload.stateMachine.transitions).toHaveLength(5);
     expect(payload.stateMachine.transitions[0].actionLabel).toBe('Panggil Berikutnya');
+    // The client-only `mode` preset must never reach the wire (mirrors the
+    // wizard's finalize — mode is a UI-only affordance, stripped at save).
+    expect((payload.stateMachine as unknown as Record<string, unknown>).mode).toBeUndefined();
     // brandColor is editable (AC3) and prefilled from the loaded config.
     expect(payload.brandColor).toBe(DEFAULT_BRAND_COLOR);
+  });
+
+  it('edits storeName + a custom state-machine transition and sends them on the PUT payload', async () => {
+    const { api, save } = makeApi();
+    renderPanel(api);
+    await screen.findByText('Apotek Sehat');
+
+    // Edit the store name.
+    const storeNameInput = screen.getByTestId('admin-store-name');
+    await userEvent.clear(storeNameInput);
+    await userEvent.type(storeNameInput, 'Toko Baru');
+
+    // Switch the state machine to custom mode and edit the first transition's label.
+    await userEvent.click(screen.getByLabelText(/Susun alur status sendiri/));
+    const labelInputs = screen.getAllByLabelText(/Transisi 1 label aksi/);
+    fireEvent.change(labelInputs[0], { target: { value: 'Panggil Cepat' } });
+
+    await userEvent.click(screen.getByTestId('admin-save'));
+    await screen.findByText('Konfigurasi tersimpan.');
+
+    const payload = save.mock.calls[0][0] as SaveSystemConfigurationPayload;
+    expect(payload.storeName).toBe('Toko Baru');
+    expect(payload.stateMachine.transitions[0].actionLabel).toBe('Panggil Cepat');
+    // The `mode` preset is stripped — never on the wire.
+    expect((payload.stateMachine as unknown as Record<string, unknown>).mode).toBeUndefined();
   });
 
   it('edits the brand color and the new color reaches the save payload (QUE-36)', async () => {
@@ -454,6 +486,223 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     expect(
       Array.from(tzSelect.options).some((o) => o.value === nonCurated),
     ).toBe(true);
+  });
+});
+
+/**
+ * The safety rails the panel inherited when the wizard became first-run only:
+ * it is now the ONLY post-setup editor, so guards that used to live in the
+ * wizard's step flow have to exist here or they exist nowhere.
+ */
+describe('AdminPanel (post-wizard safety rails)', () => {
+  /** A configured store whose routing matrix assigns nothing to any counter. */
+  function unassignedRoutingStore(): SystemConfigurationDto {
+    return {
+      ...configuredStore(),
+      routingRules: [
+        { counterId: 1, counterName: 'Counter 1', assignedCategoryIds: [], priorityPolicy: 'FIFO_GLOBAL' },
+      ],
+    };
+  }
+
+  it('blocks save on a fully-unassigned routing matrix and explains why', async () => {
+    // Mirrors the wizard's step-2 gate: with no counter serving any category
+    // every counter is dead and no ticket can ever be routed. The backend has
+    // no such invariant, so without this the panel could PUT it.
+    const { api, save } = makeApi(unassignedRoutingStore());
+    renderPanel(api);
+    await screen.findByText('Apotek Sehat');
+
+    expect(screen.getByTestId('admin-save')).toBeDisabled();
+    expect(screen.getByTestId('routing-empty-hint')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId('admin-save'));
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('lifts the routing guard once a counter is assigned a category', async () => {
+    const { api, save } = makeApi(unassignedRoutingStore());
+    renderPanel(api);
+    await screen.findByText('Apotek Sehat');
+
+    await userEvent.click(screen.getByTestId('routing-edit-0'));
+    const search = screen.getByRole('combobox', { name: /Kategori dilayani/ });
+    await userEvent.type(search, 'Customer');
+    await userEvent.click(screen.getByRole('option', { name: /Customer Service/ }));
+    await userEvent.click(screen.getByTestId('routing-modal-save'));
+
+    expect(screen.queryByTestId('routing-empty-hint')).not.toBeInTheDocument();
+    expect(screen.getByTestId('admin-save')).not.toBeDisabled();
+
+    await userEvent.click(screen.getByTestId('admin-save'));
+    await screen.findByText('Konfigurasi tersimpan.');
+    const payload = save.mock.calls[0][0] as SaveSystemConfigurationPayload;
+    expect(payload.routingRules[0].assignedCategoryCodes).toEqual(['A']);
+  });
+
+  it('blocks save on an empty store name and explains why', async () => {
+    // Mirrors the wizard's step-1 gate: the backend 400s on a blank storeName,
+    // and the panel is the only post-setup editor of it, so the guard has to
+    // live here or it lives nowhere.
+    const { api, save } = makeApi();
+    renderPanel(api);
+    await screen.findByText('Apotek Sehat');
+
+    await userEvent.clear(screen.getByTestId('admin-store-name'));
+
+    expect(screen.getByTestId('admin-save')).toBeDisabled();
+    expect(screen.getByTestId('store-name-errors')).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('admin-save'));
+    expect(save).not.toHaveBeenCalled();
+
+    // ...and lifts as soon as a name is typed back in.
+    await userEvent.type(screen.getByTestId('admin-store-name'), 'Apotek Baru');
+    expect(screen.queryByTestId('store-name-errors')).not.toBeInTheDocument();
+    expect(screen.getByTestId('admin-save')).not.toBeDisabled();
+  });
+
+  it('blocks save on an invalid custom ticket flow and explains why', async () => {
+    // Mirrors the wizard's step-3 gate via the same shared
+    // `validateCustomStateMachine`: an empty action label is a graph the backend
+    // rejects, and the panel is now the only post-setup editor of the flow.
+    const { api, save } = makeApi();
+    renderPanel(api);
+    await screen.findByText('Apotek Sehat');
+
+    await userEvent.click(screen.getByLabelText(/Susun alur status sendiri/));
+    // Controlled input bound to derived state — set via fireEvent.change.
+    fireEvent.change(screen.getAllByLabelText(/Transisi 1 label aksi/)[0], { target: { value: '' } });
+
+    expect(screen.getByTestId('admin-save')).toBeDisabled();
+    expect(screen.getByTestId('sm-errors')).toHaveTextContent('Label aksi tidak boleh kosong.');
+    await userEvent.click(screen.getByTestId('admin-save'));
+    expect(save).not.toHaveBeenCalled();
+
+    // ...and lifts once the label is restored.
+    fireEvent.change(screen.getAllByLabelText(/Transisi 1 label aksi/)[0], {
+      target: { value: 'Panggil Berikutnya' },
+    });
+    expect(screen.queryByTestId('sm-errors')).not.toBeInTheDocument();
+    expect(screen.getByTestId('admin-save')).not.toBeDisabled();
+  });
+
+  it('warns — without blocking save — when the ticket flow drops a standard status', async () => {
+    // The bigger hazard than a live ticket: core-api's queue engine transitions
+    // to the standard status names as literals, but `StateSchema` carries no
+    // invariant that they survive a custom graph. Dropping COMPLETED breaks
+    // "Selesai Layan" for every FUTURE ticket and stops stamping completed_at
+    // (the analytics average). The manager is warned; the save still goes
+    // through, because a custom flow may legitimately skip a status.
+    const trimmedFlow: SystemConfigurationDto = {
+      ...configuredStore(),
+      stateMachine: {
+        states: ['WAITING', 'CALLING'],
+        transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' }],
+      },
+    };
+    const { api, save } = makeApi(trimmedFlow);
+    renderPanel(api);
+    await screen.findByText('Apotek Sehat');
+
+    const warning = screen.getByTestId('sm-standard-warning');
+    expect(warning).toHaveTextContent('SERVING');
+    expect(warning).toHaveTextContent('SKIPPED');
+    expect(warning).toHaveTextContent('COMPLETED');
+    expect(warning).toHaveTextContent(/Selesai Layan/);
+    // Not an error list, and not a save gate.
+    expect(screen.queryByTestId('sm-errors')).not.toBeInTheDocument();
+    expect(screen.getByTestId('admin-save')).not.toBeDisabled();
+
+    await userEvent.click(screen.getByTestId('admin-save'));
+    await screen.findByText('Konfigurasi tersimpan.');
+    expect(save).toHaveBeenCalledTimes(1);
+  });
+
+  it('warns that editing the ticket flow can strand a live ticket', async () => {
+    // The alur status is resolved per operation, so a ticket sitting in a status
+    // this save removes has no legal next step — its caller action buttons
+    // vanish. The wizard framed this as one-time guided setup; the panel is a
+    // daily surface, so the consequence has to be stated.
+    const { api } = makeApi();
+    renderPanel(api);
+    await screen.findByText('Apotek Sehat');
+
+    const warning = screen.getByTestId('state-machine-warning');
+    expect(warning).toHaveTextContent(/tidak bisa dilanjutkan/i);
+    expect(warning).toHaveTextContent(/panel caller/i);
+  });
+});
+
+describe('AdminPanel config load failure (retry)', () => {
+  it('offers a Coba Lagi retry that re-runs the config load', async () => {
+    // The two config guards gained a retry; the panel's own load-failure state
+    // had none, so the manager's only recourse was a full page reload.
+    let calls = 0;
+    const { api } = makeApi();
+    (api.getSystemConfig as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      calls += 1;
+      return calls === 1
+        ? Promise.reject(new Error('core-api down'))
+        : Promise.resolve(configuredStore());
+    });
+    renderPanel(api);
+
+    expect(await screen.findByText(/Gagal memuat konfigurasi/i)).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('config-retry'));
+    expect(await screen.findByText('Apotek Sehat')).toBeInTheDocument();
+    expect(calls).toBe(2);
+  });
+});
+
+describe('AdminPanel shared-config coherence', () => {
+  /** Projects the shared snapshot so the post-save refresh is observable. */
+  function SharedStoreName() {
+    const { config } = useSystemConfigContext();
+    return <span data-testid="shared-store-name">{config?.storeName ?? '—'}</span>;
+  }
+
+  it('refreshes the shared config after a save so the app chrome shows the new store name', async () => {
+    // The shell's sidebar brand reads the shared snapshot. Before this, a
+    // rename saved fine but the chrome kept the OLD name until a full reload,
+    // because App held its own independent copy of the config.
+    let shared: SystemConfigurationDto = { ...configuredStore(), storeName: 'Toko Lama' };
+    const { api } = makeApi();
+    (api.saveSystemConfig as ReturnType<typeof vi.fn>).mockImplementation(
+      (payload: SaveSystemConfigurationPayload) => {
+        shared = { ...shared, storeName: payload.storeName };
+        return Promise.resolve({
+          isInitialSetupCompleted: true,
+          storeName: payload.storeName,
+          brandColor: payload.brandColor,
+          serviceThemes: payload.serviceThemes,
+        });
+      },
+    );
+    const providerApi: ISystemConfigApi = { getSystemConfig: vi.fn(() => Promise.resolve(shared)) };
+
+    render(
+      <MemoryRouter>
+        <SystemConfigProvider api={providerApi}>
+          <SharedStoreName />
+          <AdminPanel api={api} />
+        </SystemConfigProvider>
+      </MemoryRouter>,
+    );
+    await screen.findByText('Apotek Sehat');
+    expect(await screen.findByTestId('shared-store-name')).toHaveTextContent('Toko Lama');
+
+    const storeNameInput = screen.getByTestId('admin-store-name');
+    await userEvent.clear(storeNameInput);
+    await userEvent.type(storeNameInput, 'Toko Baru');
+    await userEvent.click(screen.getByTestId('admin-save'));
+    await screen.findByText('Konfigurasi tersimpan.');
+
+    await waitFor(() =>
+      expect(screen.getByTestId('shared-store-name')).toHaveTextContent('Toko Baru'),
+    );
+    // Exactly two shared probes: the mount resolution + the post-save refresh
+    // (the panel's own reload uses its own api, not the shared one).
+    expect(providerApi.getSystemConfig).toHaveBeenCalledTimes(2);
   });
 });
 

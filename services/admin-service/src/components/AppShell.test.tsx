@@ -177,11 +177,14 @@ describe('AppShell', () => {
 
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    // The menu renders three items — Pengaturan, Konfigurasi Awal (Wizard), and
-    // the QUE-43 Keluar (sign-out) action.
+    // The menu renders two items — Pengaturan and the QUE-43 Keluar (sign-out)
+    // action. The "Konfigurasi Awal (Wizard)" link was removed: the wizard is
+    // first-run only now (gated by WizardGuard), and the store-name + state-
+    // machine editing that used to live only in the wizard now lives in the
+    // AdminPanel (no functionality lost).
     expect(screen.getByRole('menuitem', { name: 'Pengaturan' })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: 'Konfigurasi Awal (Wizard)' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Keluar' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Konfigurasi Awal (Wizard)' })).not.toBeInTheDocument();
   });
 
   it('closes the profile menu on a second toggle click', () => {

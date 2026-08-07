@@ -109,6 +109,28 @@ describe('styles.css AC guards', () => {
     expect(rule('.nav-icon svg')).toContain('width: 1.25rem');
   });
 
+  it('the config-section warning is tinted with the warn token, not the danger one', () => {
+    // A consequence warning ("this can strand a live ticket"), not an error that
+    // already happened — so it must read as caution. jsdom applies no CSS
+    // (css: false), so the visual treatment is guarded statically.
+    const warning = rule('.admin-panel__warning');
+    expect(warning).toContain('var(--warn)');
+    expect(warning).not.toContain('var(--danger');
+  });
+
+  it('the shared editor warning (.sm-warning) shares the panel warning declaration block', () => {
+    // The dropped-standard-status caution must read as caution, not as one of
+    // the red `sm-errors` that block saving. It shares the panel warning's block
+    // so the two cannot drift; the grouped selector keeps `.admin-panel__warning`
+    // last so the `rule()` extractor above still resolves it.
+    expect(css).toMatch(/\.sm-warning,\s*\.admin-panel__warning\s*\{/);
+    expect(rule('.admin-panel__warning')).toContain('var(--warn)');
+  });
+
+  it('the warning bullet list stays inside the tinted box (no default 40px indent)', () => {
+    expect(rule('.sm-warning__list')).toContain('padding-left: 1.2rem');
+  });
+
   it('QUE-45 — responsive ≤900px collapses grouped nav: labels hidden, groups inline', () => {
     const media = atRuleBlock('@media (max-width: 900px)');
     // Group labels drop in the horizontal row (the row is too short for them).

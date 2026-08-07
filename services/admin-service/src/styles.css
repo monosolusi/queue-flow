@@ -74,6 +74,22 @@ fieldset {
   font-size: 1.25rem;
 }
 
+/* The shared <GuardError> outage state behind SetupGuard + WizardGuard. A failed
+   config read is a real outage, not "not configured" (the read returns a default
+   DTO on a clean store), so the guards surface a retry button instead of
+   redirecting — a redirect would loop SetupGuard against WizardGuard. The
+   AdminPanel's own config-load failure offers the same "Coba Lagi" affordance but
+   renders its own `.admin-panel__error` markup, not this class. */
+.guard-error {
+  padding: 3rem;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  color: var(--text);
+}
+
 /* Admin panel ------------------------------------------------------------ */
 .admin-panel {
   max-width: 920px;
@@ -108,6 +124,36 @@ fieldset {
   margin: 0.5rem 0 0;
   color: var(--text-muted);
   font-size: 0.9rem;
+}
+/* A consequence warning on an editable section — louder than `__hint` (which is
+   a neutral tip) because acting on it can strand a live ticket. Tinted with the
+   warn hue via color-mix so it reads as caution, not as an error that already
+   happened.
+
+   `.sm-warning` is the same treatment for the shared StateMachineEditor's
+   dropped-standard-status caution. It carries a block-neutral name because that
+   editor renders under BOTH `.admin-panel` and `.wizard`, so an `admin-panel__`
+   class there would be a cross-block leak. The two share one declaration block
+   so the caution never drifts between the two surfaces. */
+.sm-warning,
+.admin-panel__warning {
+  margin: 0.75rem 0 0;
+  padding: 0.6rem 0.8rem;
+  border-radius: var(--radius);
+  border-left: 3px solid var(--warn);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  color: var(--text);
+  font-size: 0.9rem;
+}
+.sm-warning__intro,
+.sm-warning__outro {
+  margin: 0;
+}
+/* Keep the bullets inside the tinted box rather than at the browser's default
+   ~40px indent, which would push them past the border-left rule. */
+.sm-warning__list {
+  margin: 0.4rem 0;
+  padding-left: 1.2rem;
 }
 .admin-panel__actions {
   display: flex;
@@ -512,9 +558,10 @@ fieldset {
   color: var(--text-muted);
 }
 
-/* A "you must do this before continuing" hint — used on step 2 when no
-   category is assigned to any counter yet. Carries the danger tint so it reads
-   as a blocker, not a neutral tip, matching the disabled Lanjut button. */
+/* A "you must fix this before continuing" hint — used wherever no category is
+   assigned to any counter yet: the wizard's step 2 and the AdminPanel's routing
+   section (`routing-empty-hint`). Carries the danger tint so it reads as a
+   blocker, not a neutral tip, matching the disabled Lanjut / Simpan button. */
 .wizard__hint--required {
   color: var(--danger-on-surface);
   margin-top: 0.75rem;

@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 import type { IAdminApi } from '../api/admin-api';
+import { useSystemConfigContext } from '../config/system-config-context';
 import type {
   DailyResetMode,
   PriorityPolicy,
   ServiceSurface,
   ServiceThemesMap,
-  StateMachineDto,
   SystemConfigurationDto,
   ThemeMode,
 } from '../api/types';
@@ -20,7 +19,15 @@ import { timeToCron, cronToTime } from '../lib/daily-reset';
 import { BROWSER_TIMEZONE, timezoneSelectOptions } from '../lib/timezone';
 import { applyBrandColor, applyThemeMode } from '../lib/theme';
 import { validateCustomCategories, validateResetTo } from '../lib/categories';
+import { validateStoreName } from '../lib/store-name';
 import { CounterRoutingEditor } from '../components/CounterRoutingEditor';
+import { StateMachineEditor } from '../components/StateMachineEditor';
+import {
+  type StateMachineForm,
+  isDefaultGraph,
+  toStateMachineDto,
+  validateCustomStateMachine,
+} from '../lib/state-machine';
 
 /**
  * One editable category row. `id` is carried for categories that already exist
@@ -54,10 +61,12 @@ interface RoutingRow {
 }
 
 interface AdminForm {
-  /** Passthrough — read-only here; the wizard owns store-name editing. */
+  /** Editable — the manager changes the store / branch name post-setup. */
   storeName: string;
-  /** Passthrough — read-only here; the wizard owns state-machine editing. */
-  stateMachine: StateMachineDto;
+  /** Editable state-machine form slice (shared with the wizard via
+   *  {@link StateMachineEditor}). The client-only `mode` preset is stripped at
+   *  save (never sent to core-api) — same pattern as the wizard's finalize. */
+  stateMachine: StateMachineForm;
   /** Editable brand color (QUE-36) — the manager re-themes `--accent` post-setup. */
   brandColor: string;
   /** Editable per-service light/dark theme map (QUE-47) — the manager sets each
@@ -96,23 +105,51 @@ function describedBy(
 
 /**
  * The operational configuration panel (FR-ADM-01 / QUE-24). After first-run
- * setup the manager edits the operational areas here — categories,
- * counter routing, the daily-reset policy, and the brand color — without
- * re-running the guided wizard. The store name and state machine stay read-only
- * (the wizard owns those; an "Ubah Konfigurasi" link re-opens it).
+ * setup the manager edits every operational area here — store name, state
+ * machine, categories, counter routing, the daily-reset policy, and the brand
+ * color — without re-running the guided wizard. The wizard is first-run only
+ * (gated by {@link WizardGuard}), so the store-name + state-machine editing
+ * that used to live only in the wizard now lives here too (no functionality
+ * lost). The state-machine editor is the same shared {@link StateMachineEditor}
+ * + pure `lib/state-machine` validation the wizard uses (DRY — one editor, one
+ * validation module).
  *
  * The panel is a thin editor over the existing config save surface: it loads
- * the full config (`GET /api/system/config`), lets the manager edit the three
+ * the full config (`GET /api/system/config`), lets the manager edit the
  * in-scope sections, and PUTs the full payload back (`PUT /api/system/config`)
- * — passing the unchanged `storeName` + `stateMachine` through. That reuses
- * the single atomic, audited save use case (DRY — no duplicated audit/tx
- * wiring). Category ids are preserved across edits so re-save does not orphan
- * tickets' `categoryId`; routing `assignedCategoryIds` are mapped to codes on
- * load (the PUT expects codes). The panel consumes only `IAdminApi` (ISP) and
- * owns no realtime/WS surface (SRP).
+ * — mapping the form to the wire shape through the shared `toStateMachineDto`,
+ * which strips the client-only `stateMachine.mode` preset and force-resets the
+ * default graph exactly as the wizard's finalize does. That reuses the single
+ * atomic, audited save use case (DRY — no duplicated audit/tx wiring). Category
+ * ids are preserved across edits so re-save does not orphan tickets'
+ * `categoryId`; routing `assignedCategoryIds` are mapped to codes on load (the
+ * PUT expects codes). The panel consumes only `IAdminApi` (ISP) and owns no
+ * realtime/WS surface (SRP).
+ *
+ * Because it is now the ONLY post-setup editor, it also carries the two safety
+ * rails the wizard used to own alone: the degenerate-routing guard (`routingValid`
+ * — an all-unassigned matrix is unsavable) and the live-ticket warning on the
+ * state-machine section (removing a status a live ticket occupies strands it).
+ *
+ * The panel keeps its own config read rather than consuming the shared
+ * `SystemConfigProvider` snapshot: it owns a mutable draft, and re-deriving that
+ * draft from a shared value any `refresh()` can change would clobber the
+ * manager's in-progress edits. It calls the shared `refresh()` after a
+ * successful save so the app-wide chrome (the shell's sidebar store name) still
+ * reflects the new configuration without a page reload.
+ *
+ * (Noted, deliberately not done here: the file is on an SRP trajectory that
+ * warrants splitting each `config-card` into its own section component. That is
+ * a separate refactor — out of scope for this fix.)
  */
 export function AdminPanel({ api }: { api: IAdminApi }) {
   const [state, setState] = useState<PanelState>({ status: 'loading' });
+  // Bumped by the error state's "Coba Lagi" to re-run the load effect. Driving
+  // the retry through the effect's own dependency (rather than calling a shared
+  // `load()` from the button) means React tears down the previous run's
+  // `cancelled` flag for us, so every attempt — not just the first — is
+  // genuinely cancellable on unmount.
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -137,6 +174,12 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
   const [cleanupError, setCleanupError] = useState<string | null>(null);
   const cleanupInFlight = useRef(false);
   const retentionError = validateRetentionDays(retentionDays);
+  // The app-wide configuration. The panel keeps its own load (below) because it
+  // owns a mutable draft the shared snapshot must never overwrite mid-edit; it
+  // calls `refreshSharedConfig` after a successful save so the chrome that reads
+  // the shared snapshot — notably the shell's sidebar store name — reflects a
+  // rename immediately instead of after a full page reload.
+  const { refresh: refreshSharedConfig } = useSystemConfigContext();
 
   useEffect(() => {
     let cancelled = false;
@@ -153,7 +196,7 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
     return () => {
       cancelled = true;
     };
-  }, [api]);
+  }, [api, loadAttempt]);
 
   if (state.status === 'loading') {
     return <div className="admin-panel admin-panel--loading">Memuat konfigurasi…</div>;
@@ -161,10 +204,24 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
   if (state.status === 'error') {
     return (
       <div className="admin-panel">
-        <p className="admin-panel__error">Gagal memuat konfigurasi: {state.message}</p>
-        <Link className="btn btn--primary" to="/wizard">
-          Buka Wizard
-        </Link>
+        <p className="admin-panel__error" role="alert">
+          Gagal memuat konfigurasi: {state.message}
+        </p>
+        {/* The panel only loads post-setup (SetupGuard wraps the route), so the
+            wizard is blocked (WizardGuard bounces /wizard → /). A "Buka Wizard"
+            escape hatch would loop; the retry re-runs the fetch in place,
+            matching the two config guards' "Coba Lagi" affordance. */}
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={() => {
+            setState({ status: 'loading' });
+            setLoadAttempt((n) => n + 1);
+          }}
+          data-testid="config-retry"
+        >
+          Coba Lagi
+        </button>
       </div>
     );
   }
@@ -196,6 +253,30 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
   // inline error list and disables the save button.
   const catErrors = validateCustomCategories(form.categories);
   const categoriesValid = catErrors.length === 0;
+  // Store-name validation — shares the wizard step-1 guard's `lib/store-name`
+  // validator so the operational panel cannot save an empty name (the backend
+  // would 400) and the two surfaces cannot drift on the rule or the copy.
+  // Drives the inline error and disables the save button. Now editable here (the
+  // wizard is first-run only; store-name editing migrated to the panel).
+  const storeNameError = validateStoreName(form.storeName);
+  const storeNameValid = storeNameError === null;
+  // Degenerate-routing guard, mirrored from the wizard's step-2 `Lanjut` gate:
+  // at least one counter must serve at least one category. An all-unassigned
+  // matrix means every counter is dead and no ticket can ever be routed. The
+  // backend has no such invariant and the wizard is first-run only now, so
+  // without this mirror the panel — the only post-setup routing editor — could
+  // PUT a configuration that silently breaks the whole queue. Minimal by design
+  // (same as the wizard): it blocks only the fully-unassigned matrix, not a
+  // single idle counter alongside a wired one.
+  const routingValid = form.routingRules.some((r) => r.assignedCategoryCodes.length > 0);
+  // State-machine validation — mirrors the wizard step-3 guard via the shared
+  // pure `validateCustomStateMachine` helper so the operational panel cannot
+  // save a graph the backend would 400. Default mode is always valid (the PRD
+  // §7 graph is). Drives the editor's inline error list and disables the save
+  // button. Now editable here (the wizard is first-run only; state-machine
+  // editing migrated to the panel).
+  const smErrors = form.stateMachine.mode === 'custom' ? validateCustomStateMachine(form.stateMachine) : [];
+  const stateMachineValid = smErrors.length === 0;
 
   async function save() {
     if (submittingRef.current) return;
@@ -205,7 +286,12 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
     try {
       await api.saveSystemConfig({
         storeName: form.storeName,
-        stateMachine: form.stateMachine,
+        // Strip the client-only `mode` preset — never on the wire — via the same
+        // shared mapper the wizard's finalize uses. It ALSO force-resets to the
+        // PRD §7 graph in default mode: relying on the editor's default-radio
+        // having already replaced the graph would make this surface silently PUT
+        // a half-edited custom graph as "the default" the day that radio changes.
+        stateMachine: toStateMachineDto(form.stateMachine),
         brandColor: form.brandColor,
         serviceThemes: form.serviceThemes,
         dailyReset: {
@@ -229,14 +315,24 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
       setSavedAt(Date.now());
       // Reload so newly added categories get their server-minted ids into the
       // form (keeps a subsequent edit id-stable) and the UI reflects saved state.
+      // This read is the panel's own: it re-seeds the editable draft, which the
+      // shared snapshot must not do (a later `refresh()` would clobber an
+      // in-progress edit).
       const config = await api.getSystemConfig();
       // Re-apply the runtime `--accent` so a manager who changed the brand color
       // sees it take effect immediately, without a full page reload (QUE-35).
       applyBrandColor(config.brandColor);
       // Re-apply this panel's own theme so the admin UI reflects an admin-theme
-      // change immediately (QUE-47 — mirrors the brandColor re-apply).
+      // change immediately (QUE-47 — mirrors the brandColor re-apply). Both
+      // re-applies are idempotent with the App-level effect that runs off the
+      // shared refresh below; they are kept so the panel still re-themes when
+      // rendered standalone (its own spec does exactly that).
       applyThemeMode(config.serviceThemes.admin);
       setState({ status: 'ready', form: toForm(config) });
+      // Re-read the shared snapshot so app-wide chrome fed by it updates now —
+      // above all the shell's sidebar brand, which would otherwise keep showing
+      // the OLD store name until a full page reload.
+      await refreshSharedConfig();
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -314,6 +410,34 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
         </p>
       )}
       {saveError && <p className="admin-panel__error">Gagal menyimpan: {saveError}</p>}
+
+      {/* Store profile — store name (migrated from the wizard; the wizard is
+          first-run only now). */}
+      <section className="config-card" data-testid="store-profile-section">
+        <h2 className="config-card__title">Profil Toko</h2>
+        <label className="field" htmlFor="admin-store-name">
+          <span className="field__label">
+            Nama toko / cabang<span aria-hidden="true"> *</span>
+          </span>
+          <input
+            id="admin-store-name"
+            className="field__input"
+            type="text"
+            value={form.storeName}
+            onChange={(e) => setState({ status: 'ready', form: { ...form, storeName: e.target.value } })}
+            placeholder="mis. Apotek Sehat Sentosa"
+            required
+            aria-required="true"
+            data-testid="admin-store-name"
+            {...describedBy('store-name-errors', storeNameError !== null)}
+          />
+        </label>
+        {storeNameError !== null && (
+          <ul className="wizard__errors" id="store-name-errors" data-testid="store-name-errors">
+            <li>{storeNameError}</li>
+          </ul>
+        )}
+      </section>
 
       {/* Categories — add / edit / remove (FR-ADM-01). */}
       <section className="config-card">
@@ -460,6 +584,12 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
           canRemove={() => form.routingRules.length > 1}
           idPrefix="routing"
         />
+        {!routingValid && (
+          <p className="wizard__hint wizard__hint--required" data-testid="routing-empty-hint">
+            Pilih minimal satu kategori pada salah satu counter. Tanpa itu tidak ada tiket yang
+            bisa dilayani, jadi konfigurasi belum bisa disimpan.
+          </p>
+        )}
       </section>
 
       {/* Daily reset policy — mode / cron / resetTo / archive (FR-ADM-01). */}
@@ -570,19 +700,37 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
         </p>
       </section>
 
-      {/* Read-only state machine — the wizard owns editing (out of QUE-24 scope). */}
+      {/* State machine — editable (migrated from the wizard; the wizard is
+          first-run only now). Uses the same shared StateMachineEditor + pure
+          lib/state-machine validation the wizard uses (DRY — one editor). */}
       <section className="config-card">
-        <h2 className="config-card__title">Alur Status Tiket (hanya lihat)</h2>
-        <ul className="transition-list">
-          {form.stateMachine.transitions.map((t, i) => (
-            <li key={i} className="transition-list__item">
-              <span className="transition-list__state">{t.from}</span>
-              <span className="transition-list__arrow">→</span>
-              <span className="transition-list__state">{t.to}</span>
-              <span className="transition-list__label">{t.actionLabel}</span>
-            </li>
-          ))}
-        </ul>
+        <h2 className="config-card__title">Alur Status Tiket</h2>
+        <p className="admin-panel__hint">
+          Pilih alur status standar atau susun sendiri. Label aksi menjadi tombol di panel caller.
+        </p>
+        {/* Live-ticket warning (arch-review). The active alur status is resolved
+            per operation, so a ticket sitting in a status that this save removes
+            or renames has no legal next step: the caller's action buttons for it
+            disappear and the ticket can only be cleared by a daily reset. The
+            wizard framed this as one-time guided setup; here it sits next to
+            Kategori on a panel the manager opens daily, so the risk has to be
+            stated. A backend guard is out of scope for this change.
+
+            The complementary hazard — a custom flow that DROPS a standard status,
+            which breaks a caller action (and the report's service-time average)
+            for every FUTURE ticket, not just the live ones — is warned about by
+            the shared StateMachineEditor itself: it derives from the form alone,
+            so this panel and the wizard both get it with no prop threading. */}
+        <p className="admin-panel__warning" data-testid="state-machine-warning">
+          Perhatian: mengubah atau menghapus status yang sedang dipakai tiket aktif membuat tiket
+          tersebut tidak bisa dilanjutkan — tombol aksinya hilang di panel caller. Ubah alur status
+          saat antrian kosong, misalnya setelah reset harian.
+        </p>
+        <StateMachineEditor
+          value={form.stateMachine}
+          onChange={(sm) => setState({ status: 'ready', form: { ...form, stateMachine: sm } })}
+          errors={smErrors}
+        />
       </section>
 
       {/* Manual override operations (FR-ADM-02 / QUE-25). */}
@@ -677,7 +825,10 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
             !dailyResetValid ||
             !brandColorValid ||
             !serviceThemesValid ||
-            !categoriesValid
+            !categoriesValid ||
+            !storeNameValid ||
+            !routingValid ||
+            !stateMachineValid
           }
           data-testid="admin-save"
         >
@@ -696,7 +847,14 @@ function toForm(config: SystemConfigurationDto): AdminForm {
   const idToCode = new Map(config.categories.map((c) => [c.id, c.code]));
   return {
     storeName: config.storeName,
-    stateMachine: config.stateMachine,
+    // Build a StateMachineForm with the client-only `mode` preset inferred by
+    // deep-equal against the PRD §7 default graph (mirrors the wizard's prefill
+    // inference). `mode` is stripped at save (never on the wire).
+    stateMachine: {
+      mode: isDefaultGraph(config.stateMachine.states, config.stateMachine.transitions) ? 'default' : 'custom',
+      states: [...config.stateMachine.states],
+      transitions: config.stateMachine.transitions.map((t) => ({ ...t })),
+    },
     brandColor: config.brandColor || DEFAULT_BRAND_COLOR,
     // Coerce a partial/degraded GET projection into a complete 4-surface map
     // (defaults an unknown surface to light — mirrors the backend VO).

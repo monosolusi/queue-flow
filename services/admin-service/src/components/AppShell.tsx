@@ -40,6 +40,12 @@ function pageTitleFor(pathname: string): string {
  * session). Dropping the cached user to `null` makes {@link RequireAuth}
  * redirect to `/login` on the next render. Keeps the existing dropdown a11y
  * (aria-haspopup, role=menu, outside-click close, Escape close).
+ *
+ * The "Konfigurasi Awal (Wizard)" link was removed: the wizard is first-run
+ * only now (gated by {@link WizardGuard}), and the store-name + state-machine
+ * editing that used to live only in the wizard now lives in the operational
+ * `AdminPanel` (no functionality lost). The menu carries "Pengaturan" (→
+ * `/config`) + "Keluar".
  */
 function ProfileMenu() {
   const { user, logout } = useAuthContext();
@@ -100,14 +106,6 @@ function ProfileMenu() {
             onClick={() => setOpen(false)}
           >
             Pengaturan
-          </Link>
-          <Link
-            to="/wizard"
-            role="menuitem"
-            className="profile__menuitem"
-            onClick={() => setOpen(false)}
-          >
-            Konfigurasi Awal (Wizard)
           </Link>
           <button
             type="button"

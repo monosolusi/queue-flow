@@ -5,15 +5,15 @@ import {
   type DailyResetMode,
   type PriorityPolicy,
   DEFAULT_CATEGORIES,
-  DEFAULT_STATE_MACHINE,
   DEFAULT_DAILY_RESET,
   DEFAULT_BRAND_COLOR,
-  type StateMachineDto,
   type WizardCategoryDto,
   type WizardRoutingRuleDto,
   type ServiceThemesMap,
   DEFAULT_SERVICE_THEMES,
 } from '../api/types';
+import { useAuthContext } from '../auth/auth-context';
+import { useSystemConfigContext } from '../config/system-config-context';
 import { writeToken } from '../auth/token-store';
 import { validateCronExpression } from '../lib/cron';
 import { validateBrandColor, isValidBrandColor } from '../lib/brand-color';
@@ -21,29 +21,17 @@ import { DAILY_RESET_MODE_LABELS } from '../lib/labels';
 import { timeToCron, cronToTime } from '../lib/daily-reset';
 import { BROWSER_TIMEZONE, timezoneSelectOptions } from '../lib/timezone';
 import { validateCustomCategories, validateResetTo } from '../lib/categories';
+import { validateStoreName } from '../lib/store-name';
 import { RoutingGraph } from '../components/RoutingGraph';
 import { CounterRoutingEditor } from '../components/CounterRoutingEditor';
-
-/** One transition edge in the editable state machine. */
-interface Transition {
-  from: string;
-  to: string;
-  actionLabel: string;
-}
-
-/**
- * The editable state-machine form slice. `mode` is a **client-only preset** —
- * it is never sent to core-api (the PUT payload is always the full
- * `{ states, transitions }` graph). `'default'` locks the form to the PRD §7
- * default graph; `'custom'` opens the states + transitions editor. It is
- * inferred on prefill (deep-equal to {@link DEFAULT_STATE_MACHINE} ⇒ default)
- * so a re-edit of a store that never customized stays in default mode.
- */
-interface StateMachineForm {
-  mode: 'default' | 'custom';
-  states: string[];
-  transitions: Transition[];
-}
+import { StateMachineEditor } from '../components/StateMachineEditor';
+import {
+  type StateMachineForm,
+  defaultStateMachineForm,
+  isDefaultGraph,
+  toStateMachineDto,
+  validateCustomStateMachine,
+} from '../lib/state-machine';
 
 /**
  * `categoriesMode` is a **client-only preset** — never sent to core-api (the PUT
@@ -143,14 +131,6 @@ function formatTzOffset(totalMinutes: number): string {
   return `UTC${sign}${hh}:${mm}`;
 }
 
-function defaultStateMachineForm(): StateMachineForm {
-  return {
-    mode: 'default',
-    states: [...DEFAULT_STATE_MACHINE.states],
-    transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
-  };
-}
-
 function emptyForm(): WizardForm {
   return {
     storeName: '',
@@ -198,58 +178,6 @@ function defaultCategoriesWithIds(existing: readonly WizardCategoryDto[]): Wizar
     const match = existing.find((c) => c.code === dc.code);
     return match?.id ? { id: match.id, code: dc.code, name: dc.name } : { code: dc.code, name: dc.name };
   });
-}
-
-/** Structural deep-equal against the PRD §7 default graph (prefill mode inference). */
-function isDefaultGraph(states: readonly string[], transitions: readonly Transition[]): boolean {
-  if (states.length !== DEFAULT_STATE_MACHINE.states.length) return false;
-  if (transitions.length !== DEFAULT_STATE_MACHINE.transitions.length) return false;
-  const sameStates = states.every((s, i) => s === DEFAULT_STATE_MACHINE.states[i]);
-  if (!sameStates) return false;
-  return transitions.every((t, i) => {
-    const d = DEFAULT_STATE_MACHINE.transitions[i];
-    return t.from === d.from && t.to === d.to && t.actionLabel === d.actionLabel;
-  });
-}
-
-/**
- * Validate a custom state machine, mirroring the backend invariants
- * (`StateMachine` / `StateSchema` in `core-api`) so the wizard never submits a
- * graph the backend would reject with a 400. Returns a list of human-readable
- * (Indonesian) error strings; empty means valid.
- */
-function validateCustomStateMachine(form: StateMachineForm): string[] {
-  const errors: string[] = [];
-  const { states, transitions } = form;
-  if (states.length === 0) errors.push('State machine harus memiliki minimal satu state.');
-  if (transitions.length === 0) errors.push('State machine harus memiliki minimal satu transisi.');
-  const seenStates = new Set<string>();
-  for (const s of states) {
-    if (!s || !s.trim()) errors.push('Nama state tidak boleh kosong.');
-    else if (seenStates.has(s)) errors.push(`State '${s}' duplikat.`);
-    seenStates.add(s);
-  }
-  const seenEdges = new Set<string>();
-  for (const t of transitions) {
-    if (!t.actionLabel || !t.actionLabel.trim()) errors.push('Label aksi tidak boleh kosong.');
-    if (!seenStates.has(t.from)) errors.push(`Transisi '${t.from}'→'${t.to}': state '${t.from}' tidak dikenal.`);
-    if (!seenStates.has(t.to)) errors.push(`Transisi '${t.from}'→'${t.to}': state '${t.to}' tidak dikenal.`);
-    const edge = `${t.from}->${t.to}`;
-    if (seenEdges.has(edge)) errors.push(`Transisi '${t.from}'→'${t.to}' duplikat.`);
-    seenEdges.add(edge);
-  }
-  // De-duplicate identical messages (e.g. several empty labels).
-  return [...new Set(errors)];
-}
-
-/** States referenced by at least one transition — removing these would dangle an edge. */
-function referencedStates(form: StateMachineForm): Set<string> {
-  const refs = new Set<string>();
-  for (const t of form.transitions) {
-    refs.add(t.from);
-    refs.add(t.to);
-  }
-  return refs;
 }
 
 /** Username invariant mirror (QUE-43 — mirrors core-api's `Username` VO). */
@@ -306,25 +234,48 @@ function describedBy(
  *  4. Daily-reset policy — mode/cron/resetTo/archive (FR-WZD-05). The cron field
  *     is validated client-side ({@link validateCronExpression}) so the wizard
  *     never submits an expression the boot-time scheduler would reject.
- *  5. Admin credentials (QUE-43) — first-run only: the manager picks the initial
- *     administrator username + password (mirrors the backend `Username` /
- *     password-≥8 invariants). On a re-edit (setup already complete) the step is
- *     a read-only notice and finalize skips setup-admin + login.
+ *  5. Admin credentials (QUE-43): the manager picks the initial administrator
+ *     username + password (mirrors the backend `Username` / password-≥8
+ *     invariants).
  *  6. Review — a read-only summary of the whole assembled configuration before
  *     the manager activates it (FR-WZD-06). No API call; renders from the
  *     in-memory form. The `Simpan & Aktifkan` button lives here.
  *
+ * **The wizard is first-run only.** {@link WizardGuard} bounces every post-setup
+ * visit to `/`, and the store-name + state-machine editing that used to make the
+ * wizard double as a re-editor now lives in the operational {@link AdminPanel}
+ * (no functionality lost). So `isFirstRun` (read from the prefill's
+ * `isInitialSetupCompleted`) is `true` on every reachable render.
+ *
+ * The `isFirstRun` branches are **retained deliberately as a defensive
+ * backstop**, not dead code: this component is also mounted directly (by its own
+ * spec) without the guard, and the guard's own decision comes from a fetched
+ * snapshot — a stale/failed read must not put the wizard into a state where it
+ * calls `POST /api/auth/setup-admin` against an already-configured store (a
+ * guaranteed 403 that would strand the manager on the review step). When
+ * `isFirstRun` is false the credentials step is a read-only notice and finalize
+ * skips setup-admin + login, just saving the config.
+ *
  * On mount it loads the current config (`GET /api/system/config`) to prefill the
- * form, so the wizard also serves as a re-editor after initial setup. On
- * finalize (first-run) it calls `POST /api/auth/setup-admin` (before the config
- * save, since setup-admin only works while setup is incomplete), then
+ * form. This is the wizard's own read, deliberately NOT the shared
+ * `SystemConfigProvider` snapshot: the prefill seeds a mutable draft exactly
+ * once, and re-deriving it from a shared value that any later `refresh()` can
+ * change would clobber the manager's in-progress edits. On finalize (first-run)
+ * it calls `POST /api/auth/setup-admin` (before the config save, since
+ * setup-admin only works while setup is incomplete), then
  * `PUT /api/system/config` (which flips `isInitialSetupCompleted` server-side),
- * then `POST /api/auth/login` + stores the token, and navigates to `/`. On a
- * re-edit it just saves the config (the admin is already authenticated). The
- * wizard owns no realtime/WS surface (SRP).
+ * then `POST /api/auth/login` + stores the token + re-resolves the principal and
+ * the shared config, and navigates to `/`. The wizard owns no realtime/WS
+ * surface (SRP).
  */
 export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
   const navigate = useNavigate();
+  // The two shared resolutions the finalize must re-run before it navigates:
+  // the principal (the account it just created) and the store configuration
+  // (which it just completed). Without them `navigate('/')` lands on guards
+  // still holding pre-setup / pre-login snapshots.
+  const { refresh: refreshPrincipal } = useAuthContext();
+  const { refresh: refreshConfig } = useSystemConfigContext();
   const [step, setStep] = useState(1);
   const [form, setForm] = useState<WizardForm>(emptyForm);
   const [loading, setLoading] = useState(true);
@@ -343,7 +294,10 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
   // every `QueueTicket.categoryId`). See `defaultCategoriesWithIds`.
   const loadedCategoriesRef = useRef<WizardCategoryDto[]>([]);
 
-  // Prefill from the current config (supports re-edit after initial setup).
+  // Seed the editable draft from the current config, once on mount. The wizard is
+  // first-run only (see the class docstring), so this reads a clean / partially
+  // set-up store rather than re-opening a finished configuration; it also decides
+  // the `isFirstRun` backstop from `isInitialSetupCompleted`.
   useEffect(() => {
     let cancelled = false;
     api
@@ -453,7 +407,10 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
     if (!Number.isInteger(n) || n < 1) return ['Jumlah counter aktif minimal 1.'];
     return [];
   }, [form.counterCount]);
-  const storeNameError = form.storeName.trim() ? null : 'Nama toko tidak boleh kosong.';
+  // Store-name presence guard, shared with the operational AdminPanel via the
+  // mirrored `lib/store-name` validator so both surfaces enforce one rule with
+  // one string of copy.
+  const storeNameError = validateStoreName(form.storeName);
   const step1Valid =
     storeNameError === null &&
     catErrors.length === 0 &&
@@ -485,12 +442,6 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
     [form.stateMachine],
   );
   const step3Valid = smErrors.length === 0;
-  // States referenced by at least one transition — hoisted out of the render
-  // loop so the states editor's remove-guard reads one shared set.
-  const referencedStateSet = useMemo(
-    () => (form.stateMachine.mode === 'custom' ? referencedStates(form.stateMachine) : new Set<string>()),
-    [form.stateMachine],
-  );
 
   // Step 4 cron validation. The cron field is only relevant in AUTOMATIC_CRON
   // mode; in MANUAL mode there is no field, so the step is always valid. The
@@ -547,15 +498,10 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
     setError(null);
     try {
       // `mode` is a client-only preset; never sent to core-api. In default mode
-      // force the PRD §7 graph so a half-edited custom graph the manager
-      // abandoned does not leak into the payload.
-      const sm: StateMachineDto =
-        form.stateMachine.mode === 'default'
-          ? {
-              states: [...DEFAULT_STATE_MACHINE.states],
-              transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
-            }
-          : { states: form.stateMachine.states, transitions: form.stateMachine.transitions };
+      // the shared mapper forces the PRD §7 graph so a half-edited custom graph
+      // the manager abandoned does not leak into the payload — the AdminPanel's
+      // save goes through the same mapper, so neither surface can drift.
+      const sm = toStateMachineDto(form.stateMachine);
       // `categoriesMode` is likewise a client-only preset. In default mode force
       // the PRD §7 categories, preserving any existing id by code-match so a
       // re-save of a store that used the default template reuses its category
@@ -599,7 +545,19 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
         // the operational routes (gated by RequireAuth) admit the manager.
         const { token } = await api.login(form.adminUsername, form.adminPassword);
         writeToken(token);
+        // `writeToken` only touches localStorage. The AuthProvider resolved
+        // `user: null, loading: false` at App mount (there was no token then)
+        // and nothing re-probes `/me` on its own, so navigating now would hand
+        // RequireAuth a null user and dump the manager who JUST created the
+        // account onto `/login`. Re-resolve the principal first — the same
+        // order LoginPage uses (writeToken → refresh → navigate).
+        await refreshPrincipal();
       }
+      // Re-read the shared configuration so every consumer sees the post-setup
+      // snapshot: the dashboard gets its categories (instead of the pre-setup
+      // empty list), the shell gets the store name, and WizardGuard now knows
+      // setup is complete so a back-navigation to `/wizard` is bounced.
+      await refreshConfig();
       navigate('/');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -841,148 +799,11 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
               Pilih alur status standar atau susun sendiri. Label aksi menjadi tombol di panel caller.
             </p>
 
-            <fieldset className="radio-group" data-testid="sm-mode">
-              <legend>Jenis alur status</legend>
-              <label className="radio-group__item">
-                <input
-                  type="radio"
-                  name="sm-mode"
-                  value="default"
-                  checked={form.stateMachine.mode === 'default'}
-                  onChange={() => setForm({ ...form, stateMachine: defaultStateMachineForm() })}
-                />
-                Gunakan alur status standar
-              </label>
-              <label className="radio-group__item">
-                <input
-                  type="radio"
-                  name="sm-mode"
-                  value="custom"
-                  checked={form.stateMachine.mode === 'custom'}
-                  onChange={() =>
-                    setForm({ ...form, stateMachine: { ...form.stateMachine, mode: 'custom' } })
-                  }
-                />
-                Susun alur status sendiri
-              </label>
-            </fieldset>
-
-            {form.stateMachine.mode === 'default' ? (
-              <div className="sm-readonly" data-testid="sm-readonly">
-                <p className="wizard__hint">Alur status tiket standar (hanya lihat):</p>
-                <ul className="entry-list">
-                  {form.stateMachine.transitions.map((t, i) => (
-                    <li key={i} className="entry-row entry-row--transition">
-                      <span className="entry-row__state">{t.from}</span>
-                      <span className="entry-row__arrow">→</span>
-                      <span className="entry-row__state">{t.to}</span>
-                      <span className="entry-row__label">{t.actionLabel}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : (
-              <div
-                data-testid="sm-editor"
-                role="group"
-                aria-label="Editor alur status"
-                aria-describedby={smErrors.length > 0 ? 'sm-errors' : undefined}
-              >
-                <h3 className="wizard__subhead">States</h3>
-                <ul className="entry-list">
-                  {form.stateMachine.states.map((s, i) => {
-                    const referenced = referencedStateSet.has(s);
-                    return (
-                      <li key={i} className="entry-row entry-row--state">
-                        <input
-                          className="field__input entry-row__state"
-                          type="text"
-                          value={s}
-                          onChange={(e) => updateState(form, setForm, i, e.target.value.toUpperCase())}
-                          aria-label={`State ${i + 1}`}
-                          aria-required="true"
-                        />
-                        <button
-                          type="button"
-                          className="btn btn--ghost"
-                          onClick={() => removeState(form, setForm, i)}
-                          disabled={referenced}
-                          title={referenced ? 'State sedang dipakai transisi' : 'Hapus state'}
-                        >
-                          Hapus
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-                <button type="button" className="btn btn--secondary" onClick={() => addState(form, setForm)}>
-                  + Tambah State
-                </button>
-
-                <h3 className="wizard__subhead">Transisi</h3>
-                <ul className="entry-list">
-                  {form.stateMachine.transitions.map((t, i) => (
-                    <li key={i} className="entry-row entry-row--transition">
-                      <select
-                        className="field__input entry-row__state"
-                        value={t.from}
-                        onChange={(e) => updateTransition(form, setForm, i, { from: e.target.value })}
-                        aria-label={`Transisi ${i + 1} from`}
-                        aria-required="true"
-                      >
-                        {form.stateMachine.states.map((s, si) => (
-                          <option key={`${si}-${s}`} value={s}>
-                            {s}
-                          </option>
-                        ))}
-                      </select>
-                      <span className="entry-row__arrow">→</span>
-                      <select
-                        className="field__input entry-row__state"
-                        value={t.to}
-                        onChange={(e) => updateTransition(form, setForm, i, { to: e.target.value })}
-                        aria-label={`Transisi ${i + 1} to`}
-                        aria-required="true"
-                      >
-                        {form.stateMachine.states.map((s, si) => (
-                          <option key={`${si}-${s}`} value={s}>
-                            {s}
-                          </option>
-                        ))}
-                      </select>
-                      <input
-                        className="field__input entry-row__label"
-                        type="text"
-                        value={t.actionLabel}
-                        onChange={(e) => updateTransition(form, setForm, i, { actionLabel: e.target.value })}
-                        placeholder="Label aksi (Indonesia)"
-                        aria-label={`Transisi ${i + 1} label aksi`}
-                        aria-required="true"
-                      />
-                      <button
-                        type="button"
-                        className="btn btn--ghost"
-                        onClick={() => removeTransition(form, setForm, i)}
-                        disabled={form.stateMachine.transitions.length <= 1}
-                      >
-                        Hapus
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-                <button type="button" className="btn btn--secondary" onClick={() => addTransition(form, setForm)}>
-                  + Tambah Transisi
-                </button>
-
-                {smErrors.length > 0 && (
-                  <ul className="wizard__errors" id="sm-errors" data-testid="sm-errors">
-                    {smErrors.map((msg) => (
-                      <li key={msg}>{msg}</li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
+            <StateMachineEditor
+              value={form.stateMachine}
+              onChange={(sm) => setForm({ ...form, stateMachine: sm })}
+              errors={smErrors}
+            />
           </section>
         )}
 
@@ -1326,42 +1147,3 @@ function setCounterCount(form: WizardForm, setForm: (f: WizardForm) => void, raw
   }
 }
 
-function updateTransition(form: WizardForm, setForm: (f: WizardForm) => void, i: number, patch: Partial<{ from: string; to: string; actionLabel: string }>) {
-  const transitions = form.stateMachine.transitions.map((t, idx) => (idx === i ? { ...t, ...patch } : t));
-  setForm({ ...form, stateMachine: { ...form.stateMachine, transitions } });
-}
-function addTransition(form: WizardForm, setForm: (f: WizardForm) => void) {
-  // Seed a new edge from the first state to itself (or empty when no states yet)
-  // so the dropdowns always carry a valid value; the manager adjusts from there.
-  const firstState = form.stateMachine.states[0] ?? '';
-  setForm({
-    ...form,
-    stateMachine: {
-      ...form.stateMachine,
-      transitions: [...form.stateMachine.transitions, { from: firstState, to: firstState, actionLabel: '' }],
-    },
-  });
-}
-function removeTransition(form: WizardForm, setForm: (f: WizardForm) => void, i: number) {
-  setForm({ ...form, stateMachine: { ...form.stateMachine, transitions: form.stateMachine.transitions.filter((_, idx) => idx !== i) } });
-}
-
-function updateState(form: WizardForm, setForm: (f: WizardForm) => void, i: number, value: string) {
-  const states = form.stateMachine.states.map((s, idx) => (idx === i ? value : s));
-  // Renaming a state must propagate to any transition that referenced the old
-  // name, so a rename never leaves a dangling edge (the dropdowns would then
-  // show the old value which is no longer in the states list).
-  const oldName = form.stateMachine.states[i];
-  const transitions = form.stateMachine.transitions.map((t) => ({
-    from: t.from === oldName ? value : t.from,
-    to: t.to === oldName ? value : t.to,
-    actionLabel: t.actionLabel,
-  }));
-  setForm({ ...form, stateMachine: { ...form.stateMachine, states, transitions } });
-}
-function addState(form: WizardForm, setForm: (f: WizardForm) => void) {
-  setForm({ ...form, stateMachine: { ...form.stateMachine, states: [...form.stateMachine.states, ''] } });
-}
-function removeState(form: WizardForm, setForm: (f: WizardForm) => void, i: number) {
-  setForm({ ...form, stateMachine: { ...form.stateMachine, states: form.stateMachine.states.filter((_, idx) => idx !== i) } });
-}

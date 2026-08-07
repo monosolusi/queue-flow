@@ -1,10 +1,14 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { App } from './App';
 import type { IAdminAppApi } from './api/admin-api';
-import type { SystemConfigurationDto } from './api/types';
-import { DEFAULT_SERVICE_THEMES } from './api/types';
+import type { AuthUserDto, SystemConfigurationDto } from './api/types';
+import { DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES, DEFAULT_STATE_MACHINE } from './api/types';
+import { clearToken, writeToken } from './auth/token-store';
+
+const ADMIN: AuthUserDto = { id: 'u-1', username: 'manajer', role: 'admin' };
 
 function makeConfig(brandColor = '#2563eb'): SystemConfigurationDto {
   return {
@@ -25,7 +29,31 @@ function makeConfig(brandColor = '#2563eb'): SystemConfigurationDto {
   };
 }
 
-function makeApi(config: SystemConfigurationDto, reject?: Error): IAdminAppApi {
+/**
+ * A clean store that is already walkable end-to-end: it carries a store name,
+ * one category and one assigned counter, so the wizard's step-1 and step-2
+ * guards pass on the prefill and the finalize path (the arm under test) is
+ * reachable in a handful of clicks.
+ */
+const CAT_ID = '11111111-1111-4111-8111-111111111111';
+function cleanWalkableConfig(): SystemConfigurationDto {
+  return {
+    ...makeConfig(DEFAULT_BRAND_COLOR),
+    isInitialSetupCompleted: false,
+    storeName: 'Toko Contoh',
+    stateMachine: DEFAULT_STATE_MACHINE,
+    categories: [{ id: CAT_ID, code: 'A', name: 'Customer Service' }],
+    routingRules: [
+      { counterId: 1, counterName: 'Counter 1', assignedCategoryIds: [CAT_ID], priorityPolicy: 'FIFO_GLOBAL' },
+    ],
+  };
+}
+
+function makeApi(
+  config: SystemConfigurationDto,
+  reject?: Error,
+  overrides: Partial<IAdminAppApi> = {},
+): IAdminAppApi {
   return {
     getSystemConfig: reject ? vi.fn(() => Promise.reject(reject)) : vi.fn(() => Promise.resolve(config)),
     saveSystemConfig: vi.fn(() =>
@@ -35,27 +63,32 @@ function makeApi(config: SystemConfigurationDto, reject?: Error): IAdminAppApi {
     getDailyReport: vi.fn(),
     getCounterPerformance: vi.fn(),
     getRangeReport: vi.fn(),
-    getQueueBoard: vi.fn(),
-    getCounters: vi.fn(),
+    // The dashboard polls these two; resolve them empty so the landing view
+    // renders instead of erroring.
+    getQueueBoard: vi.fn(() => Promise.resolve({ active: [], waiting: [], waitingCount: 0 })),
+    getCounters: vi.fn(() => Promise.resolve([])),
     getAuditLog: vi.fn(),
     triggerManualReset: vi.fn(),
     cleanupTransactionLogs: vi.fn(),
     // IAuthApi (QUE-43) — App wires an AuthProvider; with no token in jsdom it
-    // never probes /me, so these stay unused here but satisfy the interface.
-    login: vi.fn(),
-    logout: vi.fn(),
-    getMe: vi.fn(),
-    setupInitialAdmin: vi.fn(),
+    // never probes /me, so these stay unused unless a test writes a token.
+    login: vi.fn(() => Promise.resolve({ token: 'test-token', user: ADMIN })),
+    logout: vi.fn(() => Promise.resolve()),
+    getMe: vi.fn(() => Promise.resolve(ADMIN)),
+    setupInitialAdmin: vi.fn(() =>
+      Promise.resolve({ id: 'u-1', username: 'manajer', role: 'admin' as const, createdAt: 0 }),
+    ),
     // IUsersApi (QUE-43) — unused by the App-level smoke tests; present for types.
     listUsers: vi.fn(),
     createUser: vi.fn(),
     deleteUser: vi.fn(),
+    ...overrides,
   };
 }
 
-function renderApp(api: IAdminAppApi) {
+function renderApp(api: IAdminAppApi, initialEntries: string[] = ['/']) {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={initialEntries}>
       <App api={api} />
     </MemoryRouter>,
   );
@@ -88,16 +121,170 @@ describe('App (admin — runtime brand color, QUE-37 AC6)', () => {
 });
 
 describe('App (admin — landmark + skip link, QUE-41 AC8)', () => {
+  // These two assert the initial render only, so the mount config probe is
+  // stubbed to a promise that never resolves — otherwise it settles after the
+  // synchronous test body and leaks an "update not wrapped in act" warning.
+  // The landmark + skip link are chrome: they render regardless of guard state.
+  function pendingApi(): IAdminAppApi {
+    return makeApi(makeConfig(), undefined, {
+      getSystemConfig: vi.fn(() => new Promise<SystemConfigurationDto>(() => {})),
+    });
+  }
+
   it('renders a single <main> landmark with id="main-content"', () => {
-    renderApp(makeApi(makeConfig()));
+    renderApp(pendingApi());
     const main = screen.getByRole('main');
     expect(main).toHaveAttribute('id', 'main-content');
   });
 
   it('renders a skip link pointing at #main-content', () => {
-    renderApp(makeApi(makeConfig()));
+    renderApp(pendingApi());
     const skip = screen.getByRole('link', { name: /Lewati ke konten/i });
     expect(skip).toHaveAttribute('href', '#main-content');
     expect(skip).toHaveClass('skip-link');
+  });
+});
+
+/**
+ * The full route-guard matrix. The reported bug — a first-run visitor bounced to
+ * `/login` for an account that does not exist yet — has one arm per axis (setup
+ * complete?, token?, which route?), so the whole matrix is asserted here rather
+ * than only the arm that regressed.
+ */
+describe('App (admin — first-run guard matrix)', () => {
+  beforeEach(() => clearToken());
+  afterEach(() => clearToken());
+
+  it('redirects a clean store (no setup, no token) to /wizard, NOT /login', async () => {
+    // The reported bug: a first-run visitor with no account hit /admin and was
+    // bounced to /login with no way to create an account. Fix: SetupGuard is
+    // the OUTER guard (setup first), so a clean store redirects to /wizard
+    // regardless of token state. This test is the regression detector.
+    const cleanConfig: SystemConfigurationDto = { ...makeConfig(), isInitialSetupCompleted: false };
+    renderApp(makeApi(cleanConfig));
+    // The wizard renders (SetupGuard → /wizard → WizardGuard → ready → WizardPage).
+    expect(await screen.findByText(/Setup Awal Sistem/i)).toBeInTheDocument();
+    // The login page must NOT render — the first-run path goes to the wizard,
+    // not the login page.
+    expect(screen.queryByRole('heading', { name: /Masuk Admin/i })).not.toBeInTheDocument();
+  });
+
+  it('redirects a clean store landing on /login to /wizard (the bug on another route)', async () => {
+    // `/admin/login` is reachable by bookmark / browser autocomplete, and the
+    // gateway `auth_request` exempts `/admin/`, so nothing but SetupGuard stops
+    // a clean store from rendering a sign-in form for a nonexistent account.
+    const cleanConfig: SystemConfigurationDto = { ...makeConfig(), isInitialSetupCompleted: false };
+    renderApp(makeApi(cleanConfig), ['/login']);
+    expect(await screen.findByText(/Setup Awal Sistem/i)).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /Masuk Admin/i })).not.toBeInTheDocument();
+  });
+
+  it('redirects a configured store with no token to /login', async () => {
+    renderApp(makeApi(makeConfig()));
+    expect(await screen.findByRole('heading', { name: /Masuk Admin/i })).toBeInTheDocument();
+    expect(screen.queryByText(/Setup Awal Sistem/i)).not.toBeInTheDocument();
+  });
+
+  it('renders the operational page for a configured store with an authenticated principal', async () => {
+    writeToken('abc123');
+    renderApp(makeApi(makeConfig()));
+    expect(await screen.findByTestId('app-shell-page-title')).toHaveTextContent('Status Antrian');
+    expect(screen.queryByRole('heading', { name: /Masuk Admin/i })).not.toBeInTheDocument();
+  });
+
+  it('bounces an authenticated manual navigation to /wizard back to /', async () => {
+    writeToken('abc123');
+    renderApp(makeApi(makeConfig()), ['/wizard']);
+    // The wizard is first-run only — WizardGuard sends a configured store home.
+    expect(await screen.findByTestId('app-shell-page-title')).toHaveTextContent('Status Antrian');
+    expect(screen.queryByText(/Setup Awal Sistem/i)).not.toBeInTheDocument();
+  });
+
+  it('lands the manager on the dashboard after completing the wizard, NOT on /login', async () => {
+    // The first-run dead-end: the wizard wrote the bearer token but nothing
+    // re-resolved the principal, so `navigate('/')` handed RequireAuth a null
+    // user and dumped the manager who had just created the account onto the
+    // login form. The finalize now re-resolves BOTH the principal and the store
+    // configuration before navigating.
+    let current = cleanWalkableConfig();
+    const completed: SystemConfigurationDto = { ...current, isInitialSetupCompleted: true };
+    const api = makeApi(current, undefined, {
+      getSystemConfig: vi.fn(() => Promise.resolve(current)),
+      saveSystemConfig: vi.fn(() => {
+        current = completed;
+        return Promise.resolve({
+          isInitialSetupCompleted: true,
+          storeName: completed.storeName,
+          brandColor: completed.brandColor,
+          serviceThemes: completed.serviceThemes,
+        });
+      }),
+    });
+    renderApp(api);
+
+    // Steps 1–4 are valid straight off the prefill; walk them.
+    await screen.findByTestId('step-1');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-2');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-3');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-4');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+
+    // Step 5 — the initial administrator (first-run only).
+    await screen.findByTestId('step-5');
+    await userEvent.type(screen.getByTestId('admin-username'), 'manajer');
+    await userEvent.type(screen.getByTestId('admin-password'), 'rahasia123');
+    await userEvent.type(screen.getByTestId('admin-password-confirm'), 'rahasia123');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+
+    await screen.findByTestId('step-6');
+    await userEvent.click(screen.getByTestId('wizard-finalize'));
+
+    // The manager lands on the operational dashboard, authenticated.
+    expect(await screen.findByTestId('app-shell-page-title')).toHaveTextContent('Status Antrian');
+    expect(screen.queryByRole('heading', { name: /Masuk Admin/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Setup Awal Sistem/i)).not.toBeInTheDocument();
+    expect(api.getMe).toHaveBeenCalled();
+  });
+
+  it('refreshes the shared config after the wizard so the shell shows the new store name', async () => {
+    // Previously each holder kept its own snapshot, so `App`'s copy stayed the
+    // pre-setup DTO after finalize and the chrome/dashboard rendered stale data
+    // until a manual reload.
+    let current: SystemConfigurationDto = { ...cleanWalkableConfig(), storeName: 'Toko Contoh' };
+    const api = makeApi(current, undefined, {
+      getSystemConfig: vi.fn(() => Promise.resolve(current)),
+      saveSystemConfig: vi.fn(() => {
+        current = { ...current, isInitialSetupCompleted: true, storeName: 'Apotek Sehat Sentosa' };
+        return Promise.resolve({
+          isInitialSetupCompleted: true,
+          storeName: current.storeName,
+          brandColor: current.brandColor,
+          serviceThemes: current.serviceThemes,
+        });
+      }),
+    });
+    renderApp(api);
+
+    await screen.findByTestId('step-1');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-2');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-3');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-4');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-5');
+    await userEvent.type(screen.getByTestId('admin-username'), 'manajer');
+    await userEvent.type(screen.getByTestId('admin-password'), 'rahasia123');
+    await userEvent.type(screen.getByTestId('admin-password-confirm'), 'rahasia123');
+    await userEvent.click(screen.getByTestId('wizard-next'));
+    await screen.findByTestId('step-6');
+    await userEvent.click(screen.getByTestId('wizard-finalize'));
+
+    // The shell's sidebar brand reads the refreshed snapshot, not the prefill.
+    expect(await screen.findByText('Apotek Sehat Sentosa')).toBeInTheDocument();
   });
 });

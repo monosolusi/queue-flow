@@ -19,6 +19,18 @@ import type {
 } from './types';
 
 /**
+ * The system-configuration READ slice (ISP — the single `GET /api/system/config`
+ * call). Carved out of {@link IAdminApi} so the app-wide {@link SystemConfigProvider}
+ * — and through it the route guards — depend on the one method they use instead
+ * of the full 11-method admin surface (the guards' tests then mock one function,
+ * not eleven). {@link IAdminApi} extends it, so any existing admin fake still
+ * satisfies the provider.
+ */
+export interface ISystemConfigApi {
+  getSystemConfig(): Promise<SystemConfigurationDto>;
+}
+
+/**
  * The slice of core-api the admin panel consumes (ISP — only config read/save,
  * the active state-machine read, the reporting / audit-trail read surface, the
  * live queue-board + counters read for the operational dashboard (QUE-44), and
@@ -27,8 +39,7 @@ import type {
  * behind this interface so tests can substitute a fake without touching the
  * network.
  */
-export interface IAdminApi {
-  getSystemConfig(): Promise<SystemConfigurationDto>;
+export interface IAdminApi extends ISystemConfigApi {
   saveSystemConfig(payload: SaveSystemConfigurationPayload): Promise<SaveSystemConfigurationResult>;
   getActiveStateMachine(): Promise<StateMachineDto>;
   /** Daily queue analytics (total visitors, avg wait/service time, per-category). */
