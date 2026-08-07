@@ -74,8 +74,9 @@ describe('UsersPage (QUE-43)', () => {
     writeToken('t');
     renderUsers(makeAuthApi(STAFF_PRINCIPAL), makeUsersApi().api);
     expect(await screen.findByTestId('users-denied')).toHaveTextContent(/Akses ditolak/);
-    // The create form + list are not rendered for a non-admin.
-    expect(screen.queryByTestId('users-create')).not.toBeInTheDocument();
+    // The toolbar + add button + list are not rendered for a non-admin.
+    expect(screen.queryByTestId('users-add-btn')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('users-toolbar')).not.toBeInTheDocument();
     expect(screen.queryByTestId('users-list')).not.toBeInTheDocument();
   });
 
@@ -89,11 +90,15 @@ describe('UsersPage (QUE-43)', () => {
     expect(screen.getByTestId('user-delete-u-2')).not.toBeDisabled();
   });
 
-  it('creates a user via the form and reloads the list', async () => {
+  it('creates a user via the modal and reloads the list', async () => {
     writeToken('t');
     const { api, createUser, listUsers } = makeUsersApi();
     renderUsers(makeAuthApi(ADMIN), api);
     await screen.findByTestId('user-row-u-1');
+
+    // Open the create modal.
+    await userEvent.click(screen.getByTestId('users-add-btn'));
+    expect(screen.getByTestId('user-create-modal')).toBeInTheDocument();
 
     await userEvent.type(screen.getByLabelText('Username'), 'loket2');
     await userEvent.type(screen.getByLabelText('Kata sandi'), 'rahasia123');
@@ -105,12 +110,16 @@ describe('UsersPage (QUE-43)', () => {
     await waitFor(() => expect(createUser).toHaveBeenCalledWith({ username: 'loket2', password: 'rahasia123', role: 'caller-staff' }));
     // The list is reloaded after a successful create.
     expect(listUsers).toHaveBeenCalledTimes(2);
+    // The modal is dismissed after a successful create.
+    await waitFor(() => expect(screen.queryByTestId('user-create-modal')).not.toBeInTheDocument());
   });
 
   it('disables the create submit while the form is invalid', async () => {
     writeToken('t');
     renderUsers(makeAuthApi(ADMIN), makeUsersApi().api);
     await screen.findByTestId('user-row-u-1');
+    // Open the create modal first — the submit + fields only mount then.
+    await userEvent.click(screen.getByTestId('users-add-btn'));
     // Empty username/password → disabled.
     expect(screen.getByTestId('create-submit')).toBeDisabled();
     // Username too short + password too short → still disabled, errors shown.
@@ -120,21 +129,20 @@ describe('UsersPage (QUE-43)', () => {
     expect(screen.getByTestId('create-errors')).toBeInTheDocument();
   });
 
-  it('deletes a user via the inline two-step confirm', async () => {
+  it('deletes a user via the confirm modal', async () => {
     writeToken('t');
     const { api, deleteUser } = makeUsersApi();
     renderUsers(makeAuthApi(ADMIN), api);
     await screen.findByTestId('user-row-u-2');
 
-    // First click reveals the confirm affordance (no immediate delete).
+    // Opening the confirm modal does NOT fire the delete immediately.
     await userEvent.click(screen.getByTestId('user-delete-u-2'));
     expect(screen.getByTestId('user-confirm-u-2')).toBeInTheDocument();
     expect(deleteUser).not.toHaveBeenCalled();
 
-    // Confirming fires the delete + reload.
+    // Confirming fires the delete + reload, then dismisses the modal.
     await userEvent.click(screen.getByTestId('user-confirm-delete-u-2'));
     await waitFor(() => expect(deleteUser).toHaveBeenCalledWith('u-2'));
-    // The confirm affordance is dismissed after the delete.
     await waitFor(() => expect(screen.queryByTestId('user-confirm-u-2')).not.toBeInTheDocument());
   });
 
@@ -163,6 +171,8 @@ describe('UsersPage (QUE-43)', () => {
 
     await userEvent.click(screen.getByTestId('user-delete-u-3'));
     await userEvent.click(screen.getByTestId('user-confirm-delete-u-3'));
-    expect(await screen.findByTestId('users-error')).toHaveTextContent('Tidak dapat menghapus administrator terakhir');
+    // The modal stays open and surfaces the backend error inside the dialog.
+    expect(await screen.findByTestId('users-delete-error')).toHaveTextContent('Tidak dapat menghapus administrator terakhir');
+    expect(screen.getByTestId('user-confirm-u-3')).toBeInTheDocument();
   });
 });
