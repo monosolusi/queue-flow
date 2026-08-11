@@ -82,6 +82,15 @@ describe('styles.css AC guards', () => {
     expect(item).not.toContain('border-radius:');
     expect(rule('.counters-serving__list')).toContain('gap: 0');
     expect(css).toContain('.counters-serving__item:last-child');
+    // Idle counter (no active ticket): the em-dash number is muted via the
+    // existing --text-muted token — no new shared token minted.
+    expect(css).toContain('.counters-serving__item--idle');
+    expect(css).toContain(
+      '.counters-serving__item--idle .counters-serving__number',
+    );
+    expect(css).toMatch(
+      /\.counters-serving__item--idle\s+\.counters-serving__number\s*\{[^}]*color:\s*var\(--text-muted\)/,
+    );
   });
 
   it('waiting-queue mirrors call-history: surface card + hairline dividers + containment', () => {

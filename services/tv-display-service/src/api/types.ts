@@ -109,15 +109,23 @@ export interface SystemConfigurationDto {
   }[];
 }
 
-/** A counter currently serving a ticket, projected client-side by the TV
- * store from `GET /api/queue/board`'s `active` array joined with the
- * `routingRules` counter-name map. */
+/** A counter view model for the "Sedang Melayani" panel, projected
+ * client-side by the TV store from `GET /api/queue/board`'s `active` array
+ * joined with the `routingRules` counter-name map. The list includes EVERY
+ * configured counter (from `routingRules`) — a single on-premise store has
+ * every configured counter operational, so an idle counter (no active ticket
+ * right now) stays visible: it carries `ticketNumber: '—'`, `ticketId: ''`,
+ * `status: ''`, `idle: true` and is visually muted. A counter currently
+ * serving carries its real ticket fields and `idle: false`. */
 export interface CounterServing {
   readonly counterId: number;
   readonly counterName: string;
   readonly ticketNumber: string;
   readonly ticketId: string;
   readonly status: string;
+  /** `true` when this counter has no active ticket (idle — visible as an em
+   * dash, muted). `false` when it is currently serving a ticket. */
+  readonly idle: boolean;
 }
 
 /** WebSocket lifecycle event types broadcast by core-api (FR-ENG-04). */
