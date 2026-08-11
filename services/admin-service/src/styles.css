@@ -23,6 +23,23 @@ body,
   color: var(--text);
 }
 
+/* Reserve the vertical-scrollbar gutter unconditionally so the document's
+   inline size stays CONSTANT regardless of whether the active section is tall
+   enough to scroll. Without this, the /admin/config sectioned nav (one section
+   mounted at a time) toggles the page scrollbar as the manager switches
+   between a tall section (e.g. Profil & Tampilan — three config cards) and a
+   short one (e.g. Operasi Manual — one card): the scrollbar appears/disappears,
+   the viewport's usable width changes by the scrollbar width, and the centered
+   `.page` (max-width: 920px; margin: 0 auto) shifts + resizes — the
+   "membesar dan mengecil / tidak standard" the manager reported. Reserving the
+   gutter on the root scroller (`html`) keeps the content box a fixed width, so
+   every section renders at the same column width with no horizontal jitter.
+   (`stable`, not `overflow-y: scroll`, so no scrollbar is drawn when the
+   content does not overflow — only the space is kept.) */
+html {
+  scrollbar-gutter: stable;
+}
+
 button {
   font-family: inherit;
   cursor: pointer;
