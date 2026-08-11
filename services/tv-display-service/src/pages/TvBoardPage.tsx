@@ -31,9 +31,16 @@ export function TvBoardPage() {
       <main className="tv-board__main">
         <div className="tv-board__active" data-testid="board-active">
           <div className="tv-board__active-grid">
-            {/* showNowServing=false renders the hero's empty state so the grid
-                column stays mounted and the layout stays stable. */}
-            <NowServingCard nowServing={opts.showNowServing ? state.nowServing : null} />
+            {/* showNowServing=false truly hides the hero (no misleading idle-state
+                copy). A structural placeholder keeps the 2fr grid cell occupied
+                so the side column's 1fr track and the active-grid layout stay
+                stable — same layout-stability outcome as mounting the card,
+                without rendering the "Menunggu" empty state the manager hid. */}
+            {opts.showNowServing ? (
+              <NowServingCard nowServing={state.nowServing} />
+            ) : (
+              <div className="now-serving now-serving--placeholder" aria-hidden="true" data-testid="now-serving-placeholder" />
+            )}
             {/* The 1fr right column stacks the counters-serving list (top),
                 the waiting queue (middle, flex:1), and the call history
                 (bottom); the now-serving card stays the 2fr hero on the left. */}

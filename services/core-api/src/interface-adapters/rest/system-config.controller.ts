@@ -160,12 +160,11 @@ function configNestedShapeErrors(body: Partial<SaveSystemConfigurationCommand>):
       }
     });
   }
-  // tvDisplayOptions: a present-but-non-boolean value for a known key would
-  // throw `InvalidValueObjectException` in the VO (→ 400) — but a present
-  // non-boolean value crashes the VO's `typeof value === 'boolean'` check?
-  // No: the VO handles that cleanly. Still, guard at the boundary for a
-  // consistent error message (mirrors the dailyReset.timezone guard style).
-  // Unknown extra keys are ignored — the VO only reads the 5 canonical keys.
+  // tvDisplayOptions: the VO already throws `InvalidValueObjectException`
+  // (→ 400) on a present non-boolean; this boundary guard only gives a
+  // consistent, field-named error message (mirrors the dailyReset.timezone
+  // guard). Unknown extra keys are ignored — the VO only reads the 5
+  // canonical keys.
   const tvOpts = body.tvDisplayOptions;
   if (tvOpts != null && typeof tvOpts === 'object' && !Array.isArray(tvOpts)) {
     for (const key of TV_DISPLAY_OPTION_KEYS) {

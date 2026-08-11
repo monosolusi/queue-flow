@@ -794,7 +794,7 @@ describe('TvStoreProvider counters-serving projection + display options', () => 
     expect(screen.queryByRole('marquee')).not.toBeInTheDocument();
   });
 
-  it('hides the now-serving hero content when showNowServing is false (empty state renders)', async () => {
+  it('truly hides the now-serving hero when showNowServing is false (no misleading idle state)', async () => {
     const opts: TvDisplayOptionsMap = {
       showNowServing: false,
       showWaitingQueue: true,
@@ -809,10 +809,14 @@ describe('TvStoreProvider counters-serving projection + display options', () => 
     const audio = makeAudio();
     renderBoard(api, audio);
 
-    // showNowServing=false passes null to NowServingCard → its empty state
-    // renders even though the server has an active ticket. The ticket number
-    // must NOT appear in the now-serving hero (it may still appear in the
-    // counters-serving panel).
-    expect(await screen.findByText('Menunggu panggilan berikutnya…')).toBeInTheDocument();
+    // showNowServing=false mounts a structural placeholder (keeps the 2fr grid
+    // cell occupied) instead of NowServingCard — so the misleading "Menunggu"
+    // idle-state copy must NOT render even though the server has an active
+    // ticket. The hero's ticket number is suppressed; A-005 may still appear
+    // in the counters-serving panel (showCountersServing=true), which is
+    // expected and not asserted here.
+    expect(await screen.findByTestId('now-serving-placeholder')).toBeInTheDocument();
+    expect(screen.queryByText('Menunggu panggilan berikutnya…')).not.toBeInTheDocument();
+    expect(screen.queryByText('PERGI KE COUNTER')).not.toBeInTheDocument();
   });
 });

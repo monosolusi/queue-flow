@@ -94,6 +94,19 @@ body,
 .now-serving--empty {
   color: var(--text-muted);
 }
+/* Manager hid the now-serving panel (tvDisplayOptions.showNowServing === false).
+   A structural placeholder keeps the 2fr grid cell occupied so the side
+   column's 1fr track and the active-grid layout stay stable, but renders no
+   card surface, radius, or padding — the panel is truly absent (no misleading
+   idle-state copy), not replaced with a blank card. Named `--placeholder`
+   (not the BEM "hidden state" modifier the removed promo crossfade overlay
+   used) so the AC6 negation guarding that overlay stays an honest signal —
+   this is a grid-track placeholder, not an opacity/visibility-toggled layer. */
+.now-serving--placeholder {
+  background: none;
+  border-radius: 0;
+  padding: 0;
+}
 .now-serving__empty-text {
   font-size: 2rem;
   margin: 0;
