@@ -11,6 +11,7 @@ import { RequireAuth } from './auth/RequireAuth';
 import { SystemConfigProvider, useSystemConfigContext } from './config/system-config-context';
 import { ToastProvider } from './toast/toast-context';
 import { AdminPanel } from './pages/AdminPanel';
+import { AlurStatusDesigner } from './pages/AlurStatusDesigner';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { AuditLogPage } from './pages/AuditLogPage';
 import { DashboardPage } from './pages/DashboardPage';
@@ -18,6 +19,7 @@ import { LoginPage } from './pages/LoginPage';
 import { TvLayoutPage } from './pages/TvLayoutPage';
 import { UsersPage } from './pages/UsersPage';
 import { WizardPage } from './pages/WizardPage';
+import { ConfigDraftProvider } from './pages/admin-config/config-draft-context';
 
 /**
  * Top-level routing for the admin panel + first-run wizard (FR-WZD-01..06).
@@ -35,7 +37,15 @@ import { WizardPage } from './pages/WizardPage';
  *               a clean store (isInitialSetupCompleted === false) redirects to
  *               `/wizard`; once setup is complete, RequireAuth redirects a
  *               tokenless visitor to `/login`.
- * `/config`   — the operational config panel (setup-complete + authed).
+ * `/config`   — the operational config panel (setup-complete + authed). A nested
+ *               route group whose element is a `ConfigDraftProvider` (owns the
+ *               shared mutable draft + `save()`), rendering `<Outlet/>`:
+ *                 `/config`             → the sectioned panel (index).
+ *                 `/config/alur-status` → the full-page Alur Status Tiket
+ *                                         diagram designer (large canvas +
+ *                                         JSON source view). The provider stays
+ *                 mounted across the two URLs, so the draft + a cross-section
+ *                 edit ride ONE full-payload save and navigation loses no edits.
  * `/users`    — the user-management page, admin-only (setup-complete + authed;
  *               the backend `GET|POST|DELETE /api/users` is admin-only too).
  * `/wizard`   — the 6-step first-run setup wizard, gated by WizardGuard
@@ -174,11 +184,14 @@ function AppRoutes({ api }: { api: IAdminAppApi }) {
             element={
               <SetupGuard>
                 <RequireAuth>
-                  <AdminPanel api={api} />
+                  <ConfigDraftProvider api={api} />
                 </RequireAuth>
               </SetupGuard>
             }
-          />
+          >
+            <Route index element={<AdminPanel />} />
+            <Route path="alur-status" element={<AlurStatusDesigner />} />
+          </Route>
           <Route
             path="/tv-layout"
             element={

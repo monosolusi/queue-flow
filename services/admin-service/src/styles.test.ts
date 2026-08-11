@@ -18,6 +18,21 @@ const css = readFileSync(resolve(here, 'styles.css'), 'utf8').replace(/\s+/g, ' 
 // canonical shared/design-tokens/tokens.css). Read statically to guard the
 // QUE-47 light/dark token structure + the semantic on-surface rename.
 const tokens = readFileSync(resolve(here, 'styles/_tokens.css'), 'utf8').replace(/\s+/g, ' ');
+// The StateMachineWorkflow / designer component styles (diagram canvas, the
+// Diagram↔Source toggle, the JSON source textarea). Read statically to guard
+// the dedicated Alur Status Tiket designer view (manager feedback: the inline
+// canvas was too small; moved to a full-page route + a Kaleo-style view
+// switch). Guarded here because jsdom applies no CSS (css: false).
+const wfCss = readFileSync(resolve(here, 'components/state-machine-workflow.css'), 'utf8').replace(/\s+/g, ' ');
+
+/** Same as {@link rule} but against the StateMachineWorkflow component CSS. */
+function wfRule(sel: string): string {
+  const escaped = sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`${escaped}\\s*\\{([^}]*)\\}`);
+  const m = wfCss.match(re);
+  if (!m) throw new Error(`selector not found in state-machine-workflow.css: ${sel}`);
+  return m[1];
+}
 
 /** Extracts the declaration block of a selector (greedy to the closing brace). */
 function rule(sel: string): string {
@@ -557,5 +572,66 @@ describe('relative-range presets + range-trend bar/line toggle', () => {
     ]) {
       expect(rule(sel), sel).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
     }
+  });
+});
+
+describe('Alur Status Tiket designer — warning relocation + dedicated full-page diagram', () => {
+  it('the section warning is hoisted to the very top with breathing room (manager feedback: terlalu dempat)', () => {
+    // The "Perhatian" warning was too close to the status-flow type selector.
+    // `.admin-panel__warning--top` overrides the grouped selector's
+    // `margin: 0.75rem 0 0` (same specificity, source-order win — the grouped
+    // block stays untouched so its guard holds) with a 1rem bottom margin so the
+    // <h2> below it has space.
+    const top = rule('.admin-panel__warning--top');
+    expect(top).toContain('margin: 0 0 1rem');
+  });
+
+  it('the designer page root drops the 920px cap so the canvas fills <main> width', () => {
+    // Manager feedback: the inline diagram was too small. The designer route is
+    // NOT a `.page` (it carries its own geometry) — it must NOT inherit the
+    // 920px max-width or the canvas is cramped again. Guard both the presence of
+    // the root rule and the absence of the cap.
+    const designer = rule('.alur-status-designer');
+    expect(designer).toContain('display: flex');
+    expect(designer).toContain('flex-direction: column');
+    expect(designer).not.toMatch(/max-width:\s*920px/);
+  });
+
+  it('the designer canvas is tall (descendant selector beats the base .sm-canvas height)', () => {
+    // The base `.sm-canvas` (60vh / min 360px) is the inline config-card size the
+    // manager found too small. `.alur-status-designer .sm-canvas` (specificity
+    // 0-2-0) overrides it without changing the StateMachineWorkflow API. Guard
+    // the tall height + the larger min-height.
+    const canvas = wfRule('.alur-status-designer .sm-canvas');
+    expect(canvas).toContain('height: calc(100vh - 16rem)');
+    expect(canvas).toContain('min-height: 30rem');
+  });
+
+  it('the Diagram↔Source segmented toggle active button uses the accent token', () => {
+    // The active view button reads as the selected affordance via the brand
+    // accent (token-driven so light/dark + brandColor re-themes apply), NOT a
+    // hardcoded color literal.
+    const active = wfRule('.sm-view-toggle__btn--active');
+    expect(active).toContain('background: var(--accent)');
+    expect(active).toContain('color: var(--accent-contrast)');
+  });
+
+  it('the JSON source textarea is a monospace input over the token surface (no hardcoded color)', () => {
+    // The Source view is an editable JSON textarea (Kaleo-style view switch).
+    // Monospace keeps the JSON column-aligned; token border/surface so it reads
+    // as an input under both themes. No hardcoded color literal — dark mode
+    // flips it for free.
+    const source = wfRule('.sm-source');
+    expect(source).toContain('font-family: ui-monospace');
+    expect(source).toContain('background: var(--surface)');
+    expect(source).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+  });
+
+  it('the source error region uses the danger-on-surface text token (a validation error, not a caution)', () => {
+    // An invalid JSON parse / validation failure blocks the save — it reads as
+    // an error, so it uses `--danger-on-surface` (text-on-surface semantic),
+    // distinct from the `--warn` caution the section warning uses.
+    const err = wfRule('.sm-source-error');
+    expect(err).toContain('color: var(--danger-on-surface)');
   });
 });

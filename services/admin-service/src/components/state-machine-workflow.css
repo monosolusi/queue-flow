@@ -157,3 +157,90 @@
     width: auto;
   }
 }
+
+/* --- Dedicated Alur Status Tiket designer (/config/alur-status) ---------------
+   The inline canvas on /admin/config was too small (60vh / min 360px crammed in
+   a config card). On the designer page the canvas fills the <main> width and a
+   tall height. The descendant selector (specificity 0-2-0) overrides the base
+   `.sm-canvas` (0-1-0) without changing the StateMachineWorkflow API. */
+.alur-status-designer .sm-canvas {
+  height: calc(100vh - 16rem);
+  min-height: 30rem;
+}
+
+/* Diagram / Source segmented toggle (Kaleo-style view switch). A `role="group"`
+   cluster of two `aria-pressed` buttons — NOT radios, so it stays a button group
+   (CLAUDE.md: a labelled cluster of immediate-action buttons is role=group). */
+.sm-view-toggle {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--text) 15%, transparent);
+  background: var(--surface);
+}
+.sm-view-toggle__btn {
+  padding: 0.4rem 0.9rem;
+  border: none;
+  border-radius: calc(var(--radius) * 0.6);
+  background: transparent;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.sm-view-toggle__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.sm-view-toggle__btn--active {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+/* --- JSON Source view (StateMachineSource) -----------------------------------
+   A controlled textarea carrying the serialized `{ states, transitions }` graph.
+   Monospace so the JSON stays column-aligned; token border/surface so it reads
+   as an input, and a distinct error region in the danger tint. */
+.sm-source-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.sm-source__label {
+  font-weight: 600;
+  color: var(--text);
+}
+.sm-source__hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+.sm-source__hint code {
+  color: var(--accent-on-surface);
+  font-size: 0.8rem;
+}
+.sm-source {
+  flex: 1 1 auto;
+  min-height: 24rem;
+  padding: 0.75rem;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--text) 20%, transparent);
+  background: var(--surface);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  resize: vertical;
+}
+.sm-source:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.sm-source-error {
+  margin: 0;
+  color: var(--danger-on-surface);
+  font-size: 0.875rem;
+}
