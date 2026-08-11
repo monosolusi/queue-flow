@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter } from 'react-router-dom';
 import { AnalyticsPage, type RangeReportExporter } from './AnalyticsPage';
 import { ToastProvider } from '../toast/toast-context';
+import { daysAgoLocalKey, todayLocalKey } from '../lib/date';
 import type { IAdminApi } from '../api/admin-api';
 import type {
   AuditLogEntryDto,
@@ -429,5 +430,63 @@ describe('AnalyticsPage — export feedback', () => {
 
     await politeRegion().findByText('Laporan .xlsx berhasil diunduh.');
     expect(exporter).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('AnalyticsPage — relative-range presets', () => {
+  it('the default render (last 7 days) has the "7 hari" preset pressed', async () => {
+    const { api } = makeApi();
+    renderPage(api);
+    // The picker renders in the header even while the report loads, so no need
+    // to await the ready state.
+    expect(screen.getByTestId('relative-range-7')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('relative-range-14')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('relative-range-30')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('relative-range-90')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('clicking the 30-hari preset reloads with daysAgoLocalKey(29) + todayLocalKey()', async () => {
+    const { api, stubs } = makeApi();
+    renderPage(api);
+    await screen.findByTestId('metric-total');
+
+    fireEvent.click(screen.getByTestId('relative-range-30'));
+
+    const expectedFrom = daysAgoLocalKey(29);
+    const expectedTo = todayLocalKey();
+    await waitFor(() => expect(stubs.getRangeReport).toHaveBeenLastCalledWith(expectedFrom, expectedTo));
+    // The 30-hari preset is now pressed; 7-hari is not.
+    expect(screen.getByTestId('relative-range-30')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('relative-range-7')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('manually editing a DateField clears the active preset (custom range)', async () => {
+    const { api } = makeApi();
+    renderPage(api);
+    await screen.findByTestId('metric-total');
+    // The default range → 7-hari pressed.
+    expect(screen.getByTestId('relative-range-7')).toHaveAttribute('aria-pressed', 'true');
+
+    // The manager types a custom `from`; the derivation no longer matches any
+    // preset, so all presets are un-pressed.
+    fireEvent.change(screen.getByTestId('analytics-from'), { target: { value: '2026-07-01' } });
+    await waitFor(() =>
+      expect(screen.getByTestId('relative-range-7')).toHaveAttribute('aria-pressed', 'false'),
+    );
+    expect(screen.getByTestId('relative-range-14')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('relative-range-30')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('relative-range-90')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('clicking the 90-hari preset reloads with the 90-day window (the MAX_RANGE_DAYS cap)', async () => {
+    const { api, stubs } = makeApi();
+    renderPage(api);
+    await screen.findByTestId('metric-total');
+
+    fireEvent.click(screen.getByTestId('relative-range-90'));
+    await waitFor(() =>
+      expect(stubs.getRangeReport).toHaveBeenLastCalledWith(daysAgoLocalKey(89), todayLocalKey()),
+    );
+    expect(screen.getByTestId('relative-range-90')).toHaveAttribute('aria-pressed', 'true');
   });
 });
