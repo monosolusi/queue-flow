@@ -1,0 +1,159 @@
+/* Visual workflow builder styles for the "Alur Status Tiket" editor
+   (StateMachineWorkflow). Component-specific only — does NOT touch the
+   generated _tokens.css / _interactions.css. Uses design tokens (--accent,
+   --text, --text-muted, --surface, --radius) so light/dark + brand-color
+   overrides apply. React Flow's own base stylesheet
+   (@xyflow/react/dist/style.css) is imported by the component; the rules below
+   override its defaults to match the QMS design language. */
+
+.sm-workflow-layout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+/* Palette sidebar — the draggable "Status" card + the accessible fallback
+   buttons. Narrow on wide screens, full-width (stacked above the canvas) on
+   narrow ones. */
+.sm-palette {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 11rem;
+  flex: 0 0 11rem;
+}
+.sm-palette__hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+.sm-palette__item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.6rem 0.8rem;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  color: var(--text);
+  font-weight: 600;
+  cursor: grab;
+  user-select: none;
+}
+.sm-palette__item:active {
+  cursor: grabbing;
+}
+.sm-palette .btn {
+  width: 100%;
+  justify-content: center;
+}
+
+/* The React Flow canvas wrapper. Explicit height is required by React Flow
+   (it measures the container). */
+.sm-canvas {
+  flex: 1 1 22rem;
+  min-width: 0;
+  height: 60vh;
+  min-height: 360px;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+/* React Flow theme overrides — align the viewport chrome with QMS tokens. */
+.sm-canvas .react-flow {
+  background: var(--surface);
+}
+
+/* Custom state node. */
+.state-node {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.5rem;
+  min-width: 8rem;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--text) 25%, transparent);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.9rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+/* Canonical (PRD §7 default) states get an accent border so the standard flow
+   is recognizable at a glance. */
+.state-node--canonical {
+  border-color: var(--accent);
+  border-width: 2px;
+}
+.state-node__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-weight: 600;
+  font-size: inherit;
+  text-transform: uppercase;
+  outline: none;
+}
+.state-node__input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: calc(var(--radius) * 0.5);
+}
+.state-node__delete {
+  flex: 0 0 auto;
+  padding: 0.15rem 0.4rem;
+  font-size: 0.75rem;
+}
+
+/* Custom transition edge label (rendered via EdgeLabelRenderer). */
+.transition-edge__label {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.15rem 0.3rem;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--text) 20%, transparent);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+.transition-edge__input {
+  width: 9rem;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.8rem;
+  outline: none;
+}
+.transition-edge__input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: calc(var(--radius) * 0.5);
+}
+.transition-edge__input::placeholder {
+  color: var(--text-muted);
+}
+.transition-edge__delete {
+  padding: 0.1rem 0.35rem;
+  font-size: 0.7rem;
+}
+
+/* Stack the palette above the canvas on narrow screens. */
+@media (max-width: 48rem) {
+  .sm-palette {
+    flex: 1 1 100%;
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .sm-palette__hint {
+    flex: 1 1 100%;
+  }
+  .sm-palette .btn {
+    width: auto;
+  }
+}

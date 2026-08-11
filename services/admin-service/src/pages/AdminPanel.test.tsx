@@ -335,7 +335,7 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     // (a per-section save still sends the full payload — do NOT split into two).
     await goToSection('Alur Status Tiket');
     await userEvent.click(screen.getByLabelText(/Susun alur status sendiri/));
-    const labelInputs = screen.getAllByLabelText(/Transisi 1 label aksi/);
+    const labelInputs = screen.getAllByLabelText('Label aksi');
     fireEvent.change(labelInputs[0], { target: { value: 'Panggil Cepat' } });
 
     await userEvent.click(screen.getByTestId('admin-save'));
@@ -733,7 +733,7 @@ describe('AdminPanel (post-wizard safety rails)', () => {
 
     await userEvent.click(screen.getByLabelText(/Susun alur status sendiri/));
     // Controlled input bound to derived state — set via fireEvent.change.
-    fireEvent.change(screen.getAllByLabelText(/Transisi 1 label aksi/)[0], { target: { value: '' } });
+    fireEvent.change(screen.getAllByLabelText('Label aksi')[0], { target: { value: '' } });
 
     expect(screen.getByTestId('admin-save')).toBeDisabled();
     expect(screen.getByTestId('sm-errors')).toHaveTextContent('Label aksi tidak boleh kosong.');
@@ -741,7 +741,7 @@ describe('AdminPanel (post-wizard safety rails)', () => {
     expect(save).not.toHaveBeenCalled();
 
     // ...and lifts once the label is restored.
-    fireEvent.change(screen.getAllByLabelText(/Transisi 1 label aksi/)[0], {
+    fireEvent.change(screen.getAllByLabelText('Label aksi')[0], {
       target: { value: 'Panggil Berikutnya' },
     });
     expect(screen.queryByTestId('sm-errors')).not.toBeInTheDocument();
