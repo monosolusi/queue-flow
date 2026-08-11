@@ -225,6 +225,13 @@ body,
   font-size: 2.5rem;
   font-weight: 700;
 }
+/* Idle counter (no active ticket): the number is an em dash, muted via the
+   existing --text-muted token (no new shared token — per the per-service-
+   override rule). Font size/weight stay the same so row heights are
+   consistent with serving rows. */
+.counters-serving__item--idle .counters-serving__number {
+  color: var(--text-muted);
+}
 
 /* Waiting queue ("Antrian Berikutnya") ------------------------------------ */
 /* Mirrors .call-history: a surface card with hairline dividers (AC4) and
