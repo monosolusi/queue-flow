@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { AuthProvider } from '../auth/auth-context';
@@ -227,13 +227,38 @@ describe('UsersPage (QUE-43)', () => {
     await userEvent.type(screen.getByLabelText('Username'), 'loket2');
     await userEvent.type(screen.getByLabelText('Kata sandi'), 'rahasia123');
 
-    // `fireEvent` (not userEvent) so both clicks land in ONE tick — `creating`
-    // has not re-rendered yet, so only the synchronous ref guard can stop the
-    // second submit. A state-only guard would create two accounts.
+    // Both clicks MUST be batched inside one `act`. React 18 flushes a discrete
+    // click update synchronously at the end of the event, so two bare
+    // `fireEvent.click`s would leave `disabled` already applied before the
+    // second lands — the second click never reaches the handler and the test
+    // passes with or without the ref (verified by deleting the guard: still
+    // green). Batching keeps `disabled` false across both, so the synchronous
+    // ref is the only thing that can stop the second submit.
     const submit = screen.getByTestId('create-submit');
-    fireEvent.click(submit);
-    fireEvent.click(submit);
+    act(() => {
+      fireEvent.click(submit);
+      fireEvent.click(submit);
+    });
 
     await waitFor(() => expect(createUser).toHaveBeenCalledTimes(1));
+  });
+
+  it('deletes exactly once when the confirm is double-tapped in the same tick', async () => {
+    // Delete is the destructive mutation, so its guard is the one that most
+    // needs pinning. The pre-rebase branch had this test; the merge onto the
+    // modal restructure kept `deletingRef` but lost its coverage.
+    writeToken('t');
+    const { api, deleteUser } = makeUsersApi();
+    renderUsers(makeAuthApi(ADMIN), api);
+    await screen.findByTestId('user-row-u-2');
+
+    await userEvent.click(screen.getByTestId('user-delete-u-2'));
+    const confirm = screen.getByTestId('user-confirm-delete-u-2');
+    act(() => {
+      fireEvent.click(confirm);
+      fireEvent.click(confirm);
+    });
+
+    await waitFor(() => expect(deleteUser).toHaveBeenCalledTimes(1));
   });
 });

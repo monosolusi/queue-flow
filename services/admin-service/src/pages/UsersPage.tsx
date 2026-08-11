@@ -360,10 +360,17 @@ export function UsersPage({ api }: { api: IUsersApi }) {
    *
    * The success toast is the reported gap: the modal closes and the row appears,
    * but a manager who was looking at the button got no confirmation that the
-   * account was actually created. The failure path deliberately stays INLINE in
-   * the modal (`createError`) rather than becoming a toast — the modal stays
-   * open on failure, so the message belongs next to the field the manager has
-   * to correct, not in a corner of the screen.
+   * account was actually created.
+   *
+   * The failure path deliberately stays INLINE in the modal (`createError`)
+   * rather than becoming a toast, even though `AdminPanel` routes both outcomes
+   * to toasts. Proximity is the lesser reason; the decisive one is that this
+   * modal is `aria-modal="true"` and the toast viewport renders OUTSIDE the
+   * dialog subtree, so AT users scoped to the dialog would never reach a toast
+   * fired while it is open — routing a modal-scoped failure to a toast would be
+   * an a11y regression, not just an inconsistency. The success toast is safe for
+   * the complementary reason: the modal is closed before it fires. Do not
+   * "unify" these onto one channel without re-checking that.
    */
   async function onCreate(form: CreateForm) {
     // Synchronous double-submit guard — `creating` only lands after a
@@ -388,13 +395,14 @@ export function UsersPage({ api }: { api: IUsersApi }) {
     }
   }
 
-  /** Deletes the account, announcing success; the refusal stays inline (the
-   *  modal stays open so the manager reads why next to the Hapus they pressed). */
-  async function onDelete(id: string) {
+  /** Deletes the account, announcing success; the refusal stays inline (see the
+   *  aria-modal note on {@link onCreate}). `username` is passed in rather than
+   *  looked up: it is the row the manager clicked, and after the `reload()`
+   *  below that row is gone, so a post-hoc lookup would find nothing. */
+  async function onDelete(id: string, username: string) {
     // Same synchronous guard as `onCreate` — a double-tap must delete once.
     if (deletingRef.current) return;
     deletingRef.current = true;
-    const username = users.find((u) => u.id === id)?.username ?? '';
     setDeleting(true);
     setDeleteError(null);
     try {
@@ -532,7 +540,7 @@ export function UsersPage({ api }: { api: IUsersApi }) {
             setDeletingUser(null);
             setDeleteError(null);
           }}
-          onConfirm={() => onDelete(deletingUser.id)}
+          onConfirm={() => onDelete(deletingUser.id, deletingUser.username)}
           submitting={deleting}
           error={deleteError}
         />
