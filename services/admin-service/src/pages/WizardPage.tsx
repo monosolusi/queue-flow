@@ -11,10 +11,10 @@ import {
   type WizardRoutingRuleDto,
   type ServiceThemesMap,
   DEFAULT_SERVICE_THEMES,
-  type TvDisplayOptionsMap,
-  DEFAULT_TV_DISPLAY_OPTIONS,
+  type TvPanelLayoutMap,
+  DEFAULT_TV_PANEL_LAYOUT,
 } from '../api/types';
-import { coerceTvDisplayOptions } from '../lib/tv-display-options';
+import { coerceTvPanelLayout, defaultTvPanelLayout } from '../lib/tv-panel-layout';
 import { useAuthContext } from '../auth/auth-context';
 import { useSystemConfigContext } from '../config/system-config-context';
 import { writeToken } from '../auth/token-store';
@@ -59,11 +59,12 @@ interface WizardForm {
   // the field is prefilled from GET and passed through finalize so the required
   // `serviceThemes` wire field is always sent on the PUT (never dropped).
   serviceThemes: ServiceThemesMap;
-  // TV-display panel visibility toggles. Payload-only here — the wizard carries
-  // no TV-display UI (the admin panel owns the TV-display settings surface);
-  // the field is prefilled from GET and passed through finalize so the required
-  // `tvDisplayOptions` wire field is always sent on the PUT (never dropped).
-  tvDisplayOptions: TvDisplayOptionsMap;
+  // TV-display panel layout (visibility, order, size). Payload-only here — the
+  // wizard carries no TV-layout UI (the dedicated `/tv-layout` page owns the
+  // TV-display settings surface); the field is prefilled from GET and passed
+  // through finalize so the required `tvPanelLayout` wire field is always sent
+  // on the PUT (never dropped).
+  tvPanelLayout: TvPanelLayoutMap;
   categories: WizardCategoryDto[];
   categoriesMode: 'default' | 'custom';
   /** Raw text value of the step-1 "Jumlah counter aktif" input (digits only,
@@ -145,7 +146,12 @@ function emptyForm(): WizardForm {
     storeName: '',
     brandColor: DEFAULT_BRAND_COLOR,
     serviceThemes: { ...DEFAULT_SERVICE_THEMES },
-    tvDisplayOptions: { ...DEFAULT_TV_DISPLAY_OPTIONS },
+    // A fresh deep-ish copy of the default panel layout — reuses the editor's
+    // lib helper (one owner of the default-copy shape) instead of a local
+    // duplicate. The layout has nested objects, so a one-level spread is not
+    // enough (mirrors the `{ ...DEFAULT_SERVICE_THEMES }` theme spread, which
+    // is shallow because the theme map has primitive values).
+    tvPanelLayout: defaultTvPanelLayout(),
     categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })),
     categoriesMode: 'default',
     counterCount: '1',
@@ -350,7 +356,7 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
           serviceThemes: config.serviceThemes
             ? { ...DEFAULT_SERVICE_THEMES, ...config.serviceThemes }
             : { ...DEFAULT_SERVICE_THEMES },
-          tvDisplayOptions: coerceTvDisplayOptions(config.tvDisplayOptions ?? DEFAULT_TV_DISPLAY_OPTIONS),
+          tvPanelLayout: coerceTvPanelLayout(config.tvPanelLayout ?? DEFAULT_TV_PANEL_LAYOUT),
           categories: loadedCategories,
           // Infer the preset by code+name deep-equal (id-agnostic) so a re-edit
           // of a store that kept the default template stays in default mode and
@@ -549,7 +555,7 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
         routingRules: form.routingRules,
         brandColor: form.brandColor,
         serviceThemes: form.serviceThemes,
-        tvDisplayOptions: form.tvDisplayOptions,
+        tvPanelLayout: form.tvPanelLayout,
       });
       if (isFirstRun.current) {
         // Now that setup-admin created the account and the config save completed

@@ -60,17 +60,44 @@ body,
 .tv-board__active {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  /* No `gap` here — `.tv-board__active` has a single child (`.tv-board__panels`),
+     which carries its own `gap` for the panel list. A gap on a single-child
+     container is a no-op and would be misleading. */
   height: 100%;
   min-height: 0;
 }
-.tv-board__active-grid {
+/* The flex column of visible content panels (tvPanelLayout). Each panel
+   carries an inline `flex: <size> 1 0` for proportional height share; this
+   container just distributes them vertically. Replaces the old fixed 2fr/1fr
+   grid — the manager now controls order + size per panel. */
+.tv-board__panels {
   flex: 1;
-  display: grid;
-  grid-template-columns: 2fr 1fr;
-  grid-template-rows: minmax(0, 1fr);
-  gap: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
   min-height: 0;
+}
+/* Each panel wrapper is a flex column that lets its inner component fill the
+   cell. min-height/min-width:0 so a panel can shrink below its content's
+   intrinsic size (containment, AC3 — mirrors the panel-component rule). */
+.tv-board__panel {
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* Empty state when no content panel is visible (the manager hid all four).
+   Centered status text — role="status" is set in the markup. */
+.tv-board__panels-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: 0;
+  color: var(--text-muted);
+  font-size: 1.5rem;
+  text-align: center;
+  padding: 2rem;
 }
 
 /* Now serving ------------------------------------------------------------- */
@@ -87,25 +114,14 @@ body,
      intrinsic width and clip overflow instead of pushing the grid wider. */
   min-width: 0;
   overflow: hidden;
-  /* Inline-size container so the number sizes to the 2fr column, not the
-     viewport — the one-line guarantee (FR-TV responsiveness). */
+  /* Inline-size container so the number sizes to the panel wrapper, not the
+     viewport — the one-line guarantee (FR-TV responsiveness). In the flex-
+     column model the wrapper is full-width, so the number scales to the board
+     width. */
   container-type: inline-size;
 }
 .now-serving--empty {
   color: var(--text-muted);
-}
-/* Manager hid the now-serving panel (tvDisplayOptions.showNowServing === false).
-   A structural placeholder keeps the 2fr grid cell occupied so the side
-   column's 1fr track and the active-grid layout stay stable, but renders no
-   card surface, radius, or padding — the panel is truly absent (no misleading
-   idle-state copy), not replaced with a blank card. Named `--placeholder`
-   (not the BEM "hidden state" modifier the removed promo crossfade overlay
-   used) so the AC6 negation guarding that overlay stays an honest signal —
-   this is a grid-track placeholder, not an opacity/visibility-toggled layer. */
-.now-serving--placeholder {
-  background: none;
-  border-radius: 0;
-  padding: 0;
 }
 .now-serving__empty-text {
   font-size: 2rem;
@@ -119,7 +135,7 @@ body,
   color: var(--text-muted);
 }
 .now-serving__number {
-  font-size: clamp(5rem, 18cqw, 22rem); /* AC3: fluid to the 2fr column, not the viewport */
+  font-size: clamp(5rem, 18cqw, 22rem); /* AC3: fluid to the panel wrapper, not the viewport */
   font-weight: 800;
   letter-spacing: 0.05em;
   line-height: 1;
@@ -240,10 +256,11 @@ body,
    rule). */
 /* The panel is a size container so children can scale to the panel's height via
    cqh units — all VISIBLE_LIMIT items always fit the panel regardless of its
-   height (responsive). The panel height is determinate because the active
-   grid uses grid-template-rows: minmax(0, 1fr) and the active side column
-   resolves it via flex — size containment is safe (the panel's size is
-   determined by the flex/grid parent, not its content). */
+   height (responsive). The panel height is determinate because the
+   `.tv-board__panel` wrapper resolves its flex share (proportional to the
+   manager-configured `size`) and the wrapper is a flex column — size
+   containment is safe (the panel's size is determined by the flex parent,
+   not its content). */
 .waiting-queue {
   background: var(--surface);
   border-radius: var(--radius);
@@ -315,32 +332,6 @@ body,
   margin: clamp(0.5rem, 1cqh, 1rem) 0 0;
   color: var(--text-muted);
   font-size: clamp(0.9rem, 3cqh, 1.1rem);
-  flex: 0 0 auto;
-}
-
-/* Active grid right column (stacks waiting queue + call history) ------------ */
-/* The 1fr right column stacks the waiting queue (top) above the call history
-   (bottom); now-serving stays the 2fr hero on the left. min-width:0 so the
-   column can shrink below its content's intrinsic width (grid-cell containment,
-   AC3). */
-.tv-board__active-side {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-  min-width: 0;
-  min-height: 0;
-}
-/* The side column's children share the column height — the waiting panel takes
-   a flexible share, the call history keeps its natural height. */
-.tv-board__active-side > .waiting-queue {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: hidden;
-}
-.tv-board__active-side > .call-history {
-  flex: 0 0 auto;
-}
-.tv-board__active-side > .counters-serving {
   flex: 0 0 auto;
 }
 

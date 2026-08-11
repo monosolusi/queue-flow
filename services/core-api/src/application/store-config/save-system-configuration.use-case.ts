@@ -10,7 +10,7 @@ import { StateTransitionRule } from '../../domain/store-config';
 import { DailyResetPolicy, DailyResetMode } from '../../domain/store-config';
 import { BrandColor } from '../../domain/store-config';
 import { ServiceThemes, type ServiceThemesMap } from '../../domain/store-config';
-import { TvDisplayOptions, type TvDisplayOptionsMap } from '../../domain/store-config';
+import { TvPanelLayout, type TvPanelLayoutMap } from '../../domain/store-config';
 import { type IDailyResetSchedulerPort } from '../../domain/store-config';
 import {
   Identifier,
@@ -82,10 +82,11 @@ export interface SaveSystemConfigurationCommand {
    *  defaults any missing surface to `'light'` and rejects a present-but-invalid
    *  value. Not change-gated (like `brandColor`). */
   readonly serviceThemes: ServiceThemesMap;
-  /** Per-panel TV display visibility toggles. Required on the wire; the VO
-   *  defaults any missing key to `true` and rejects a present-but-non-boolean
-   *  value. Not change-gated (like `brandColor`/`serviceThemes`). */
-  readonly tvDisplayOptions: TvDisplayOptionsMap;
+  /** Per-panel TV layout (visibility + order + size). Required on the wire; the
+   *  VO defaults any missing key to its per-key default and rejects a
+   *  present-but-invalid value. Not change-gated (like
+   *  `brandColor`/`serviceThemes`). */
+  readonly tvPanelLayout: TvPanelLayoutMap;
   readonly actor: string;
 }
 
@@ -94,7 +95,7 @@ export interface SaveSystemConfigurationResult {
   readonly storeName: string;
   readonly brandColor: string;
   readonly serviceThemes: ServiceThemesMap;
-  readonly tvDisplayOptions: TvDisplayOptionsMap;
+  readonly tvPanelLayout: TvPanelLayoutMap;
 }
 
 /** Minimal projection used only for audit before/after snapshots. */
@@ -191,10 +192,10 @@ export class SaveSystemConfigurationUseCase {
     // Per-service themes — same shape: pure appearance, not change-gated, no
     // post-commit side-effect. Validated pre-tx so a malformed map fails fast.
     const serviceThemes = ServiceThemes.of(command.serviceThemes);
-    // Per-panel TV display options — same shape: pure appearance, not
-    // change-gated, no post-commit side-effect. Validated pre-tx so a malformed
-    // map fails fast.
-    const tvDisplayOptions = TvDisplayOptions.of(command.tvDisplayOptions);
+    // Per-panel TV layout — same shape: pure appearance, not change-gated, no
+    // post-commit side-effect. Validated pre-tx so a malformed layout fails
+    // fast.
+    const tvPanelLayout = TvPanelLayout.of(command.tvPanelLayout);
     const newCategories = this.buildCategories(command.categories);
     const codeToId = new Map(newCategories.map((c) => [c.code, c.id.value]));
     const newRules = this.buildRoutingRules(command.routingRules, codeToId);
@@ -240,7 +241,7 @@ export class SaveSystemConfigurationUseCase {
         dailyResetPolicy,
         brandColor,
         serviceThemes,
-        tvDisplayOptions,
+        tvPanelLayout,
       });
       system.completeInitialSetup(); // idempotent — validates store name, flips the flag
 
@@ -290,7 +291,7 @@ export class SaveSystemConfigurationUseCase {
         storeName: system.storeName,
         brandColor: system.brandColor.value,
         serviceThemes: system.serviceThemes.toDto(),
-        tvDisplayOptions: system.tvDisplayOptions.toDto(),
+        tvPanelLayout: system.tvPanelLayout.toDto(),
       };
     });
 

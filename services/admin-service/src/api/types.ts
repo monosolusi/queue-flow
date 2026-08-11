@@ -28,37 +28,57 @@ export const DEFAULT_SERVICE_THEMES: ServiceThemesMap = {
 };
 
 /**
- * The five TV-display panels a manager can show/hide independently. The keys
- * mirror core-api's `TvDisplayOptionKey` (`domain/store-config/value-objects/
- * tv-display-options.ts`) exactly — the friendly display names live in
- * {@link import('../lib/labels').TV_DISPLAY_OPTION_LABELS}, never here.
+ * The five TV-display panels a manager can reorder/resize/show independently.
+ * The keys mirror core-api's `TvPanelKey` (`domain/store-config/value-objects/
+ * tv-panel-layout.ts`) exactly — the friendly display names live in
+ * {@link import('../lib/labels').TV_PANEL_LABELS}, never here.
+ *
+ * `runningText` is a fixed marquee footer — its `order`/`size` are stored for
+ * map uniformity but ignored by the TV (always rendered last as footer). The
+ * admin editor exposes only a visibility toggle for it (no drag handle / no
+ * size control). Documented invariant, mirrored across core-api / admin /
+ * tv-display-service (the three duplicated type definitions are intentional
+ * per the standalone-service ethos — there is no shared package).
  */
-export type TvDisplayOptionKey =
-  | 'showNowServing'
-  | 'showWaitingQueue'
-  | 'showCallHistory'
-  | 'showCountersServing'
-  | 'showRunningText';
-/** Persisted shape: one boolean visibility toggle per TV panel. */
-export type TvDisplayOptionsMap = Record<TvDisplayOptionKey, boolean>;
-/** Stable display order of the toggle keys (matches the admin section's row
- *  order and the backend `TV_DISPLAY_OPTION_KEYS`). */
-export const TV_DISPLAY_OPTION_KEYS: readonly TvDisplayOptionKey[] = [
-  'showNowServing',
-  'showWaitingQueue',
-  'showCallHistory',
-  'showCountersServing',
-  'showRunningText',
+export type TvPanelKey =
+  | 'nowServing'
+  | 'waitingQueue'
+  | 'callHistory'
+  | 'countersServing'
+  | 'runningText';
+/** Per-panel config: visibility, render order, and a 1..4 flex-height weight
+ *  (1=Kecil, 2=Sedang, 3=Besar, 4=Penuh). */
+export interface TvPanelConfig {
+  visible: boolean;
+  order: number;
+  size: number;
+}
+/** Persisted shape: one {@link TvPanelConfig} per TV panel. */
+export type TvPanelLayoutMap = Record<TvPanelKey, TvPanelConfig>;
+/** Stable key list (matches the backend `TV_PANEL_KEYS`). */
+export const TV_PANEL_KEYS: readonly TvPanelKey[] = [
+  'nowServing',
+  'waitingQueue',
+  'callHistory',
+  'countersServing',
+  'runningText',
 ];
-/** All-visible — matches `TvDisplayOptions.DEFAULT` (the PRD default so a store
- *  that never configures this keeps the existing TV layout — zero visual
- *  regression, mirroring `DEFAULT_SERVICE_THEMES`). */
-export const DEFAULT_TV_DISPLAY_OPTIONS: TvDisplayOptionsMap = {
-  showNowServing: true,
-  showWaitingQueue: true,
-  showCallHistory: true,
-  showCountersServing: true,
-  showRunningText: true,
+/** Minimum panel size (Kecil). */
+export const TV_PANEL_SIZE_MIN = 1;
+/** Maximum panel size (Penuh). */
+export const TV_PANEL_SIZE_MAX = 4;
+/** All-visible default with the PRD §7 order + proportional sizes — matches
+ *  `TvPanelLayout.DEFAULT` (the PRD default so a store that never configures
+ *  this keeps the existing TV layout — zero visual regression, mirroring
+ *  `DEFAULT_SERVICE_THEMES`). `nowServing` is the hero (size 4); the others
+ *  share the side column at Sedang (2); `runningText` is the footer (order/size
+ *  stored but ignored by the TV). */
+export const DEFAULT_TV_PANEL_LAYOUT: TvPanelLayoutMap = {
+  nowServing: { visible: true, order: 0, size: 4 },
+  waitingQueue: { visible: true, order: 1, size: 2 },
+  callHistory: { visible: true, order: 2, size: 2 },
+  countersServing: { visible: true, order: 3, size: 2 },
+  runningText: { visible: true, order: 4, size: 2 },
 };
 
 export interface StateTransitionDto {
@@ -108,10 +128,11 @@ export interface SystemConfigurationDto {
   /** Per-service light/dark theme map (QUE-47). Admin reads + edits the full
    *  map; each other service reads only its own surface key (ISP). */
   readonly serviceThemes: ServiceThemesMap;
-  /** Per-panel visibility toggles for the TV display. Admin reads + edits the
-   *  full map; the TV service reads the whole map at boot and gates each panel
-   *  on its toggle (all-visible default — zero visual regression). */
-  readonly tvDisplayOptions: TvDisplayOptionsMap;
+  /** Per-panel layout for the TV display (visibility, order, size). Admin reads
+   *  + edits the full map; the TV service reads the whole map at boot and lays
+   *  the visible panels out in `order` with `flex: <size> 1 0` height weights
+   *  (all-visible default — zero visual regression). */
+  readonly tvPanelLayout: TvPanelLayoutMap;
 }
 
 /**
@@ -150,7 +171,7 @@ export interface SaveSystemConfigurationPayload {
   readonly routingRules: readonly WizardRoutingRuleDto[];
   readonly brandColor: string;
   readonly serviceThemes: ServiceThemesMap;
-  readonly tvDisplayOptions: TvDisplayOptionsMap;
+  readonly tvPanelLayout: TvPanelLayoutMap;
 }
 
 /** Result of `PUT /api/system/config`. */
@@ -159,7 +180,7 @@ export interface SaveSystemConfigurationResult {
   readonly storeName: string;
   readonly brandColor: string;
   readonly serviceThemes: ServiceThemesMap;
-  readonly tvDisplayOptions: TvDisplayOptionsMap;
+  readonly tvPanelLayout: TvPanelLayoutMap;
 }
 
 /**

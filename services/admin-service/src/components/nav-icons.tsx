@@ -83,3 +83,14 @@ export function UsersIcon() {
     </>,
   );
 }
+
+export function TvLayoutIcon() {
+  // A display screen with stacked panels of varying height — "TV panel layout".
+  return navIcon(
+    <>
+      <rect x={3} y={4} width={18} height={13} rx={1.5} />
+      <path d="M6 14V8M10 14v-3M14 14v-2M18 14V9" />
+      <path d="M9 20h6" />
+    </>,
+  );
+}

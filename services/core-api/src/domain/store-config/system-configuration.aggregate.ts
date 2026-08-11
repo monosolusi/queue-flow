@@ -4,7 +4,7 @@ import { InvalidValueObjectException } from '../shared/errors';
 import { BrandColor } from './value-objects/brand-color';
 import { DailyResetPolicy } from './value-objects/daily-reset-policy';
 import { ServiceThemes } from './value-objects/service-themes';
-import { TvDisplayOptions } from './value-objects/tv-display-options';
+import { TvPanelLayout } from './value-objects/tv-panel-layout';
 import { StateMachine } from './state-machine';
 
 /**
@@ -20,7 +20,7 @@ export class SystemConfiguration extends AggregateRoot {
   private _dailyResetPolicy: DailyResetPolicy;
   private _brandColor: BrandColor;
   private _serviceThemes: ServiceThemes;
-  private _tvDisplayOptions: TvDisplayOptions;
+  private _tvPanelLayout: TvPanelLayout;
 
   private constructor(
     id: Identifier,
@@ -30,7 +30,7 @@ export class SystemConfiguration extends AggregateRoot {
     dailyResetPolicy: DailyResetPolicy,
     brandColor: BrandColor,
     serviceThemes: ServiceThemes,
-    tvDisplayOptions: TvDisplayOptions,
+    tvPanelLayout: TvPanelLayout,
   ) {
     super(id);
     this._storeName = storeName;
@@ -39,19 +39,19 @@ export class SystemConfiguration extends AggregateRoot {
     this._dailyResetPolicy = dailyResetPolicy;
     this._brandColor = brandColor;
     this._serviceThemes = serviceThemes;
-    this._tvDisplayOptions = tvDisplayOptions;
+    this._tvPanelLayout = tvPanelLayout;
   }
 
   /** Creates a fresh, not-yet-configured instance with the default state machine,
-   * brand color, service themes, and TV display options. `brandColor` +
-   * `serviceThemes` + `tvDisplayOptions` default so the dev seed and acceptance
+   * brand color, service themes, and TV panel layout. `brandColor` +
+   * `serviceThemes` + `tvPanelLayout` default so the dev seed and acceptance
    * `seedPrdConfig` (2-arg calls) need no change. */
   public static create(
     id: Identifier,
     storeName = '',
     brandColor: BrandColor = BrandColor.DEFAULT,
     serviceThemes: ServiceThemes = ServiceThemes.DEFAULT,
-    tvDisplayOptions: TvDisplayOptions = TvDisplayOptions.DEFAULT,
+    tvPanelLayout: TvPanelLayout = TvPanelLayout.DEFAULT,
   ): SystemConfiguration {
     return new SystemConfiguration(
       id,
@@ -61,7 +61,7 @@ export class SystemConfiguration extends AggregateRoot {
       DailyResetPolicy.DEFAULT,
       brandColor,
       serviceThemes,
-      tvDisplayOptions,
+      tvPanelLayout,
     );
   }
 
@@ -73,7 +73,7 @@ export class SystemConfiguration extends AggregateRoot {
     dailyResetPolicy: DailyResetPolicy;
     brandColor: BrandColor;
     serviceThemes: ServiceThemes;
-    tvDisplayOptions: TvDisplayOptions;
+    tvPanelLayout: TvPanelLayout;
   }): SystemConfiguration {
     return new SystemConfiguration(
       params.id,
@@ -83,7 +83,7 @@ export class SystemConfiguration extends AggregateRoot {
       params.dailyResetPolicy,
       params.brandColor,
       params.serviceThemes,
-      params.tvDisplayOptions,
+      params.tvPanelLayout,
     );
   }
 
@@ -111,8 +111,8 @@ export class SystemConfiguration extends AggregateRoot {
     return this._serviceThemes;
   }
 
-  public get tvDisplayOptions(): TvDisplayOptions {
-    return this._tvDisplayOptions;
+  public get tvPanelLayout(): TvPanelLayout {
+    return this._tvPanelLayout;
   }
 
   public setStoreName(name: string): void {

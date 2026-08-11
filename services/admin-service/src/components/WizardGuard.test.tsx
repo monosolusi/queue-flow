@@ -5,7 +5,7 @@ import { WizardGuard } from './WizardGuard';
 import { SystemConfigProvider } from '../config/system-config-context';
 import type { ISystemConfigApi } from '../api/admin-api';
 import type { SystemConfigurationDto } from '../api/types';
-import { DEFAULT_SERVICE_THEMES, DEFAULT_TV_DISPLAY_OPTIONS } from '../api/types';
+import { DEFAULT_SERVICE_THEMES, DEFAULT_TV_PANEL_LAYOUT } from '../api/types';
 
 function cleanStore(): SystemConfigurationDto {
   return {
@@ -17,7 +17,7 @@ function cleanStore(): SystemConfigurationDto {
     routingRules: [],
     brandColor: '#2563eb',
     serviceThemes: { ...DEFAULT_SERVICE_THEMES },
-    tvDisplayOptions: { ...DEFAULT_TV_DISPLAY_OPTIONS },
+    tvPanelLayout: { ...DEFAULT_TV_PANEL_LAYOUT },
   };
 }
 

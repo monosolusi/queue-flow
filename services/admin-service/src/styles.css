@@ -2056,3 +2056,270 @@ fieldset {
 .users__role {
   font-weight: 600;
 }
+
+/* --- TV Panel Layout editor (/tv-layout) ------------------------------------
+ * The dedicated TV-display layout page (replaces the old /admin/config TV
+ * checkbox section). Drag-and-drop reorder + a per-panel segmented size
+ * control (Kecil/Sedang/Besar/Penuh -> 1..4) + visibility toggle + a live
+ * proportional preview. Uses design tokens only (zero hardcoded color
+ * literals) so [data-theme="dark"] flips for free. Touch targets >= 44px
+ * (AC5). Reduced-motion guarded. The runningText panel is a fixed footer
+ * (order/size stored but ignored by the TV), so it renders as a separate
+ * visibility-only row below the list.
+ */
+.tv-layout-page {
+  /* Composes .page (max-width/padding/flex). The save button row is the only
+   * page-specific geometry — sticky to the foot so a long list never buries
+   * it. */
+}
+.tv-layout-page--loading {
+  text-align: center;
+  padding: 3rem;
+  color: var(--text-muted);
+}
+.tv-layout-page__save {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.tv-layout-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.tv-layout-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.tv-layout-row {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--surface-2);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.75rem;
+  transition: opacity 0.15s ease, box-shadow 0.15s ease;
+}
+.tv-layout-row--dragging {
+  opacity: 0.5;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.tv-layout-row__main {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.tv-layout-row__handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  padding: 0;
+  border: 1px solid var(--surface-2);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: grab;
+  touch-action: none;
+  flex: 0 0 auto;
+}
+.tv-layout-row__handle:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+.tv-layout-row__handle svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+.tv-layout-row--dragging .tv-layout-row__handle,
+.tv-layout-row__handle:active {
+  cursor: grabbing;
+}
+
+.tv-layout-row__name {
+  flex: 1 1 12rem;
+  font-weight: 600;
+  color: var(--text);
+  min-width: 0;
+}
+
+/* Size segmented control (role="radiogroup"): one labeled radio per size. */
+.tv-layout-row__size {
+  display: inline-flex;
+  border: 1px solid var(--surface-2);
+  border-radius: var(--radius);
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+.tv-layout-row__size-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.75rem;
+  padding: 0 0.75rem;
+  cursor: pointer;
+  color: var(--text-muted);
+  border-right: 1px solid var(--surface-2);
+  background: var(--surface);
+  font-size: 0.9rem;
+  user-select: none;
+}
+.tv-layout-row__size-option:last-child {
+  border-right: none;
+}
+.tv-layout-row__size-option input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  /* sr-only-style clip so the radio stays keyboard-focusable but invisible. */
+  clip: rect(0, 0, 0, 0);
+  margin: -1px;
+}
+.tv-layout-row__size-option:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.tv-layout-row__size-option--selected {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  color: var(--accent-on-surface);
+  font-weight: 600;
+}
+
+.tv-layout-row__vis {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2.75rem;
+  color: var(--text);
+  font-size: 0.9rem;
+  flex: 0 0 auto;
+}
+.tv-layout-row__vis input {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+}
+
+.tv-layout-row__move {
+  display: inline-flex;
+  gap: 0.25rem;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+.tv-layout-row__move-btn {
+  min-height: 2.75rem;
+  min-width: 2.75rem;
+  padding: 0 0.6rem;
+  border: 1px solid var(--surface-2);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.tv-layout-row__move-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-on-surface);
+}
+.tv-layout-row__move-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Drop indicator: a 2px accent line between rows. */
+.tv-layout__drop-indicator {
+  height: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+  margin: 0.25rem 0;
+}
+
+/* runningText footer row: visibility-only (no drag handle / no size control). */
+.tv-layout__running-text-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--surface-2);
+  border-radius: var(--radius);
+}
+.tv-layout__running-text-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+/* Live preview: a flex column of proportional bars (height ~ size) in order,
+ * labeled with panel names, + a thin footer bar for runningText if visible. */
+.tv-layout-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-height: 16rem;
+  padding: 0.75rem;
+  background: var(--surface-2);
+  border: 1px solid var(--surface-2);
+  border-radius: var(--radius);
+}
+.tv-layout-preview__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--surface-2);
+  border-radius: calc(var(--radius) * 0.75);
+  color: var(--text);
+  min-height: 0;
+  overflow: hidden;
+}
+.tv-layout-preview__label {
+  font-weight: 600;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tv-layout-preview__size {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  flex: 0 0 auto;
+}
+.tv-layout-preview__footer {
+  display: flex;
+  align-items: center;
+  padding: 0.4rem 0.75rem;
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--surface));
+  border-radius: calc(var(--radius) * 0.75);
+  color: var(--accent-on-surface);
+  flex: 0 0 auto;
+}
+.tv-layout-preview__empty {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 2rem;
+  font-size: 0.9rem;
+}
+
+/* Reduced motion: disable the drag row transition (the only animated property
+ * on this page). The @media parenthetical ) sits between the keyword and the
+ * block brace, so the matcher tolerates it. */
+@media (prefers-reduced-motion: reduce) {
+  .tv-layout-row {
+    transition: none;
+  }
+}

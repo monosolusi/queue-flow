@@ -1,8 +1,8 @@
 import type { SystemConfigurationDto } from '../../api/types';
-import { DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES, DEFAULT_TV_DISPLAY_OPTIONS } from '../../api/types';
-import type { DailyResetMode, PriorityPolicy, ServiceThemesMap, TvDisplayOptionsMap } from '../../api/types';
+import { DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES, DEFAULT_TV_PANEL_LAYOUT } from '../../api/types';
+import type { DailyResetMode, PriorityPolicy, ServiceThemesMap, TvPanelLayoutMap } from '../../api/types';
 import { coerceServiceThemes } from '../../lib/service-themes';
-import { coerceTvDisplayOptions } from '../../lib/tv-display-options';
+import { coerceTvPanelLayout } from '../../lib/tv-panel-layout';
 import { BROWSER_TIMEZONE } from '../../lib/timezone';
 import {
   type StateMachineForm,
@@ -52,10 +52,11 @@ export interface AdminForm {
   /** Editable per-service light/dark theme map (QUE-47) — the manager sets each
    *  service's theme from this one panel; each service applies its own key at boot. */
   serviceThemes: ServiceThemesMap;
-  /** Editable TV-display panel visibility toggles — the manager shows/hides each
-   *  TV panel from this one panel; the TV service reads the map at boot and gates
-   *  each panel on its toggle (all-visible default). */
-  tvDisplayOptions: TvDisplayOptionsMap;
+  /** TV-display panel layout (visibility, order, size). Payload-only here — the
+   *  dedicated `/tv-layout` page owns the TV-display editing surface; this field
+   *  is prefilled from GET and passed through the full-payload PUT unchanged so
+   *  the required `tvPanelLayout` wire field is always sent (never dropped). */
+  tvPanelLayout: TvPanelLayoutMap;
   categories: CategoryRow[];
   routingRules: RoutingRow[];
   dailyReset: {
@@ -95,7 +96,7 @@ export function toForm(config: SystemConfigurationDto): AdminForm {
     serviceThemes: coerceServiceThemes(config.serviceThemes ?? DEFAULT_SERVICE_THEMES),
     // Coerce a partial/degraded GET projection into a complete 5-key toggle map
     // (defaults an unknown key to true — mirrors the backend VO).
-    tvDisplayOptions: coerceTvDisplayOptions(config.tvDisplayOptions ?? DEFAULT_TV_DISPLAY_OPTIONS),
+    tvPanelLayout: coerceTvPanelLayout(config.tvPanelLayout ?? DEFAULT_TV_PANEL_LAYOUT),
     categories:
       config.categories.length > 0
         ? config.categories.map((c) => ({ id: c.id, rowKey: `cat-${c.id}`, code: c.code, name: c.name }))

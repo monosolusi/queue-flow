@@ -51,55 +51,77 @@ export interface TvBoardStateDto {
 export type ThemeMode = 'light' | 'dark';
 
 /**
- * The five TV-display panels a manager can show/hide independently. The keys
- * mirror core-api's `TvDisplayOptionKey` wire identifiers exactly (the wire
- * contract is duplicated here intentionally — no shared package, per the
- * standalone-service ethos).
+ * The five TV-display panels a manager can arrange independently. The keys
+ * mirror core-api's `TvPanelKey` wire identifiers exactly (the wire contract
+ * is duplicated here intentionally — no shared package, per the standalone-
+ * service ethos; friendly panel names live elsewhere — `labels`-style helpers
+ * are an admin-service concern, not a TV concern).
+ *
+ * Per-panel `{ visible, order, size }`:
+ * - `visible` gates rendering (the TV renders only visible panels).
+ * - `order` is the vertical position among the visible content panels
+ *   (`runningText` is a fixed footer; its `order` is stored for map
+ *   uniformity but **ignored by the TV**).
+ * - `size` is the proportional height share (`flex: <size> 1 0`); 1..4.
  */
-export type TvDisplayOptionKey =
-  | 'showNowServing'
-  | 'showWaitingQueue'
-  | 'showCallHistory'
-  | 'showCountersServing'
-  | 'showRunningText';
+export type TvPanelKey =
+  | 'nowServing'
+  | 'waitingQueue'
+  | 'callHistory'
+  | 'countersServing'
+  | 'runningText';
 
-/** Per-panel visibility toggle map, returned by `GET /api/system/config`. */
-export type TvDisplayOptionsMap = Record<TvDisplayOptionKey, boolean>;
+export interface TvPanelConfig {
+  readonly visible: boolean;
+  readonly order: number;
+  readonly size: number;
+}
 
-/** All-visible — the default so a store that never configures this keeps the
- * existing TV layout (zero visual regression). Mirrors core-api's
- * `TvDisplayOptions.DEFAULT`. */
-export const DEFAULT_TV_DISPLAY_OPTIONS: TvDisplayOptionsMap = {
-  showNowServing: true,
-  showWaitingQueue: true,
-  showCallHistory: true,
-  showCountersServing: true,
-  showRunningText: true,
-};
+/** Per-panel layout map, returned by `GET /api/system/config`. */
+export type TvPanelLayoutMap = Record<TvPanelKey, TvPanelConfig>;
 
-export const TV_DISPLAY_OPTION_KEYS: readonly TvDisplayOptionKey[] = [
-  'showNowServing',
-  'showWaitingQueue',
-  'showCallHistory',
-  'showCountersServing',
-  'showRunningText',
+export const TV_PANEL_SIZE_MIN = 1;
+export const TV_PANEL_SIZE_MAX = 4;
+
+/** The canonical key order: nowServing → waitingQueue → callHistory →
+ * countersServing → runningText. Used for iteration + default `order` values. */
+export const TV_PANEL_KEYS: readonly TvPanelKey[] = [
+  'nowServing',
+  'waitingQueue',
+  'callHistory',
+  'countersServing',
+  'runningText',
 ];
+
+/** All-visible, default sizes — `nowServing` is the hero (size 4, order 0);
+ * the side panels share size 2; `runningText` is the fixed footer
+ * (order 4). Mirrors core-api's `DEFAULT_TV_PANEL_LAYOUT` so a store that
+ * never configures this keeps the existing TV layout (zero visual regression
+ * — the hero is the biggest, the side panels share equal height). */
+export const DEFAULT_TV_PANEL_LAYOUT: TvPanelLayoutMap = {
+  nowServing: { visible: true, order: 0, size: 4 },
+  waitingQueue: { visible: true, order: 1, size: 2 },
+  callHistory: { visible: true, order: 2, size: 2 },
+  countersServing: { visible: true, order: 3, size: 2 },
+  runningText: { visible: true, order: 4, size: 2 },
+};
 
 /** Store profile, returned by `GET /api/system/config`. The TV needs the store
  * name (running text) + the manager-configured brand color (QUE-36) applied to
  * the runtime `--accent` (QUE-37 AC6) + this service's theme (the tv surface
- * key from `serviceThemes`, QUE-47) + the per-panel TV display visibility
- * toggles + the routing rules (for the counter id→name map used by the
- * counters-serving list — a client-side name join mirroring the categories
- * name-lookup precedent: a counter name is from an entity the board read
- * model does not touch, so the TV joins it client-side via the public config
- * response's `routingRules`). */
+ * key from `serviceThemes`, QUE-47) + the per-panel TV layout
+ * (`tvPanelLayout` — visible/order/size for each of the five panels) + the
+ * routing rules (for the counter id→name map used by the counters-serving
+ * list — a client-side name join mirroring the categories name-lookup
+ * precedent: a counter name is from an entity the board read model does not
+ * touch, so the TV joins it client-side via the public config response's
+ * `routingRules`). */
 export interface SystemConfigurationDto {
   readonly isInitialSetupCompleted: boolean;
   readonly storeName: string;
   readonly brandColor: string;
   readonly serviceThemes: { readonly tv: ThemeMode };
-  readonly tvDisplayOptions: TvDisplayOptionsMap;
+  readonly tvPanelLayout: TvPanelLayoutMap;
   /** Slim slice — the TV reads only `counterId` + `counterName` for the
    * counters-serving client-side name join; the other routing fields are
    * ignored. */

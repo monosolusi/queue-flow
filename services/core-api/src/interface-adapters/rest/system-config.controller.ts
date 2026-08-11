@@ -7,7 +7,7 @@ import {
   type SaveSystemConfigurationCommand,
 } from '../../application/store-config';
 import { Role, type AuthenticatedPrincipal } from '../../domain/identity';
-import { TV_DISPLAY_OPTION_KEYS } from '../../domain/store-config';
+import { TV_PANEL_KEYS } from '../../domain/store-config';
 import { AuthGuard } from '../auth/auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -37,7 +37,7 @@ const REQUIRED_CONFIG_FIELDS: ReadonlyArray<keyof SaveSystemConfigurationCommand
   'routingRules',
   'brandColor',
   'serviceThemes',
-  'tvDisplayOptions',
+  'tvPanelLayout',
 ];
 
 /**
@@ -62,7 +62,7 @@ const CONFIG_FIELD_SHAPES: ReadonlyArray<{
   { field: 'categories', kind: 'array' },
   { field: 'routingRules', kind: 'array' },
   { field: 'serviceThemes', kind: 'object' },
-  { field: 'tvDisplayOptions', kind: 'object' },
+  { field: 'tvPanelLayout', kind: 'object' },
 ];
 
 /** True when `value` does not match the expected `kind` (object = plain object, not array). */
@@ -160,17 +160,30 @@ function configNestedShapeErrors(body: Partial<SaveSystemConfigurationCommand>):
       }
     });
   }
-  // tvDisplayOptions: the VO already throws `InvalidValueObjectException`
-  // (→ 400) on a present non-boolean; this boundary guard only gives a
-  // consistent, field-named error message (mirrors the dailyReset.timezone
-  // guard). Unknown extra keys are ignored — the VO only reads the 5
-  // canonical keys.
-  const tvOpts = body.tvDisplayOptions;
-  if (tvOpts != null && typeof tvOpts === 'object' && !Array.isArray(tvOpts)) {
-    for (const key of TV_DISPLAY_OPTION_KEYS) {
-      const value = (tvOpts as Record<string, unknown>)[key];
-      if (value != null && typeof value !== 'boolean') {
-        errs.push(`tvDisplayOptions.${key} must be a boolean`);
+  // tvPanelLayout: the VO throws `InvalidValueObjectException` (→ 400) on a
+  // present-but-invalid entry (non-object, bad visible/order/size, out-of-range
+  // size). This boundary guard catches the crash class (a non-object entry
+  // would TypeError before the VO's own guard) and gives consistent,
+  // field-named error messages. Range/integer enforcement stays in the VO.
+  // Unknown extra keys are ignored — the VO only reads the 5 canonical keys.
+  const tvLayout = body.tvPanelLayout;
+  if (tvLayout != null && typeof tvLayout === 'object' && !Array.isArray(tvLayout)) {
+    for (const key of TV_PANEL_KEYS) {
+      const entry = (tvLayout as Record<string, unknown>)[key];
+      if (entry == null) continue;
+      if (typeof entry !== 'object' || Array.isArray(entry)) {
+        errs.push(`tvPanelLayout.${key} must be a plain object`);
+        continue;
+      }
+      const e = entry as Record<string, unknown>;
+      if (e.visible != null && typeof e.visible !== 'boolean') {
+        errs.push(`tvPanelLayout.${key}.visible must be a boolean`);
+      }
+      if (e.order != null && typeof e.order !== 'number') {
+        errs.push(`tvPanelLayout.${key}.order must be a number`);
+      }
+      if (e.size != null && typeof e.size !== 'number') {
+        errs.push(`tvPanelLayout.${key}.size must be a number`);
       }
     }
   }
@@ -260,7 +273,7 @@ export class SystemConfigController {
       routingRules: body.routingRules!,
       brandColor: body.brandColor!,
       serviceThemes: body.serviceThemes!,
-      tvDisplayOptions: body.tvDisplayOptions!,
+      tvPanelLayout: body.tvPanelLayout!,
       actor: principal?.username ?? 'system',
     };
     return this.saveConfig.execute(command);

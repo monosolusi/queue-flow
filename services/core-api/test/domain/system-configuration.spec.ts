@@ -8,7 +8,7 @@ import {
   StateMachine,
   StateSchema,
   SystemConfiguration,
-  TvDisplayOptions,
+  TvPanelLayout,
 } from '../../src/domain/store-config';
 import { DEFAULT_TIMEZONE } from '../../src/domain/store-config/value-objects/timezone';
 import { TicketStatus } from '../../src/domain/queue';
@@ -200,15 +200,15 @@ describe('SystemConfiguration aggregate', () => {
     });
   });
 
-  it('defaults tvDisplayOptions to all-visible (zero visual regression)', () => {
+  it('defaults tvPanelLayout to the PRD-default layout (zero visual regression)', () => {
     const config = SystemConfiguration.create(Identifier.generate());
-    expect(config.tvDisplayOptions).toBe(TvDisplayOptions.DEFAULT);
-    expect(config.tvDisplayOptions.toDto()).toEqual({
-      showNowServing: true,
-      showWaitingQueue: true,
-      showCallHistory: true,
-      showCountersServing: true,
-      showRunningText: true,
+    expect(config.tvPanelLayout).toBe(TvPanelLayout.DEFAULT);
+    expect(config.tvPanelLayout.toDto()).toEqual({
+      nowServing: { visible: true, order: 0, size: 4 },
+      waitingQueue: { visible: true, order: 1, size: 2 },
+      callHistory: { visible: true, order: 2, size: 2 },
+      countersServing: { visible: true, order: 3, size: 2 },
+      runningText: { visible: true, order: 4, size: 2 },
     });
   });
 
@@ -221,7 +221,7 @@ describe('SystemConfiguration aggregate', () => {
       dailyResetPolicy: DailyResetPolicy.DEFAULT,
       brandColor: BrandColor.of('#aabbcc'),
       serviceThemes: ServiceThemes.DEFAULT,
-      tvDisplayOptions: TvDisplayOptions.DEFAULT,
+      tvPanelLayout: TvPanelLayout.DEFAULT,
     });
     expect(config.brandColor.value).toBe('#aabbcc');
   });
@@ -235,7 +235,7 @@ describe('SystemConfiguration aggregate', () => {
       dailyResetPolicy: DailyResetPolicy.DEFAULT,
       brandColor: BrandColor.DEFAULT,
       serviceThemes: ServiceThemes.of({ kiosk: 'light', tv: 'dark', caller: 'dark', admin: 'light' }),
-      tvDisplayOptions: TvDisplayOptions.DEFAULT,
+      tvPanelLayout: TvPanelLayout.DEFAULT,
     });
     expect(config.serviceThemes.toDto()).toEqual({
       kiosk: 'light',
@@ -245,7 +245,7 @@ describe('SystemConfiguration aggregate', () => {
     });
   });
 
-  it('reconstitute carries custom TV display options through', () => {
+  it('reconstitute carries a custom TV panel layout through', () => {
     const config = SystemConfiguration.reconstitute({
       id: Identifier.generate(),
       storeName: 'Toko Brand',
@@ -254,20 +254,20 @@ describe('SystemConfiguration aggregate', () => {
       dailyResetPolicy: DailyResetPolicy.DEFAULT,
       brandColor: BrandColor.DEFAULT,
       serviceThemes: ServiceThemes.DEFAULT,
-      tvDisplayOptions: TvDisplayOptions.of({
-        showNowServing: true,
-        showWaitingQueue: false,
-        showCallHistory: true,
-        showCountersServing: false,
-        showRunningText: true,
+      tvPanelLayout: TvPanelLayout.of({
+        nowServing: { visible: true, order: 1, size: 3 },
+        waitingQueue: { visible: false, order: 0, size: 2 },
+        callHistory: { visible: true, order: 2, size: 2 },
+        countersServing: { visible: false, order: 3, size: 2 },
+        runningText: { visible: true, order: 4, size: 2 },
       }),
     });
-    expect(config.tvDisplayOptions.toDto()).toEqual({
-      showNowServing: true,
-      showWaitingQueue: false,
-      showCallHistory: true,
-      showCountersServing: false,
-      showRunningText: true,
+    expect(config.tvPanelLayout.toDto()).toEqual({
+      nowServing: { visible: true, order: 1, size: 3 },
+      waitingQueue: { visible: false, order: 0, size: 2 },
+      callHistory: { visible: true, order: 2, size: 2 },
+      countersServing: { visible: false, order: 3, size: 2 },
+      runningText: { visible: true, order: 4, size: 2 },
     });
   });
 

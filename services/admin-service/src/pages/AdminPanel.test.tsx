@@ -10,13 +10,13 @@ import {
   DEFAULT_STATE_MACHINE,
   DEFAULT_BRAND_COLOR,
   DEFAULT_SERVICE_THEMES,
-  DEFAULT_TV_DISPLAY_OPTIONS,
+  DEFAULT_TV_PANEL_LAYOUT,
   type CleanupTransactionLogResultDto,
   type ManualResetResultDto,
   type SaveSystemConfigurationPayload,
   type ServiceThemesMap,
   type SystemConfigurationDto,
-  type TvDisplayOptionsMap,
+  type TvPanelLayoutMap,
 } from '../api/types';
 
 /**
@@ -45,7 +45,7 @@ function configuredStore(): SystemConfigurationDto {
     ],
     brandColor: DEFAULT_BRAND_COLOR,
     serviceThemes: { ...DEFAULT_SERVICE_THEMES },
-    tvDisplayOptions: { ...DEFAULT_TV_DISPLAY_OPTIONS },
+    tvPanelLayout: { ...DEFAULT_TV_PANEL_LAYOUT },
   };
 }
 
@@ -61,7 +61,7 @@ function unassignedRoutingStore(): SystemConfigurationDto {
 
 function makeApi(
   config: SystemConfigurationDto = configuredStore(),
-  saveImpl?: (payload: SaveSystemConfigurationPayload) => Promise<{ isInitialSetupCompleted: boolean; storeName: string; brandColor: string; serviceThemes: ServiceThemesMap; tvDisplayOptions: TvDisplayOptionsMap }>,
+  saveImpl?: (payload: SaveSystemConfigurationPayload) => Promise<{ isInitialSetupCompleted: boolean; storeName: string; brandColor: string; serviceThemes: ServiceThemesMap; tvPanelLayout: TvPanelLayoutMap }>,
   overrides?: {
     manualReset?: () => Promise<ManualResetResultDto>;
     cleanup?: (retentionDays: number) => Promise<CleanupTransactionLogResultDto>;
@@ -70,7 +70,7 @@ function makeApi(
   const save = vi.fn(
     saveImpl ??
       ((payload: SaveSystemConfigurationPayload) =>
-        Promise.resolve({ isInitialSetupCompleted: true, storeName: payload.storeName, brandColor: payload.brandColor, serviceThemes: payload.serviceThemes, tvDisplayOptions: payload.tvDisplayOptions })),
+        Promise.resolve({ isInitialSetupCompleted: true, storeName: payload.storeName, brandColor: payload.brandColor, serviceThemes: payload.serviceThemes, tvPanelLayout: payload.tvPanelLayout })),
   );
   // The panel reloads the config after a successful save; default to returning
   // the same config (with ids preserved) so the post-save repopulate succeeds.
@@ -603,7 +603,7 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     const tablist = screen.getByRole('tablist');
     expect(tablist).toHaveAttribute('aria-label', 'Bagian konfigurasi');
     const tabs = screen.getAllByRole('tab');
-    expect(tabs).toHaveLength(7);
+    expect(tabs).toHaveLength(6);
 
     // Default active = profile: its tab is selected + in the tab order; the
     // rest rove (tabindex -1, aria-selected false).
@@ -870,7 +870,7 @@ describe('AdminPanel shared-config coherence', () => {
           storeName: payload.storeName,
           brandColor: payload.brandColor,
           serviceThemes: payload.serviceThemes,
-          tvDisplayOptions: payload.tvDisplayOptions,
+          tvPanelLayout: payload.tvPanelLayout,
         });
       },
     );

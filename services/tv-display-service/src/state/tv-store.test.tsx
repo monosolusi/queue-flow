@@ -6,8 +6,8 @@ import { TvStoreProvider } from './tv-store';
 import { TvBoardPage } from '../pages/TvBoardPage';
 import type { ITvApi } from '../api/tv-api';
 import type { AudioProvider } from '../audio/audio-provider';
-import type { QueueLifecycleWireEvent, TvTicketDto, TvDisplayOptionsMap } from '../api/types';
-import { DEFAULT_TV_DISPLAY_OPTIONS } from '../api/types';
+import type { QueueLifecycleWireEvent, TvTicketDto, TvPanelLayoutMap } from '../api/types';
+import { DEFAULT_TV_PANEL_LAYOUT } from '../api/types';
 
 /** Fake WebSocket whose instances the test can reach to deliver frames. */
 class FakeWebSocket {
@@ -35,7 +35,7 @@ function makeApi(
   brandColor = '',
   waiting: TvTicketDto[] = [],
   active: TvTicketDto[] = [],
-  displayOptions: TvDisplayOptionsMap = DEFAULT_TV_DISPLAY_OPTIONS,
+  panelLayout: TvPanelLayoutMap = DEFAULT_TV_PANEL_LAYOUT,
 ): ITvApi {
   return {
     getSystemConfig: vi.fn(() =>
@@ -44,7 +44,7 @@ function makeApi(
         storeName: 'Apotek Sehat',
         brandColor,
         serviceThemes: { tv: 'light' as const },
-        tvDisplayOptions: displayOptions,
+        tvPanelLayout: panelLayout,
         routingRules: [
           { counterId: 1, counterName: 'Loket 1' },
           { counterId: 2, counterName: 'Loket 2' },
@@ -523,7 +523,7 @@ describe('TV board state refetch (server owns the read model)', () => {
           storeName: 'Apotek Sehat',
           brandColor: '',
           serviceThemes: { tv: 'light' as const },
-          tvDisplayOptions: DEFAULT_TV_DISPLAY_OPTIONS,
+          tvPanelLayout: DEFAULT_TV_PANEL_LAYOUT,
           routingRules: [],
         }),
       ),
@@ -651,7 +651,7 @@ describe('TV board state refetch (server owns the read model)', () => {
   });
 });
 
-describe('TvStoreProvider counters-serving projection + display options', () => {
+describe('TvStoreProvider counters-serving projection + panel layout', () => {
   it('BOARD_LOADED projects countersServing from active + counterNameById (Sedang Melayani)', async () => {
     // Two active tickets at two counters; each counter appears once with its
     // boot-config name and the ticket number being served.
@@ -704,7 +704,7 @@ describe('TvStoreProvider counters-serving projection + display options', () => 
           storeName: 'Apotek Sehat',
           brandColor: '',
           serviceThemes: { tv: 'light' as const },
-          tvDisplayOptions: DEFAULT_TV_DISPLAY_OPTIONS,
+          tvPanelLayout: DEFAULT_TV_PANEL_LAYOUT,
           routingRules: [{ counterId: 1, counterName: 'Loket 1' }],
         }),
       ),
@@ -769,7 +769,7 @@ describe('TvStoreProvider counters-serving projection + display options', () => 
     expect(screen.queryByText('Tidak ada counter yang sedang melayani.')).not.toBeInTheDocument();
   });
 
-  it('displayOptions carried from BOOT_LOADED and gates the panels (all visible by default)', async () => {
+  it('panelLayout carried from BOOT_LOADED — all visible by default renders panels in order', async () => {
     const active = [
       { ticketId: 't1', ticketNumber: 'A-005', categoryId: 'cat-a', status: 'CALLING', counterId: 2 },
     ];
@@ -777,60 +777,158 @@ describe('TvStoreProvider counters-serving projection + display options', () => 
     const audio = makeAudio();
     renderBoard(api, audio);
 
-    // All panels visible by default.
-    expect(await screen.findByText('Sedang Melayani')).toBeInTheDocument();
+    // All content panels visible by default. NowServing is non-null (active
+    // ticket), so the hero renders the ticket (not the idle empty state).
+    // A-005 appears in BOTH the now-serving card and the counters-serving
+    // panel, so await the nowServing panel wrapper by testid instead.
+    expect(await screen.findByTestId('tv-board__panel--nowServing')).toBeInTheDocument();
+    expect(screen.getByText('Sedang Melayani')).toBeInTheDocument();
     expect(screen.getByText('Antrian Berikutnya')).toBeInTheDocument();
     expect(screen.getByText('Riwayat Panggilan')).toBeInTheDocument();
     // RunningText footer is rendered.
     expect(screen.getByRole('marquee')).toBeInTheDocument();
+
+    // The visible content panels render in the DEFAULT order:
+    // nowServing(0) → waitingQueue(1) → callHistory(2) → countersServing(3).
+    const order = Array.from(
+      document.querySelectorAll('[data-testid^="tv-board__panel--"]'),
+    ).map((el) => el.getAttribute('data-testid'));
+    expect(order).toEqual([
+      'tv-board__panel--nowServing',
+      'tv-board__panel--waitingQueue',
+      'tv-board__panel--callHistory',
+      'tv-board__panel--countersServing',
+    ]);
   });
 
-  it('hides the counters-serving + waiting + history + running-text panels when toggled off', async () => {
-    const opts: TvDisplayOptionsMap = {
-      showNowServing: true,
-      showWaitingQueue: false,
-      showCallHistory: false,
-      showCountersServing: false,
-      showRunningText: false,
+  it('hides a panel when visible=false (panel not in DOM; others fill the flex column)', async () => {
+    const layout: TvPanelLayoutMap = {
+      nowServing: { visible: true, order: 0, size: 4 },
+      waitingQueue: { visible: false, order: 1, size: 2 },
+      callHistory: { visible: false, order: 2, size: 2 },
+      countersServing: { visible: false, order: 3, size: 2 },
+      runningText: { visible: false, order: 4, size: 2 },
     };
     const active = [
       { ticketId: 't1', ticketNumber: 'A-005', categoryId: 'cat-a', status: 'CALLING', counterId: 2 },
     ];
-    const api = makeApi('', [], active, opts);
+    const api = makeApi('', [], active, layout);
     const audio = makeAudio();
     renderBoard(api, audio);
 
     // nowServing stays visible (hero); the side panels + footer are hidden.
-    expect(await screen.findByText('A-005')).toBeInTheDocument();
+    expect(await screen.findByTestId('tv-board__panel--nowServing')).toBeInTheDocument();
     expect(screen.queryByText('Sedang Melayani')).not.toBeInTheDocument();
     expect(screen.queryByText('Antrian Berikutnya')).not.toBeInTheDocument();
     expect(screen.queryByText('Riwayat Panggilan')).not.toBeInTheDocument();
     expect(screen.queryByRole('marquee')).not.toBeInTheDocument();
+    // Only the nowServing panel wrapper is rendered.
+    const order = Array.from(
+      document.querySelectorAll('[data-testid^="tv-board__panel--"]'),
+    ).map((el) => el.getAttribute('data-testid'));
+    expect(order).toEqual(['tv-board__panel--nowServing']);
   });
 
-  it('truly hides the now-serving hero when showNowServing is false (no misleading idle state)', async () => {
-    const opts: TvDisplayOptionsMap = {
-      showNowServing: false,
-      showWaitingQueue: true,
-      showCallHistory: true,
-      showCountersServing: true,
-      showRunningText: true,
+  it('nowServing.visible=false → NowServingCard not rendered, no misleading "Menunggu" idle copy', async () => {
+    const layout: TvPanelLayoutMap = {
+      nowServing: { visible: false, order: 0, size: 4 },
+      waitingQueue: { visible: true, order: 1, size: 2 },
+      callHistory: { visible: true, order: 2, size: 2 },
+      countersServing: { visible: true, order: 3, size: 2 },
+      runningText: { visible: true, order: 4, size: 2 },
     };
     const active = [
       { ticketId: 't1', ticketNumber: 'A-005', categoryId: 'cat-a', status: 'CALLING', counterId: 2 },
     ];
-    const api = makeApi('', [], active, opts);
+    const api = makeApi('', [], active, layout);
     const audio = makeAudio();
     renderBoard(api, audio);
 
-    // showNowServing=false mounts a structural placeholder (keeps the 2fr grid
-    // cell occupied) instead of NowServingCard — so the misleading "Menunggu"
-    // idle-state copy must NOT render even though the server has an active
-    // ticket. The hero's ticket number is suppressed; A-005 may still appear
-    // in the counters-serving panel (showCountersServing=true), which is
+    // nowServing.hidden → no nowServing panel wrapper, no "Menunggu" idle
+    // copy, no "PERGI KE COUNTER" eyebrow (the panel is truly absent — no
+    // structural placeholder is needed in the flex-column model). A-005 may
+    // still appear in the counters-serving panel (visible=true), which is
     // expected and not asserted here.
-    expect(await screen.findByTestId('now-serving-placeholder')).toBeInTheDocument();
+    await screen.findByText('Sedang Melayani');
+    expect(screen.queryByTestId('tv-board__panel--nowServing')).not.toBeInTheDocument();
     expect(screen.queryByText('Menunggu panggilan berikutnya…')).not.toBeInTheDocument();
     expect(screen.queryByText('PERGI KE COUNTER')).not.toBeInTheDocument();
+  });
+
+  it('renders panels in a custom order (callHistory first)', async () => {
+    const layout: TvPanelLayoutMap = {
+      nowServing: { visible: true, order: 2, size: 4 },
+      waitingQueue: { visible: true, order: 1, size: 2 },
+      callHistory: { visible: true, order: 0, size: 2 },
+      countersServing: { visible: true, order: 3, size: 2 },
+      runningText: { visible: false, order: 4, size: 2 },
+    };
+    const active = [
+      { ticketId: 't1', ticketNumber: 'A-005', categoryId: 'cat-a', status: 'CALLING', counterId: 2 },
+    ];
+    const api = makeApi('', [], active, layout);
+    const audio = makeAudio();
+    renderBoard(api, audio);
+
+    await screen.findByTestId('tv-board__panel--callHistory');
+    // callHistory(0) → waitingQueue(1) → nowServing(2) → countersServing(3).
+    const order = Array.from(
+      document.querySelectorAll('[data-testid^="tv-board__panel--"]'),
+    ).map((el) => el.getAttribute('data-testid'));
+    expect(order).toEqual([
+      'tv-board__panel--callHistory',
+      'tv-board__panel--waitingQueue',
+      'tv-board__panel--nowServing',
+      'tv-board__panel--countersServing',
+    ]);
+  });
+
+  it('a panel wrapper carries inline flex: <size> 1 0 (proportional height share)', async () => {
+    const layout: TvPanelLayoutMap = {
+      nowServing: { visible: true, order: 0, size: 3 },
+      waitingQueue: { visible: true, order: 1, size: 1 },
+      callHistory: { visible: true, order: 2, size: 2 },
+      countersServing: { visible: false, order: 3, size: 2 },
+      runningText: { visible: false, order: 4, size: 2 },
+    };
+    const active = [
+      { ticketId: 't1', ticketNumber: 'A-005', categoryId: 'cat-a', status: 'CALLING', counterId: 2 },
+    ];
+    const api = makeApi('', [], active, layout);
+    const audio = makeAudio();
+    renderBoard(api, audio);
+
+    await screen.findByTestId('tv-board__panel--nowServing');
+    const nowServingPanel = screen.getByTestId('tv-board__panel--nowServing');
+    expect(nowServingPanel.getAttribute('style')).toContain('flex: 3 1 0');
+    const waitingPanel = screen.getByTestId('tv-board__panel--waitingQueue');
+    expect(waitingPanel.getAttribute('style')).toContain('flex: 1 1 0');
+    const historyPanel = screen.getByTestId('tv-board__panel--callHistory');
+    expect(historyPanel.getAttribute('style')).toContain('flex: 2 1 0');
+  });
+
+  it('renders the empty-state status when all content panels are hidden', async () => {
+    const layout: TvPanelLayoutMap = {
+      nowServing: { visible: false, order: 0, size: 4 },
+      waitingQueue: { visible: false, order: 1, size: 2 },
+      callHistory: { visible: false, order: 2, size: 2 },
+      countersServing: { visible: false, order: 3, size: 2 },
+      runningText: { visible: true, order: 4, size: 2 },
+    };
+    const api = makeApi('', [], [], layout);
+    const audio = makeAudio();
+    renderBoard(api, audio);
+
+    // The empty-state status div renders when no content panel is visible.
+    // Use a regex matcher (the em-dash in the literal string trips the exact
+    // text matcher); scope to the panels-empty class to disambiguate from the
+    // connection-status badge (also role="status").
+    const emptyStatus = await screen.findByText(/Tidak ada panel yang ditampilkan/);
+    expect(emptyStatus).toHaveClass('tv-board__panels-empty');
+    expect(emptyStatus.textContent).toContain('aktifkan panel di Tampilan TV');
+    // No panel wrappers render.
+    expect(document.querySelector('[data-testid^="tv-board__panel--"]')).toBeNull();
+    // The runningText footer still renders (visibility-only).
+    expect(screen.getByRole('marquee')).toBeInTheDocument();
   });
 });
