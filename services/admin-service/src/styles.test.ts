@@ -482,4 +482,15 @@ describe('layout-consistency refactor — shared .page geometry + .page-header',
     expect(css).not.toMatch(/\.status-dashboard[^{]*\{[^}]*1100px/);
     expect(css).not.toMatch(/\.status-dashboard[^{]*\{[^}]*1\.25rem\s+1\.25rem/);
   });
+
+  it('reserves the scrollbar gutter on the root scroller so /admin/config does not resize across sections', () => {
+    // The sectioned /admin/config nav mounts ONE section at a time, so document
+    // height — and thus the vertical scrollbar's presence — changes per section.
+    // Without a reserved gutter the centered `.page` shifts/resizes when the bar
+    // toggles (the "membesar dan mengecil" the manager reported). `scrollbar-gutter:
+    // stable` on the root scroller (`html`) keeps the inline size constant. Guard
+    // it on `html` (the viewport scroller), not `body`.
+    const html = rule('html');
+    expect(html).toContain('scrollbar-gutter: stable');
+  });
 });
