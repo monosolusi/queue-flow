@@ -115,10 +115,13 @@ describe('SearchableCategorySelect', () => {
   });
 
   it('caps the listbox max-height inline so a scroll container never scrolls', () => {
-    // jsdom `getBoundingClientRect` returns zeros, so the measurement falls to
-    // the cramped branch (downward, min-height) — what matters here is that the
-    // listbox carries an inline maxHeight (set from the measurement) instead of
-    // relying on a CSS max-height that would extend a scroll container.
+    // jsdom has no layout engine, so `getBoundingClientRect` returns a
+    // degenerate rect that is the SAME for every element (the global test setup
+    // patches it to a non-zero default, but identical across elements) — so
+    // `spaceBelow`/`spaceAbove` are ≤ 0 and the measurement falls to the cramped
+    // branch (downward, min-height). What matters here is that the listbox
+    // carries an inline maxHeight (set from the measurement) instead of relying
+    // on a CSS max-height that would extend a scroll container.
     render(
       <SearchableCategorySelect categories={CATEGORIES} selectedCodes={[]} onChange={() => {}} />,
     );

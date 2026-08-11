@@ -19,7 +19,7 @@ import { validateCustomCategories, validateResetTo } from '../lib/categories';
 import { validateStoreName } from '../lib/store-name';
 import { CounterRoutingEditor } from '../components/CounterRoutingEditor';
 import { PageHeader } from '../components/PageHeader';
-import { StateMachineEditor } from '../components/StateMachineEditor';
+import { StateMachineWorkflow } from '../components/StateMachineWorkflow';
 import { TimeField } from '../components/TimeField';
 import { useToast } from '../toast/useToast';
 import {
@@ -773,8 +773,10 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
           {activeSection === 'state-machine' && (
             <>
               {/* State machine — editable (migrated from the wizard; the wizard
-                  is first-run only now). Uses the same shared StateMachineEditor
-                  + pure lib/state-machine validation the wizard uses (DRY). */}
+                  is first-run only now). Uses the visual StateMachineWorkflow
+                  builder (React Flow) over the same pure lib/state-machine
+                  validation the wizard's form editor uses (DRY — same
+                  StateMachineForm + helpers, different view). */}
               <section className="config-card">
                 <h2 className="config-card__title">Alur Status Tiket</h2>
                 <p className="admin-panel__hint">
@@ -798,7 +800,7 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
                   tersebut tidak bisa dilanjutkan — tombol aksinya hilang di panel caller. Ubah alur status
                   saat antrian kosong, misalnya setelah reset harian.
                 </p>
-                <StateMachineEditor
+                <StateMachineWorkflow
                   value={form.stateMachine}
                   onChange={(sm) => setState({ status: 'ready', form: { ...form, stateMachine: sm } })}
                   errors={smErrors}

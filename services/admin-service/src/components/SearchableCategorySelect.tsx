@@ -121,9 +121,10 @@ export function SearchableCategorySelect({
   // listbox inside the container — so it never extends the container's
   // scrollable area (no modal scroll). Prefers downward; flips up only when
   // there isn't room below. Runs as a layout effect so the listbox is sized
-  // before paint. In jsdom `getBoundingClientRect` returns zeros, so both
-  // spaces are ≤ 0 and the cramped branch keeps the downward default — the
-  // existing option-based assertions still find the listbox.
+  // before paint. In jsdom (no layout engine) every element reports the same
+  // degenerate rect, so `spaceBelow`/`spaceAbove` are ≤ 0 and the cramped
+  // branch keeps the downward default — the existing option-based assertions
+  // still find the listbox.
   useLayoutEffect(() => {
     if (!open) return;
     const input = inputRef.current;

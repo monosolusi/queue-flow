@@ -44,6 +44,24 @@ const ALLOWED_HOSTS = new Set([
   'docs.oasis-open.org', // ODF metadata namespace identifiers
   'sheetjs.com', // SheetJS library origin/metadata string (not fetched)
   'macVmlSchemaUri', // SheetJS macOS VML schema placeholder literal (not a URL)
+  // React Flow (`@xyflow/react` v12, admin-service state-machine workflow builder):
+  // `reactflow.dev?utm_source=attribution` is the attribution-link constant
+  // (hidden via `proOptions.hideAttribution` — never rendered, never fetched).
+  // `hostOf` does not stop at `?`, so the query string is part of the extracted
+  // "host" here (the URL has no path component to terminate the match earlier).
+  // `${e}flow.dev` is a minified template-literal fragment from the error-code
+  // help URLs (`https://${e}flow.dev/error#NNN`); `e` resolves to `"react"` or
+  // `"xy"` at runtime → `reactflow.dev` / `xyflow.dev`. Both are doc/error-message
+  // strings embedded in the library, never fetched at runtime (NFR-REL-01).
+  'reactflow.dev?utm_source=attribution',
+  // Defense-in-depth: list the concrete hosts alongside the minified template
+  // fragment so a future `@xyflow/react` version that (a) drops `?utm_source=…`
+  // from the attribution constant, or (b) stops emitting the `${e}flow.dev`
+  // template literal in favor of the resolved strings, does not silently
+  // redden the offline-assets gate. These never match today but cost nothing.
+  'reactflow.dev',
+  'xyflow.dev',
+  '${e}flow.dev',
 ]);
 
 /** Extracts the host from an http(s) URL string, or null if not a real URL. */

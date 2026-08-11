@@ -1,0 +1,474 @@
+/**
+ * Visual drag-and-drop workflow builder for the "Alur Status Tiket" state
+ * machine, backed by the open-source React Flow library (`@xyflow/react` v12).
+ * Replaces the form-based {@link StateMachineEditor} on the operational
+ * `/admin/config` surface (the wizard keeps the form editor — first-run only).
+ *
+ * States become nodes; transitions become edges drawn between nodes. The manager
+ * drags a "Status" card from the palette onto the canvas (or uses the
+ * accessible "Tambah Status" button) to add a state, and drags between a node's
+ * source/target handles to draw a transition edge (or uses "Tambah Transisi").
+ *
+ * **Wire contract unchanged.** The component is a different VIEW over the same
+ * {@link StateMachineForm} + same `lib/state-machine` helpers: it lifts
+ * graph-structure changes to the parent via `onChange(next: StateMachineForm)`,
+ * and AdminPanel's existing save path calls `toStateMachineDto` (the single
+ * wire-boundary mapper). Positions live only in internal node state — they
+ * never reach the wire form. `validateCustomStateMachine` stays the validation
+ * authority; the component structurally prevents what it can (duplicate edges
+ * in `onConnect`, the ≥1-transition delete guard) and surfaces the rest via the
+ * `errors` list.
+ *
+ * **Controlled-with-internal-state pattern.** The component owns React Flow
+ * `nodes`/`edges` in `useState` (initialized from `formToFlow(value, autoLayout)`)
+ * and lifts graph-structure changes to the parent. A `lastEmitted` ref holds the
+ * signature of the last value emitted; a `useEffect([value])` re-syncs from an
+ * EXTERNAL value change (post-save re-seed, prefill change) — preserving
+ * positions for surviving state names — and skips our own changes (we update
+ * the ref when we emit) so a self-driven `onChange` never round-trips into a
+ * position reset.
+ */
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Background,
+  Controls,
+  ReactFlow,
+  ReactFlowProvider,
+  applyEdgeChanges,
+  applyNodeChanges,
+  useReactFlow,
+  type Connection,
+  type EdgeChange,
+  type NodeChange,
+} from '@xyflow/react';
+import '@xyflow/react/dist/style.css';
+import {
+  type StateMachineForm,
+  defaultStateMachineForm,
+  missingCanonicalStates,
+} from '../lib/state-machine';
+import {
+  autoLayout,
+  flowToGraph,
+  formToFlow,
+  nextStateName,
+  type FlowEdge,
+  type FlowNode,
+} from '../lib/state-machine-flow';
+import {
+  WorkflowContext,
+  edgeTypes,
+  nodeTypes,
+  type WorkflowHandlers,
+} from './StateMachineWorkflowNodes';
+import './state-machine-workflow.css';
+
+/**
+ * Signature of the graph structure (states + transitions). Excludes `mode`
+ * (the canvas graph = `value.states`/`value.transitions` regardless of mode;
+ * mode only toggles read-only) and positions (owned internally, never on the
+ * wire). Used to detect an EXTERNAL value change vs. our own emitted change.
+ */
+function signatureOf(form: StateMachineForm): string {
+  return JSON.stringify({ s: form.states, t: form.transitions });
+}
+
+export function StateMachineWorkflow({
+  value,
+  onChange,
+  errors,
+}: {
+  value: StateMachineForm;
+  onChange: (next: StateMachineForm) => void;
+  errors: string[];
+}): JSX.Element {
+  const [nodes, setNodes] = useState<FlowNode[]>(
+    () => formToFlow(value, autoLayout(value.states, value.transitions)).nodes,
+  );
+  const [edges, setEdges] = useState<FlowEdge[]>(
+    () => formToFlow(value, autoLayout(value.states, value.transitions)).edges,
+  );
+  // Signature of the last value we emitted (or the initial value). The sync
+  // effect compares the incoming `value` signature against this; a mismatch
+  // means an external reset (we did NOT emit it), so we re-sync. When WE cause
+  // a change we update this ref before `onChange`, so the effect skips the
+  // round-trip and preserves canvas positions.
+  const lastEmitted = useRef<string>(signatureOf(value));
+  // Monotonic per-instance counter for newly minted edge ids. Edges rebuilt by
+  // `formToFlow` (external reset) use index-based ids `${from}->${to}#${i}`;
+  // edges minted here (`onConnect` / "+ Tambah Transisi") use `sm-edge-N` — a
+  // distinct prefix so the two id spaces NEVER collide, and ids no longer
+  // encode source/target (so a state rename never leaves a stale edge id).
+  // Monotonic ⇒ unique across adds even after deletes leave gaps in the
+  // index-based ids (the M1 collision: a length-based id used to match a
+  // surviving index-based id after a delete).
+  const edgeIdSeq = useRef(0);
+  const mintEdgeId = useCallback(() => `sm-edge-${edgeIdSeq.current++}`, []);
+  // Touch-surface double-tap guard (CLAUDE.md: flip the ref before the first
+  // await, reset after the commit flushes). "+ Tambah Status" / "+ Tambah
+  // Transisi" are synchronous, but two same-tap clicks land before the parent
+  // re-renders; the ref absorbs the second. Reset unconditionally in the
+  // value-sync effect (below) which runs after every `onChange` round-trip —
+  // the parent has then re-rendered with our emitted change, so a queued
+  // second tap re-evaluates against fresh state.
+  const addPendingRef = useRef(false);
+
+  // External reset: rebuild nodes/edges from the incoming value, PRESERVING
+  // positions for surviving state names (a post-save re-seed keeps the nodes
+  // where the manager left them). Reads prior positions inside the setNodes
+  // callback so it always sees the latest committed node state.
+  useEffect(() => {
+    const sig = signatureOf(value);
+    if (sig !== lastEmitted.current) {
+      lastEmitted.current = sig;
+      setNodes((prev) => {
+        const oldPositions: Record<string, { x: number; y: number }> = {};
+        for (const n of prev) oldPositions[n.data.name] = n.position;
+        return formToFlow(value, oldPositions).nodes;
+      });
+      setEdges(formToFlow(value, {}).edges);
+    }
+    // Always reset the double-tap guard after a value round-trip. By the time
+    // this effect runs, the parent has re-rendered with our emitted change
+    // (commit → onChange → parent setState → re-render → new `value` prop), so a
+    // queued second tap is safe to admit again — it re-evaluates against fresh
+    // state and the duplicate-edge / nextStateName guards do the rest.
+    addPendingRef.current = false;
+  }, [value]);
+
+  // Lift a node/edge mutation to the parent + stamp the last-emitted signature
+  // so the sync effect above skips the round-trip (positions preserved).
+  const commit = useCallback(
+    (nextNodes: FlowNode[], nextEdges: FlowEdge[]) => {
+      setNodes(nextNodes);
+      setEdges(nextEdges);
+      const { states, transitions } = flowToGraph(nextNodes, nextEdges);
+      const form: StateMachineForm = { mode: value.mode, states, transitions };
+      lastEmitted.current = signatureOf(form);
+      onChange(form);
+    },
+    [value.mode, onChange],
+  );
+
+  // Apply React Flow's internal change stream (drag position, selection) to the
+  // local node/edge state. Positions are NOT lifted to the parent (they are not
+  // part of the wire form), so a node drag never calls `onChange`. `remove`
+  // changes are dropped here — deletion is owned exclusively by the "Hapus"
+  // buttons (which `commit` → lift to the parent form), so React Flow's own
+  // remove path (already disabled via `deleteKeyCode={null}`) can never desync
+  // the internal canvas state from the parent's form. The cast is load-bearing:
+  // `applyNodeChanges` is generic over `Node` (wide `data`), so it returns
+  // `Node[]`; we narrow back to our `FlowNode` (the runtime shape is unchanged —
+  // it only spreads our objects).
+  const onNodesChange = useCallback((changes: NodeChange[]) => {
+    const safe = changes.filter((c) => c.type !== 'remove');
+    setNodes((prev) => applyNodeChanges(safe, prev) as FlowNode[]);
+  }, []);
+  const onEdgesChange = useCallback((changes: EdgeChange[]) => {
+    const safe = changes.filter((c) => c.type !== 'remove');
+    setEdges((prev) => applyEdgeChanges(safe, prev) as FlowEdge[]);
+  }, []);
+
+  // Draw a transition edge by connecting a source handle to a target handle.
+  // Guard: skip a duplicate edge (same source/target) — the structural
+  // prevention `validateCustomStateMachine` also catches.
+  const onConnect = useCallback(
+    (connection: Connection) => {
+      const from = connection.source;
+      const to = connection.target;
+      if (!from || !to) return;
+      if (edges.some((e) => e.source === from && e.target === to)) return;
+      const newEdge: FlowEdge = {
+        id: mintEdgeId(),
+        source: from,
+        target: to,
+        type: 'transition',
+        data: { actionLabel: '' },
+      };
+      commit(nodes, [...edges, newEdge]);
+    },
+    [edges, nodes, commit, mintEdgeId],
+  );
+
+  // Add a new state node (drag-drop + button share this). The name is generated
+  // via `nextStateName` (non-colliding with existing + canonical names) so the
+  // manager never lands on a duplicate the validation would reject.
+  const addStateAt = useCallback(
+    (position: { x: number; y: number }) => {
+      const newName = nextStateName(value.states);
+      const newNode: FlowNode = { id: newName, type: 'state', position, data: { name: newName } };
+      commit([...nodes, newNode], edges);
+    },
+    [nodes, edges, value.states, commit],
+  );
+
+  // Accessible, touch-friendly fallback for the palette drag: add a state at a
+  // visible offset from the last node. The double-tap ref guard (m3) absorbs a
+  // second same-tick tap; reset in the value-sync effect after the round-trip.
+  const addStateButton = useCallback(() => {
+    if (addPendingRef.current) return;
+    addPendingRef.current = true;
+    const lastNode = nodes[nodes.length - 1];
+    const position = lastNode
+      ? { x: lastNode.position.x + 120, y: lastNode.position.y + 120 }
+      : { x: 0, y: 0 };
+    addStateAt(position);
+  }, [nodes, addStateAt]);
+
+  // Accessible fallback for drawing edges: add a self-edge on the first state
+  // (mirrors `addTransition`), which the manager then re-routes by dragging a
+  // handle or deletes. Disabled when there are no states to anchor on. Guards:
+  // the double-tap ref (m3) absorbs a second same-tick tap; the duplicate
+  // self-edge guard (m1) mirrors `onConnect` so the button can't seed the M1
+  // collision and stays consistent with drawn edges.
+  const addTransitionButton = useCallback(() => {
+    if (addPendingRef.current) return;
+    if (value.states.length === 0) return;
+    const firstState = value.states[0];
+    if (edges.some((e) => e.source === firstState && e.target === firstState)) return;
+    addPendingRef.current = true;
+    const newEdge: FlowEdge = {
+      id: mintEdgeId(),
+      source: firstState,
+      target: firstState,
+      type: 'transition',
+      data: { actionLabel: '' },
+    };
+    commit(nodes, [...edges, newEdge]);
+  }, [nodes, edges, value.states, commit, mintEdgeId]);
+
+  // Handlers the custom node/edge components reach via context. Recreated when
+  // the graph/mode changes so they always read the latest committed state.
+  const handlers = useMemo<WorkflowHandlers>(
+    () => ({
+      mode: value.mode,
+      transitionsCount: value.transitions.length,
+      onRenameState: (oldName, newName) => {
+        if (newName === oldName) return;
+        // Guard a rename onto an existing state name — the node id IS the state
+        // name, so a rename to an in-use id would produce two nodes with the
+        // same React key + a duplicate state in the form. No-op (the controlled
+        // input reverts to the prior name on re-render) instead of corrupting
+        // the canvas. Mirrors onConnect's duplicate-edge guard structurally.
+        if (nodes.some((n) => n.id === newName)) return;
+        const nextNodes = nodes.map((n) =>
+          n.id === oldName ? { ...n, id: newName, data: { name: newName } } : n,
+        );
+        // Propagate the rename to every referencing edge so no edge dangles.
+        const nextEdges = edges.map((e) => ({
+          ...e,
+          source: e.source === oldName ? newName : e.source,
+          target: e.target === oldName ? newName : e.target,
+        }));
+        commit(nextNodes, nextEdges);
+      },
+      onDeleteState: (name) => {
+        // Cascade: drop the node + every transition referencing it so the
+        // graph stays valid (no dangling edges).
+        const nextNodes = nodes.filter((n) => n.id !== name);
+        const nextEdges = edges.filter((e) => e.source !== name && e.target !== name);
+        commit(nextNodes, nextEdges);
+      },
+      onEditTransitionLabel: (edgeId, label) => {
+        const nextEdges = edges.map((e) =>
+          e.id === edgeId ? { ...e, data: { ...e.data, actionLabel: label } } : e,
+        );
+        commit(nodes, nextEdges);
+      },
+      onDeleteTransition: (edgeId) => {
+        if (value.transitions.length <= 1) return; // ≥1-transition invariant
+        const nextEdges = edges.filter((e) => e.id !== edgeId);
+        commit(nodes, nextEdges);
+      },
+    }),
+    [value.mode, value.transitions.length, nodes, edges, commit],
+  );
+
+  const missingStandardStates = useMemo(() => missingCanonicalStates(value), [value]);
+  const editorDescribedBy =
+    [errors.length > 0 ? 'sm-errors' : null, missingStandardStates.length > 0 ? 'sm-standard-warning' : null]
+      .filter((id): id is string => id !== null)
+      .join(' ') || undefined;
+  const isCustom = value.mode === 'custom';
+
+  return (
+    <>
+      <fieldset className="radio-group" data-testid="sm-mode">
+        <legend>Jenis alur status</legend>
+        <label className="radio-group__item">
+          <input
+            type="radio"
+            name="sm-mode"
+            value="default"
+            checked={value.mode === 'default'}
+            onChange={() => onChange(defaultStateMachineForm())}
+          />
+          Gunakan alur status standar
+        </label>
+        <label className="radio-group__item">
+          <input
+            type="radio"
+            name="sm-mode"
+            value="custom"
+            checked={value.mode === 'custom'}
+            onChange={() => onChange({ ...value, mode: 'custom' })}
+          />
+          Susun alur status sendiri
+        </label>
+      </fieldset>
+
+      <div
+        className="sm-workflow-layout"
+        role="group"
+        aria-label="Editor alur status"
+        aria-describedby={editorDescribedBy}
+      >
+        {isCustom && (
+          <aside className="sm-palette" data-testid="sm-palette">
+            <p className="sm-palette__hint">Seret kartu ke kanvas untuk menambah status.</p>
+            <div
+              className="sm-palette__item"
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData('application/reactflow', 'state');
+                e.dataTransfer.effectAllowed = 'move';
+              }}
+            >
+              Status
+            </div>
+            <button
+              type="button"
+              className="btn btn--secondary"
+              data-testid="sm-add-state"
+              onClick={addStateButton}
+            >
+              + Tambah Status
+            </button>
+            <button
+              type="button"
+              className="btn btn--secondary"
+              data-testid="sm-add-transition"
+              onClick={addTransitionButton}
+              disabled={value.states.length === 0}
+            >
+              + Tambah Transisi
+            </button>
+          </aside>
+        )}
+        <ReactFlowProvider>
+          <FlowCanvas
+            nodes={nodes}
+            edges={edges}
+            isCustom={isCustom}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onDropPosition={addStateAt}
+            handlers={handlers}
+          />
+        </ReactFlowProvider>
+      </div>
+
+      {isCustom && errors.length > 0 && (
+        <ul className="wizard__errors" id="sm-errors" data-testid="sm-errors">
+          {errors.map((msg) => (
+            <li key={msg}>{msg}</li>
+          ))}
+        </ul>
+      )}
+
+      {/* Dropped-standard-status caution — rendered OUTSIDE the editor group and
+          in the warn tint so it never reads as one of the red sm-errors that
+          block saving. Identical copy/markup to the shared StateMachineEditor. */}
+      {missingStandardStates.length > 0 && (
+        <div className="sm-warning" id="sm-standard-warning" data-testid="sm-standard-warning">
+          <p className="sm-warning__intro">
+            Perhatian: alur status yang Anda susun tidak memakai sebagian status dari alur standar.
+            Untuk semua tiket berikutnya:
+          </p>
+          <ul className="sm-warning__list">
+            {missingStandardStates.map(({ state, consequence }) => (
+              <li key={state}>
+                <strong>{state}</strong> tidak ada — {consequence}.
+              </li>
+            ))}
+          </ul>
+          <p className="sm-warning__outro">
+            Jika ini memang disengaja, konfigurasi tetap bisa disimpan.
+          </p>
+        </div>
+      )}
+    </>
+  );
+}
+
+/**
+ * The canvas inner component — must live inside `<ReactFlowProvider>` so
+ * `useReactFlow` (for drop-to-flow-position) resolves. Wraps the canvas in the
+ * handler context so the custom node/edge components reach the parent's
+ * mutation handlers.
+ */
+function FlowCanvas({
+  nodes,
+  edges,
+  isCustom,
+  onNodesChange,
+  onEdgesChange,
+  onConnect,
+  onDropPosition,
+  handlers,
+}: {
+  nodes: FlowNode[];
+  edges: FlowEdge[];
+  isCustom: boolean;
+  onNodesChange: (changes: NodeChange[]) => void;
+  onEdgesChange: (changes: EdgeChange[]) => void;
+  onConnect: (connection: Connection) => void;
+  onDropPosition: (position: { x: number; y: number }) => void;
+  handlers: WorkflowHandlers;
+}): JSX.Element {
+  const { screenToFlowPosition } = useReactFlow();
+  return (
+    <WorkflowContext.Provider value={handlers}>
+      <div
+        className="sm-canvas"
+        data-testid="sm-canvas"
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          const type = e.dataTransfer.getData('application/reactflow');
+          if (type !== 'state') return;
+          const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+          onDropPosition(position);
+        }}
+      >
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          nodesDraggable={isCustom}
+          nodesConnectable={isCustom}
+          elementsSelectable={isCustom}
+          fitView
+          deleteKeyCode={null}
+          // Hide the React Flow attribution badge: the link points to
+          // reactflow.dev (unreachable on the offline LAN, NFR-REL-01) and would
+          // confuse a non-technical manager. The MIT license does not require
+          // it; the URL constant remains in the bundle (allowlisted in the
+          // offline-assets gate) but is never rendered or fetched.
+          proOptions={{ hideAttribution: true }}
+        >
+          <Background />
+          <Controls showInteractive={false} />
+        </ReactFlow>
+      </div>
+    </WorkflowContext.Provider>
+  );
+}
