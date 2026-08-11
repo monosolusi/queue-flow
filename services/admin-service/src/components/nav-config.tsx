@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { AnalyticsIcon, AuditIcon, ConfigIcon, DashboardIcon, UsersIcon } from './nav-icons';
+import { AnalyticsIcon, AuditIcon, ConfigIcon, DashboardIcon, TvLayoutIcon, UsersIcon } from './nav-icons';
 
 /**
  * The grouped, task-oriented left-navigation information architecture (QUE-45).
@@ -53,7 +53,10 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   },
   {
     label: 'Konfigurasi Sistem',
-    items: [{ label: 'Konfigurasi', to: '/config', icon: <ConfigIcon /> }],
+    items: [
+      { label: 'Konfigurasi', to: '/config', icon: <ConfigIcon /> },
+      { label: 'Tampilan TV', to: '/tv-layout', icon: <TvLayoutIcon /> },
+    ],
   },
   {
     label: 'Audit',

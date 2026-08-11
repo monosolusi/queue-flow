@@ -38,8 +38,9 @@ describe('styles.css AC guards', () => {
   });
 
   it('AC3: now-serving number is a one-line container-query clamp (cqw) + nowrap + a 4K media tier', () => {
-    // The card is an inline-size container so the number sizes to the 2fr
-    // column, not the viewport — the one-line guarantee.
+    // The card is an inline-size container so the number sizes to its panel
+    // wrapper (full-width in the flex-column model), not the viewport — the
+    // one-line guarantee.
     expect(rule('.now-serving')).toContain('container-type: inline-size');
     const number = rule('.now-serving__number');
     expect(number).toContain('clamp(5rem, 18cqw, 22rem)');
@@ -52,7 +53,7 @@ describe('styles.css AC guards', () => {
     expect(tierMatch?.[1]).toContain('clamp(10rem, 18cqw, 40rem)');
   });
 
-  it('AC3: grid-cell containment — now-serving + call-history allow shrinking', () => {
+  it('AC3: panel containment — now-serving + call-history allow shrinking (min-width: 0)', () => {
     expect(rule('.now-serving')).toContain('min-width: 0');
     expect(rule('.call-history')).toContain('min-width: 0');
   });
@@ -116,9 +117,9 @@ describe('styles.css AC guards', () => {
   it('waiting-queue scales rows to the panel height (cqh) + scrollable list (no clip)', () => {
     // The panel is a size container so children can scale to its height via cqh
     // units — all VISIBLE_LIMIT items always fit the panel regardless of its
-    // height (responsive). The panel height is determinate because the active
-    // grid uses grid-template-rows: minmax(0, 1fr) and the active side column
-    // resolves it via flex.
+    // height (responsive). The panel height is determinate because the
+    // .tv-board__panel wrapper resolves its flex share (proportional to the
+    // manager-configured size) and is itself a flex column.
     const panel = rule('.waiting-queue');
     expect(panel).toContain('container-type: size');
     expect(panel).toContain('display: flex');
@@ -134,8 +135,23 @@ describe('styles.css AC guards', () => {
     expect(rule('.waiting-queue__item')).toMatch(/cqh/);
   });
 
-  it('active grid defines a determinate row height (minmax(0, 1fr))', () => {
-    expect(rule('.tv-board__active-grid')).toContain('grid-template-rows: minmax(0, 1fr)');
+  it('tv-board__panels is a flex column of visible content panels (replaces the 2fr/1fr grid)', () => {
+    const panels = rule('.tv-board__panels');
+    expect(panels).toContain('display: flex');
+    expect(panels).toContain('flex-direction: column');
+    expect(panels).toContain('flex: 1');
+    expect(panels).toContain('min-height: 0');
+    // The old fixed 2fr/1fr grid + side column are gone.
+    expect(css).not.toContain('.tv-board__active-grid');
+    expect(css).not.toContain('.tv-board__active-side');
+  });
+
+  it('tv-board__panel wrapper is a flex column with containment (min-height: 0, min-width: 0)', () => {
+    const panel = rule('.tv-board__panel');
+    expect(panel).toContain('display: flex');
+    expect(panel).toContain('flex-direction: column');
+    expect(panel).toContain('min-height: 0');
+    expect(panel).toContain('min-width: 0');
   });
 
   it('AC6: the active board is the single always-visible layer (no standby/crossfade)', () => {

@@ -14,9 +14,9 @@ import {
   type ServiceThemesMap,
 } from '../../../domain/store-config/value-objects/service-themes';
 import {
-  TvDisplayOptions,
-  type TvDisplayOptionsMap,
-} from '../../../domain/store-config/value-objects/tv-display-options';
+  TvPanelLayout,
+  type TvPanelLayoutMap,
+} from '../../../domain/store-config/value-objects/tv-panel-layout';
 import { StateMachine } from '../../../domain/store-config/state-machine';
 import { StateSchema } from '../../../domain/store-config/value-objects/state-schema';
 import { StateTransitionRule } from '../../../domain/store-config/value-objects/state-transition-rule';
@@ -31,7 +31,7 @@ interface ConfigRow {
   daily_reset_policy: DailyResetPolicyProps;
   brand_color: string;
   service_themes: ServiceThemesMap | null;
-  tv_display_options: TvDisplayOptionsMap | null;
+  tv_panel_layout: TvPanelLayoutMap | null;
 }
 
 /**
@@ -58,7 +58,7 @@ export class PostgresSystemConfigurationRepository implements ISystemConfigurati
   async save(config: SystemConfiguration): Promise<void> {
     await withDbClient(this.pool, async (client) => {
       await client.query(
-        `INSERT INTO system_configuration (id, store_name, is_initial_setup_completed, state_machine, daily_reset_policy, brand_color, service_themes, tv_display_options)
+        `INSERT INTO system_configuration (id, store_name, is_initial_setup_completed, state_machine, daily_reset_policy, brand_color, service_themes, tv_panel_layout)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          ON CONFLICT (id) DO UPDATE SET
            store_name                = EXCLUDED.store_name,
@@ -67,7 +67,7 @@ export class PostgresSystemConfigurationRepository implements ISystemConfigurati
            daily_reset_policy        = EXCLUDED.daily_reset_policy,
            brand_color               = EXCLUDED.brand_color,
            service_themes            = EXCLUDED.service_themes,
-           tv_display_options        = EXCLUDED.tv_display_options`,
+           tv_panel_layout           = EXCLUDED.tv_panel_layout`,
         [
           config.id.value,
           config.storeName,
@@ -82,7 +82,7 @@ export class PostgresSystemConfigurationRepository implements ISystemConfigurati
           }),
           config.brandColor.value,
           JSON.stringify(config.serviceThemes.toDto()),
-          JSON.stringify(config.tvDisplayOptions.toDto()),
+          JSON.stringify(config.tvPanelLayout.toDto()),
         ],
       );
     });
@@ -119,11 +119,12 @@ function toConfig(row: ConfigRow): SystemConfiguration {
     // SELECT * simply lacks the column (pg returns undefined here) — both paths
     // reconstitute ServiceThemes.DEFAULT. Mirrors the brandColor fallback.
     serviceThemes: ServiceThemes.of(row.service_themes ?? undefined),
-    // Same boot-window fallback for tv_display_options (0008 migration). `of()`
-    // recovers a null/undefined column to all-visible, and a pre-migration row's
-    // SELECT * simply lacks the column (pg returns undefined here) — both paths
-    // reconstitute TvDisplayOptions.DEFAULT. Mirrors the serviceThemes fallback.
-    tvDisplayOptions: TvDisplayOptions.of(row.tv_display_options ?? undefined),
+    // Same boot-window fallback for tv_panel_layout (0009 migration renamed
+    // the old boolean-map column to this). `of()` recovers a null/undefined
+    // column to the default layout, and a pre-migration row's SELECT * simply
+    // lacks the column (pg returns undefined here) — both paths reconstitute
+    // TvPanelLayout.DEFAULT. Mirrors the serviceThemes fallback.
+    tvPanelLayout: TvPanelLayout.of(row.tv_panel_layout ?? undefined),
   });
 }
 

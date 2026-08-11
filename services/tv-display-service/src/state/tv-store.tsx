@@ -11,10 +11,10 @@ import type {
   CategoryDto,
   CounterServing,
   QueueLifecycleWireEvent,
-  TvDisplayOptionsMap,
+  TvPanelLayoutMap,
   TvTicketDto,
 } from '../api/types';
-import { DEFAULT_TV_DISPLAY_OPTIONS } from '../api/types';
+import { DEFAULT_TV_PANEL_LAYOUT } from '../api/types';
 import type { ITvApi } from '../api/tv-api';
 import { type AudioProvider } from '../audio/audio-provider';
 import { buildCallFragments } from '../audio/audio-provider';
@@ -58,9 +58,11 @@ export interface TvState {
    * does NOT project this from events (SRP — the server owns the read model).
    */
   readonly countersServing: readonly CounterServing[];
-  /** Per-panel visibility toggles from `SystemConfiguration.tvDisplayOptions`.
-   * Applied at boot; drives the page's conditional panel rendering. */
-  readonly displayOptions: TvDisplayOptionsMap;
+  /** Per-panel layout from `SystemConfiguration.tvPanelLayout` (visible/order/
+   * size for each of the five panels). Applied at boot; drives the page's
+   * ordered flex-column rendering. Config (not queue state) — preserved
+   * across `SYSTEM_RESET`. */
+  readonly panelLayout: TvPanelLayoutMap;
   /** Boot-built counter id→name map from `routingRules`. Kept in state so the
    * BOOT_LOADED reducer can re-derive `countersServing` once this map is
    * populated, without a second board fetch (the first board fetch races the
@@ -85,7 +87,7 @@ export type TvAction =
       type: 'BOOT_LOADED';
       storeName: string;
       categories: CategoryDto[];
-      displayOptions: TvDisplayOptionsMap;
+      panelLayout: TvPanelLayoutMap;
       counterNameById: ReadonlyMap<number, string>;
     }
   | { type: 'BOOT_ERROR'; message: string }
@@ -109,7 +111,7 @@ const initialState: TvState = {
   history: [],
   waiting: [],
   countersServing: [],
-  displayOptions: DEFAULT_TV_DISPLAY_OPTIONS,
+  panelLayout: DEFAULT_TV_PANEL_LAYOUT,
   counterNameById: new Map<number, string>(),
   lastActive: [],
   connection: 'closed',
@@ -200,7 +202,7 @@ function tvReducer(state: TvState, action: TvAction): TvState {
         ...state,
         storeName: action.storeName,
         categories: action.categories,
-        displayOptions: action.displayOptions,
+        panelLayout: action.panelLayout,
         counterNameById: action.counterNameById,
         // Re-derive countersServing from the stashed lastActive joined with
         // the now-populated counterNameById (the first BOARD_LOADED raced the
@@ -309,13 +311,15 @@ function projectEvent(state: TvState, e: QueueLifecycleWireEvent): TvState {
       };
     }
     case 'SYSTEM_RESET':
-      // Clear now-serving + history immediately; also clear the waiting list
-      // and the stashed active slice locally for snappy UX — the debounced
-      // refetch in the boot effect reconciles with the server's fresh-day read
-      // model. The counters-serving panel is re-derived from the empty active
-      // slice joined with `counterNameById`, so EVERY configured counter
-      // immediately shows as idle (em dash) — no empty-state flash before the
-      // debounced refetch reconciles.
+      // Clear now-serving + history immediately; also clear the waiting list,
+      // counters-serving, and stashed active slice locally for snappy UX — the
+      // debounced refetch in the boot effect reconciles with the server's
+      // fresh-day read model. The counters-serving panel is re-derived from the
+      // empty active slice joined with `counterNameById`, so EVERY configured
+      // counter immediately shows as idle (em dash) — no empty-state flash
+      // before the debounced refetch reconciles. `panelLayout` is config (not
+      // queue state) so it is preserved via the `...state` spread — a reset
+      // never drops the manager's TV layout.
       return {
         ...state,
         nowServing: null,
@@ -456,7 +460,7 @@ export function TvStoreProvider({ api, audio, children, socketOptions }: TvStore
             type: 'BOOT_LOADED',
             storeName: configRes.value.storeName,
             categories: categoriesRes.value,
-            displayOptions: configRes.value.tvDisplayOptions,
+            panelLayout: configRes.value.tvPanelLayout,
             counterNameById,
           });
         } else {

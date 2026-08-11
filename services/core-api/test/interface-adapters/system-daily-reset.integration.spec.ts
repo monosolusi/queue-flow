@@ -22,7 +22,7 @@ import {
   SYSTEM_CONFIGURATION_REPOSITORY,
   BrandColor,
   ServiceThemes,
-  TvDisplayOptions,
+  TvPanelLayout,
   DailyResetPolicy,
   DailyResetMode,
   SystemConfiguration,
@@ -184,7 +184,7 @@ describe('System daily-reset REST surface (integration — QUE-2)', () => {
         dailyResetPolicy: DailyResetPolicy.of(DailyResetMode.MANUAL, null, 5),
         brandColor: BrandColor.DEFAULT,
         serviceThemes: ServiceThemes.DEFAULT,
-        tvDisplayOptions: TvDisplayOptions.DEFAULT,
+        tvPanelLayout: TvPanelLayout.DEFAULT,
       }),
     );
 

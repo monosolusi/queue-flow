@@ -73,12 +73,12 @@ describe('SaveSystemConfigurationUseCase — daily-reset policy audit + re-arm (
       ],
       brandColor: '#2563eb',
       serviceThemes: { kiosk: 'light', tv: 'light', caller: 'light', admin: 'light' },
-      tvDisplayOptions: {
-        showNowServing: true,
-        showWaitingQueue: true,
-        showCallHistory: true,
-        showCountersServing: true,
-        showRunningText: true,
+      tvPanelLayout: {
+        nowServing: { visible: true, order: 0, size: 4 },
+        waitingQueue: { visible: true, order: 1, size: 2 },
+        callHistory: { visible: true, order: 2, size: 2 },
+        countersServing: { visible: true, order: 3, size: 2 },
+        runningText: { visible: true, order: 4, size: 2 },
       },
       actor: 'admin',
       ...overrides,

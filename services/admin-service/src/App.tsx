@@ -15,6 +15,7 @@ import { AnalyticsPage } from './pages/AnalyticsPage';
 import { AuditLogPage } from './pages/AuditLogPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { LoginPage } from './pages/LoginPage';
+import { TvLayoutPage } from './pages/TvLayoutPage';
 import { UsersPage } from './pages/UsersPage';
 import { WizardPage } from './pages/WizardPage';
 
@@ -174,6 +175,16 @@ function AppRoutes({ api }: { api: IAdminAppApi }) {
               <SetupGuard>
                 <RequireAuth>
                   <AdminPanel api={api} />
+                </RequireAuth>
+              </SetupGuard>
+            }
+          />
+          <Route
+            path="/tv-layout"
+            element={
+              <SetupGuard>
+                <RequireAuth>
+                  <TvLayoutPage api={api} />
                 </RequireAuth>
               </SetupGuard>
             }
