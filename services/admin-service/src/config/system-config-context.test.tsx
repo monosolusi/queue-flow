@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { SystemConfigProvider, useSystemConfigContext } from './system-config-context';
 import type { ISystemConfigApi } from '../api/admin-api';
 import type { SystemConfigurationDto } from '../api/types';
-import { DEFAULT_SERVICE_THEMES } from '../api/types';
+import { DEFAULT_SERVICE_THEMES, DEFAULT_TV_DISPLAY_OPTIONS } from '../api/types';
 
 function storeNamed(storeName: string): SystemConfigurationDto {
   return {
@@ -15,6 +15,7 @@ function storeNamed(storeName: string): SystemConfigurationDto {
     routingRules: [],
     brandColor: '#2563eb',
     serviceThemes: { ...DEFAULT_SERVICE_THEMES },
+    tvDisplayOptions: { ...DEFAULT_TV_DISPLAY_OPTIONS },
   };
 }
 

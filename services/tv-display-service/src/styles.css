@@ -166,6 +166,53 @@ body,
   font-size: 1.25rem;
 }
 
+/* Counters serving ("Sedang Melayani") ------------------------------------- */
+/* Mirrors .call-history: a surface card with hairline dividers (AC4) and
+   grid-cell containment (AC3). Uses the per-service var(--radius), --surface,
+   and --text-muted directly — no new shared token (per the per-service-override
+   rule). Stays in the service's own styles.css (NOT _tokens.css — no shared-
+   token change, drift gate stays green). */
+.counters-serving {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  overflow: hidden;
+  min-width: 0; /* grid-cell containment (AC3) */
+}
+.counters-serving__title {
+  margin: 0 0 1rem;
+  font-size: 1.5rem;
+}
+.counters-serving__empty {
+  color: var(--text-muted);
+  font-size: 1.25rem;
+}
+.counters-serving__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0; /* dividers carry the spacing; gap+border would double up */
+}
+.counters-serving__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 0.25rem;
+  border-bottom: 1px solid var(--text-muted);
+}
+.counters-serving__item:last-child {
+  border-bottom: none;
+}
+.counters-serving__counter {
+  font-weight: 700;
+  font-size: 1.5rem;
+}
+.counters-serving__number {
+  font-size: 2.5rem;
+  font-weight: 700;
+}
+
 /* Waiting queue ("Antrian Berikutnya") ------------------------------------ */
 /* Mirrors .call-history: a surface card with hairline dividers (AC4) and
    grid-cell containment (AC3). Uses the per-service var(--radius), --surface,
@@ -271,6 +318,9 @@ body,
   overflow: hidden;
 }
 .tv-board__active-side > .call-history {
+  flex: 0 0 auto;
+}
+.tv-board__active-side > .counters-serving {
   flex: 0 0 auto;
 }
 

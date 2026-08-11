@@ -4,6 +4,7 @@ import { InvalidValueObjectException } from '../shared/errors';
 import { BrandColor } from './value-objects/brand-color';
 import { DailyResetPolicy } from './value-objects/daily-reset-policy';
 import { ServiceThemes } from './value-objects/service-themes';
+import { TvDisplayOptions } from './value-objects/tv-display-options';
 import { StateMachine } from './state-machine';
 
 /**
@@ -19,6 +20,7 @@ export class SystemConfiguration extends AggregateRoot {
   private _dailyResetPolicy: DailyResetPolicy;
   private _brandColor: BrandColor;
   private _serviceThemes: ServiceThemes;
+  private _tvDisplayOptions: TvDisplayOptions;
 
   private constructor(
     id: Identifier,
@@ -28,6 +30,7 @@ export class SystemConfiguration extends AggregateRoot {
     dailyResetPolicy: DailyResetPolicy,
     brandColor: BrandColor,
     serviceThemes: ServiceThemes,
+    tvDisplayOptions: TvDisplayOptions,
   ) {
     super(id);
     this._storeName = storeName;
@@ -36,16 +39,19 @@ export class SystemConfiguration extends AggregateRoot {
     this._dailyResetPolicy = dailyResetPolicy;
     this._brandColor = brandColor;
     this._serviceThemes = serviceThemes;
+    this._tvDisplayOptions = tvDisplayOptions;
   }
 
   /** Creates a fresh, not-yet-configured instance with the default state machine,
-   * brand color, and service themes. `brandColor` + `serviceThemes` default so
-   * the dev seed and acceptance `seedPrdConfig` (2-arg calls) need no change. */
+   * brand color, service themes, and TV display options. `brandColor` +
+   * `serviceThemes` + `tvDisplayOptions` default so the dev seed and acceptance
+   * `seedPrdConfig` (2-arg calls) need no change. */
   public static create(
     id: Identifier,
     storeName = '',
     brandColor: BrandColor = BrandColor.DEFAULT,
     serviceThemes: ServiceThemes = ServiceThemes.DEFAULT,
+    tvDisplayOptions: TvDisplayOptions = TvDisplayOptions.DEFAULT,
   ): SystemConfiguration {
     return new SystemConfiguration(
       id,
@@ -55,6 +61,7 @@ export class SystemConfiguration extends AggregateRoot {
       DailyResetPolicy.DEFAULT,
       brandColor,
       serviceThemes,
+      tvDisplayOptions,
     );
   }
 
@@ -66,6 +73,7 @@ export class SystemConfiguration extends AggregateRoot {
     dailyResetPolicy: DailyResetPolicy;
     brandColor: BrandColor;
     serviceThemes: ServiceThemes;
+    tvDisplayOptions: TvDisplayOptions;
   }): SystemConfiguration {
     return new SystemConfiguration(
       params.id,
@@ -75,6 +83,7 @@ export class SystemConfiguration extends AggregateRoot {
       params.dailyResetPolicy,
       params.brandColor,
       params.serviceThemes,
+      params.tvDisplayOptions,
     );
   }
 
@@ -100,6 +109,10 @@ export class SystemConfiguration extends AggregateRoot {
 
   public get serviceThemes(): ServiceThemes {
     return this._serviceThemes;
+  }
+
+  public get tvDisplayOptions(): TvDisplayOptions {
+    return this._tvDisplayOptions;
   }
 
   public setStoreName(name: string): void {

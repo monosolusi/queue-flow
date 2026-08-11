@@ -68,6 +68,22 @@ describe('styles.css AC guards', () => {
     expect(css).toContain('.call-history__item:last-child');
   });
 
+  it('counters-serving mirrors call-history: surface card + hairline dividers + containment', () => {
+    // Surface card via per-service tokens (no new shared token minted).
+    const panel = rule('.counters-serving');
+    expect(panel).toContain('background: var(--surface)');
+    expect(panel).toContain('border-radius: var(--radius)');
+    expect(panel).toContain('min-width: 0'); // grid-cell containment (AC3)
+    expect(panel).toContain('overflow: hidden');
+    // Hairline divider between rows, no nested card background.
+    const item = rule('.counters-serving__item');
+    expect(item).toContain('border-bottom: 1px solid var(--text-muted)');
+    expect(item).not.toContain('background:');
+    expect(item).not.toContain('border-radius:');
+    expect(rule('.counters-serving__list')).toContain('gap: 0');
+    expect(css).toContain('.counters-serving__item:last-child');
+  });
+
   it('waiting-queue mirrors call-history: surface card + hairline dividers + containment', () => {
     // Surface card via per-service tokens (no new shared token minted).
     const panel = rule('.waiting-queue');

@@ -56,6 +56,13 @@ describe('SaveSystemConfigurationUseCase — category id preservation (QUE-24)',
       ],
       brandColor: '#2563eb',
       serviceThemes: { kiosk: 'light', tv: 'light', caller: 'light', admin: 'light' },
+      tvDisplayOptions: {
+        showNowServing: true,
+        showWaitingQueue: true,
+        showCallHistory: true,
+        showCountersServing: true,
+        showRunningText: true,
+      },
       actor: 'admin',
     };
   }
@@ -168,6 +175,13 @@ describe('SaveSystemConfigurationUseCase — brandColor (QUE-36)', () => {
       ],
       brandColor,
       serviceThemes: { kiosk: 'light', tv: 'light', caller: 'light', admin: 'light' },
+      tvDisplayOptions: {
+        showNowServing: true,
+        showWaitingQueue: true,
+        showCallHistory: true,
+        showCountersServing: true,
+        showRunningText: true,
+      },
       actor: 'admin',
     };
   }

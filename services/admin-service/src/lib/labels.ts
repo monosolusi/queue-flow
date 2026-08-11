@@ -1,4 +1,11 @@
-import type { DailyResetMode, PriorityPolicy, ServiceSurface, ThemeMode, UserRole } from '../api/types';
+import type {
+  DailyResetMode,
+  PriorityPolicy,
+  ServiceSurface,
+  ThemeMode,
+  TvDisplayOptionKey,
+  UserRole,
+} from '../api/types';
 
 /**
  * Friendly Bahasa Indonesia display labels for the enum values the manager
@@ -63,6 +70,22 @@ export const SERVICE_SURFACE_LABELS: Record<ServiceSurface, string> = {
   tv: 'TV Display',
   caller: 'Panel Loket (Caller)',
   admin: 'Panel Admin',
+};
+
+/**
+ * Friendly Bahasa Indonesia labels for the TV-display panel visibility toggles.
+ * The toggle key stays as the wire identifier (`showNowServing`/…); this map is
+ * the display name shown as the row label in the admin "Tampilan TV" section.
+ * Never sent to the backend (display only). Mirrors the QUE-34 rule: no
+ * internal/technical terms in user-visible copy — the labels name the panel
+ * as the manager sees it on the TV board.
+ */
+export const TV_DISPLAY_OPTION_LABELS: Record<TvDisplayOptionKey, string> = {
+  showNowServing: 'Sedang Dilayani',
+  showWaitingQueue: 'Antrian Berikutnya',
+  showCallHistory: 'Riwayat Panggilan',
+  showCountersServing: 'Sedang Melayani (per counter)',
+  showRunningText: 'Teks Berjalan',
 };
 
 /**

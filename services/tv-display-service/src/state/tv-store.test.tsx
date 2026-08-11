@@ -6,7 +6,8 @@ import { TvStoreProvider } from './tv-store';
 import { TvBoardPage } from '../pages/TvBoardPage';
 import type { ITvApi } from '../api/tv-api';
 import type { AudioProvider } from '../audio/audio-provider';
-import type { QueueLifecycleWireEvent, TvTicketDto } from '../api/types';
+import type { QueueLifecycleWireEvent, TvTicketDto, TvDisplayOptionsMap } from '../api/types';
+import { DEFAULT_TV_DISPLAY_OPTIONS } from '../api/types';
 
 /** Fake WebSocket whose instances the test can reach to deliver frames. */
 class FakeWebSocket {
@@ -34,6 +35,7 @@ function makeApi(
   brandColor = '',
   waiting: TvTicketDto[] = [],
   active: TvTicketDto[] = [],
+  displayOptions: TvDisplayOptionsMap = DEFAULT_TV_DISPLAY_OPTIONS,
 ): ITvApi {
   return {
     getSystemConfig: vi.fn(() =>
@@ -42,6 +44,11 @@ function makeApi(
         storeName: 'Apotek Sehat',
         brandColor,
         serviceThemes: { tv: 'light' as const },
+        tvDisplayOptions: displayOptions,
+        routingRules: [
+          { counterId: 1, counterName: 'Loket 1' },
+          { counterId: 2, counterName: 'Loket 2' },
+        ],
       }),
     ),
     getCategories: vi.fn(() =>
@@ -406,9 +413,9 @@ describe('TV board state refetch (server owns the read model)', () => {
     const audio = makeAudio();
     renderBoard(api, audio);
 
-    // The now-serving hero shows the restored ticket + counter. The active
-    // board is the sole layer; NowServingCard renders the ticket number.
-    expect(await screen.findByText('A-005')).toBeInTheDocument();
+    // The now-serving hero shows the restored ticket + counter. The ticket
+    // number also appears in the counters-serving panel, so use findAllByText.
+    expect((await screen.findAllByText('A-005')).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Counter 2')).toBeInTheDocument();
     // The active board is visible; nowServing is non-null, so NowServingCard
     // does NOT render its empty-state text.
@@ -437,8 +444,9 @@ describe('TV board state refetch (server owns the read model)', () => {
     const audio = makeAudio();
     renderBoard(api, audio);
 
-    // The newer call (B-007 at counter 2) wins as nowServing.
-    expect(await screen.findByText('B-007')).toBeInTheDocument();
+    // The newer call (B-007 at counter 2) wins as nowServing. The ticket
+    // number also appears in the counters-serving panel, so use findAllByText.
+    expect((await screen.findAllByText('B-007')).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Counter 2')).toBeInTheDocument();
   });
 
@@ -515,6 +523,8 @@ describe('TV board state refetch (server owns the read model)', () => {
           storeName: 'Apotek Sehat',
           brandColor: '',
           serviceThemes: { tv: 'light' as const },
+          tvDisplayOptions: DEFAULT_TV_DISPLAY_OPTIONS,
+          routingRules: [],
         }),
       ),
       getCategories: vi.fn(() => Promise.resolve([{ id: 'cat-a', code: 'A', name: 'CS' }])),
@@ -638,5 +648,171 @@ describe('TV board state refetch (server owns the read model)', () => {
     expect(screen.getAllByText('A-002')).toHaveLength(1);
     expect(screen.getAllByText(/Menunggu: 2 tiket/)).toHaveLength(1);
     expect(api.getBoardState).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('TvStoreProvider counters-serving projection + display options', () => {
+  it('BOARD_LOADED projects countersServing from active + counterNameById (Sedang Melayani)', async () => {
+    // Two active tickets at two counters; each counter appears once with its
+    // boot-config name and the ticket number being served.
+    const active = [
+      { ticketId: 't1', ticketNumber: 'A-005', categoryId: 'cat-a', status: 'CALLING', counterId: 2 },
+      { ticketId: 't2', ticketNumber: 'B-010', categoryId: 'cat-b', status: 'SERVING', counterId: 1 },
+    ];
+    const api = makeApi('', [], active);
+    const audio = makeAudio();
+    renderBoard(api, audio);
+
+    // The counters-serving panel renders both counters (sorted by counterId
+    // ascending → counter 1 first). Each row shows the counter name + ticket.
+    // Scope to the Sedang Melayani section — ticket numbers also appear in the
+    // now-serving card (nowServing = the last active = B-010).
+    const section = (await screen.findByRole('group', { name: 'Counter Sedang Melayani' }));
+    expect(within(section).getByText('Loket 1')).toBeInTheDocument();
+    expect(within(section).getByText('B-010')).toBeInTheDocument();
+    expect(within(section).getByText('Loket 2')).toBeInTheDocument();
+    expect(within(section).getByText('A-005')).toBeInTheDocument();
+  });
+
+  it('groups by counterId keeping the most-recently-touched active row (last wins)', async () => {
+    // active is ordered by updatedAt asc; the last row for a counter wins.
+    const active = [
+      { ticketId: 't-old', ticketNumber: 'A-001', categoryId: 'cat-a', status: 'CALLING', counterId: 1 },
+      { ticketId: 't-new', ticketNumber: 'A-002', categoryId: 'cat-a', status: 'SERVING', counterId: 1 },
+    ];
+    const api = makeApi('', [], active);
+    const audio = makeAudio();
+    renderBoard(api, audio);
+
+    const section = (await screen.findByRole('group', { name: 'Counter Sedang Melayani' }));
+    // Only one row for counter 1; the newer ticket (A-002) wins.
+    expect(within(section).getByText('Loket 1')).toBeInTheDocument();
+    expect(within(section).getByText('A-002')).toBeInTheDocument();
+    expect(within(section).queryByText('A-001')).not.toBeInTheDocument();
+  });
+
+  it('falls back to `Counter {id}` when the counter has no boot-config name', async () => {
+    // A counter appears in the active slice but was NOT in the boot routingRules
+    // (e.g. a counter added after boot). The name falls back defensively.
+    const active = [
+      { ticketId: 't1', ticketNumber: 'A-005', categoryId: 'cat-a', status: 'CALLING', counterId: 9 },
+    ];
+    const api: ITvApi = {
+      getSystemConfig: vi.fn(() =>
+        Promise.resolve({
+          isInitialSetupCompleted: true,
+          storeName: 'Apotek Sehat',
+          brandColor: '',
+          serviceThemes: { tv: 'light' as const },
+          tvDisplayOptions: DEFAULT_TV_DISPLAY_OPTIONS,
+          routingRules: [{ counterId: 1, counterName: 'Loket 1' }],
+        }),
+      ),
+      getCategories: vi.fn(() => Promise.resolve([])),
+      getBoardState: vi.fn(() =>
+        Promise.resolve({ active, waiting: [], waitingCount: 0 }),
+      ),
+    };
+    const audio = makeAudio();
+    renderBoard(api, audio);
+
+    // "Counter 9" appears in BOTH the now-serving card (shows `Counter {id}`)
+    // and the counters-serving panel (fallback name). Scope to the section.
+    const section = (await screen.findByRole('group', { name: 'Counter Sedang Melayani' }));
+    expect(within(section).getByText('Counter 9')).toBeInTheDocument();
+    expect(within(section).getByText('A-005')).toBeInTheDocument();
+  });
+
+  it('renders the empty state when no counter is serving', async () => {
+    const api = makeApi('', [], []);
+    const audio = makeAudio();
+    renderBoard(api, audio);
+
+    expect(await screen.findByText('Sedang Melayani')).toBeInTheDocument();
+    expect(screen.getByText('Tidak ada counter yang sedang melayani.')).toBeInTheDocument();
+  });
+
+  it('SYSTEM_RESET clears countersServing immediately', async () => {
+    const active = [
+      { ticketId: 't1', ticketNumber: 'A-005', categoryId: 'cat-a', status: 'CALLING', counterId: 2 },
+    ];
+    const api = makeApi('', [], active);
+    const audio = makeAudio();
+    renderBoard(api, audio);
+    const section = (await screen.findByRole('group', { name: 'Counter Sedang Melayani' }));
+    expect(within(section).getByText('Loket 2')).toBeInTheDocument();
+    const ws = FakeWebSocket.instances[0];
+
+    fire(ws, {
+      type: 'SYSTEM_RESET',
+      aggregateId: 'system',
+      occurredAt: 3,
+      version: 3,
+      payload: { resetTo: 1, date: '2026-07-31' },
+    });
+    // countersServing cleared locally → the empty state renders immediately.
+    expect(await screen.findByText('Tidak ada counter yang sedang melayani.')).toBeInTheDocument();
+    expect(screen.queryByText('Loket 2')).not.toBeInTheDocument();
+  });
+
+  it('displayOptions carried from BOOT_LOADED and gates the panels (all visible by default)', async () => {
+    const active = [
+      { ticketId: 't1', ticketNumber: 'A-005', categoryId: 'cat-a', status: 'CALLING', counterId: 2 },
+    ];
+    const api = makeApi('', [], active);
+    const audio = makeAudio();
+    renderBoard(api, audio);
+
+    // All panels visible by default.
+    expect(await screen.findByText('Sedang Melayani')).toBeInTheDocument();
+    expect(screen.getByText('Antrian Berikutnya')).toBeInTheDocument();
+    expect(screen.getByText('Riwayat Panggilan')).toBeInTheDocument();
+    // RunningText footer is rendered.
+    expect(screen.getByRole('marquee')).toBeInTheDocument();
+  });
+
+  it('hides the counters-serving + waiting + history + running-text panels when toggled off', async () => {
+    const opts: TvDisplayOptionsMap = {
+      showNowServing: true,
+      showWaitingQueue: false,
+      showCallHistory: false,
+      showCountersServing: false,
+      showRunningText: false,
+    };
+    const active = [
+      { ticketId: 't1', ticketNumber: 'A-005', categoryId: 'cat-a', status: 'CALLING', counterId: 2 },
+    ];
+    const api = makeApi('', [], active, opts);
+    const audio = makeAudio();
+    renderBoard(api, audio);
+
+    // nowServing stays visible (hero); the side panels + footer are hidden.
+    expect(await screen.findByText('A-005')).toBeInTheDocument();
+    expect(screen.queryByText('Sedang Melayani')).not.toBeInTheDocument();
+    expect(screen.queryByText('Antrian Berikutnya')).not.toBeInTheDocument();
+    expect(screen.queryByText('Riwayat Panggilan')).not.toBeInTheDocument();
+    expect(screen.queryByRole('marquee')).not.toBeInTheDocument();
+  });
+
+  it('hides the now-serving hero content when showNowServing is false (empty state renders)', async () => {
+    const opts: TvDisplayOptionsMap = {
+      showNowServing: false,
+      showWaitingQueue: true,
+      showCallHistory: true,
+      showCountersServing: true,
+      showRunningText: true,
+    };
+    const active = [
+      { ticketId: 't1', ticketNumber: 'A-005', categoryId: 'cat-a', status: 'CALLING', counterId: 2 },
+    ];
+    const api = makeApi('', [], active, opts);
+    const audio = makeAudio();
+    renderBoard(api, audio);
+
+    // showNowServing=false passes null to NowServingCard → its empty state
+    // renders even though the server has an active ticket. The ticket number
+    // must NOT appear in the now-serving hero (it may still appear in the
+    // counters-serving panel).
+    expect(await screen.findByText('Menunggu panggilan berikutnya…')).toBeInTheDocument();
   });
 });

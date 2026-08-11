@@ -24,6 +24,7 @@ import {
   CounterRoutingRule,
   BrandColor,
   ServiceThemes,
+  TvDisplayOptions,
   DailyResetPolicy,
   StateMachine,
   StateSchema,
@@ -251,6 +252,7 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
         dailyResetPolicy: DailyResetPolicy.DEFAULT,
         brandColor: BrandColor.DEFAULT,
         serviceThemes: ServiceThemes.DEFAULT,
+        tvDisplayOptions: TvDisplayOptions.DEFAULT,
       }),
     );
 
@@ -344,6 +346,7 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
         dailyResetPolicy: DailyResetPolicy.DEFAULT,
         brandColor: BrandColor.DEFAULT,
         serviceThemes: ServiceThemes.DEFAULT,
+        tvDisplayOptions: TvDisplayOptions.DEFAULT,
       }),
     );
 

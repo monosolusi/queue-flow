@@ -10,3 +10,4 @@ export * from './value-objects/priority-policy';
 export * from './value-objects/service-themes';
 export * from './value-objects/state-schema';
 export * from './value-objects/state-transition-rule';
+export * from './value-objects/tv-display-options';

@@ -57,6 +57,13 @@ function wizardPayload() {
     ],
     brandColor: '#aabbcc',
     serviceThemes: { kiosk: 'light', tv: 'light', caller: 'light', admin: 'light' },
+    tvDisplayOptions: {
+      showNowServing: true,
+      showWaitingQueue: true,
+      showCallHistory: true,
+      showCountersServing: true,
+      showRunningText: true,
+    },
   };
 }
 

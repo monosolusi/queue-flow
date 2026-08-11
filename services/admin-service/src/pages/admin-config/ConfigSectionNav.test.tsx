@@ -10,6 +10,7 @@ const ALL_VALID: SectionValidity = {
   routing: true,
   dailyReset: true,
   stateMachine: true,
+  tvDisplay: true,
 };
 
 /**
@@ -100,6 +101,7 @@ describe('ConfigSectionNav (ARIA tablist)', () => {
     fireEvent.keyDown(tab('Counter & Routing'), { key: 'ArrowDown' });
     fireEvent.keyDown(tab('Reset Harian'), { key: 'ArrowDown' });
     fireEvent.keyDown(tab('Alur Status Tiket'), { key: 'ArrowDown' });
+    fireEvent.keyDown(tab('Tampilan TV'), { key: 'ArrowDown' });
     fireEvent.keyDown(tab('Operasi Manual'), { key: 'ArrowDown' });
     expect(tab('Profil & Tampilan')).toHaveAttribute('aria-selected', 'true');
     expect(tab('Profil & Tampilan')).toHaveFocus();

@@ -5,13 +5,15 @@ import type {
   DailyResetMode,
   ServiceSurface,
   ThemeMode,
+  TvDisplayOptionKey,
 } from '../api/types';
-import { DEFAULT_BRAND_COLOR } from '../api/types';
+import { DEFAULT_BRAND_COLOR, TV_DISPLAY_OPTION_KEYS } from '../api/types';
 import { validateCronExpression } from '../lib/cron';
 import { validateBrandColor, isValidBrandColor } from '../lib/brand-color';
 import { validateRetentionDays } from '../lib/retention';
-import { DAILY_RESET_MODE_LABELS, SERVICE_SURFACE_LABELS, SERVICE_THEME_LABELS } from '../lib/labels';
+import { DAILY_RESET_MODE_LABELS, SERVICE_SURFACE_LABELS, SERVICE_THEME_LABELS, TV_DISPLAY_OPTION_LABELS } from '../lib/labels';
 import { SERVICE_SURFACES, validateServiceThemes } from '../lib/service-themes';
+import { validateTvDisplayOptions } from '../lib/tv-display-options';
 import { timeToCron, cronToTime } from '../lib/daily-reset';
 import { timezoneSelectOptions } from '../lib/timezone';
 import { applyBrandColor, applyThemeMode } from '../lib/theme';
@@ -246,6 +248,11 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
   // editing migrated to the panel).
   const smErrors = form.stateMachine.mode === 'custom' ? validateCustomStateMachine(form.stateMachine) : [];
   const stateMachineValid = smErrors.length === 0;
+  // TV-display panel visibility toggles — the checkboxes are constrained to
+  // true/false so this is defense-in-depth for a corrupt prefill; the error list
+  // drives the inline message and disables the save button.
+  const tvDisplayErrors = validateTvDisplayOptions(form.tvDisplayOptions);
+  const tvDisplayValid = tvDisplayErrors.length === 0;
 
   // Per-section validity bag drives the nav error badges + the save-disabled
   // gate. `PUT /api/system/config` is a FULL save — every section's save
@@ -259,13 +266,15 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
     routing: routingValid,
     dailyReset: dailyResetValid,
     stateMachine: stateMachineValid,
+    tvDisplay: tvDisplayValid,
   };
   const wholeFormValid =
     sectionValidity.profile &&
     sectionValidity.categories &&
     sectionValidity.routing &&
     sectionValidity.dailyReset &&
-    sectionValidity.stateMachine;
+    sectionValidity.stateMachine &&
+    sectionValidity.tvDisplay;
 
   /**
    * PUTs the whole configuration, then re-reads it so server-minted category
@@ -297,6 +306,7 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
           stateMachine: toStateMachineDto(form.stateMachine),
           brandColor: form.brandColor,
           serviceThemes: form.serviceThemes,
+          tvDisplayOptions: form.tvDisplayOptions,
           dailyReset: {
             mode: form.dailyReset.mode,
             cronExpression:
@@ -803,6 +813,53 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
                   onChange={(sm) => setState({ status: 'ready', form: { ...form, stateMachine: sm } })}
                   errors={smErrors}
                 />
+              </section>
+              {saveButton}
+            </>
+          )}
+
+          {activeSection === 'tv-display' && (
+            <>
+              {/* TV-display panel visibility — show/hide each TV board panel
+                  independently. Constrained checkboxes (true/false) make an
+                  invalid value unconstructable; the TV service reads the map at
+                  boot and gates each panel on its toggle (all-visible default). */}
+              <section className="config-card" data-testid="tv-display-section">
+                <h2 className="config-card__title">Tampilan TV</h2>
+                <p className="admin-panel__hint">
+                  Pilih panel mana yang ditampilkan di TV Display. Perubahan
+                  diterapkan saat TV Display dimuat ulang.
+                </p>
+                <ul className="entry-list">
+                  {TV_DISPLAY_OPTION_KEYS.map((key: TvDisplayOptionKey) => (
+                    <li className="entry-row entry-row--check" key={key}>
+                      <label className="field field--inline">
+                        <input
+                          type="checkbox"
+                          checked={form.tvDisplayOptions[key]}
+                          onChange={(e) =>
+                            setState({
+                              status: 'ready',
+                              form: {
+                                ...form,
+                                tvDisplayOptions: { ...form.tvDisplayOptions, [key]: e.target.checked },
+                              },
+                            })
+                          }
+                          data-testid={`tv-display-toggle-${key}`}
+                        />
+                        <span>{TV_DISPLAY_OPTION_LABELS[key]}</span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+                {tvDisplayErrors.length > 0 && (
+                  <ul className="wizard__errors" data-testid="tv-display-errors" style={{ marginTop: '0.75rem' }}>
+                    {tvDisplayErrors.map((msg) => (
+                      <li key={msg}>{msg}</li>
+                    ))}
+                  </ul>
+                )}
               </section>
               {saveButton}
             </>

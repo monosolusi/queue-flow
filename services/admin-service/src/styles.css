@@ -535,6 +535,21 @@ fieldset {
   width: auto;
 }
 
+/* TV-display panel visibility toggles. Each row is an inline checkbox + label
+ * (constrained true/false — an invalid value is not constructable). Stacks
+ * vertically with the entry-list gap; no nested card background. */
+.entry-row--check {
+  padding: 0.4rem 0.25rem;
+  border-bottom: 1px solid var(--surface-2);
+}
+.entry-row--check:last-child {
+  border-bottom: none;
+}
+.entry-row--check .field--inline {
+  margin-bottom: 0;
+  gap: 0.6rem;
+}
+
 .entry-list {
   list-style: none;
   margin: 0 0 0.75rem;
