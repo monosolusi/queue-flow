@@ -1460,6 +1460,36 @@ Token conventions:
 - The focus baseline uses `:where(...):focus-visible` for **zero
   specificity** so service overrides win; `.pressable` is the opt-in `:active`
   pressed-state utility for cards.
+- **`:where()` is for a SHARED baseline yielding to service overrides — NEVER
+  for a service rule overriding its own base.** `:where(.x[aria-pressed='true'])`
+  zeroes the whole selector to specificity (0,0,0); the service's own `.x` base
+  (0,1,0) then wins and the active state is **visually invisible** while the
+  ARIA state is correct (a silent visual/announced drift the static-CSS guard
+  can't catch — jsdom runs `css: false`, so specificity is not testable; the
+  `styles.test.ts` text assertion passes because it checks the rule *text*
+  exists, not that it *applies*). The `:where(...):focus-visible` rule above is
+  the shared `_interactions.css` baseline **yielding to** a higher-specificity
+  service rule — that's the correct direction. A service active/selected state
+  overriding its own base needs a **plain attribute selector** (0,1,1) that
+  beats the base (0,1,0) — the `.timefield__option[aria-pressed='true']` idiom
+  (no `:where()`). General rule: the ARIA-state-IS-the-selector pattern
+  (`.x[aria-pressed='true']`, no `--active` modifier) uses a plain attribute
+  selector, NOT `:where()`. Guard against a regression to the `:where()` shape
+  with `expect(css).not.toMatch(/:where\(\.x\[/)` in `styles.test.ts` — a
+  specificity bug that renders the active state invisible is otherwise
+  undetectable until a real browser render.
+
+  **State-derivation corollary — derive a presentational control's active
+  state from existing page state rather than storing a parallel `preset`
+  state.** A `useMemo` over `[from, to]` that returns the matching preset (or
+  `null` = custom) gives the "manual edit clears the active preset" behavior
+  for free with no extra wiring and no drift surface — a separate `preset`
+  state would have to be manually cleared on every upstream edit and would
+  drift the moment one clear path is missed. This is the same "no `--selected`
+  modifier, the ARIA state IS the selector" ethos extended one layer up to the
+  state model. Instance: `AnalyticsPage.activeDays` derives the active
+  relative-range preset from `from`/`to`; a manual `DateField` edit makes the
+  derivation return `null` with no clear-handler.
 
 **Runtime `--accent` from `SystemConfiguration.brandColor`:** each service has
 a `src/lib/theme.ts` leaf utility (`applyBrandColor(brandColor)` →

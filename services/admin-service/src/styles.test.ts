@@ -494,3 +494,68 @@ describe('layout-consistency refactor — shared .page geometry + .page-header',
     expect(html).toContain('scrollbar-gutter: stable');
   });
 });
+
+describe('relative-range presets + range-trend bar/line toggle', () => {
+  it('.relative-range is a flex-wrap cluster', () => {
+    const r = rule('.relative-range');
+    expect(r).toContain('display: flex');
+    expect(r).toContain('flex-wrap: wrap');
+  });
+
+  it('.relative-range__btn keeps the ≥44px touch target + token-only colors', () => {
+    const btn = rule('.relative-range__btn');
+    expect(btn).toContain('min-height: 2.75rem');
+    expect(btn).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+  });
+
+  it('selects the active preset off the ARIA state itself (no --active modifier to drift)', () => {
+    expect(css).toContain(".relative-range__btn[aria-pressed='true']");
+    expect(css).not.toContain('.relative-range__btn--active');
+    // The active selector must NOT be wrapped in `:where(...)` — `:where()`
+    // zeroes specificity (0,0,0) so the `.relative-range__btn` base (0,1,0)
+    // would win and the pressed preset would be visually identical to inactive.
+    // A plain attribute selector (0,1,1) beats the base (mirrors
+    // `.timefield__option[aria-pressed='true']`).
+    expect(css).not.toMatch(/:where\(\.relative-range__btn\[/);
+    const active = rule(".relative-range__btn[aria-pressed='true']");
+    expect(active).toContain('background: var(--accent)');
+    expect(active).toContain('color: var(--accent-contrast)');
+  });
+
+  it('.range-trend__head lays the h2 + mode toggle in a space-between flex row', () => {
+    const head = rule('.range-trend__head');
+    expect(head).toContain('display: flex');
+    expect(head).toContain('justify-content: space-between');
+    expect(head).toContain('align-items: center');
+    expect(head).toContain('flex-wrap: wrap');
+  });
+
+  it('.range-trend__mode-btn keeps the ≥44px touch target + selects active off the ARIA state', () => {
+    const btn = rule('.range-trend__mode-btn');
+    expect(btn).toContain('min-height: 2.75rem');
+    expect(css).toContain(".range-trend__mode-btn[aria-pressed='true']");
+    expect(css).not.toContain('.range-trend__mode-btn--active');
+    // Same `:where()` guard as the relative-range active selector — see above.
+    expect(css).not.toMatch(/:where\(\.range-trend__mode-btn\[/);
+  });
+
+  it('the line mark + point use the accent token (single-hue series, text never wears the data color)', () => {
+    expect(rule('.range-trend__line')).toContain('stroke: var(--accent)');
+    expect(rule('.range-trend__line')).toContain('fill: none');
+    expect(rule('.range-trend__point')).toContain('fill: var(--accent)');
+  });
+
+  it('uses zero hardcoded color literals in the new selectors', () => {
+    for (const sel of [
+      '.relative-range',
+      '.relative-range__btn',
+      '.range-trend__head',
+      '.range-trend__mode',
+      '.range-trend__mode-btn',
+      '.range-trend__line',
+      '.range-trend__point',
+    ]) {
+      expect(rule(sel), sel).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    }
+  });
+});

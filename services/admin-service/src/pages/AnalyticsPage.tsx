@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { IAdminApi } from '../api/admin-api';
 import type { AuditLogEntryDto, RangeReportDto } from '../api/types';
@@ -10,6 +10,7 @@ import { DateField } from '../components/DateField';
 import { RangeTrendChart } from '../components/RangeTrendChart';
 import { CategoryBreakdownChart } from '../components/CategoryBreakdownChart';
 import { PageHeader } from '../components/PageHeader';
+import { RELATIVE_PRESETS, RelativeRangePicker } from '../components/RelativeRangePicker';
 import { useToast } from '../toast/useToast';
 
 /** Id of the range-validation message, wired to the date fields' `aria-describedby`. */
@@ -90,6 +91,32 @@ export function AnalyticsPage({
   const toInvalid = toMalformed || inverted;
   const rangeInvalid = fromInvalid || toInvalid;
 
+  // Derive the active relative-range preset purely from `from`/`to` — there is
+  // NO separate `preset` state to drift. A preset `days` is active iff `to` is
+  // today AND `from` is exactly `daysAgoLocalKey(days - 1)` (the preset's first
+  // day). The default page state (`from=daysAgoLocalKey(6)`, `to=todayLocalKey()`)
+  // → "7 hari" is active on first render. The moment the manager manually edits
+  // either DateField, the derivation returns `null` (custom) with no extra
+  // wiring — `aria-pressed` on the preset buttons follows for free.
+  const activeDays = useMemo(() => {
+    if (to !== todayLocalKey()) return null;
+    for (const p of RELATIVE_PRESETS) {
+      if (from === daysAgoLocalKey(p.days - 1)) return p.days;
+    }
+    return null;
+    // `todayLocalKey`/`daysAgoLocalKey` are pure functions of `new Date()` and
+    // the page re-derives on every `from`/`to` change; the date helpers do not
+    // need to be in the dep array (the memo recomputes whenever from/to do).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from, to]);
+
+  /** Jumps the range to the last `days` days. A preset click always produces a
+   *  pair of well-formed, in-order keys, so it never trips `rangeInvalid`. */
+  function selectRelative(days: number) {
+    setFrom(daysAgoLocalKey(days - 1));
+    setTo(todayLocalKey());
+  }
+
   useEffect(() => {
     if (rangeInvalid) return;
     let cancelled = false;
@@ -151,6 +178,8 @@ export function AnalyticsPage({
     fromInvalid,
     toInvalid,
     rangeInvalid,
+    activeDays,
+    onSelectRelative: selectRelative,
   };
 
   if (state.status === 'loading') {
@@ -293,6 +322,8 @@ function AnalyticsHeader({
   fromInvalid,
   toInvalid,
   rangeInvalid,
+  activeDays,
+  onSelectRelative,
 }: {
   from: string;
   to: string;
@@ -306,6 +337,10 @@ function AnalyticsHeader({
   toInvalid: boolean;
   /** Their union — gates the export button and renders the shared error node. */
   rangeInvalid: boolean;
+  /** The derived active relative-range preset (`null` = custom range). */
+  activeDays: number | null;
+  /** Jump the range to the last `days` days. */
+  onSelectRelative: (days: number) => void;
 }) {
   return (
     <>
@@ -315,6 +350,11 @@ function AnalyticsHeader({
         actionsAlign="end"
         actions={
           <>
+            {/* Quick relative-range presets — rendered BEFORE the manual Dari/
+                Sampai pickers so the manager can one-tap a common range, then
+                fine-tune with the date fields. The actions row flex-wraps, so
+                the preset group + the two date fields lay out without overflow. */}
+            <RelativeRangePicker activeDays={activeDays} onSelect={onSelectRelative} />
             <DateField
               label="Dari"
               value={from}

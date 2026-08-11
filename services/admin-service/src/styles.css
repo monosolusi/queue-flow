@@ -836,7 +836,43 @@ fieldset {
 
 /* Range trend chart — "Tren Pengunjung" (FR-ADM-03 / QUE-44) ----------------
  * Hand-rolled offline SVG vertical bars (no chart library, NFR-REL-01). One
- * accent hue per single-series magnitude chart; text never wears the data color. */
+ * accent hue per single-series magnitude chart; text never wears the data color.
+ * The bar/line toggle is presentational state local to the chart (SRP); the
+ * ARIA state IS the selector on the mode buttons (no --active modifier to drift,
+ * mirroring the .timefield__option idiom). */
+.range-trend__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.range-trend__mode {
+  display: flex;
+  gap: 0.4rem;
+}
+.range-trend__mode-btn {
+  min-height: 2.75rem;
+  padding: 0.5rem 0.85rem;
+  border: 1px solid var(--surface-2);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+.range-trend__mode-btn:hover {
+  background: var(--surface-2);
+}
+/* The ARIA state IS the selector — no `--active` modifier to drift. A plain
+   attribute selector (specificity 0,1,1) beats the `.range-trend__mode-btn`
+   base (0,1,0); `:where()` would zero it out and the base would win, leaving
+   the pressed mode visually identical to inactive (mirrors the
+   `.timefield__option[aria-pressed='true']` idiom). */
+.range-trend__mode-btn[aria-pressed='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+}
 .range-trend__svg {
   width: 100%;
   height: auto;
@@ -853,6 +889,16 @@ fieldset {
 .range-trend__bar {
   fill: var(--accent);
 }
+.range-trend__line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.range-trend__point {
+  fill: var(--accent);
+}
 .range-trend__value {
   fill: var(--text);
   font-size: 10px;
@@ -860,6 +906,38 @@ fieldset {
 .range-trend__date {
   fill: var(--text-muted);
   font-size: 10px;
+}
+
+/* RelativeRangePicker — quick relative-range presets on /admin/analytics -------
+ * A role="group" cluster of aria-pressed toggle buttons. The ARIA state IS the
+ * selector (no --active modifier) so the visual and announced state cannot drift
+ * (mirrors the .timefield__option idiom). ≥44px touch target (AC5). */
+.relative-range {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.relative-range__btn {
+  min-height: 2.75rem;
+  padding: 0.5rem 0.85rem;
+  border: 1px solid var(--surface-2);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+.relative-range__btn:hover {
+  background: var(--surface-2);
+}
+/* The ARIA state IS the selector — no `--active` modifier to drift. A plain
+   attribute selector (specificity 0,1,1) beats the `.relative-range__btn` base
+   (0,1,0); `:where()` would zero it out and the base would win, leaving the
+   pressed preset visually identical to inactive (mirrors the
+   `.timefield__option[aria-pressed='true']` idiom). */
+.relative-range__btn[aria-pressed='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
 }
 
 /* CategoryBreakdownChart — hand-rolled offline SVG horizontal bars (no chart
