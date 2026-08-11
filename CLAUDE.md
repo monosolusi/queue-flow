@@ -1266,6 +1266,19 @@ config, proxied to `core-api:3000` by Vite in dev).
   label's accessible name. Use a **sibling `<label htmlFor={id}>`** + the
   `<select id={id}>` alongside it, not a wrapping `<label>`. Apply to any
   form control where the label must stay clean/short (auth + wizard steps).
+- **`aria-label` on a bare `<span>`/`<div>` is unreliable — give it a
+  naming-allowed role.** A plain `<span>`/`<div>` has the ARIA `generic` role,
+  whose spec **prohibits name-from-author** — so `aria-label` is ignored by
+  some browsers/AT and inconsistently exposed by others. When the element's
+  visible text is a presentational glyph (an em dash `—`, an icon, a symbol)
+  and the accessible name must differ from the visible text, add an explicit
+  role that supports author naming — typically `role="img"` (the glyph IS the
+  image, the label IS its meaning) — alongside `aria-label`. Instance: the TV
+  `CountersServing` idle row shows a visible `—` for an idle counter but AT
+  must read "belum melayani", so the span carries `role="img"
+  aria-label="belum melayani"`. A serving row's number span carries neither
+  (AT reads the visible ticket number). Do not put `aria-label` on a
+  role-less element expecting it to take effect.
 - **ARIA: a labelled cluster of nav links is `role="group"` + `aria-label` on
   the items container, too — a visible group label that is `aria-hidden` must
   be paired with the grouping semantic on the cluster, else SRs hear a flat
