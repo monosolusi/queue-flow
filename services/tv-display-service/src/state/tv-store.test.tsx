@@ -723,16 +723,21 @@ describe('TvStoreProvider counters-serving projection + display options', () => 
     expect(within(section).getByText('A-005')).toBeInTheDocument();
   });
 
-  it('renders the empty state when no counter is serving', async () => {
+  it('shows all configured counters as idle (em dash) when none are serving', async () => {
     const api = makeApi('', [], []);
     const audio = makeAudio();
     renderBoard(api, audio);
 
-    expect(await screen.findByText('Sedang Melayani')).toBeInTheDocument();
-    expect(screen.getByText('Tidak ada counter yang sedang melayani.')).toBeInTheDocument();
+    const section = (await screen.findByRole('group', { name: 'Counter Sedang Melayani' }));
+    // The panel is NOT empty — both configured counters render, idle (em dash).
+    expect(within(section).getByText('Loket 1')).toBeInTheDocument();
+    expect(within(section).getByText('Loket 2')).toBeInTheDocument();
+    expect(within(section).getAllByText('—')).toHaveLength(2);
+    // The empty-state message must NOT appear — there ARE configured counters.
+    expect(screen.queryByText('Tidak ada counter yang sedang melayani.')).not.toBeInTheDocument();
   });
 
-  it('SYSTEM_RESET clears countersServing immediately', async () => {
+  it('SYSTEM_RESET marks all configured counters idle immediately (em dash)', async () => {
     const active = [
       { ticketId: 't1', ticketNumber: 'A-005', categoryId: 'cat-a', status: 'CALLING', counterId: 2 },
     ];
@@ -750,9 +755,18 @@ describe('TvStoreProvider counters-serving projection + display options', () => 
       version: 3,
       payload: { resetTo: 1, date: '2026-07-31' },
     });
-    // countersServing cleared locally → the empty state renders immediately.
-    expect(await screen.findByText('Tidak ada counter yang sedang melayani.')).toBeInTheDocument();
-    expect(screen.queryByText('Loket 2')).not.toBeInTheDocument();
+    // Synchronous queries — read the immediate projection before the ~300ms
+    // debounced refetch reconciles with the server's fresh-day read model.
+    // After SYSTEM_RESET, every configured counter shows as idle (em dash):
+    // Loket 1 + Loket 2 are still present, both idle; A-005 is gone; the
+    // empty-state message must NOT appear (there ARE configured counters).
+    // Scope to the captured section (the DOM node is reused across the
+    // act-wrapped re-render) — mirrors the sibling idle test's scoping.
+    expect(within(section).getByText('Loket 1')).toBeInTheDocument();
+    expect(within(section).getByText('Loket 2')).toBeInTheDocument();
+    expect(within(section).getAllByText('—')).toHaveLength(2);
+    expect(within(section).queryByText('A-005')).not.toBeInTheDocument();
+    expect(screen.queryByText('Tidak ada counter yang sedang melayani.')).not.toBeInTheDocument();
   });
 
   it('displayOptions carried from BOOT_LOADED and gates the panels (all visible by default)', async () => {

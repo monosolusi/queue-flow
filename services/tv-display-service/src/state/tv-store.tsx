@@ -47,9 +47,13 @@ export interface TvState {
    */
   readonly waiting: readonly WaitingTicket[];
   /**
-   * The counters currently serving a ticket, projected client-side from
+   * The counters-serving panel ("Sedang Melayani"), projected client-side from
    * `GET /api/queue/board`'s `active` array joined with the boot-built
-   * `counterNameById` map. Sourced from the server's read model (like
+   * `counterNameById` map. The list includes EVERY configured counter (from
+   * `routingRules`); a counter with no active ticket right now is shown as
+   * idle (em dash, `idle: true`, muted) — a single on-premise store has every
+   * configured counter operational, so idle counters stay visible instead of
+   * disappearing from the board. Sourced from the server's read model (like
    * `waiting`) and refreshed via the same debounced board refetch — the TV
    * does NOT project this from events (SRP — the server owns the read model).
    */
@@ -122,31 +126,59 @@ function toWaitingTicket(t: TvTicketDto): WaitingTicket {
 
 /**
  * Projects the `counters-serving` list from the board state's `active` slice
- * joined with the boot-built counter-name map. Each `active` row with a
- * non-null `counterId` is a counter currently serving; grouped by `counterId`
- * keeping the LAST (most-recently-touched, since `active` is ordered by
- * `updatedAt` asc), then sorted by `counterId` ascending for stable display.
- * Falls back to `Counter {id}` when a counter has no boot-config name
- * (defensive against a counter added after boot).
+ * joined with the boot-built counter-name map. The list includes EVERY
+ * configured counter (the union of `counterNameById` keys AND any counter id
+ * appearing in the `active` slice — the latter preserves the defensive
+ * fallback for a counter added after boot that's not in the boot config map).
+ * A counter with an active ticket shows its real ticket fields (`idle: false`);
+ * a counter with no active ticket shows `ticketNumber: '—'`, `ticketId: ''`,
+ * `status: ''`, `idle: true` (visible-but-muted — a single on-premise store
+ * has every configured counter operational, so idle counters stay on the
+ * board instead of disappearing). The `active` slice is grouped by
+ * `counterId` keeping the LAST (most-recently-touched, since `active` is
+ * ordered by `updatedAt` asc), then every counter id is sorted ascending for
+ * stable display. Falls back to `Counter {id}` when a counter has no
+ * boot-config name (defensive against a counter added after boot).
  */
 function toCountersServing(
   active: readonly TvTicketDto[],
   counterNameById: ReadonlyMap<number, string>,
 ): readonly CounterServing[] {
-  const byId = new Map<number, TvTicketDto>();
+  // Group active rows by counterId; last-in-wins (active is updatedAt asc →
+  // last is most-recently-touched).
+  const activeByCounter = new Map<number, TvTicketDto>();
   for (const t of active) {
     if (t.counterId === null) continue;
-    // last-in-wins (active is updatedAt asc → last is most-recently-touched)
-    byId.set(t.counterId, t);
+    activeByCounter.set(t.counterId, t);
   }
-  return [...byId.entries()]
-    .map(([counterId, t]) => ({
-      counterId,
-      counterName: counterNameById.get(counterId) ?? `Counter ${counterId}`,
-      ticketNumber: t.ticketNumber,
-      ticketId: t.ticketId,
-      status: t.status,
-    }))
+  // The union of configured counter ids AND any counter appearing in the
+  // active slice (defensive against a counter added after boot that's not in
+  // the boot config map).
+  const ids = new Set<number>(counterNameById.keys());
+  for (const id of activeByCounter.keys()) ids.add(id);
+  return [...ids]
+    .map((counterId) => {
+      const t = activeByCounter.get(counterId);
+      const counterName = counterNameById.get(counterId) ?? `Counter ${counterId}`;
+      if (t) {
+        return {
+          counterId,
+          counterName,
+          ticketNumber: t.ticketNumber,
+          ticketId: t.ticketId,
+          status: t.status,
+          idle: false,
+        };
+      }
+      return {
+        counterId,
+        counterName,
+        ticketNumber: '—',
+        ticketId: '',
+        status: '',
+        idle: true,
+      };
+    })
     .sort((a, b) => a.counterId - b.counterId);
 }
 
@@ -277,16 +309,19 @@ function projectEvent(state: TvState, e: QueueLifecycleWireEvent): TvState {
       };
     }
     case 'SYSTEM_RESET':
-      // Clear now-serving + history immediately; also clear the waiting list,
-      // counters-serving, and stashed active slice locally for snappy UX — the
-      // debounced refetch in the boot effect reconciles with the server's
-      // fresh-day read model.
+      // Clear now-serving + history immediately; also clear the waiting list
+      // and the stashed active slice locally for snappy UX — the debounced
+      // refetch in the boot effect reconciles with the server's fresh-day read
+      // model. The counters-serving panel is re-derived from the empty active
+      // slice joined with `counterNameById`, so EVERY configured counter
+      // immediately shows as idle (em dash) — no empty-state flash before the
+      // debounced refetch reconciles.
       return {
         ...state,
         nowServing: null,
         history: [],
         waiting: [],
-        countersServing: [],
+        countersServing: toCountersServing([], state.counterNameById),
         lastActive: [],
       };
     default:
