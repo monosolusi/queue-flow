@@ -66,8 +66,19 @@ fieldset {
 
 /* SetupGuard / loading --------------------------------------------------- */
 .guard-loading,
-.admin-panel--loading,
 .wizard--loading {
+  padding: 3rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 1.25rem;
+}
+/* The AdminPanel loading state composes `.page` for the shared 920px
+   max-width + centering, then overrides only the padding via a TWO-class
+   selector (`.admin-panel.admin-panel--loading`, specificity 0,2,0) so it
+   beats `.page`'s one-class `padding` regardless of source order. This keeps
+   `.page` as the single source of page geometry — no duplicated max-width /
+   margin / flex base on `.admin-panel` (DRY). */
+.admin-panel.admin-panel--loading {
   padding: 3rem;
   text-align: center;
   color: var(--text-muted);
@@ -90,8 +101,15 @@ fieldset {
   color: var(--text);
 }
 
-/* Admin panel ------------------------------------------------------------ */
-.admin-panel {
+/* Shared in-shell page geometry + header (layout-consistency refactor) --------
+ * The four in-shell admin pages (Dashboard, AdminPanel, Analitik, Audit, Users)
+ * share one root container geometry + one header component (`<PageHeader>`).
+ * The `.page` class carries the unified `max-width`/`margin`/`padding`/flex
+ * column rhythm; each page root keeps its per-page class for descendant rules
+ * (`.status-dashboard__stale`, `.analytics__empty`, `.users__table`, etc.) but
+ * drops its own geometry block. The `.page-header` block replaces the 4×
+ * duplicated `__title`/`__subtitle`/`__header` rules. */
+.page {
   max-width: 920px;
   margin: 0 auto;
   padding: 1.5rem 1rem 2rem;
@@ -99,21 +117,46 @@ fieldset {
   flex-direction: column;
   gap: 1.25rem;
 }
-.admin-panel__header {
+.page-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+  flex-wrap: wrap;
 }
-.admin-panel__title {
+.page-header__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.page-header__title {
   margin: 0;
   font-size: 1.75rem;
 }
-.admin-panel__subtitle {
+.page-header__subtitle {
   margin: 0;
   color: var(--text-muted);
   font-size: 1rem;
 }
+.page-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+/* Analytics + Audit date pickers carry labels above their inputs, so the
+   actions row aligns to the bottom (input baselines) instead of the center. */
+.page-header__actions--align-end {
+  align-items: flex-end;
+}
+
+/* Admin panel ------------------------------------------------------------ */
+/* The root `.admin-panel` class carries NO geometry of its own — every state
+   (ready / error / loading) composes `.page` for the shared 920px max-width +
+   centering + padding + flex column rhythm. The loading state's `padding: 3rem`
+   override lives in the two-class `.admin-panel.admin-panel--loading` rule
+   above (specificity beats `.page`). Descendant rules (`.admin-panel__error`
+   etc.) are scoped by their own class, not by a `.admin-panel` parent block. */
 .admin-panel__error {
   color: var(--danger-on-surface);
 }
@@ -681,36 +724,10 @@ fieldset {
 }
 
 /* Analytics dashboard (FR-ADM-03 / QUE-26) -------------------------------- */
-.analytics {
-  max-width: 920px;
-  margin: 0 auto;
-  padding: 1.5rem 1rem 2rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-}
-.analytics__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-.analytics__title {
-  margin: 0;
-  font-size: 1.75rem;
-}
-.analytics__subtitle {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 1rem;
-}
-.analytics__controls {
-  display: flex;
-  align-items: flex-end;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
+/* The root `.analytics` class carries no geometry of its own — `.page`
+   (composed on the root <div>) supplies the shared max-width/margin/padding/
+   flex-column rhythm. The header + controls now use the shared `.page-header`
+   block above; only the page-specific descendants keep `.analytics__*` rules. */
 .analytics__empty {
   color: var(--text-muted);
 }
@@ -1625,36 +1642,11 @@ fieldset {
 }
 
 /* Live operational dashboard (FR-ADM-03 / QUE-44) ------------------------- */
-.status-dashboard {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 1.5rem 1.25rem 2rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-}
-.status-dashboard__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-.status-dashboard__title {
-  margin: 0;
-  font-size: 1.75rem;
-}
-.status-dashboard__subtitle {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 1rem;
-}
-.status-dashboard__controls {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
+/* The root `.status-dashboard` class carries no geometry of its own — `.page`
+   (composed on the root <div>) supplies the shared max-width: 920px +
+   margin/padding/flex-column rhythm. The header now uses the shared
+   `.page-header` block above; only page-specific descendants keep
+   `.status-dashboard__*` rules. */
 .status-dashboard__updated {
   color: var(--text-muted);
   font-size: 0.85rem;
@@ -1890,30 +1882,12 @@ fieldset {
 }
 
 /* Users page (QUE-43) ----------------------------------------------------- */
-.users {
-  max-width: 920px;
-  margin: 0 auto;
-  padding: 1.5rem 1rem 2rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-}
+/* The root `.users` class carries no geometry of its own — `.page` (composed
+   on the root <div>) supplies the shared max-width/margin/padding/flex-column
+   rhythm. The header now uses the shared `.page-header` block above; only
+   page-specific descendants keep `.users__*` rules. */
 .users--denied {
   max-width: 520px;
-}
-.users__header {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-.users__title {
-  margin: 0;
-  font-size: 1.75rem;
-}
-.users__subtitle {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 1rem;
 }
 .users__error {
   color: var(--danger-on-surface);

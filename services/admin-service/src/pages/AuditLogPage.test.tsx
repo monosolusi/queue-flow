@@ -89,7 +89,7 @@ function renderPage(api: IAdminApi) {
 describe('AuditLogPage (QUE-45)', () => {
   it('shows a loading state, then renders the audit table with friendly action labels', async () => {
     const { api } = makeApi();
-    renderPage(api);
+    const { container } = renderPage(api);
 
     expect(screen.getByText('Memuat log audit…')).toBeInTheDocument();
     // The raw enum strings must NEVER leak — the friendly labels render instead.
@@ -97,6 +97,12 @@ describe('AuditLogPage (QUE-45)', () => {
     expect(screen.getByText('Ubah Alur Status')).toBeInTheDocument();
     expect(screen.queryByText('MANUAL_RESET')).not.toBeInTheDocument();
     expect(screen.queryByText('STATE_SCHEMA_CHANGE')).not.toBeInTheDocument();
+
+    // Regression guard (arch-review): the ready render path must compose the
+    // shared `.page` root so it keeps the unified max-width/centering/padding.
+    // The geometry block was removed from `.analytics` — without `.page` the
+    // primary audit-table view renders full-width, uncentered, no padding.
+    expect(container.firstElementChild).toHaveClass('page');
   });
 
   it('renders the empty state when there are no entries', async () => {

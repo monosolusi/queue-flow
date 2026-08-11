@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { IAdminApi } from '../api/admin-api';
 import type { AuditLogEntryDto } from '../api/types';
+import { PageHeader } from '../components/PageHeader';
 import { isDateKey, localDayKey } from '../lib/date';
 import { labelForAuditAction } from '../lib/labels';
 import { DateField } from '../components/DateField';
@@ -80,7 +81,7 @@ export function AuditLogPage({ api }: { api: IAdminApi }) {
 
   if (state.status === 'loading') {
     return (
-      <div className="analytics analytics--loading">
+      <div className="page analytics">
         {/* The header renders the <h1> so the page owns its heading on every
             view — the AppShell topbar title is intentionally a non-heading
             <span> and relies on the routed page providing the <h1>. */}
@@ -93,7 +94,7 @@ export function AuditLogPage({ api }: { api: IAdminApi }) {
   }
   if (state.status === 'error') {
     return (
-      <div className="analytics">
+      <div className="page analytics">
         <AuditHeader filterDate={filterDate} onFilterDateChange={setFilterDate} />
         <p className="admin-panel__error">Gagal memuat log audit: {state.message}</p>
         <Link className="btn btn--primary" to="/">
@@ -104,7 +105,7 @@ export function AuditLogPage({ api }: { api: IAdminApi }) {
   }
   if (state.status === 'empty' || visible.length === 0) {
     return (
-      <div className="analytics">
+      <div className="page analytics">
         <AuditHeader filterDate={filterDate} onFilterDateChange={setFilterDate} />
         <p className="analytics__empty" data-testid="audit-empty">
           {/* Only claim "nothing on that date" when a real date is filtering;
@@ -118,7 +119,7 @@ export function AuditLogPage({ api }: { api: IAdminApi }) {
   }
 
   return (
-    <div className="analytics">
+    <div className="page analytics">
       <AuditHeader filterDate={filterDate} onFilterDateChange={setFilterDate} />
 
       {/* AC4 — the 5-column audit table overflows on narrow viewports; wrap it
@@ -165,16 +166,15 @@ function AuditHeader({
   onFilterDateChange: (d: string) => void;
 }) {
   const invalid = filterDate !== '' && !isDateKey(filterDate);
+  // `clearable` only here: '' is this field's meaningful "tampilkan semua"
+  // state, and the native date input used to give Chrome users a clear
+  // affordance that a plain text input does not.
   return (
-    <header className="analytics__header">
-      <div>
-        <h1 className="analytics__title">Log Audit</h1>
-        <p className="analytics__subtitle">Riwayat tindakan sensitif</p>
-      </div>
-      <div className="analytics__controls">
-        {/* `clearable` only here: '' is this field's meaningful "tampilkan
-            semua" state, and the native date input used to give Chrome users a
-            clear affordance that a plain text input does not. */}
+    <PageHeader
+      title="Log Audit"
+      subtitle="Riwayat tindakan sensitif"
+      actionsAlign="end"
+      actions={
         <DateField
           label="Filter tanggal"
           value={filterDate}
@@ -195,7 +195,7 @@ function AuditHeader({
             </span>
           )}
         </DateField>
-      </div>
-    </header>
+      }
+    />
   );
 }

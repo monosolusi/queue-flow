@@ -165,12 +165,17 @@ function rowOf(label: string): HTMLElement {
 describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
   it('prefills editable sections and maps routing assignedCategoryIds -> codes', async () => {
     const { api } = makeApi();
-    renderPanel(api);
+    const { container } = renderPanel(api);
 
     expect(await screen.findByText('Apotek Sehat')).toBeInTheDocument();
     // Store name prefilled on the default profile section.
     expect(screen.getByTestId('admin-store-name')).toHaveValue('Apotek Sehat');
 
+    // Regression guard (layout-consistency refactor): the ready render path
+    // must compose the shared `.page` root so it keeps the unified
+    // max-width/centering/padding. `.admin-panel` carries NO geometry — without
+    // `.page` the primary config view renders full-width, uncentered, no padding.
+    expect(container.firstElementChild).toHaveClass('page');
     // Categories prefilled with existing names.
     await goToSection('Kategori');
     expect(screen.getByLabelText('Kategori 1 kode')).toHaveValue('A');
