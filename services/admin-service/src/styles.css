@@ -161,8 +161,10 @@ fieldset {
   gap: 0.75rem;
   flex-wrap: wrap;
 }
-/* Analytics + Audit date pickers carry labels above their inputs, so the
-   actions row aligns to the bottom (input baselines) instead of the center. */
+/* The Audit page's date pickers carry labels above their inputs, so its
+   actions row aligns to the bottom (input baselines) instead of the center.
+   (Analytics no longer uses this — its date fields moved out of the actions
+   row into the .analytics__custom-range panel below the header.) */
 .page-header__actions--align-end {
   align-items: flex-end;
 }
@@ -938,6 +940,26 @@ fieldset {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-contrast);
+}
+
+/* The manual Dari/Sampai panel — revealed on its own row below the header when
+ * the manager taps "Kustom". A flex-wrap row of the two labeled DateFields.
+ * The `.field` base carries `margin-bottom: 1rem` (for stacked form rows), which
+ * would droop the inputs inside a single-row cluster, so it is reset to 0 here.
+ * The actions row above is all equal-height buttons now, so the prior
+ * `align-items: flex-end` workaround for mixing labeled fields with unlabeled
+ * buttons is gone — this dedicated row is the structural fix for the
+ * misalignment the manager reported. */
+.analytics__custom-range {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-end;
+}
+.analytics__custom-range .field {
+  margin-bottom: 0;
+  flex: 1 1 14rem;
+  min-width: 0;
 }
 
 /* CategoryBreakdownChart — hand-rolled offline SVG horizontal bars (no chart

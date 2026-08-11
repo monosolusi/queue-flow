@@ -16,10 +16,12 @@
  * the first heading in the page body.
  *
  * The optional `actions` slot replaces the per-page `__controls` div. When the
- * actions need bottom alignment (e.g. the analytics date pickers carry labels
+ * actions need bottom alignment (e.g. the Audit page's date pickers carry labels
  * above their inputs and must align with the heading's baseline), pass
  * `actionsAlign="end"`; the default is `center` (used by the dashboard's
- * Muat Ulang button + last-updated stamp).
+ * Muat Ulang button + last-updated stamp, and by the analytics range selector —
+ * its date fields live on a dedicated row below the header, not in the actions
+ * row, so the actions row is all equal-height buttons).
  */
 import type { ReactNode } from 'react';
 
@@ -31,7 +33,7 @@ export interface PageHeaderProps {
   /** Optional right-aligned action controls (buttons, date pickers, links). */
   actions?: ReactNode;
   /** Actions row alignment — `center` (default) or `end` (bottom-aligned, for
-   *  controls with labels above their inputs, e.g. the analytics date pickers). */
+   *  controls with labels above their inputs, e.g. the Audit page's date pickers). */
   actionsAlign?: 'center' | 'end';
 }
 
