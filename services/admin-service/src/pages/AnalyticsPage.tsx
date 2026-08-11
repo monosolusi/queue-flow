@@ -9,6 +9,7 @@ import { loadRangeOverview, type RangeOverviewData } from '../lib/analytics-load
 import { DateField } from '../components/DateField';
 import { RangeTrendChart } from '../components/RangeTrendChart';
 import { CategoryBreakdownChart } from '../components/CategoryBreakdownChart';
+import { PageHeader } from '../components/PageHeader';
 import { useToast } from '../toast/useToast';
 
 /** Id of the range-validation message, wired to the date fields' `aria-describedby`. */
@@ -154,7 +155,7 @@ export function AnalyticsPage({
 
   if (state.status === 'loading') {
     return (
-      <div className="analytics">
+      <div className="page analytics">
         <AnalyticsHeader {...headerProps} exportDisabled={true} />
         <p className="analytics__loading" role="status" aria-live="polite">
           Memuat analitik…
@@ -167,7 +168,7 @@ export function AnalyticsPage({
   }
   if (state.status === 'error') {
     return (
-      <div className="analytics">
+      <div className="page analytics">
         <AnalyticsHeader {...headerProps} exportDisabled={true} />
         <p className="admin-panel__error" data-testid="analytics-error">
           Gagal memuat analitik: {state.message}
@@ -182,7 +183,7 @@ export function AnalyticsPage({
   const { report, counters } = state.data;
 
   return (
-    <div className="analytics">
+    <div className="page analytics">
       <AnalyticsHeader {...headerProps} exportDisabled={false} />
 
       <section className="analytics__summary" aria-label="Ringkasan rentang">
@@ -307,57 +308,64 @@ function AnalyticsHeader({
   rangeInvalid: boolean;
 }) {
   return (
-    <header className="analytics__header">
-      <div>
-        <h1 className="analytics__title">Analitik &amp; Laporan</h1>
-        <p className="analytics__subtitle">Ekspor laporan lokal (.xlsx)</p>
-      </div>
-      <div className="analytics__controls">
-        <DateField
-          label="Dari"
-          value={from}
-          onChange={onFromChange}
-          ariaLabel="Tanggal mulai"
-          testId="analytics-from"
-          invalid={fromInvalid}
-          describedById={fromInvalid ? RANGE_ERROR_ID : undefined}
-        />
-        <DateField
-          label="Sampai"
-          value={to}
-          onChange={onToChange}
-          ariaLabel="Tanggal akhir"
-          testId="analytics-to"
-          invalid={toInvalid}
-          describedById={toInvalid ? RANGE_ERROR_ID : undefined}
-        />
-        <button
-          type="button"
-          className="btn btn--primary"
-          onClick={onExport}
-          disabled={exportDisabled || exporting || rangeInvalid}
-          data-testid="analytics-export"
-        >
-          {exporting ? 'Mengekspor…' : 'Ekspor .xlsx'}
-        </button>
-        {/* QUE-45 — the audit trail now lives on its own `/audit` route; this
-            link is the bridge from the analytics view to it. */}
-        <Link className="btn btn--secondary" to="/audit" data-testid="analytics-audit-link">
-          Lihat log audit
-        </Link>
-      </div>
-      {/* Owned by the header, not by a single view branch, so it renders in
-          every state the page can be in. The fields are flagged from the same
-          `from`/`to` the header already holds, and a failed load leaves the page
-          on its error branch while the manager keeps editing dates — parking
-          this node in the ready branch only would let `aria-invalid` travel
-          without the `aria-describedby` target that explains it. */}
+    <>
+      <PageHeader
+        title="Analitik & Laporan"
+        subtitle="Ekspor laporan lokal (.xlsx)"
+        actionsAlign="end"
+        actions={
+          <>
+            <DateField
+              label="Dari"
+              value={from}
+              onChange={onFromChange}
+              ariaLabel="Tanggal mulai"
+              testId="analytics-from"
+              invalid={fromInvalid}
+              describedById={fromInvalid ? RANGE_ERROR_ID : undefined}
+            />
+            <DateField
+              label="Sampai"
+              value={to}
+              onChange={onToChange}
+              ariaLabel="Tanggal akhir"
+              testId="analytics-to"
+              invalid={toInvalid}
+              describedById={toInvalid ? RANGE_ERROR_ID : undefined}
+            />
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={onExport}
+              disabled={exportDisabled || exporting || rangeInvalid}
+              data-testid="analytics-export"
+            >
+              {exporting ? 'Mengekspor…' : 'Ekspor .xlsx'}
+            </button>
+            {/* QUE-45 — the audit trail now lives on its own `/audit` route; this
+                link is the bridge from the analytics view to it. */}
+            <Link className="btn btn--secondary" to="/audit" data-testid="analytics-audit-link">
+              Lihat log audit
+            </Link>
+          </>
+        }
+      />
+      {/* Owned by AnalyticsHeader, not by a single view branch, so it renders
+          in every state the page can be in (loading / error / ready all render
+          this header). The fields are flagged from the same `from`/`to` the
+          header already holds, and a failed load leaves the page on its error
+          branch while the manager keeps editing dates — parking this node in
+          the ready branch only would let `aria-invalid` travel without the
+          `aria-describedby` target that explains it. Rendered as a sibling
+          after the PageHeader (which has no children slot) rather than inside
+          the old `<header>`, but the `id`/`aria-describedby` wiring is
+          DOM-location-independent so the association is unchanged. */}
       {rangeInvalid && (
         <p className="admin-panel__error" id={RANGE_ERROR_ID} data-testid="analytics-range-invalid">
           Isi kedua tanggal dengan format YYYY-MM-DD, dan pastikan tanggal mulai sebelum atau sama
           dengan tanggal akhir.
         </p>
       )}
-    </header>
+    </>
   );
 }

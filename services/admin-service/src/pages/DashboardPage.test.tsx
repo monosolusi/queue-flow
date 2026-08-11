@@ -127,10 +127,17 @@ describe('DashboardPage (live operational status — QUE-44)', () => {
 
   it('renders the now-serving card + waiting counts + counter statuses', async () => {
     const { api } = makeApi();
-    renderPage(api);
+    const { container } = renderPage(api);
 
     // Now-serving: last active ticket → A-001 at Counter 1.
     expect(await screen.findByTestId('now-serving-number')).toHaveTextContent('A-001');
+    // Regression guard (layout-consistency refactor): the ready render path
+    // must compose the shared `.page` root so it keeps the unified
+    // max-width/centering/padding. DashboardPage was the 1100px / 1.25rem
+    // outlier this refactor specifically converges — guard the ready path so a
+    // future edit cannot silently re-introduce the divergent geometry (the
+    // static CSS guard catches the rule, this catches the runtime class).
+    expect(container.firstElementChild).toHaveClass('page');
     expect(screen.getByTestId('now-serving-counter')).toHaveTextContent('Counter 1');
 
     // Waiting per category: 2×A, 1×B.

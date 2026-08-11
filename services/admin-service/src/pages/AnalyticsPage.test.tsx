@@ -158,12 +158,18 @@ function alertRegion() {
 describe('AnalyticsPage (range analytics — FR-ADM-03 / QUE-44)', () => {
   it('loads the range report and renders metrics, per-category + counter tables', async () => {
     const { api } = makeApi();
-    renderPage(api);
+    const { container } = renderPage(api);
 
     expect(screen.getByText('Memuat analitik…')).toBeInTheDocument();
     expect(await screen.findByTestId('metric-total')).toHaveTextContent('4');
     expect(screen.getByTestId('metric-wait')).toHaveTextContent('12.0 detik');
     expect(screen.getByTestId('metric-service')).toHaveTextContent('30.0 detik');
+
+    // Regression guard (arch-review): the ready render path must compose the
+    // shared `.page` root so it keeps the unified max-width/centering/padding.
+    // The geometry block was removed from `.analytics` — without `.page` the
+    // primary view renders full-width, uncentered, no padding.
+    expect(container.firstElementChild).toHaveClass('page');
 
     const perCategory = screen.getByRole('region', { name: 'Per kategori' });
     // QUE-49 — the per-category view shows human-readable NAMES, not raw codes.

@@ -71,8 +71,13 @@ describe('UsersPage (QUE-43)', () => {
 
   it('lists users with friendly Indonesian role labels (admin principal)', async () => {
     writeToken('t');
-    renderUsers(makeAuthApi(ADMIN), makeUsersApi().api);
+    const { container } = renderUsers(makeAuthApi(ADMIN), makeUsersApi().api);
     expect(await screen.findByTestId('user-row-u-1')).toBeInTheDocument();
+    // Regression guard (layout-consistency refactor): the ready render path
+    // must compose the shared `.page` root so it keeps the unified
+    // max-width/centering/padding. `.users` carries NO geometry — without
+    // `.page` the primary users view renders full-width, uncentered, no padding.
+    expect(container.firstElementChild).toHaveClass('page');
     expect(screen.getByTestId('user-username-u-1')).toHaveTextContent('manajer');
     // Role is rendered via the friendly label, never the raw enum. The role
     // select's options also carry the friendly labels, so both the table cell

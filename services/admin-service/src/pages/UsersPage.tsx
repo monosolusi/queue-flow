@@ -3,6 +3,7 @@ import type { IUsersApi } from '../api/admin-api';
 import type { UserDto, UserRole } from '../api/types';
 import { useAuthContext } from '../auth/auth-context';
 import { useToast } from '../toast/useToast';
+import { PageHeader } from '../components/PageHeader';
 import { USER_ROLE_DESCRIPTIONS, USER_ROLE_LABELS } from '../lib/labels';
 
 /** Username invariant mirror (QUE-43 — mirrors core-api's `Username` VO). */
@@ -431,8 +432,8 @@ export function UsersPage({ api }: { api: IUsersApi }) {
 
   if (!isAdmin) {
     return (
-      <div className="users users--denied">
-        <h1 className="users__title">Pengguna</h1>
+      <div className="page users users--denied">
+        <PageHeader title="Pengguna" />
         <p className="users__error" role="alert" data-testid="users-denied">
           Akses ditolak. Halaman ini hanya untuk administrator.
         </p>
@@ -441,11 +442,8 @@ export function UsersPage({ api }: { api: IUsersApi }) {
   }
 
   return (
-    <div className="users">
-      <header className="users__header">
-        <h1 className="users__title">Pengguna</h1>
-        <p className="users__subtitle">Kelola akun administrator dan staf loket.</p>
-      </header>
+    <div className="page users">
+      <PageHeader title="Pengguna" subtitle="Kelola akun administrator dan staf loket." />
 
       {error && (
         <p className="users__error" role="alert" data-testid="users-error">

@@ -399,3 +399,87 @@ describe('_tokens.css QUE-47 light/dark structure', () => {
     expect(declsOnly).not.toContain('--danger-on-dark');
   });
 });
+
+describe('layout-consistency refactor — shared .page geometry + .page-header', () => {
+  it('defines one shared .page rule with the unified geometry (920px / 1rem h-padding)', () => {
+    // The unified geometry the four in-shell page roots converged on. Asserting
+    // the exact value keeps a future divergent edit from silently re-introducing
+    // the 1100px / 1.25rem outlier the refactor removed.
+    const page = rule('.page');
+    expect(page).toContain('max-width: 920px');
+    expect(page).toContain('margin: 0 auto');
+    expect(page).toContain('padding: 1.5rem 1rem 2rem');
+    expect(page).toContain('display: flex');
+    expect(page).toContain('flex-direction: column');
+    expect(page).toContain('gap: 1.25rem');
+  });
+
+  it('defines the shared .page-header title + subtitle rules', () => {
+    expect(rule('.page-header__title')).toContain('font-size: 1.75rem');
+    expect(rule('.page-header__subtitle')).toContain('color: var(--text-muted)');
+    expect(rule('.page-header__subtitle')).toContain('font-size: 1rem');
+  });
+
+  it('defines the .page-header__actions row + the --align-end modifier', () => {
+    expect(rule('.page-header__actions')).toContain('display: flex');
+    expect(rule('.page-header__actions')).toContain('gap: 0.75rem');
+    // The default alignment is center (no modifier); the modifier flips it.
+    expect(rule('.page-header__actions--align-end')).toContain('align-items: flex-end');
+  });
+
+  it('the per-page __title / __subtitle rules are gone (replaced by .page-header)', () => {
+    expect(css).not.toMatch(/\.status-dashboard__title\s*\{/);
+    expect(css).not.toMatch(/\.status-dashboard__subtitle\s*\{/);
+    expect(css).not.toMatch(/\.analytics__title\s*\{/);
+    expect(css).not.toMatch(/\.analytics__subtitle\s*\{/);
+    expect(css).not.toMatch(/\.admin-panel__title\s*\{/);
+    expect(css).not.toMatch(/\.admin-panel__subtitle\s*\{/);
+    expect(css).not.toMatch(/\.users__title\s*\{/);
+    expect(css).not.toMatch(/\.users__subtitle\s*\{/);
+  });
+
+  it('the per-page __header + __controls rules are gone (replaced by .page-header)', () => {
+    expect(css).not.toMatch(/\.status-dashboard__header\s*\{/);
+    expect(css).not.toMatch(/\.status-dashboard__controls\s*\{/);
+    expect(css).not.toMatch(/\.analytics__header\s*\{/);
+    expect(css).not.toMatch(/\.analytics__controls\s*\{/);
+    expect(css).not.toMatch(/\.admin-panel__header\s*\{/);
+    expect(css).not.toMatch(/\.users__header\s*\{/);
+  });
+
+  it('the per-page root geometry blocks are gone — .page is the single geometry source', () => {
+    // .status-dashboard, .analytics, .users, .admin-panel no longer carry ANY
+    // geometry rule — .page supplies max-width/margin/padding/flex. The selector
+    // may still appear in comment prose, so assert the rule block (selector +
+    // brace) does not declare geometry.
+    expect(css).not.toMatch(/\.status-dashboard\s*\{[^}]*max-width/);
+    expect(css).not.toMatch(/\.analytics\s*\{[^}]*max-width/);
+    expect(css).not.toMatch(/\.users\s*\{[^}]*max-width/);
+    // `.admin-panel` has NO bare base rule at all — every state composes `.page`.
+    // A bare `.admin-panel {` would re-introduce a duplicated geometry source
+    // (DRY). The two-class `.admin-panel.admin-panel--loading` override below is
+    // the only `.admin-panel`-rooted rule, and `\s*\{` does not match the
+    // `.admin-panel--loading` suffix, so this guard sees a true bare base if one
+    // is ever re-added.
+    expect(css).not.toMatch(/\.admin-panel\s*\{/);
+  });
+
+  it('.admin-panel--loading overrides padding via a two-class selector that beats .page', () => {
+    // The loading state composes `.page` (for the 920px max-width + centering)
+    // then overrides only the padding. A two-class selector (0,2,0) beats
+    // `.page`'s one-class `padding` regardless of source order — so `.page`
+    // stays the single geometry source and the loading state keeps its 3rem
+    // centered text. Guards the arch-review cleaner approach.
+    const loading = rule('.admin-panel.admin-panel--loading');
+    expect(loading).toContain('padding: 3rem');
+    expect(loading).toContain('text-align: center');
+  });
+
+  it('.status-dashboard no longer carries the divergent 1100px / 1.25rem outlier', () => {
+    // The refactor specifically converged .status-dashboard from 1100px / 1.25rem
+    // onto the shared 920px / 1rem geometry. Guard the exact old values stay gone
+    // so a future edit cannot silently re-introduce the divergence.
+    expect(css).not.toMatch(/\.status-dashboard[^{]*\{[^}]*1100px/);
+    expect(css).not.toMatch(/\.status-dashboard[^{]*\{[^}]*1\.25rem\s+1\.25rem/);
+  });
+});

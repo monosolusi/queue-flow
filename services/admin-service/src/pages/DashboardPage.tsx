@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import type { IAdminApi } from '../api/admin-api';
 import type { SystemConfigurationDto } from '../api/types';
+import { PageHeader } from '../components/PageHeader';
 import { COUNTER_STATUS_LABELS } from '../lib/labels';
 import {
   counterStatuses,
@@ -52,7 +53,7 @@ export function DashboardPage({
     // page mounts, so a failure here is a transient core-api outage. The shell's
     // left nav stays available; "Muat Ulang" is the retry affordance.
     return (
-      <div className="status-dashboard">
+      <div className="page status-dashboard">
         <DashboardHeader lastUpdated={poll.lastUpdated} onRefresh={poll.refresh} />
         <p className="admin-panel__error" data-testid="dashboard-error">
           Gagal memuat status antrian: {poll.error}
@@ -72,7 +73,7 @@ export function DashboardPage({
   const counters = counterStatuses(data.counters, data.board);
 
   return (
-    <div className="status-dashboard">
+    <div className="page status-dashboard">
       <DashboardHeader lastUpdated={poll.lastUpdated} onRefresh={poll.refresh} />
 
       {poll.error && (
@@ -161,27 +162,27 @@ function DashboardHeader({
   onRefresh: () => void;
 }) {
   return (
-    <header className="status-dashboard__header">
-      <div>
-        <h1 className="status-dashboard__title">Status Antrian</h1>
-        <p className="status-dashboard__subtitle">Pemantauan langsung — diperbarui otomatis</p>
-      </div>
-      <div className="status-dashboard__controls">
-        <button
-          type="button"
-          className="btn btn--secondary"
-          onClick={onRefresh}
-          data-testid="dashboard-refresh"
-        >
-          Muat Ulang
-        </button>
-        {lastUpdated !== null && (
-          <span className="status-dashboard__updated" data-testid="dashboard-updated">
-            Terakhir: {new Date(lastUpdated).toLocaleTimeString()}
-          </span>
-        )}
-      </div>
-    </header>
+    <PageHeader
+      title="Status Antrian"
+      subtitle="Pemantauan langsung — diperbarui otomatis"
+      actions={
+        <>
+          <button
+            type="button"
+            className="btn btn--secondary"
+            onClick={onRefresh}
+            data-testid="dashboard-refresh"
+          >
+            Muat Ulang
+          </button>
+          {lastUpdated !== null && (
+            <span className="status-dashboard__updated" data-testid="dashboard-updated">
+              Terakhir: {new Date(lastUpdated).toLocaleTimeString()}
+            </span>
+          )}
+        </>
+      }
+    />
   );
 }
 
@@ -189,13 +190,8 @@ function DashboardHeader({
  *  `.skeleton` shapes (CLAUDE.md recipe; jsdom `css:false`-safe via class asserts). */
 function DashboardSkeleton() {
   return (
-    <div className="status-dashboard" role="status" aria-busy="true">
-      <header className="status-dashboard__header">
-        <div>
-          <h1 className="status-dashboard__title">Status Antrian</h1>
-          <p className="status-dashboard__subtitle">Pemantauan langsung — diperbarui otomatis</p>
-        </div>
-      </header>
+    <div className="page status-dashboard" role="status" aria-busy="true">
+      <PageHeader title="Status Antrian" subtitle="Pemantauan langsung — diperbarui otomatis" />
       <span className="sr-only">Memuat status antrian…</span>
       <div className="skeleton skeleton--lg" aria-hidden="true" data-testid="dashboard-skeleton" />
       <div className="skeleton skeleton--grid" aria-hidden="true">

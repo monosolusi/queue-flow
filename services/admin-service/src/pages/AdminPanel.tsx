@@ -18,6 +18,7 @@ import { applyBrandColor, applyThemeMode } from '../lib/theme';
 import { validateCustomCategories, validateResetTo } from '../lib/categories';
 import { validateStoreName } from '../lib/store-name';
 import { CounterRoutingEditor } from '../components/CounterRoutingEditor';
+import { PageHeader } from '../components/PageHeader';
 import { StateMachineEditor } from '../components/StateMachineEditor';
 import { TimeField } from '../components/TimeField';
 import { useToast } from '../toast/useToast';
@@ -167,11 +168,11 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
   }, [api, loadAttempt]);
 
   if (state.status === 'loading') {
-    return <div className="admin-panel admin-panel--loading">Memuat konfigurasi…</div>;
+    return <div className="page admin-panel admin-panel--loading">Memuat konfigurasi…</div>;
   }
   if (state.status === 'error') {
     return (
-      <div className="admin-panel">
+      <div className="page admin-panel">
         <p className="admin-panel__error" role="alert">
           Gagal memuat konfigurasi: {state.message}
         </p>
@@ -428,13 +429,8 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
   );
 
   return (
-    <div className="admin-panel">
-      <header className="admin-panel__header">
-        <div>
-          <h1 className="admin-panel__title">{form.storeName || 'QMS Admin'}</h1>
-          <p className="admin-panel__subtitle">Konfigurasi Operasional</p>
-        </div>
-      </header>
+    <div className="page admin-panel">
+      <PageHeader title={form.storeName || 'QMS Admin'} subtitle="Konfigurasi Operasional" />
 
       {/* Save / reset / cleanup outcomes are announced by the app-wide toast
           stack (auto-dismissing for successes, sticky for errors). The inline
