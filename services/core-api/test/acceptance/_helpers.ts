@@ -90,6 +90,16 @@ export function prdWizardPayload() {
     // All-light matches ServiceThemes.DEFAULT and the CSS `:root` light default,
     // so the standard wizard payload keeps the existing light look.
     serviceThemes: { kiosk: 'light', tv: 'light', caller: 'light', admin: 'light' },
+    // tvDisplayOptions: per-panel TV display visibility toggles, a required wire
+    // field. All-true matches TvDisplayOptions.DEFAULT and the existing TV layout,
+    // so the standard wizard payload keeps every panel visible.
+    tvDisplayOptions: {
+      showNowServing: true,
+      showWaitingQueue: true,
+      showCallHistory: true,
+      showCountersServing: true,
+      showRunningText: true,
+    },
     // QUE-43: `actor` is no longer a wire field — the server derives the audit
     // actor from the authenticated principal (or the 'system' sentinel on the
     // pre-setup wizard path). The wizard client stopped sending it; this fixture

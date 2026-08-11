@@ -7,6 +7,7 @@ import {
   type SaveSystemConfigurationCommand,
 } from '../../application/store-config';
 import { Role, type AuthenticatedPrincipal } from '../../domain/identity';
+import { TV_DISPLAY_OPTION_KEYS } from '../../domain/store-config';
 import { AuthGuard } from '../auth/auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -36,6 +37,7 @@ const REQUIRED_CONFIG_FIELDS: ReadonlyArray<keyof SaveSystemConfigurationCommand
   'routingRules',
   'brandColor',
   'serviceThemes',
+  'tvDisplayOptions',
 ];
 
 /**
@@ -60,6 +62,7 @@ const CONFIG_FIELD_SHAPES: ReadonlyArray<{
   { field: 'categories', kind: 'array' },
   { field: 'routingRules', kind: 'array' },
   { field: 'serviceThemes', kind: 'object' },
+  { field: 'tvDisplayOptions', kind: 'object' },
 ];
 
 /** True when `value` does not match the expected `kind` (object = plain object, not array). */
@@ -157,6 +160,20 @@ function configNestedShapeErrors(body: Partial<SaveSystemConfigurationCommand>):
       }
     });
   }
+  // tvDisplayOptions: the VO already throws `InvalidValueObjectException`
+  // (→ 400) on a present non-boolean; this boundary guard only gives a
+  // consistent, field-named error message (mirrors the dailyReset.timezone
+  // guard). Unknown extra keys are ignored — the VO only reads the 5
+  // canonical keys.
+  const tvOpts = body.tvDisplayOptions;
+  if (tvOpts != null && typeof tvOpts === 'object' && !Array.isArray(tvOpts)) {
+    for (const key of TV_DISPLAY_OPTION_KEYS) {
+      const value = (tvOpts as Record<string, unknown>)[key];
+      if (value != null && typeof value !== 'boolean') {
+        errs.push(`tvDisplayOptions.${key} must be a boolean`);
+      }
+    }
+  }
   return errs;
 }
 
@@ -243,6 +260,7 @@ export class SystemConfigController {
       routingRules: body.routingRules!,
       brandColor: body.brandColor!,
       serviceThemes: body.serviceThemes!,
+      tvDisplayOptions: body.tvDisplayOptions!,
       actor: principal?.username ?? 'system',
     };
     return this.saveConfig.execute(command);

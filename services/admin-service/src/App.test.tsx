@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { App } from './App';
 import type { IAdminAppApi } from './api/admin-api';
 import type { AuthUserDto, SystemConfigurationDto } from './api/types';
-import { DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES, DEFAULT_STATE_MACHINE } from './api/types';
+import { DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES, DEFAULT_STATE_MACHINE, DEFAULT_TV_DISPLAY_OPTIONS } from './api/types';
 import { clearToken, writeToken } from './auth/token-store';
 
 const ADMIN: AuthUserDto = { id: 'u-1', username: 'manajer', role: 'admin' };
@@ -26,6 +26,7 @@ function makeConfig(brandColor = '#2563eb'): SystemConfigurationDto {
     routingRules: [],
     brandColor,
     serviceThemes: { ...DEFAULT_SERVICE_THEMES },
+    tvDisplayOptions: { ...DEFAULT_TV_DISPLAY_OPTIONS },
   };
 }
 
@@ -57,7 +58,7 @@ function makeApi(
   return {
     getSystemConfig: reject ? vi.fn(() => Promise.reject(reject)) : vi.fn(() => Promise.resolve(config)),
     saveSystemConfig: vi.fn(() =>
-      Promise.resolve({ isInitialSetupCompleted: true, storeName: config.storeName, brandColor: config.brandColor, serviceThemes: config.serviceThemes }),
+      Promise.resolve({ isInitialSetupCompleted: true, storeName: config.storeName, brandColor: config.brandColor, serviceThemes: config.serviceThemes, tvDisplayOptions: config.tvDisplayOptions }),
     ),
     getActiveStateMachine: vi.fn(() => Promise.resolve(config.stateMachine)),
     getDailyReport: vi.fn(),
@@ -217,6 +218,7 @@ describe('App (admin — first-run guard matrix)', () => {
           storeName: completed.storeName,
           brandColor: completed.brandColor,
           serviceThemes: completed.serviceThemes,
+          tvDisplayOptions: completed.tvDisplayOptions,
         });
       }),
     });
@@ -263,6 +265,7 @@ describe('App (admin — first-run guard matrix)', () => {
           storeName: current.storeName,
           brandColor: current.brandColor,
           serviceThemes: current.serviceThemes,
+          tvDisplayOptions: current.tvDisplayOptions,
         });
       }),
     });

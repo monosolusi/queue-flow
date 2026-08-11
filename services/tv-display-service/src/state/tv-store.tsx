@@ -7,7 +7,14 @@ import {
   useRef,
   type ReactNode,
 } from 'react';
-import type { CategoryDto, QueueLifecycleWireEvent, TvTicketDto } from '../api/types';
+import type {
+  CategoryDto,
+  CounterServing,
+  QueueLifecycleWireEvent,
+  TvDisplayOptionsMap,
+  TvTicketDto,
+} from '../api/types';
+import { DEFAULT_TV_DISPLAY_OPTIONS } from '../api/types';
 import type { ITvApi } from '../api/tv-api';
 import { type AudioProvider } from '../audio/audio-provider';
 import { buildCallFragments } from '../audio/audio-provider';
@@ -39,6 +46,29 @@ export interface TvState {
    * this from events (SRP — the server owns the queue read model).
    */
   readonly waiting: readonly WaitingTicket[];
+  /**
+   * The counters currently serving a ticket, projected client-side from
+   * `GET /api/queue/board`'s `active` array joined with the boot-built
+   * `counterNameById` map. Sourced from the server's read model (like
+   * `waiting`) and refreshed via the same debounced board refetch — the TV
+   * does NOT project this from events (SRP — the server owns the read model).
+   */
+  readonly countersServing: readonly CounterServing[];
+  /** Per-panel visibility toggles from `SystemConfiguration.tvDisplayOptions`.
+   * Applied at boot; drives the page's conditional panel rendering. */
+  readonly displayOptions: TvDisplayOptionsMap;
+  /** Boot-built counter id→name map from `routingRules`. Kept in state so the
+   * BOOT_LOADED reducer can re-derive `countersServing` once this map is
+   * populated, without a second board fetch (the first board fetch races the
+   * config fetch and resolves with the empty initial map → fallback names;
+   * BOOT_LOADED re-derives with the populated map). Defensive fallback to
+   * `Counter {id}` when a counter appears in the active slice but was absent
+   * from the boot config (e.g. a counter added after boot). */
+  readonly counterNameById: ReadonlyMap<number, string>;
+  /** The raw active slice from the last `BOARD_LOADED`, stashed so BOOT_LOADED
+   * can re-derive `countersServing` once the counter-name map is populated.
+   * Internal — not consumed by the page. */
+  readonly lastActive: readonly TvTicketDto[];
   readonly connection: ConnectionStatus;
   readonly loadStatus: 'loading' | 'loaded' | 'error';
   readonly loadError: string | null;
@@ -47,12 +77,19 @@ export interface TvState {
 }
 
 export type TvAction =
-  | { type: 'BOOT_LOADED'; storeName: string; categories: CategoryDto[] }
+  | {
+      type: 'BOOT_LOADED';
+      storeName: string;
+      categories: CategoryDto[];
+      displayOptions: TvDisplayOptionsMap;
+      counterNameById: ReadonlyMap<number, string>;
+    }
   | { type: 'BOOT_ERROR'; message: string }
   | {
       type: 'BOARD_LOADED';
       nowServing: NowServing | null;
       waiting: readonly WaitingTicket[];
+      active: readonly TvTicketDto[];
     }
   | { type: 'CONNECTION'; status: ConnectionStatus }
   | { type: 'EVENT'; event: QueueLifecycleWireEvent };
@@ -67,6 +104,10 @@ const initialState: TvState = {
   nowServing: null,
   history: [],
   waiting: [],
+  countersServing: [],
+  displayOptions: DEFAULT_TV_DISPLAY_OPTIONS,
+  counterNameById: new Map<number, string>(),
+  lastActive: [],
   connection: 'closed',
   loadStatus: 'loading',
   loadError: null,
@@ -77,6 +118,36 @@ const initialState: TvState = {
 /** Maps a wire DTO row into the slim waiting slice the board renders. */
 function toWaitingTicket(t: TvTicketDto): WaitingTicket {
   return { ticketId: t.ticketId, ticketNumber: t.ticketNumber, categoryId: t.categoryId };
+}
+
+/**
+ * Projects the `counters-serving` list from the board state's `active` slice
+ * joined with the boot-built counter-name map. Each `active` row with a
+ * non-null `counterId` is a counter currently serving; grouped by `counterId`
+ * keeping the LAST (most-recently-touched, since `active` is ordered by
+ * `updatedAt` asc), then sorted by `counterId` ascending for stable display.
+ * Falls back to `Counter {id}` when a counter has no boot-config name
+ * (defensive against a counter added after boot).
+ */
+function toCountersServing(
+  active: readonly TvTicketDto[],
+  counterNameById: ReadonlyMap<number, string>,
+): readonly CounterServing[] {
+  const byId = new Map<number, TvTicketDto>();
+  for (const t of active) {
+    if (t.counterId === null) continue;
+    // last-in-wins (active is updatedAt asc → last is most-recently-touched)
+    byId.set(t.counterId, t);
+  }
+  return [...byId.entries()]
+    .map(([counterId, t]) => ({
+      counterId,
+      counterName: counterNameById.get(counterId) ?? `Counter ${counterId}`,
+      ticketNumber: t.ticketNumber,
+      ticketId: t.ticketId,
+      status: t.status,
+    }))
+    .sort((a, b) => a.counterId - b.counterId);
 }
 
 /**
@@ -97,6 +168,13 @@ function tvReducer(state: TvState, action: TvAction): TvState {
         ...state,
         storeName: action.storeName,
         categories: action.categories,
+        displayOptions: action.displayOptions,
+        counterNameById: action.counterNameById,
+        // Re-derive countersServing from the stashed lastActive joined with
+        // the now-populated counterNameById (the first BOARD_LOADED raced the
+        // config fetch and used the empty initial map → fallback names; this
+        // re-derives with real names with no second board fetch).
+        countersServing: toCountersServing(state.lastActive, action.counterNameById),
         loadStatus: 'loaded',
         loadError: null,
       };
@@ -115,7 +193,18 @@ function tvReducer(state: TvState, action: TvAction): TvState {
       const history = action.nowServing
         ? state.history.filter((h) => h.ticketId !== action.nowServing!.ticketId)
         : state.history;
-      return { ...state, nowServing: action.nowServing, history, waiting: action.waiting };
+      return {
+        ...state,
+        nowServing: action.nowServing,
+        history,
+        waiting: action.waiting,
+        lastActive: action.active,
+        // Derive countersServing from the raw active slice joined with the
+        // current counterNameById (empty on the first boot fetch → fallback
+        // names; re-derived with real names when BOOT_LOADED dispatches the
+        // populated map).
+        countersServing: toCountersServing(action.active, state.counterNameById),
+      };
     }
     case 'CONNECTION':
       return { ...state, connection: action.status };
@@ -188,10 +277,18 @@ function projectEvent(state: TvState, e: QueueLifecycleWireEvent): TvState {
       };
     }
     case 'SYSTEM_RESET':
-      // Clear now-serving + history immediately; also clear the waiting list
-      // locally for snappy UX — the debounced refetch in the boot effect
-      // reconciles with the server's fresh-day read model.
-      return { ...state, nowServing: null, history: [], waiting: [] };
+      // Clear now-serving + history immediately; also clear the waiting list,
+      // counters-serving, and stashed active slice locally for snappy UX — the
+      // debounced refetch in the boot effect reconciles with the server's
+      // fresh-day read model.
+      return {
+        ...state,
+        nowServing: null,
+        history: [],
+        waiting: [],
+        countersServing: [],
+        lastActive: [],
+      };
     default:
       return state;
   }
@@ -278,6 +375,7 @@ export function TvStoreProvider({ api, audio, children, socketOptions }: TvStore
           type: 'BOARD_LOADED',
           nowServing,
           waiting: dto.waiting.map(toWaitingTicket),
+          active: dto.active,
         });
       })
       .catch(() => {
@@ -297,7 +395,11 @@ export function TvStoreProvider({ api, audio, children, socketOptions }: TvStore
   // state (active + waiting) is fetched separately via the shared
   // generation-counted `refetchBoard` path so its resolution races no other
   // fetch (a slow boot resolution cannot overwrite fresher event-driven
-  // state).
+  // state). The counter id→name map built here is carried in state so the
+  // BOARD_LOADED reducer re-derives `countersServing` with real names once
+  // BOOT_LOADED dispatches (the first board fetch races the config fetch and
+  // resolves with the empty initial map → fallback names; BOOT_LOADED's
+  // re-derivation fixes that with no second board fetch).
   useEffect(() => {
     let cancelled = false;
     Promise.allSettled([api.getSystemConfig(), api.getCategories()])
@@ -306,10 +408,21 @@ export function TvStoreProvider({ api, audio, children, socketOptions }: TvStore
         if (configRes.status === 'fulfilled' && categoriesRes.status === 'fulfilled') {
           applyBrandColor(configRes.value.brandColor);
           applyThemeMode(configRes.value.serviceThemes.tv);
+          // Build the counter id→name map from the config's routing rules so
+          // the reducer can re-derive countersServing once BOOT_LOADED
+          // dispatches (mirrors how getCategories feeds the waiting panel's
+          // category name join). A counter appearing in the active slice but
+          // absent from this map falls back to `Counter {id}`.
+          const counterNameById = new Map<number, string>();
+          for (const r of configRes.value.routingRules) {
+            counterNameById.set(r.counterId, r.counterName);
+          }
           dispatch({
             type: 'BOOT_LOADED',
             storeName: configRes.value.storeName,
             categories: categoriesRes.value,
+            displayOptions: configRes.value.tvDisplayOptions,
+            counterNameById,
           });
         } else {
           dispatch({

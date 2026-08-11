@@ -8,6 +8,7 @@ import {
   StateMachine,
   StateSchema,
   SystemConfiguration,
+  TvDisplayOptions,
 } from '../../src/domain/store-config';
 import { DEFAULT_TIMEZONE } from '../../src/domain/store-config/value-objects/timezone';
 import { TicketStatus } from '../../src/domain/queue';
@@ -199,6 +200,18 @@ describe('SystemConfiguration aggregate', () => {
     });
   });
 
+  it('defaults tvDisplayOptions to all-visible (zero visual regression)', () => {
+    const config = SystemConfiguration.create(Identifier.generate());
+    expect(config.tvDisplayOptions).toBe(TvDisplayOptions.DEFAULT);
+    expect(config.tvDisplayOptions.toDto()).toEqual({
+      showNowServing: true,
+      showWaitingQueue: true,
+      showCallHistory: true,
+      showCountersServing: true,
+      showRunningText: true,
+    });
+  });
+
   it('reconstitute carries a custom brand color through', () => {
     const config = SystemConfiguration.reconstitute({
       id: Identifier.generate(),
@@ -208,6 +221,7 @@ describe('SystemConfiguration aggregate', () => {
       dailyResetPolicy: DailyResetPolicy.DEFAULT,
       brandColor: BrandColor.of('#aabbcc'),
       serviceThemes: ServiceThemes.DEFAULT,
+      tvDisplayOptions: TvDisplayOptions.DEFAULT,
     });
     expect(config.brandColor.value).toBe('#aabbcc');
   });
@@ -221,12 +235,39 @@ describe('SystemConfiguration aggregate', () => {
       dailyResetPolicy: DailyResetPolicy.DEFAULT,
       brandColor: BrandColor.DEFAULT,
       serviceThemes: ServiceThemes.of({ kiosk: 'light', tv: 'dark', caller: 'dark', admin: 'light' }),
+      tvDisplayOptions: TvDisplayOptions.DEFAULT,
     });
     expect(config.serviceThemes.toDto()).toEqual({
       kiosk: 'light',
       tv: 'dark',
       caller: 'dark',
       admin: 'light',
+    });
+  });
+
+  it('reconstitute carries custom TV display options through', () => {
+    const config = SystemConfiguration.reconstitute({
+      id: Identifier.generate(),
+      storeName: 'Toko Brand',
+      isInitialSetupCompleted: true,
+      stateMachine: StateMachine.DEFAULT,
+      dailyResetPolicy: DailyResetPolicy.DEFAULT,
+      brandColor: BrandColor.DEFAULT,
+      serviceThemes: ServiceThemes.DEFAULT,
+      tvDisplayOptions: TvDisplayOptions.of({
+        showNowServing: true,
+        showWaitingQueue: false,
+        showCallHistory: true,
+        showCountersServing: false,
+        showRunningText: true,
+      }),
+    });
+    expect(config.tvDisplayOptions.toDto()).toEqual({
+      showNowServing: true,
+      showWaitingQueue: false,
+      showCallHistory: true,
+      showCountersServing: false,
+      showRunningText: true,
     });
   });
 

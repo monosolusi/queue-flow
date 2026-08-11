@@ -27,6 +27,40 @@ export const DEFAULT_SERVICE_THEMES: ServiceThemesMap = {
   admin: 'light',
 };
 
+/**
+ * The five TV-display panels a manager can show/hide independently. The keys
+ * mirror core-api's `TvDisplayOptionKey` (`domain/store-config/value-objects/
+ * tv-display-options.ts`) exactly — the friendly display names live in
+ * {@link import('../lib/labels').TV_DISPLAY_OPTION_LABELS}, never here.
+ */
+export type TvDisplayOptionKey =
+  | 'showNowServing'
+  | 'showWaitingQueue'
+  | 'showCallHistory'
+  | 'showCountersServing'
+  | 'showRunningText';
+/** Persisted shape: one boolean visibility toggle per TV panel. */
+export type TvDisplayOptionsMap = Record<TvDisplayOptionKey, boolean>;
+/** Stable display order of the toggle keys (matches the admin section's row
+ *  order and the backend `TV_DISPLAY_OPTION_KEYS`). */
+export const TV_DISPLAY_OPTION_KEYS: readonly TvDisplayOptionKey[] = [
+  'showNowServing',
+  'showWaitingQueue',
+  'showCallHistory',
+  'showCountersServing',
+  'showRunningText',
+];
+/** All-visible — matches `TvDisplayOptions.DEFAULT` (the PRD default so a store
+ *  that never configures this keeps the existing TV layout — zero visual
+ *  regression, mirroring `DEFAULT_SERVICE_THEMES`). */
+export const DEFAULT_TV_DISPLAY_OPTIONS: TvDisplayOptionsMap = {
+  showNowServing: true,
+  showWaitingQueue: true,
+  showCallHistory: true,
+  showCountersServing: true,
+  showRunningText: true,
+};
+
 export interface StateTransitionDto {
   readonly from: string;
   readonly to: string;
@@ -74,6 +108,10 @@ export interface SystemConfigurationDto {
   /** Per-service light/dark theme map (QUE-47). Admin reads + edits the full
    *  map; each other service reads only its own surface key (ISP). */
   readonly serviceThemes: ServiceThemesMap;
+  /** Per-panel visibility toggles for the TV display. Admin reads + edits the
+   *  full map; the TV service reads the whole map at boot and gates each panel
+   *  on its toggle (all-visible default — zero visual regression). */
+  readonly tvDisplayOptions: TvDisplayOptionsMap;
 }
 
 /**
@@ -112,6 +150,7 @@ export interface SaveSystemConfigurationPayload {
   readonly routingRules: readonly WizardRoutingRuleDto[];
   readonly brandColor: string;
   readonly serviceThemes: ServiceThemesMap;
+  readonly tvDisplayOptions: TvDisplayOptionsMap;
 }
 
 /** Result of `PUT /api/system/config`. */
@@ -120,6 +159,7 @@ export interface SaveSystemConfigurationResult {
   readonly storeName: string;
   readonly brandColor: string;
   readonly serviceThemes: ServiceThemesMap;
+  readonly tvDisplayOptions: TvDisplayOptionsMap;
 }
 
 /**

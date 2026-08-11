@@ -13,6 +13,7 @@ export interface SectionValidity {
   readonly routing: boolean;
   readonly dailyReset: boolean;
   readonly stateMachine: boolean;
+  readonly tvDisplay: boolean;
 }
 
 interface ConfigSectionNavProps {
@@ -34,6 +35,7 @@ const SAVED_SECTIONS: readonly SectionId[] = [
   'routing',
   'daily-reset',
   'state-machine',
+  'tv-display',
 ];
 
 /** Maps a kebab `SectionId` to its camelCase key on `SectionValidity`. The
@@ -46,6 +48,7 @@ const VALIDITY_KEY: Record<Exclude<SectionId, 'manual'>, keyof SectionValidity> 
   routing: 'routing',
   'daily-reset': 'dailyReset',
   'state-machine': 'stateMachine',
+  'tv-display': 'tvDisplay',
 };
 
 export function ConfigSectionNav({

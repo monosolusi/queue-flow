@@ -13,6 +13,10 @@ import {
   ServiceThemes,
   type ServiceThemesMap,
 } from '../../../domain/store-config/value-objects/service-themes';
+import {
+  TvDisplayOptions,
+  type TvDisplayOptionsMap,
+} from '../../../domain/store-config/value-objects/tv-display-options';
 import { StateMachine } from '../../../domain/store-config/state-machine';
 import { StateSchema } from '../../../domain/store-config/value-objects/state-schema';
 import { StateTransitionRule } from '../../../domain/store-config/value-objects/state-transition-rule';
@@ -27,6 +31,7 @@ interface ConfigRow {
   daily_reset_policy: DailyResetPolicyProps;
   brand_color: string;
   service_themes: ServiceThemesMap | null;
+  tv_display_options: TvDisplayOptionsMap | null;
 }
 
 /**
@@ -53,15 +58,16 @@ export class PostgresSystemConfigurationRepository implements ISystemConfigurati
   async save(config: SystemConfiguration): Promise<void> {
     await withDbClient(this.pool, async (client) => {
       await client.query(
-        `INSERT INTO system_configuration (id, store_name, is_initial_setup_completed, state_machine, daily_reset_policy, brand_color, service_themes)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO system_configuration (id, store_name, is_initial_setup_completed, state_machine, daily_reset_policy, brand_color, service_themes, tv_display_options)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          ON CONFLICT (id) DO UPDATE SET
            store_name                = EXCLUDED.store_name,
            is_initial_setup_completed = EXCLUDED.is_initial_setup_completed,
            state_machine             = EXCLUDED.state_machine,
            daily_reset_policy        = EXCLUDED.daily_reset_policy,
            brand_color               = EXCLUDED.brand_color,
-           service_themes            = EXCLUDED.service_themes`,
+           service_themes            = EXCLUDED.service_themes,
+           tv_display_options        = EXCLUDED.tv_display_options`,
         [
           config.id.value,
           config.storeName,
@@ -76,6 +82,7 @@ export class PostgresSystemConfigurationRepository implements ISystemConfigurati
           }),
           config.brandColor.value,
           JSON.stringify(config.serviceThemes.toDto()),
+          JSON.stringify(config.tvDisplayOptions.toDto()),
         ],
       );
     });
@@ -112,6 +119,11 @@ function toConfig(row: ConfigRow): SystemConfiguration {
     // SELECT * simply lacks the column (pg returns undefined here) — both paths
     // reconstitute ServiceThemes.DEFAULT. Mirrors the brandColor fallback.
     serviceThemes: ServiceThemes.of(row.service_themes ?? undefined),
+    // Same boot-window fallback for tv_display_options (0008 migration). `of()`
+    // recovers a null/undefined column to all-visible, and a pre-migration row's
+    // SELECT * simply lacks the column (pg returns undefined here) — both paths
+    // reconstitute TvDisplayOptions.DEFAULT. Mirrors the serviceThemes fallback.
+    tvDisplayOptions: TvDisplayOptions.of(row.tv_display_options ?? undefined),
   });
 }
 

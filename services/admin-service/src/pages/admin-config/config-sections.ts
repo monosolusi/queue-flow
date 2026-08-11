@@ -11,7 +11,14 @@
  * Order is the nav display order; the default active section is `profile`
  * (the first entry), so the manager lands on the most-edited section.
  */
-export type SectionId = 'profile' | 'categories' | 'routing' | 'daily-reset' | 'state-machine' | 'manual';
+export type SectionId =
+  | 'profile'
+  | 'categories'
+  | 'routing'
+  | 'daily-reset'
+  | 'state-machine'
+  | 'tv-display'
+  | 'manual';
 
 export interface ConfigSection {
   readonly id: SectionId;
@@ -24,6 +31,7 @@ export const CONFIG_SECTIONS: readonly ConfigSection[] = [
   { id: 'routing', label: 'Counter & Routing' },
   { id: 'daily-reset', label: 'Reset Harian' },
   { id: 'state-machine', label: 'Alur Status Tiket' },
+  { id: 'tv-display', label: 'Tampilan TV' },
   { id: 'manual', label: 'Operasi Manual' },
 ] as const;
 

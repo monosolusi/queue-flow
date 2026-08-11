@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { WizardPage } from './WizardPage';
 import type { IAdminApi, IAuthApi } from '../api/admin-api';
-import { DEFAULT_CATEGORIES, DEFAULT_STATE_MACHINE, DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES, type SaveSystemConfigurationPayload, type ServiceThemesMap, type SystemConfigurationDto } from '../api/types';
+import { DEFAULT_CATEGORIES, DEFAULT_STATE_MACHINE, DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES, DEFAULT_TV_DISPLAY_OPTIONS, type SaveSystemConfigurationPayload, type ServiceThemesMap, type SystemConfigurationDto, type TvDisplayOptionsMap } from '../api/types';
 import { BROWSER_TIMEZONE } from '../lib/timezone';
 
 /** A clean store mirrors core-api's `GetSystemConfigurationUseCase`: the default
@@ -21,6 +21,7 @@ function cleanStore(): SystemConfigurationDto {
     routingRules: [],
     brandColor: DEFAULT_BRAND_COLOR,
     serviceThemes: { ...DEFAULT_SERVICE_THEMES },
+    tvDisplayOptions: { ...DEFAULT_TV_DISPLAY_OPTIONS },
   };
 }
 
@@ -34,12 +35,12 @@ function prefilledStore(): SystemConfigurationDto {
 
 function makeApi(
   config: SystemConfigurationDto = prefilledStore(),
-  saveImpl?: (payload: SaveSystemConfigurationPayload) => Promise<{ isInitialSetupCompleted: boolean; storeName: string; brandColor: string; serviceThemes: ServiceThemesMap }>,
+  saveImpl?: (payload: SaveSystemConfigurationPayload) => Promise<{ isInitialSetupCompleted: boolean; storeName: string; brandColor: string; serviceThemes: ServiceThemesMap; tvDisplayOptions: TvDisplayOptionsMap }>,
 ) {
   const save = vi.fn(
     saveImpl ??
       ((payload: SaveSystemConfigurationPayload) =>
-        Promise.resolve({ isInitialSetupCompleted: true, storeName: payload.storeName, brandColor: payload.brandColor, serviceThemes: payload.serviceThemes })),
+        Promise.resolve({ isInitialSetupCompleted: true, storeName: payload.storeName, brandColor: payload.brandColor, serviceThemes: payload.serviceThemes, tvDisplayOptions: payload.tvDisplayOptions })),
   );
   // Auth spies (QUE-43). First-run finalize calls setupInitialAdmin then login;
   // re-edit finalize calls neither. Defaults resolve so the happy-path walk

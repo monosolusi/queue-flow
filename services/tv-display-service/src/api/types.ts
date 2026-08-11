@@ -50,15 +50,74 @@ export interface TvBoardStateDto {
 /** A per-surface light/dark choice (QUE-47). Light is the default. */
 export type ThemeMode = 'light' | 'dark';
 
+/**
+ * The five TV-display panels a manager can show/hide independently. The keys
+ * mirror core-api's `TvDisplayOptionKey` wire identifiers exactly (the wire
+ * contract is duplicated here intentionally — no shared package, per the
+ * standalone-service ethos).
+ */
+export type TvDisplayOptionKey =
+  | 'showNowServing'
+  | 'showWaitingQueue'
+  | 'showCallHistory'
+  | 'showCountersServing'
+  | 'showRunningText';
+
+/** Per-panel visibility toggle map, returned by `GET /api/system/config`. */
+export type TvDisplayOptionsMap = Record<TvDisplayOptionKey, boolean>;
+
+/** All-visible — the default so a store that never configures this keeps the
+ * existing TV layout (zero visual regression). Mirrors core-api's
+ * `TvDisplayOptions.DEFAULT`. */
+export const DEFAULT_TV_DISPLAY_OPTIONS: TvDisplayOptionsMap = {
+  showNowServing: true,
+  showWaitingQueue: true,
+  showCallHistory: true,
+  showCountersServing: true,
+  showRunningText: true,
+};
+
+export const TV_DISPLAY_OPTION_KEYS: readonly TvDisplayOptionKey[] = [
+  'showNowServing',
+  'showWaitingQueue',
+  'showCallHistory',
+  'showCountersServing',
+  'showRunningText',
+];
+
 /** Store profile, returned by `GET /api/system/config`. The TV needs the store
  * name (running text) + the manager-configured brand color (QUE-36) applied to
  * the runtime `--accent` (QUE-37 AC6) + this service's theme (the tv surface
- * key from `serviceThemes`, QUE-47). */
+ * key from `serviceThemes`, QUE-47) + the per-panel TV display visibility
+ * toggles + the routing rules (for the counter id→name map used by the
+ * counters-serving list — a client-side name join mirroring the categories
+ * name-lookup precedent: a counter name is from an entity the board read
+ * model does not touch, so the TV joins it client-side via the public config
+ * response's `routingRules`). */
 export interface SystemConfigurationDto {
   readonly isInitialSetupCompleted: boolean;
   readonly storeName: string;
   readonly brandColor: string;
   readonly serviceThemes: { readonly tv: ThemeMode };
+  readonly tvDisplayOptions: TvDisplayOptionsMap;
+  /** Slim slice — the TV reads only `counterId` + `counterName` for the
+   * counters-serving client-side name join; the other routing fields are
+   * ignored. */
+  readonly routingRules: readonly {
+    readonly counterId: number;
+    readonly counterName: string;
+  }[];
+}
+
+/** A counter currently serving a ticket, projected client-side by the TV
+ * store from `GET /api/queue/board`'s `active` array joined with the
+ * `routingRules` counter-name map. */
+export interface CounterServing {
+  readonly counterId: number;
+  readonly counterName: string;
+  readonly ticketNumber: string;
+  readonly ticketId: string;
+  readonly status: string;
 }
 
 /** WebSocket lifecycle event types broadcast by core-api (FR-ENG-04). */

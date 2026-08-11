@@ -5,6 +5,7 @@ import { StateMachine } from '../../domain/store-config';
 import { BrandColor } from '../../domain/store-config';
 import { DailyResetPolicy, DailyResetMode } from '../../domain/store-config';
 import { ServiceThemes, type ServiceThemesMap } from '../../domain/store-config';
+import { TvDisplayOptions, type TvDisplayOptionsMap } from '../../domain/store-config';
 import type { PriorityPolicy } from '../../domain/shared';
 
 /**
@@ -61,6 +62,8 @@ export interface SystemConfigurationDto {
   readonly brandColor: string;
   /** Per-service light/dark theme map (QUE-47). */
   readonly serviceThemes: ServiceThemesMap;
+  /** Per-panel TV display visibility toggles. */
+  readonly tvDisplayOptions: TvDisplayOptionsMap;
 }
 
 /** Projects the domain `StateMachine` into the flat {@link StateMachineDto}. */
@@ -130,6 +133,9 @@ export class GetSystemConfigurationUseCase {
         // All-light default (QUE-47) — matches the CSS `:root` light default so
         // a clean store prefills the wizard/admin theme selects with 'light'.
         serviceThemes: ServiceThemes.DEFAULT.toDto(),
+        // All-visible default — matches the existing TV layout so a clean store
+        // prefills the admin TV-display toggles with every panel on.
+        tvDisplayOptions: TvDisplayOptions.DEFAULT.toDto(),
       };
     }
 
@@ -146,6 +152,7 @@ export class GetSystemConfigurationUseCase {
       },
       brandColor: system.brandColor.value,
       serviceThemes: system.serviceThemes.toDto(),
+      tvDisplayOptions: system.tvDisplayOptions.toDto(),
       categories: allCategories
         .slice()
         .sort((a, b) => a.code.localeCompare(b.code))
