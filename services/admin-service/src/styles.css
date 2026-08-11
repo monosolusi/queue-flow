@@ -169,6 +169,69 @@ fieldset {
   gap: 0.5rem;
   flex-wrap: wrap;
 }
+
+/* In-content section navigation for /admin/config — one section renders at a
+   time, each with its own save button (replaces the single long scroll +
+   global footer save). The left nav is a vertical ARIA tablist
+   (`ConfigSectionNav`); the right pane is the active `role="tabpanel"`.
+   Design tokens only (no hardcoded color literals); the active indicator is a
+   snap swap (no transition → no `prefers-reduced-motion` guard needed). */
+.admin-config__layout {
+  display: grid;
+  grid-template-columns: minmax(11rem, 16rem) 1fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+.admin-config__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  position: sticky;
+  top: 1rem;
+}
+.admin-config__nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  min-height: 2.75rem;
+  background: var(--surface);
+  color: var(--text);
+  border: none;
+  border-left: 3px solid transparent;
+  border-radius: var(--radius);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.admin-config__nav-item--active {
+  border-left-color: var(--accent);
+  color: var(--accent-on-surface);
+  font-weight: 600;
+}
+.admin-config__nav-label {
+  flex: 1 1 auto;
+}
+/* Error indicator on an invalid saved section. Never color alone: the visible
+   dot is `aria-hidden` and an `.sr-only` "belum valid" label carries the
+   meaning for AT (CLAUDE.md a11y rule). */
+.admin-config__nav-badge {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--danger);
+  flex: 0 0 auto;
+}
+.admin-config__content {
+  min-width: 0;
+}
+/* The per-section save button sits at the foot of the active section. The PUT
+   is a FULL save, so this is the same `admin-save` button the global footer
+   used to own — exactly one is in the DOM at a time (only the active section
+   renders), so the testid stays unique. */
+.admin-config__section-save {
+  margin-top: 1rem;
+}
 .config-card {
   background: var(--surface);
   border-radius: var(--radius);
@@ -1765,6 +1828,27 @@ fieldset {
     border-bottom: 3px solid transparent;
   }
   .nav-link--active {
+    border-left: none;
+    border-bottom-color: var(--accent);
+  }
+  /* The in-content section nav stacks into a wrapping row on narrow viewports.
+     `aria-orientation="vertical"` is kept (a wart — the nav is now visually
+     horizontal): follow-up to drive orientation via `data-orientation` +
+     matchMedia rather than a static attribute. Not blocking; flagged here. */
+  .admin-config__layout {
+    grid-template-columns: 1fr;
+  }
+  .admin-config__nav {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+    overflow-x: auto;
+  }
+  .admin-config__nav-item {
+    border-left: none;
+    border-bottom: 3px solid transparent;
+  }
+  .admin-config__nav-item--active {
     border-left: none;
     border-bottom-color: var(--accent);
   }

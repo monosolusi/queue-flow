@@ -46,6 +46,16 @@ function configuredStore(): SystemConfigurationDto {
   };
 }
 
+/** A configured store whose routing matrix assigns nothing to any counter. */
+function unassignedRoutingStore(): SystemConfigurationDto {
+  return {
+    ...configuredStore(),
+    routingRules: [
+      { counterId: 1, counterName: 'Counter 1', assignedCategoryIds: [], priorityPolicy: 'FIFO_GLOBAL' },
+    ],
+  };
+}
+
 function makeApi(
   config: SystemConfigurationDto = configuredStore(),
   saveImpl?: (payload: SaveSystemConfigurationPayload) => Promise<{ isInitialSetupCompleted: boolean; storeName: string; brandColor: string; serviceThemes: ServiceThemesMap }>,
@@ -132,6 +142,20 @@ function alertRegion() {
   return within(toastViewport().getByRole('alert'));
 }
 
+/**
+ * Switches the active in-content section by clicking its nav tab. The `<h1>`
+ * header (`form.storeName || 'QMS Admin'`) is always visible regardless of
+ * section, so `findByText('Apotek Sehat')` remains the ready-signal and does
+ * NOT imply a section — call this to reach a section's inputs. Uses userEvent
+ * (real timers throughout these tests). The matcher tolerates the "belum
+ * valid" sr-only label an invalid section's tab appends to its accessible
+ * name, so navigating to an invalid section (e.g. unassigned routing) still
+ * resolves.
+ */
+async function goToSection(label: string): Promise<void> {
+  await userEvent.click(screen.getByRole('tab', { name: new RegExp(`^${label}( belum valid)?$`) }));
+}
+
 /** The `<li>` row that owns the labelled input. */
 function rowOf(label: string): HTMLElement {
   const el = screen.getByLabelText(label);
@@ -144,18 +168,26 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     renderPanel(api);
 
     expect(await screen.findByText('Apotek Sehat')).toBeInTheDocument();
+    // Store name prefilled on the default profile section.
+    expect(screen.getByTestId('admin-store-name')).toHaveValue('Apotek Sehat');
+
     // Categories prefilled with existing names.
+    await goToSection('Kategori');
     expect(screen.getByLabelText('Kategori 1 kode')).toHaveValue('A');
     expect(screen.getByLabelText('Kategori 1 nama')).toHaveValue('Customer Service');
+
     // Routing assignment mapped from id 'cat-a' -> code 'A' is reflected in the
     // shared routing table's Kategori Dilayani cell (the table replaces the old
     // inline checkbox group; opening the Edit modal would show the selection in
     // SearchableCategorySelect).
+    await goToSection('Counter & Routing');
     expect(screen.getByTestId('routing-categories-0')).toHaveTextContent('Customer Service');
+
     // State machine is editable now (migrated from the wizard; the wizard is
-    // first-run only). The heading carries no "(hanya lihat)" suffix, and the
-    // shared StateMachineEditor's mode fieldset renders.
-    expect(screen.getByText('Alur Status Tiket')).toBeInTheDocument();
+    // first-run only). The heading text is now a tab label (always visible → a
+    // tab-label assertion would false-pass), so assert via the editor's sm-mode
+    // testid instead.
+    await goToSection('Alur Status Tiket');
     expect(screen.getByTestId('sm-mode')).toBeInTheDocument();
   });
 
@@ -185,6 +217,7 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     const { api, save } = makeApi();
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
+    await goToSection('Kategori');
 
     // Edit the existing 'A' category name (ubah).
     await userEvent.clear(screen.getByLabelText('Kategori 1 nama'));
@@ -215,6 +248,7 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     const { api, save } = makeApi();
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
+    await goToSection('Counter & Routing');
 
     // Open the Edit modal for Counter 1, assign category B, switch policy to
     // CATEGORY_PRIORITY, then Simpan (mirrors the wizard Step 2 flow).
@@ -246,6 +280,7 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     const { api, save } = makeApi();
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
+    await goToSection('Reset Harian');
 
     await userEvent.selectOptions(screen.getByLabelText('Mode'), 'MANUAL');
     // The label now carries a decorative ` *` (required marker), so match by
@@ -285,12 +320,15 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
 
-    // Edit the store name.
+    // Edit the store name on the default profile section.
     const storeNameInput = screen.getByTestId('admin-store-name');
     await userEvent.clear(storeNameInput);
     await userEvent.type(storeNameInput, 'Toko Baru');
 
-    // Switch the state machine to custom mode and edit the first transition's label.
+    // Switch to the state-machine section and edit the first transition's
+    // label. The draft persists across the switch, so both edits ride ONE save
+    // (a per-section save still sends the full payload — do NOT split into two).
+    await goToSection('Alur Status Tiket');
     await userEvent.click(screen.getByLabelText(/Susun alur status sendiri/));
     const labelInputs = screen.getAllByLabelText(/Transisi 1 label aksi/);
     fireEvent.change(labelInputs[0], { target: { value: 'Panggil Cepat' } });
@@ -409,10 +447,12 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
 
+    await goToSection('Kategori');
     expect(screen.getByLabelText('Kategori 1 kode')).toHaveAttribute('aria-required', 'true');
     expect(screen.getByLabelText('Kategori 1 nama')).toHaveAttribute('aria-required', 'true');
     // Counter name + priority live inside the shared Edit modal now (counterId
     // is no longer hand-editable). Open the modal to assert their aria-required.
+    await goToSection('Counter & Routing');
     await userEvent.click(screen.getByTestId('routing-edit-0'));
     expect(screen.getByLabelText('Counter 1 nama')).toHaveAttribute('aria-required', 'true');
     expect(screen.getByLabelText('Counter 1 kebijakan prioritas')).toHaveAttribute('aria-required', 'true');
@@ -436,6 +476,7 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     const { api, save } = makeApi();
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
+    await goToSection('Counter & Routing');
 
     // Build [1, 2, 3] via two "+ Tambah Counter" clicks (configuredStore
     // starts with one counter, counterId 1).
@@ -479,6 +520,7 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     const { api, save } = makeApi();
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
+    await goToSection('Reset Harian');
 
     // The default cron '0 0 * * *' maps to 00:00 → save enabled, no error.
     expect(screen.getByTestId('admin-save')).not.toBeDisabled();
@@ -502,6 +544,7 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     const { api, save } = makeApi();
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
+    await goToSection('Reset Harian');
 
     // The tz selector renders in the AUTOMATIC_CRON block and defaults to the
     // loaded config's timezone (configuredStore → 'Asia/Jakarta').
@@ -530,6 +573,7 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     const { api } = makeApi(config);
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
+    await goToSection('Reset Harian');
 
     const tzSelect = screen.getByTestId('tz-select') as HTMLSelectElement;
     // The prefilled non-curated zone is the current value...
@@ -540,6 +584,73 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
       Array.from(tzSelect.options).some((o) => o.value === nonCurated),
     ).toBe(true);
   });
+
+  // --- New: section-navigation ARIA + one-section-at-a-time + per-section save ---
+
+  it('renders an ARIA tablist with 6 tabs, roving tabindex, and tabpanel labelled by the active tab', async () => {
+    const { api } = makeApi();
+    renderPanel(api);
+    await screen.findByText('Apotek Sehat');
+
+    const tablist = screen.getByRole('tablist');
+    expect(tablist).toHaveAttribute('aria-label', 'Bagian konfigurasi');
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs).toHaveLength(6);
+
+    // Default active = profile: its tab is selected + in the tab order; the
+    // rest rove (tabindex -1, aria-selected false).
+    const profileTab = screen.getByRole('tab', { name: /^Profil & Tampilan( belum valid)?$/ });
+    expect(profileTab).toHaveAttribute('aria-selected', 'true');
+    expect(profileTab).toHaveAttribute('tabindex', '0');
+    tabs
+      .filter((t) => t !== profileTab)
+      .forEach((t) => {
+        expect(t).toHaveAttribute('aria-selected', 'false');
+        expect(t).toHaveAttribute('tabindex', '-1');
+      });
+
+    // The single tabpanel is labelled by the active tab and the active tab's
+    // aria-controls resolves to its id (the panel re-identifies per section).
+    const panel = screen.getByRole('tabpanel');
+    expect(panel).toHaveAttribute('aria-labelledby', profileTab.getAttribute('id'));
+    expect(profileTab).toHaveAttribute('aria-controls', panel.getAttribute('id'));
+  });
+
+  it('renders only the active section — profile on load, Kategori after navigating to it', async () => {
+    const { api } = makeApi();
+    renderPanel(api);
+    await screen.findByText('Apotek Sehat');
+
+    // Default = profile: store-name input present, categories absent.
+    expect(screen.getByTestId('admin-store-name')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Kategori 1 kode')).not.toBeInTheDocument();
+
+    await goToSection('Kategori');
+    // After the switch, profile's store-name input is gone and categories show.
+    expect(screen.queryByTestId('admin-store-name')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Kategori 1 kode')).toBeInTheDocument();
+  });
+
+  it('a per-section save on daily-reset sends the FULL payload, not just the daily-reset slice', async () => {
+    const { api, save } = makeApi();
+    renderPanel(api);
+    await screen.findByText('Apotek Sehat');
+    await goToSection('Reset Harian');
+
+    await userEvent.click(screen.getByTestId('admin-save'));
+    await screen.findByText('Konfigurasi tersimpan.');
+
+    const payload = save.mock.calls[0][0] as SaveSystemConfigurationPayload;
+    // The daily-reset slice is present...
+    expect(payload.dailyReset.mode).toBe('AUTOMATIC_CRON');
+    // ...but so is the rest of the full config (passthrough) — a per-section
+    // save is still a full PUT.
+    expect(payload.storeName).toBe('Apotek Sehat');
+    expect(payload.categories).toHaveLength(2);
+    expect(payload.routingRules).toHaveLength(1);
+    expect(payload.stateMachine.transitions).toHaveLength(5);
+    expect(payload.brandColor).toBe(DEFAULT_BRAND_COLOR);
+  });
 });
 
 /**
@@ -548,16 +659,6 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
  * wizard's step flow have to exist here or they exist nowhere.
  */
 describe('AdminPanel (post-wizard safety rails)', () => {
-  /** A configured store whose routing matrix assigns nothing to any counter. */
-  function unassignedRoutingStore(): SystemConfigurationDto {
-    return {
-      ...configuredStore(),
-      routingRules: [
-        { counterId: 1, counterName: 'Counter 1', assignedCategoryIds: [], priorityPolicy: 'FIFO_GLOBAL' },
-      ],
-    };
-  }
-
   it('blocks save on a fully-unassigned routing matrix and explains why', async () => {
     // Mirrors the wizard's step-2 gate: with no counter serving any category
     // every counter is dead and no ticket can ever be routed. The backend has
@@ -565,6 +666,7 @@ describe('AdminPanel (post-wizard safety rails)', () => {
     const { api, save } = makeApi(unassignedRoutingStore());
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
+    await goToSection('Counter & Routing');
 
     expect(screen.getByTestId('admin-save')).toBeDisabled();
     expect(screen.getByTestId('routing-empty-hint')).toBeInTheDocument();
@@ -577,6 +679,7 @@ describe('AdminPanel (post-wizard safety rails)', () => {
     const { api, save } = makeApi(unassignedRoutingStore());
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
+    await goToSection('Counter & Routing');
 
     await userEvent.click(screen.getByTestId('routing-edit-0'));
     const search = screen.getByRole('combobox', { name: /Kategori dilayani/ });
@@ -621,6 +724,7 @@ describe('AdminPanel (post-wizard safety rails)', () => {
     const { api, save } = makeApi();
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
+    await goToSection('Alur Status Tiket');
 
     await userEvent.click(screen.getByLabelText(/Susun alur status sendiri/));
     // Controlled input bound to derived state — set via fireEvent.change.
@@ -656,6 +760,7 @@ describe('AdminPanel (post-wizard safety rails)', () => {
     const { api, save } = makeApi(trimmedFlow);
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
+    await goToSection('Alur Status Tiket');
 
     const warning = screen.getByTestId('sm-standard-warning');
     expect(warning).toHaveTextContent('SERVING');
@@ -679,10 +784,39 @@ describe('AdminPanel (post-wizard safety rails)', () => {
     const { api } = makeApi();
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
+    await goToSection('Alur Status Tiket');
 
     const warning = screen.getByTestId('state-machine-warning');
     expect(warning).toHaveTextContent(/tidak bisa dilanjutkan/i);
     expect(warning).toHaveTextContent(/panel caller/i);
+  });
+
+  it('shows a nav error badge on an invalid section and clears it once fixed', async () => {
+    // The nav surfaces cross-section invalidity: a manager on profile can see
+    // that routing is broken via the badge on its tab. Never color alone — the
+    // dot is aria-hidden and an .sr-only "belum valid" label carries the AT
+    // text (CLAUDE.md a11y rule).
+    const { api } = makeApi(unassignedRoutingStore());
+    renderPanel(api);
+    await screen.findByText('Apotek Sehat');
+
+    // Routing is invalid (all-unassigned): the routing tab carries the badge.
+    const routingTab = screen.getByRole('tab', { name: /Counter & Routing belum valid/ });
+    expect(routingTab.querySelector('.admin-config__nav-badge')).toHaveAttribute('aria-hidden', 'true');
+    expect(routingTab).toHaveTextContent('belum valid');
+
+    // Fix: assign a category to a counter on the routing section.
+    await goToSection('Counter & Routing');
+    await userEvent.click(screen.getByTestId('routing-edit-0'));
+    const search = screen.getByRole('combobox', { name: /Kategori dilayani/ });
+    await userEvent.type(search, 'Customer');
+    await userEvent.click(screen.getByRole('option', { name: /Customer Service/ }));
+    await userEvent.click(screen.getByTestId('routing-modal-save'));
+
+    // The badge clears once routing is valid again.
+    const fixedTab = screen.getByRole('tab', { name: /^Counter & Routing$/ });
+    expect(fixedTab.querySelector('.admin-config__nav-badge')).toBeNull();
+    expect(fixedTab).not.toHaveTextContent('belum valid');
   });
 });
 
@@ -775,9 +909,16 @@ describe('AdminPanel manual override operations (QUE-25 / FR-ADM-02)', () => {
     return made;
   }
 
+  /** Navigates to the manual-operations section (the manual-ops tests all
+   *  operate there). The panel opens on profile by default. */
+  async function openManual(): Promise<void> {
+    await screen.findByText('Apotek Sehat');
+    await goToSection('Operasi Manual');
+  }
+
   it('manual-reset button triggers triggerManualReset and shows the result', async () => {
     const { triggerManualReset } = renderOverridePanel();
-    await screen.findByText('Apotek Sehat');
+    await openManual();
 
     await userEvent.click(screen.getByTestId('manual-reset'));
 
@@ -788,7 +929,7 @@ describe('AdminPanel manual override operations (QUE-25 / FR-ADM-02)', () => {
 
   it('two rapid manual-reset taps produce exactly one call (synchronous double-tap guard)', async () => {
     const { triggerManualReset } = renderOverridePanel();
-    await screen.findByText('Apotek Sehat');
+    await openManual();
 
     // Two clicks land in the same tick — the in-flight ref guard drops the
     // second so only one reset is sent (mirrors the kiosk double-tap guard).
@@ -802,7 +943,7 @@ describe('AdminPanel manual override operations (QUE-25 / FR-ADM-02)', () => {
   it('manual-reset does not fire when the confirm dialog is cancelled', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(false);
     const { triggerManualReset } = renderOverridePanel();
-    await screen.findByText('Apotek Sehat');
+    await openManual();
 
     await userEvent.click(screen.getByTestId('manual-reset'));
 
@@ -814,7 +955,7 @@ describe('AdminPanel manual override operations (QUE-25 / FR-ADM-02)', () => {
       manualReset: () => Promise.reject(new Error('core-api down')),
     });
     renderPanel(api);
-    await screen.findByText('Apotek Sehat');
+    await openManual();
 
     await userEvent.click(screen.getByTestId('manual-reset'));
 
@@ -825,7 +966,7 @@ describe('AdminPanel manual override operations (QUE-25 / FR-ADM-02)', () => {
 
   it('cleanup button calls cleanupTransactionLogs with the retention value and shows the result', async () => {
     const { cleanupTransactionLogs } = renderOverridePanel();
-    await screen.findByText('Apotek Sehat');
+    await openManual();
 
     await userEvent.click(screen.getByTestId('cleanup-run'));
 
@@ -835,7 +976,7 @@ describe('AdminPanel manual override operations (QUE-25 / FR-ADM-02)', () => {
 
   it('cleanup button is disabled and shows an error when retentionDays is below the 7-day floor', async () => {
     const { cleanupTransactionLogs } = renderOverridePanel();
-    await screen.findByText('Apotek Sehat');
+    await openManual();
 
     // Controlled numeric input bound to state — set via fireEvent.change per
     // the CLAUDE.md controlled-numeric-input gotcha.
@@ -850,7 +991,7 @@ describe('AdminPanel manual override operations (QUE-25 / FR-ADM-02)', () => {
 
   it('wires the retention error to its input via aria-invalid + aria-describedby (QUE-41 AC6)', async () => {
     renderOverridePanel();
-    await screen.findByText('Apotek Sehat');
+    await openManual();
 
     const retentionInput = screen.getByTestId('retention-days');
     // Default 90 is valid — no error attributes.
@@ -867,7 +1008,7 @@ describe('AdminPanel manual override operations (QUE-25 / FR-ADM-02)', () => {
   it('cleanup does not fire when the confirm dialog is cancelled', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(false);
     const { cleanupTransactionLogs } = renderOverridePanel();
-    await screen.findByText('Apotek Sehat');
+    await openManual();
 
     await userEvent.click(screen.getByTestId('cleanup-run'));
 

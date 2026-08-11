@@ -178,6 +178,38 @@ describe('styles.css AC guards', () => {
     expect(groupMatch).not.toBeNull();
     expect(groupMatch![1]).toContain('flex-direction: row');
   });
+
+  it('admin-config: two-column grid layout (sticky left nav + right content)', () => {
+    expect(rule('.admin-config__layout')).toContain('display: grid');
+    expect(rule('.admin-config__layout')).toMatch(/grid-template-columns:\s*minmax\(11rem,\s*16rem\)\s+1fr/);
+    expect(rule('.admin-config__nav')).toContain('position: sticky');
+    expect(rule('.admin-config__nav')).toContain('flex-direction: column');
+  });
+
+  it('admin-config: nav item is a ≥44px touch target with a left active indicator', () => {
+    expect(rule('.admin-config__nav-item')).toContain('min-height: 2.75rem');
+    expect(rule('.admin-config__nav-item')).toContain('border-left: 3px solid transparent');
+    const active = rule('.admin-config__nav-item--active');
+    expect(active).toContain('var(--accent)');
+    expect(active).toContain('var(--accent-on-surface)');
+  });
+
+  it('admin-config: error badge uses the danger token (never color alone — .sr-only carries AT text)', () => {
+    expect(rule('.admin-config__nav-badge')).toContain('var(--danger)');
+    // The badge is a small dot, not a text-colored element.
+    expect(rule('.admin-config__nav-badge')).not.toContain('color:');
+  });
+
+  it('admin-config: responsive ≤900px stacks the layout into a wrapping nav row', () => {
+    const media = atRuleBlock('@media (max-width: 900px)');
+    const layoutMatch = media.match(/\.admin-config__layout\s*\{([^}]*)\}/);
+    expect(layoutMatch).not.toBeNull();
+    expect(layoutMatch![1]).toContain('grid-template-columns: 1fr');
+    const navMatch = media.match(/\.admin-config__nav\s*\{([^}]*)\}/);
+    expect(navMatch).not.toBeNull();
+    expect(navMatch![1]).toContain('flex-direction: row');
+    expect(navMatch![1]).toContain('position: static');
+  });
 });
 
 describe('QUE-47 — per-service theme settings section', () => {

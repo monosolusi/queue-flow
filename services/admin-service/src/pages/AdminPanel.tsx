@@ -1,22 +1,19 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { IAdminApi } from '../api/admin-api';
 import { useSystemConfigContext } from '../config/system-config-context';
 import type {
   DailyResetMode,
-  PriorityPolicy,
   ServiceSurface,
-  ServiceThemesMap,
-  SystemConfigurationDto,
   ThemeMode,
 } from '../api/types';
-import { DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES } from '../api/types';
+import { DEFAULT_BRAND_COLOR } from '../api/types';
 import { validateCronExpression } from '../lib/cron';
 import { validateBrandColor, isValidBrandColor } from '../lib/brand-color';
 import { validateRetentionDays } from '../lib/retention';
 import { DAILY_RESET_MODE_LABELS, SERVICE_SURFACE_LABELS, SERVICE_THEME_LABELS } from '../lib/labels';
-import { SERVICE_SURFACES, validateServiceThemes, coerceServiceThemes } from '../lib/service-themes';
+import { SERVICE_SURFACES, validateServiceThemes } from '../lib/service-themes';
 import { timeToCron, cronToTime } from '../lib/daily-reset';
-import { BROWSER_TIMEZONE, timezoneSelectOptions } from '../lib/timezone';
+import { timezoneSelectOptions } from '../lib/timezone';
 import { applyBrandColor, applyThemeMode } from '../lib/theme';
 import { validateCustomCategories, validateResetTo } from '../lib/categories';
 import { validateStoreName } from '../lib/store-name';
@@ -25,71 +22,21 @@ import { StateMachineEditor } from '../components/StateMachineEditor';
 import { TimeField } from '../components/TimeField';
 import { useToast } from '../toast/useToast';
 import {
-  type StateMachineForm,
-  isDefaultGraph,
   toStateMachineDto,
   validateCustomStateMachine,
 } from '../lib/state-machine';
-
-/**
- * One editable category row. `id` is carried for categories that already exist
- * in the store so the backend reuses it (`Identifier.of(id)`) and existing
- * tickets' `categoryId` stay valid. Rows the manager adds in this session
- * have no `id` and are minted server-side on save.
- */
-interface CategoryRow {
-  readonly id?: string;
-  /** Stable React key — set once at load/add, never mutated, stripped before save. */
-  readonly rowKey: string;
-  code: string;
-  name: string;
-}
-
-/** One editable counter routing row. Categories are referenced by code. */
-interface RoutingRow {
-  /** Stable React key — set once at load/add, never mutated, stripped before save. */
-  readonly rowKey: string;
-  counterId: number;
-  counterName: string;
-  /** `readonly` so the shared `CounterRoutingEditor`'s `RoutingRuleRow`
-   *  (also `readonly string[]`) is structurally compatible with the
-   *  `Partial<RoutingRow>` patch it emits — the editor's draft is mutable
-   *  internally but the patch it emits is treated as readonly at the
-   *  boundary. None of the admin helpers mutate the array in place; they all
-   *  create new arrays (the `readonly` is a type-level guarantee, not a
-   *  runtime constraint). */
-  readonly assignedCategoryCodes: readonly string[];
-  priorityPolicy: PriorityPolicy;
-}
-
-interface AdminForm {
-  /** Editable — the manager changes the store / branch name post-setup. */
-  storeName: string;
-  /** Editable state-machine form slice (shared with the wizard via
-   *  {@link StateMachineEditor}). The client-only `mode` preset is stripped at
-   *  save (never sent to core-api) — same pattern as the wizard's finalize. */
-  stateMachine: StateMachineForm;
-  /** Editable brand color (QUE-36) — the manager re-themes `--accent` post-setup. */
-  brandColor: string;
-  /** Editable per-service light/dark theme map (QUE-47) — the manager sets each
-   *  service's theme from this one panel; each service applies its own key at boot. */
-  serviceThemes: ServiceThemesMap;
-  categories: CategoryRow[];
-  routingRules: RoutingRow[];
-  dailyReset: {
-    mode: DailyResetMode;
-    cronExpression: string;
-    resetTicketNumberTo: number;
-    archivePreviousDayData: boolean;
-    /** IANA timezone the daily-reset cron fires in (QUE-42). */
-    timezone: string;
-  };
-}
-
-type PanelState =
-  | { status: 'loading' }
-  | { status: 'error'; message: string }
-  | { status: 'ready'; form: AdminForm };
+import {
+  type PanelState,
+  addCategory,
+  addRouting,
+  removeCategory,
+  removeRouting,
+  toForm,
+  updateCategory,
+  updateRouting,
+} from './admin-config/form';
+import { DEFAULT_SECTION, type SectionId } from './admin-config/config-sections';
+import { ConfigSectionNav, type SectionValidity } from './admin-config/ConfigSectionNav';
 
 /**
  * AC6 — wire a field error message to its input via `aria-describedby` +
@@ -140,9 +87,25 @@ function describedBy(
  * successful save so the app-wide chrome (the shell's sidebar store name) still
  * reflects the new configuration without a page reload.
  *
- * (Noted, deliberately not done here: the file is on an SRP trajectory that
- * warrants splitting each `config-card` into its own section component. That is
- * a separate refactor — out of scope for this fix.)
+ * Section navigation: the panel renders one section at a time behind a left
+ * in-content ARIA tablist (`ConfigSectionNav`) — the manager no longer
+ * scrolls one long form. `activeSection` is a SEPARATE `useState` from
+ * `PanelState`: the post-save reload replaces `PanelState`, so bundling would
+ * snap the manager back to the default section on every save. The draft stays
+ * centralized (all fields), so switching sections changes visibility only — a
+ * manager can edit profile, switch to state-machine, edit, then save once and
+ * both edits ride the one full-payload PUT. Each saved section renders its
+ * own save button (`data-testid="admin-save"` stays unique — only the active
+ * section renders); the `manual` section has no save (its operations are
+ * separate POSTs). The full PUT requires a valid whole payload, so each
+ * section's save is disabled unless the WHOLE form is valid, and the nav shows
+ * an error badge on items whose own section is invalid.
+ *
+ * Save / reset / cleanup outcomes are announced through the app-wide toast
+ * stack (`useToast`) — auto-dismissing for successes, sticky for errors. The
+ * inline banners that used to sit here were set and never cleared; inline
+ * messaging is reserved for page content (the config-load failure and every
+ * `*-errors` validation list below).
  */
 export function AdminPanel({ api }: { api: IAdminApi }) {
   const toast = useToast();
@@ -158,6 +121,14 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
   // one save (mirrors the kiosk double-tap guard; `disabled` alone lags a
   // re-render).
   const submittingRef = useRef(false);
+  // The active in-content section. DELIBERATELY separate from `PanelState`:
+  // the post-save reload replaces `PanelState`, so bundling `activeSection`
+  // there would snap the manager back to the default section every time they
+  // saved. Separate state → saving routing keeps them on routing.
+  const [activeSection, setActiveSection] = useState<SectionId>(DEFAULT_SECTION);
+  // Shared `useId()` base so each nav tab's `aria-controls` resolves to the
+  // panel this component renders with the matching `${idBase}-panel-${id}` id.
+  const idBase = useId();
 
   // --- Manual override operations (FR-ADM-02 / QUE-25) ---
   // Manual daily-reset state + the synchronous in-flight guard (double-tap).
@@ -274,6 +245,26 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
   // editing migrated to the panel).
   const smErrors = form.stateMachine.mode === 'custom' ? validateCustomStateMachine(form.stateMachine) : [];
   const stateMachineValid = smErrors.length === 0;
+
+  // Per-section validity bag drives the nav error badges + the save-disabled
+  // gate. `PUT /api/system/config` is a FULL save — every section's save
+  // button sends the whole draft — so each section's save is disabled unless
+  // the WHOLE form is valid (`wholeFormValid`). The nav shows an error badge on
+  // the items whose own section is invalid so cross-section invalidity is
+  // visible wherever the manager is.
+  const sectionValidity: SectionValidity = {
+    profile: storeNameValid && brandColorValid && serviceThemesValid,
+    categories: categoriesValid,
+    routing: routingValid,
+    dailyReset: dailyResetValid,
+    stateMachine: stateMachineValid,
+  };
+  const wholeFormValid =
+    sectionValidity.profile &&
+    sectionValidity.categories &&
+    sectionValidity.routing &&
+    sectionValidity.dailyReset &&
+    sectionValidity.stateMachine;
 
   /**
    * PUTs the whole configuration, then re-reads it so server-minted category
@@ -419,6 +410,23 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
     }
   }
 
+  // One save button element, rendered at the foot of whichever saved section
+  // is active. Exactly one is in the DOM at a time (only the active section
+  // renders), so `data-testid="admin-save"` stays unique. The PUT is a FULL
+  // save — every section sends the whole draft — so the button is disabled
+  // unless the WHOLE form is valid, regardless of which section it sits on.
+  const saveButton = (
+    <button
+      type="button"
+      className="btn btn--primary admin-config__section-save"
+      onClick={save}
+      disabled={submitting || !wholeFormValid}
+      data-testid="admin-save"
+    >
+      {submitting ? 'Menyimpan…' : 'Simpan'}
+    </button>
+  );
+
   return (
     <div className="admin-panel">
       <header className="admin-panel__header">
@@ -434,511 +442,444 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
           messaging is reserved for page content: the config-load failure above
           and every `*-errors` validation list below. */}
 
-      {/* Store profile — store name (migrated from the wizard; the wizard is
-          first-run only now). */}
-      <section className="config-card" data-testid="store-profile-section">
-        <h2 className="config-card__title">Profil Toko</h2>
-        <label className="field" htmlFor="admin-store-name">
-          <span className="field__label">
-            Nama toko / cabang<span aria-hidden="true"> *</span>
-          </span>
-          <input
-            id="admin-store-name"
-            className="field__input"
-            type="text"
-            value={form.storeName}
-            onChange={(e) => setState({ status: 'ready', form: { ...form, storeName: e.target.value } })}
-            placeholder="mis. Apotek Sehat Sentosa"
-            required
-            aria-required="true"
-            data-testid="admin-store-name"
-            {...describedBy('store-name-errors', storeNameError !== null)}
-          />
-        </label>
-        {storeNameError !== null && (
-          <ul className="wizard__errors" id="store-name-errors" data-testid="store-name-errors">
-            <li>{storeNameError}</li>
-          </ul>
-        )}
-      </section>
-
-      {/* Categories — add / edit / remove (FR-ADM-01). */}
-      <section className="config-card">
-        <h2 className="config-card__title">Kategori</h2>
-        {catErrors.length > 0 && (
-          <ul className="wizard__errors" id="cat-errors" data-testid="cat-errors">
-            {catErrors.map((msg) => (
-              <li key={msg}>{msg}</li>
-            ))}
-          </ul>
-        )}
-        <ul className="entry-list">
-          {form.categories.map((cat, i) => (
-            <li key={cat.rowKey} className="entry-row">
-              <input
-                className="field__input entry-row__code"
-                type="text"
-                value={cat.code}
-                onChange={(e) => updateCategory(form, setState, i, { code: e.target.value.toUpperCase() })}
-                placeholder="A"
-                aria-label={`Kategori ${i + 1} kode`}
-                aria-required="true"
-              />
-              <input
-                className="field__input entry-row__name"
-                type="text"
-                value={cat.name}
-                onChange={(e) => updateCategory(form, setState, i, { name: e.target.value })}
-                placeholder="Nama kategori"
-                aria-label={`Kategori ${i + 1} nama`}
-                aria-required="true"
-              />
-              <button
-                type="button"
-                className="btn btn--ghost"
-                onClick={() => removeCategory(form, setState, i)}
-                disabled={form.categories.length <= 1}
-              >
-                Hapus
-              </button>
-            </li>
-          ))}
-        </ul>
-        <button type="button" className="btn btn--secondary" onClick={() => addCategory(form, setState)}>
-          + Tambah Kategori
-        </button>
-      </section>
-
-      {/* Brand color — re-theme the store accent post-setup (QUE-36). */}
-      <section className="config-card" data-testid="brand-color-section">
-        <h2 className="config-card__title">Warna Brand</h2>
-        <div className="brand-color__controls">
-          <input
-            className="brand-color__picker"
-            type="color"
-            value={isValidBrandColor(form.brandColor) ? form.brandColor : DEFAULT_BRAND_COLOR}
-            onChange={(e) => setState({ status: 'ready', form: { ...form, brandColor: e.target.value } })}
-            aria-label="Pilih warna brand"
-          />
-          <input
-            className="field__input brand-color__hex"
-            type="text"
-            value={form.brandColor}
-            onChange={(e) => setState({ status: 'ready', form: { ...form, brandColor: e.target.value } })}
-            placeholder="#2563eb"
-            aria-label="Kode hex warna brand"
-            {...describedBy('brand-color-errors', brandColorErrors.length > 0)}
-          />
-        </div>
-        {brandColorErrors.length > 0 && (
-          <ul
-            className="wizard__errors"
-            id="brand-color-errors"
-            data-testid="brand-color-errors"
-            style={{ marginTop: '0.75rem' }}
-          >
-            {brandColorErrors.map((msg) => (
-              <li key={msg}>{msg}</li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      {/* Per-service light/dark theme (QUE-47) — the manager sets each service's
-          theme from this one panel; each service applies its own surface key at
-          boot via applyThemeMode. Constrained selects (light/dark) make an
-          invalid value unconstructable through the UI. */}
-      <section className="config-card" data-testid="service-themes-section">
-        <h2 className="config-card__title">Tema Layanan</h2>
-        <p className="admin-panel__hint">
-          Pilih mode tampilan untuk masing-masing layanan. Pilihan diterapkan
-          saat layanan tersebut dimuat ulang.
-        </p>
-        <div className="service-themes__grid">
-          {SERVICE_SURFACES.map((surface: ServiceSurface) => (
-            <div className="service-themes__row" key={surface}>
-              <label htmlFor={`theme-${surface}`} className="service-themes__label">
-                {SERVICE_SURFACE_LABELS[surface]}
-              </label>
-              <select
-                id={`theme-${surface}`}
-                className="field__input"
-                value={form.serviceThemes[surface]}
-                onChange={(e) =>
-                  setState({
-                    status: 'ready',
-                    form: {
-                      ...form,
-                      serviceThemes: { ...form.serviceThemes, [surface]: e.target.value as ThemeMode },
-                    },
-                  })
-                }
-                data-testid={`theme-select-${surface}`}
-              >
-                {(Object.keys(SERVICE_THEME_LABELS) as ThemeMode[]).map((mode) => (
-                  <option key={mode} value={mode}>
-                    {SERVICE_THEME_LABELS[mode]}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ))}
-        </div>
-        {serviceThemesErrors.length > 0 && (
-          <ul className="wizard__errors" data-testid="service-themes-errors" style={{ marginTop: '0.75rem' }}>
-            {serviceThemesErrors.map((msg) => (
-              <li key={msg}>{msg}</li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      {/* Counter & routing — add / edit / remove + category assignment (FR-ADM-01).
-          Unified with the wizard's Step 2 table + Edit-modal design (QUE-43).
-          counterId is auto-managed by the parent helpers (not hand-editable). */}
-      <section className="config-card">
-        <h2 className="config-card__title">Counter &amp; Routing</h2>
-        <CounterRoutingEditor
-          routingRules={form.routingRules}
-          categories={form.categories}
-          onUpdate={(i, patch) => updateRouting(form, setState, i, patch)}
-          onAdd={() => addRouting(form, setState)}
-          onRemove={(i) => removeRouting(form, setState, i)}
-          canRemove={() => form.routingRules.length > 1}
-          idPrefix="routing"
+      <div className="admin-config__layout">
+        <ConfigSectionNav
+          active={activeSection}
+          onSelect={setActiveSection}
+          sectionValidity={sectionValidity}
+          idBase={idBase}
         />
-        {!routingValid && (
-          <p className="wizard__hint wizard__hint--required" data-testid="routing-empty-hint">
-            Pilih minimal satu kategori pada salah satu counter. Tanpa itu tidak ada tiket yang
-            bisa dilayani, jadi konfigurasi belum bisa disimpan.
-          </p>
-        )}
-      </section>
-
-      {/* Daily reset policy — mode / cron / resetTo / archive (FR-ADM-01). */}
-      <section className="config-card">
-        <h2 className="config-card__title">Kebijakan Reset Harian</h2>
-        <label className="field">
-          <span className="field__label">Mode</span>
-          <select
-            className="field__input"
-            value={form.dailyReset.mode}
-            onChange={(e) =>
-              setState({ status: 'ready', form: { ...form, dailyReset: { ...form.dailyReset, mode: e.target.value as DailyResetMode } } })
-            }
-          >
-            {(Object.keys(DAILY_RESET_MODE_LABELS) as DailyResetMode[]).map((m) => (
-              <option key={m} value={m}>
-                {DAILY_RESET_MODE_LABELS[m]}
-              </option>
-            ))}
-          </select>
-        </label>
-        {form.dailyReset.mode === 'AUTOMATIC_CRON' && (
-          <>
-            <TimeField
-              label="Waktu reset harian"
-              value={cronToTime(form.dailyReset.cronExpression) ?? '00:00'}
-              onChange={(hhmm) =>
-                setState({ status: 'ready', form: { ...form, dailyReset: { ...form.dailyReset, cronExpression: timeToCron(hhmm) } } })
-              }
-              ariaLabel="Waktu reset harian"
-              required
-              invalid={Boolean(cronError)}
-              describedById={cronError ? 'cron-error' : undefined}
-            >
-              {cronError && (
-                <span className="field__error" id="cron-error" data-testid="cron-error">
-                  {cronError}
-                </span>
-              )}
-            </TimeField>
-            <label className="field">
-              <span className="field__label">Zona waktu</span>
-              <select
-                className="field__input"
-                value={form.dailyReset.timezone}
-                onChange={(e) =>
-                  setState({
-                    status: 'ready',
-                    form: { ...form, dailyReset: { ...form.dailyReset, timezone: e.target.value } },
-                  })
-                }
-                aria-label="Zona waktu"
-                data-testid="tz-select"
-              >
-                {timezoneSelectOptions(form.dailyReset.timezone).map((tz) => (
-                  <option key={tz} value={tz}>
-                    {tz}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </>
-        )}
-        <label className="field">
-          <span className="field__label">
-            Reset nomor antrian ke<span aria-hidden="true"> *</span>
-          </span>
-          <input
-            className="field__input"
-            type="number"
-            min={1}
-            value={form.dailyReset.resetTicketNumberTo}
-            onChange={(e) =>
-              setState({
-                status: 'ready',
-                form: { ...form, dailyReset: { ...form.dailyReset, resetTicketNumberTo: Number(e.target.value) } },
-              })
-            }
-            required
-            {...describedBy('reset-to-errors', resetToError !== null)}
-          />
-          {resetToError !== null && (
-            <ul className="wizard__errors" id="reset-to-errors" data-testid="reset-to-errors">
-              <li>{resetToError}</li>
-            </ul>
-          )}
-        </label>
-        <label className="field field--inline">
-          <input
-            type="checkbox"
-            checked={form.dailyReset.archivePreviousDayData}
-            onChange={(e) =>
-              setState({
-                status: 'ready',
-                form: { ...form, dailyReset: { ...form.dailyReset, archivePreviousDayData: e.target.checked } },
-              })
-            }
-          />
-          <span>Arsipkan data hari sebelumnya</span>
-        </label>
-        <p className="admin-panel__hint">
-          Saat diaktifkan, data antrian hari sebelumnya dipindahkan ke arsip saat reset berikutnya berjalan.
-          Perubahan jadwal reset harian berlaku segera setelah disimpan.
-        </p>
-      </section>
-
-      {/* State machine — editable (migrated from the wizard; the wizard is
-          first-run only now). Uses the same shared StateMachineEditor + pure
-          lib/state-machine validation the wizard uses (DRY — one editor). */}
-      <section className="config-card">
-        <h2 className="config-card__title">Alur Status Tiket</h2>
-        <p className="admin-panel__hint">
-          Pilih alur status standar atau susun sendiri. Label aksi menjadi tombol di panel caller.
-        </p>
-        {/* Live-ticket warning (arch-review). The active alur status is resolved
-            per operation, so a ticket sitting in a status that this save removes
-            or renames has no legal next step: the caller's action buttons for it
-            disappear and the ticket can only be cleared by a daily reset. The
-            wizard framed this as one-time guided setup; here it sits next to
-            Kategori on a panel the manager opens daily, so the risk has to be
-            stated. A backend guard is out of scope for this change.
-
-            The complementary hazard — a custom flow that DROPS a standard status,
-            which breaks a caller action (and the report's service-time average)
-            for every FUTURE ticket, not just the live ones — is warned about by
-            the shared StateMachineEditor itself: it derives from the form alone,
-            so this panel and the wizard both get it with no prop threading. */}
-        <p className="admin-panel__warning" data-testid="state-machine-warning">
-          Perhatian: mengubah atau menghapus status yang sedang dipakai tiket aktif membuat tiket
-          tersebut tidak bisa dilanjutkan — tombol aksinya hilang di panel caller. Ubah alur status
-          saat antrian kosong, misalnya setelah reset harian.
-        </p>
-        <StateMachineEditor
-          value={form.stateMachine}
-          onChange={(sm) => setState({ status: 'ready', form: { ...form, stateMachine: sm } })}
-          errors={smErrors}
-        />
-      </section>
-
-      {/* Manual override operations (FR-ADM-02 / QUE-25). */}
-      <section className="config-card" data-testid="manual-operations">
-        <h2 className="config-card__title">Operasi Manual</h2>
-
-        <div className="entry-row entry-row--override">
-          <div className="entry-row__label">
-            <span className="field__label">Reset Antrian Harian</span>
-            <span className="admin-panel__hint">
-              Kembalikan nomor antrian ke awal &amp; arsipkan tiket hari sebelumnya.
-            </span>
-          </div>
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={triggerReset}
-            disabled={resetting}
-            data-testid="manual-reset"
-          >
-            {resetting ? 'Meriset…' : 'Reset Harian Sekarang'}
-          </button>
-        </div>
-
-        <div className="entry-row entry-row--override">
-          <div className="entry-row__label">
-            <span className="field__label">Bersihkan Log Transaksi</span>
-            <span className="admin-panel__hint">
-              Hapus permanen transaksi arsip yang lebih lama dari retensi (audit log tidak dihapus).
-            </span>
-          </div>
-          <label className="field field--inline">
-            <span className="field__label">
-              Retensi (hari)<span aria-hidden="true"> *</span>
-            </span>
-            <input
-              className="field__input"
-              type="number"
-              min={7}
-              value={retentionDays}
-              onChange={(e) => setRetentionDays(Number(e.target.value))}
-              aria-label="Retensi hari"
-              data-testid="retention-days"
-              required
-              {...describedBy('retention-error', retentionError !== null)}
-            />
-          </label>
-          <button
-            type="button"
-            className="btn btn--secondary"
-            onClick={runCleanup}
-            disabled={cleaning || retentionError !== null}
-            data-testid="cleanup-run"
-          >
-            {cleaning ? 'Membersihkan…' : 'Bersihkan Sekarang'}
-          </button>
-        </div>
-        {retentionError && (
-          <p className="admin-panel__error" id="retention-error" data-testid="retention-error">
-            {retentionError}
-          </p>
-        )}
-      </section>
-
-      <footer className="admin-panel__actions">
-        <button
-          type="button"
-          className="btn btn--primary"
-          onClick={save}
-          disabled={
-            submitting ||
-            !dailyResetValid ||
-            !brandColorValid ||
-            !serviceThemesValid ||
-            !categoriesValid ||
-            !storeNameValid ||
-            !routingValid ||
-            !stateMachineValid
-          }
-          data-testid="admin-save"
+        {/* Only the active section renders — switching changes visibility, not
+            the draft, so a manager can edit profile, switch to state-machine,
+            edit, then save once → both edits in one payload. The panel owns one
+            centralized draft; every save sends the full payload.
+            ARIA note: this single panel is re-identified per active section
+            (`id`/`aria-labelledby` carry the active `SectionId`), so a non-active
+            tab's `aria-controls` points at a panel id that is NOT currently in
+            the DOM. This is an intentional trade-off of the one-section-at-a-time
+            design (mounting all six panels `hidden` would defeat the "don't show
+            all configurations" requirement) — the active tab's `aria-controls`
+            always resolves, and a manager activates a tab before reading its
+            panel, so the practical impact is limited. Do not "fix" by mounting
+            all panels; do not file the dangling references as a bug. */}
+        <section
+          className="admin-config__content"
+          role="tabpanel"
+          id={`${idBase}-panel-${activeSection}`}
+          aria-labelledby={`${idBase}-tab-${activeSection}`}
+          tabIndex={0}
         >
-          {submitting ? 'Menyimpan…' : 'Simpan Konfigurasi'}
-        </button>
-      </footer>
+          {activeSection === 'profile' && (
+            <>
+              {/* Store profile — store name (migrated from the wizard; the
+                  wizard is first-run only now). */}
+              <section className="config-card" data-testid="store-profile-section">
+                <h2 className="config-card__title">Profil Toko</h2>
+                <label className="field" htmlFor="admin-store-name">
+                  <span className="field__label">
+                    Nama toko / cabang<span aria-hidden="true"> *</span>
+                  </span>
+                  <input
+                    id="admin-store-name"
+                    className="field__input"
+                    type="text"
+                    value={form.storeName}
+                    onChange={(e) => setState({ status: 'ready', form: { ...form, storeName: e.target.value } })}
+                    placeholder="mis. Apotek Sehat Sentosa"
+                    required
+                    aria-required="true"
+                    data-testid="admin-store-name"
+                    {...describedBy('store-name-errors', storeNameError !== null)}
+                  />
+                </label>
+                {storeNameError !== null && (
+                  <ul className="wizard__errors" id="store-name-errors" data-testid="store-name-errors">
+                    <li>{storeNameError}</li>
+                  </ul>
+                )}
+              </section>
+
+              {/* Brand color — re-theme the store accent post-setup (QUE-36). */}
+              <section className="config-card" data-testid="brand-color-section">
+                <h2 className="config-card__title">Warna Brand</h2>
+                <div className="brand-color__controls">
+                  <input
+                    className="brand-color__picker"
+                    type="color"
+                    value={isValidBrandColor(form.brandColor) ? form.brandColor : DEFAULT_BRAND_COLOR}
+                    onChange={(e) => setState({ status: 'ready', form: { ...form, brandColor: e.target.value } })}
+                    aria-label="Pilih warna brand"
+                  />
+                  <input
+                    className="field__input brand-color__hex"
+                    type="text"
+                    value={form.brandColor}
+                    onChange={(e) => setState({ status: 'ready', form: { ...form, brandColor: e.target.value } })}
+                    placeholder="#2563eb"
+                    aria-label="Kode hex warna brand"
+                    {...describedBy('brand-color-errors', brandColorErrors.length > 0)}
+                  />
+                </div>
+                {brandColorErrors.length > 0 && (
+                  <ul
+                    className="wizard__errors"
+                    id="brand-color-errors"
+                    data-testid="brand-color-errors"
+                    style={{ marginTop: '0.75rem' }}
+                  >
+                    {brandColorErrors.map((msg) => (
+                      <li key={msg}>{msg}</li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+
+              {/* Per-service light/dark theme (QUE-47) — the manager sets each
+                  service's theme from this one panel; each service applies its
+                  own surface key at boot via applyThemeMode. Constrained
+                  selects (light/dark) make an invalid value unconstructable. */}
+              <section className="config-card" data-testid="service-themes-section">
+                <h2 className="config-card__title">Tema Layanan</h2>
+                <p className="admin-panel__hint">
+                  Pilih mode tampilan untuk masing-masing layanan. Pilihan diterapkan
+                  saat layanan tersebut dimuat ulang.
+                </p>
+                <div className="service-themes__grid">
+                  {SERVICE_SURFACES.map((surface: ServiceSurface) => (
+                    <div className="service-themes__row" key={surface}>
+                      <label htmlFor={`theme-${surface}`} className="service-themes__label">
+                        {SERVICE_SURFACE_LABELS[surface]}
+                      </label>
+                      <select
+                        id={`theme-${surface}`}
+                        className="field__input"
+                        value={form.serviceThemes[surface]}
+                        onChange={(e) =>
+                          setState({
+                            status: 'ready',
+                            form: {
+                              ...form,
+                              serviceThemes: { ...form.serviceThemes, [surface]: e.target.value as ThemeMode },
+                            },
+                          })
+                        }
+                        data-testid={`theme-select-${surface}`}
+                      >
+                        {(Object.keys(SERVICE_THEME_LABELS) as ThemeMode[]).map((mode) => (
+                          <option key={mode} value={mode}>
+                            {SERVICE_THEME_LABELS[mode]}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+                {serviceThemesErrors.length > 0 && (
+                  <ul className="wizard__errors" data-testid="service-themes-errors" style={{ marginTop: '0.75rem' }}>
+                    {serviceThemesErrors.map((msg) => (
+                      <li key={msg}>{msg}</li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+              {saveButton}
+            </>
+          )}
+
+          {activeSection === 'categories' && (
+            <>
+              {/* Categories — add / edit / remove (FR-ADM-01). */}
+              <section className="config-card">
+                <h2 className="config-card__title">Kategori</h2>
+                {catErrors.length > 0 && (
+                  <ul className="wizard__errors" id="cat-errors" data-testid="cat-errors">
+                    {catErrors.map((msg) => (
+                      <li key={msg}>{msg}</li>
+                    ))}
+                  </ul>
+                )}
+                <ul className="entry-list">
+                  {form.categories.map((cat, i) => (
+                    <li key={cat.rowKey} className="entry-row">
+                      <input
+                        className="field__input entry-row__code"
+                        type="text"
+                        value={cat.code}
+                        onChange={(e) => updateCategory(form, setState, i, { code: e.target.value.toUpperCase() })}
+                        placeholder="A"
+                        aria-label={`Kategori ${i + 1} kode`}
+                        aria-required="true"
+                      />
+                      <input
+                        className="field__input entry-row__name"
+                        type="text"
+                        value={cat.name}
+                        onChange={(e) => updateCategory(form, setState, i, { name: e.target.value })}
+                        placeholder="Nama kategori"
+                        aria-label={`Kategori ${i + 1} nama`}
+                        aria-required="true"
+                      />
+                      <button
+                        type="button"
+                        className="btn btn--ghost"
+                        onClick={() => removeCategory(form, setState, i)}
+                        disabled={form.categories.length <= 1}
+                      >
+                        Hapus
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <button type="button" className="btn btn--secondary" onClick={() => addCategory(form, setState)}>
+                  + Tambah Kategori
+                </button>
+              </section>
+              {saveButton}
+            </>
+          )}
+
+          {activeSection === 'routing' && (
+            <>
+              {/* Counter & routing — add / edit / remove + category assignment
+                  (FR-ADM-01). Unified with the wizard's Step 2 table + Edit-modal
+                  design (QUE-43). counterId is auto-managed by the parent helpers. */}
+              <section className="config-card">
+                <h2 className="config-card__title">Counter &amp; Routing</h2>
+                <CounterRoutingEditor
+                  routingRules={form.routingRules}
+                  categories={form.categories}
+                  onUpdate={(i, patch) => updateRouting(form, setState, i, patch)}
+                  onAdd={() => addRouting(form, setState)}
+                  onRemove={(i) => removeRouting(form, setState, i)}
+                  canRemove={() => form.routingRules.length > 1}
+                  idPrefix="routing"
+                />
+                {!routingValid && (
+                  <p className="wizard__hint wizard__hint--required" data-testid="routing-empty-hint">
+                    Pilih minimal satu kategori pada salah satu counter. Tanpa itu tidak ada tiket yang
+                    bisa dilayani, jadi konfigurasi belum bisa disimpan.
+                  </p>
+                )}
+              </section>
+              {saveButton}
+            </>
+          )}
+
+          {activeSection === 'daily-reset' && (
+            <>
+              {/* Daily reset policy — mode / cron / resetTo / archive (FR-ADM-01). */}
+              <section className="config-card">
+                <h2 className="config-card__title">Kebijakan Reset Harian</h2>
+                <label className="field">
+                  <span className="field__label">Mode</span>
+                  <select
+                    className="field__input"
+                    value={form.dailyReset.mode}
+                    onChange={(e) =>
+                      setState({ status: 'ready', form: { ...form, dailyReset: { ...form.dailyReset, mode: e.target.value as DailyResetMode } } })
+                    }
+                  >
+                    {(Object.keys(DAILY_RESET_MODE_LABELS) as DailyResetMode[]).map((m) => (
+                      <option key={m} value={m}>
+                        {DAILY_RESET_MODE_LABELS[m]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {form.dailyReset.mode === 'AUTOMATIC_CRON' && (
+                  <>
+                    <TimeField
+                      label="Waktu reset harian"
+                      value={cronToTime(form.dailyReset.cronExpression) ?? '00:00'}
+                      onChange={(hhmm) =>
+                        setState({ status: 'ready', form: { ...form, dailyReset: { ...form.dailyReset, cronExpression: timeToCron(hhmm) } } })
+                      }
+                      ariaLabel="Waktu reset harian"
+                      required
+                      invalid={Boolean(cronError)}
+                      describedById={cronError ? 'cron-error' : undefined}
+                    >
+                      {cronError && (
+                        <span className="field__error" id="cron-error" data-testid="cron-error">
+                          {cronError}
+                        </span>
+                      )}
+                    </TimeField>
+                    <label className="field">
+                      <span className="field__label">Zona waktu</span>
+                      <select
+                        className="field__input"
+                        value={form.dailyReset.timezone}
+                        onChange={(e) =>
+                          setState({
+                            status: 'ready',
+                            form: { ...form, dailyReset: { ...form.dailyReset, timezone: e.target.value } },
+                          })
+                        }
+                        aria-label="Zona waktu"
+                        data-testid="tz-select"
+                      >
+                        {timezoneSelectOptions(form.dailyReset.timezone).map((tz) => (
+                          <option key={tz} value={tz}>
+                            {tz}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </>
+                )}
+                <label className="field">
+                  <span className="field__label">
+                    Reset nomor antrian ke<span aria-hidden="true"> *</span>
+                  </span>
+                  <input
+                    className="field__input"
+                    type="number"
+                    min={1}
+                    value={form.dailyReset.resetTicketNumberTo}
+                    onChange={(e) =>
+                      setState({
+                        status: 'ready',
+                        form: { ...form, dailyReset: { ...form.dailyReset, resetTicketNumberTo: Number(e.target.value) } },
+                      })
+                    }
+                    required
+                    {...describedBy('reset-to-errors', resetToError !== null)}
+                  />
+                  {resetToError !== null && (
+                    <ul className="wizard__errors" id="reset-to-errors" data-testid="reset-to-errors">
+                      <li>{resetToError}</li>
+                    </ul>
+                  )}
+                </label>
+                <label className="field field--inline">
+                  <input
+                    type="checkbox"
+                    checked={form.dailyReset.archivePreviousDayData}
+                    onChange={(e) =>
+                      setState({
+                        status: 'ready',
+                        form: { ...form, dailyReset: { ...form.dailyReset, archivePreviousDayData: e.target.checked } },
+                      })
+                    }
+                  />
+                  <span>Arsipkan data hari sebelumnya</span>
+                </label>
+                <p className="admin-panel__hint">
+                  Saat diaktifkan, data antrian hari sebelumnya dipindahkan ke arsip saat reset berikutnya berjalan.
+                  Perubahan jadwal reset harian berlaku segera setelah disimpan.
+                </p>
+              </section>
+              {saveButton}
+            </>
+          )}
+
+          {activeSection === 'state-machine' && (
+            <>
+              {/* State machine — editable (migrated from the wizard; the wizard
+                  is first-run only now). Uses the same shared StateMachineEditor
+                  + pure lib/state-machine validation the wizard uses (DRY). */}
+              <section className="config-card">
+                <h2 className="config-card__title">Alur Status Tiket</h2>
+                <p className="admin-panel__hint">
+                  Pilih alur status standar atau susun sendiri. Label aksi menjadi tombol di panel caller.
+                </p>
+                {/* Live-ticket warning (arch-review). The active alur status is resolved
+                    per operation, so a ticket sitting in a status that this save removes
+                    or renames has no legal next step: the caller's action buttons for it
+                    disappear and the ticket can only be cleared by a daily reset. The
+                    wizard framed this as one-time guided setup; here it sits next to
+                    Kategori on a panel the manager opens daily, so the risk has to be
+                    stated. A backend guard is out of scope for this change.
+
+                    The complementary hazard — a custom flow that DROPS a standard status,
+                    which breaks a caller action (and the report's service-time average)
+                    for every FUTURE ticket, not just the live ones — is warned about by
+                    the shared StateMachineEditor itself: it derives from the form alone,
+                    so this panel and the wizard both get it with no prop threading. */}
+                <p className="admin-panel__warning" data-testid="state-machine-warning">
+                  Perhatian: mengubah atau menghapus status yang sedang dipakai tiket aktif membuat tiket
+                  tersebut tidak bisa dilanjutkan — tombol aksinya hilang di panel caller. Ubah alur status
+                  saat antrian kosong, misalnya setelah reset harian.
+                </p>
+                <StateMachineEditor
+                  value={form.stateMachine}
+                  onChange={(sm) => setState({ status: 'ready', form: { ...form, stateMachine: sm } })}
+                  errors={smErrors}
+                />
+              </section>
+              {saveButton}
+            </>
+          )}
+
+          {activeSection === 'manual' && (
+            // Manual override operations (FR-ADM-02 / QUE-25). No save button —
+            // the two operations are separate POSTs, not the full-config PUT.
+            <section className="config-card" data-testid="manual-operations">
+              <h2 className="config-card__title">Operasi Manual</h2>
+
+              <div className="entry-row entry-row--override">
+                <div className="entry-row__label">
+                  <span className="field__label">Reset Antrian Harian</span>
+                  <span className="admin-panel__hint">
+                    Kembalikan nomor antrian ke awal &amp; arsipkan tiket hari sebelumnya.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={triggerReset}
+                  disabled={resetting}
+                  data-testid="manual-reset"
+                >
+                  {resetting ? 'Meriset…' : 'Reset Harian Sekarang'}
+                </button>
+              </div>
+
+              <div className="entry-row entry-row--override">
+                <div className="entry-row__label">
+                  <span className="field__label">Bersihkan Log Transaksi</span>
+                  <span className="admin-panel__hint">
+                    Hapus permanen transaksi arsip yang lebih lama dari retensi (audit log tidak dihapus).
+                  </span>
+                </div>
+                <label className="field field--inline">
+                  <span className="field__label">
+                    Retensi (hari)<span aria-hidden="true"> *</span>
+                  </span>
+                  <input
+                    className="field__input"
+                    type="number"
+                    min={7}
+                    value={retentionDays}
+                    onChange={(e) => setRetentionDays(Number(e.target.value))}
+                    aria-label="Retensi hari"
+                    data-testid="retention-days"
+                    required
+                    {...describedBy('retention-error', retentionError !== null)}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  onClick={runCleanup}
+                  disabled={cleaning || retentionError !== null}
+                  data-testid="cleanup-run"
+                >
+                  {cleaning ? 'Membersihkan…' : 'Bersihkan Sekarang'}
+                </button>
+              </div>
+              {retentionError && (
+                <p className="admin-panel__error" id="retention-error" data-testid="retention-error">
+                  {retentionError}
+                </p>
+              )}
+            </section>
+          )}
+        </section>
+      </div>
     </div>
   );
 }
 
-// --- form construction + mutation helpers (module-local; pure over the form slice) ---
-
-/** Maps the config projection into the editable form, preserving category ids
- *  and converting routing `assignedCategoryIds` -> codes. */
-function toForm(config: SystemConfigurationDto): AdminForm {
-  const idToCode = new Map(config.categories.map((c) => [c.id, c.code]));
-  return {
-    storeName: config.storeName,
-    // Build a StateMachineForm with the client-only `mode` preset inferred by
-    // deep-equal against the PRD §7 default graph (mirrors the wizard's prefill
-    // inference). `mode` is stripped at save (never on the wire).
-    stateMachine: {
-      mode: isDefaultGraph(config.stateMachine.states, config.stateMachine.transitions) ? 'default' : 'custom',
-      states: [...config.stateMachine.states],
-      transitions: config.stateMachine.transitions.map((t) => ({ ...t })),
-    },
-    brandColor: config.brandColor || DEFAULT_BRAND_COLOR,
-    // Coerce a partial/degraded GET projection into a complete 4-surface map
-    // (defaults an unknown surface to light — mirrors the backend VO).
-    serviceThemes: coerceServiceThemes(config.serviceThemes ?? DEFAULT_SERVICE_THEMES),
-    categories:
-      config.categories.length > 0
-        ? config.categories.map((c) => ({ id: c.id, rowKey: `cat-${c.id}`, code: c.code, name: c.name }))
-        : [{ rowKey: 'cat-new-1', code: 'A', name: '' }],
-    routingRules:
-      config.routingRules.length > 0
-        ? config.routingRules.map((r) => ({
-            rowKey: `route-${r.counterId}`,
-            counterId: r.counterId,
-            counterName: r.counterName,
-            assignedCategoryCodes: r.assignedCategoryIds
-              .map((id) => idToCode.get(id))
-              .filter((code): code is string => Boolean(code)),
-            priorityPolicy: r.priorityPolicy,
-          }))
-        : [
-            {
-              rowKey: 'route-new-1',
-              counterId: 1,
-              counterName: 'Counter 1',
-              assignedCategoryCodes: [],
-              priorityPolicy: 'FIFO_GLOBAL',
-            },
-          ],
-    dailyReset: {
-      mode: config.dailyResetPolicy.mode,
-      cronExpression: config.dailyResetPolicy.cronExpression ?? '',
-      resetTicketNumberTo: config.dailyResetPolicy.resetTicketNumberTo,
-      archivePreviousDayData: config.dailyResetPolicy.archivePreviousDayData,
-      timezone: config.dailyResetPolicy.timezone || BROWSER_TIMEZONE,
-    },
-  };
-}
-
-function updateCategory(
-  form: AdminForm,
-  setState: (s: PanelState) => void,
-  i: number,
-  patch: Partial<CategoryRow>,
-) {
-  const categories = form.categories.map((c, idx) => (idx === i ? { ...c, ...patch } : c));
-  setState({ status: 'ready', form: { ...form, categories } });
-}
-function addCategory(form: AdminForm, setState: (s: PanelState) => void) {
-  // `rowKey` is unique per add (a loaded category's key is `cat-<uuid>`).
-  const rowKey = `cat-new-${form.categories.length + 1}-${Math.random().toString(36).slice(2, 8)}`;
-  setState({ status: 'ready', form: { ...form, categories: [...form.categories, { rowKey, code: '', name: '' }] } });
-}
-function removeCategory(form: AdminForm, setState: (s: PanelState) => void, i: number) {
-  setState({ status: 'ready', form: { ...form, categories: form.categories.filter((_, idx) => idx !== i) } });
-}
-
-function updateRouting(
-  form: AdminForm,
-  setState: (s: PanelState) => void,
-  i: number,
-  patch: Partial<RoutingRow>,
-) {
-  const routingRules = form.routingRules.map((r, idx) => (idx === i ? { ...r, ...patch } : r));
-  setState({ status: 'ready', form: { ...form, routingRules } });
-}
-function addRouting(form: AdminForm, setState: (s: PanelState) => void) {
-  // Derive the next counterId from the max, not the count — after a remove the
-  // count shrinks below the max id, so `length + 1` would collide with a
-  // surviving row and the backend rejects duplicate counter ids with a 400.
-  const nextId =
-    form.routingRules.length === 0
-      ? 1
-      : Math.max(...form.routingRules.map((r) => r.counterId)) + 1;
-  const rowKey = `route-new-${nextId}-${Math.random().toString(36).slice(2, 8)}`;
-  setState({
-    status: 'ready',
-    form: {
-      ...form,
-      routingRules: [
-        ...form.routingRules,
-        { rowKey, counterId: nextId, counterName: `Counter ${nextId}`, assignedCategoryCodes: [], priorityPolicy: 'FIFO_GLOBAL' },
-      ],
-    },
-  });
-}
-function removeRouting(form: AdminForm, setState: (s: PanelState) => void, i: number) {
-  setState({ status: 'ready', form: { ...form, routingRules: form.routingRules.filter((_, idx) => idx !== i) } });
-}
+// --- form construction + mutation helpers live in ./admin-config/form.ts ---
