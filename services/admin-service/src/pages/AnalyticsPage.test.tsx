@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AnalyticsPage, type RangeReportExporter } from './AnalyticsPage';
+import { ToastProvider } from '../toast/toast-context';
 import type { IAdminApi } from '../api/admin-api';
 import type {
   AuditLogEntryDto,
@@ -126,12 +127,32 @@ function makeApi(
   return { api, stubs: { getRangeReport, getAuditLog } };
 }
 
+/** Wrapped in a real ToastProvider — the export outcome is announced there. */
 function renderPage(api: IAdminApi, exporter?: RangeReportExporter) {
   return render(
     <MemoryRouter>
-      <AnalyticsPage api={api} exporter={exporter ?? (async () => {})} />
+      <ToastProvider>
+        <AnalyticsPage api={api} exporter={exporter ?? (async () => {})} />
+      </ToastProvider>
     </MemoryRouter>,
   );
+}
+
+/**
+ * The toast live regions, scoped through the viewport's `region` landmark. The
+ * page's own loading paragraph is also `role="status"`, so a bare
+ * `getByRole('status')` would be ambiguous while a range is loading.
+ */
+function toastViewport() {
+  return within(screen.getByRole('region', { name: 'Notifikasi' }));
+}
+/** The polite live region — success toasts land here. */
+function politeRegion() {
+  return within(toastViewport().getByRole('status'));
+}
+/** The assertive live region — error toasts land here. */
+function alertRegion() {
+  return within(toastViewport().getByRole('alert'));
 }
 
 describe('AnalyticsPage (range analytics — FR-ADM-03 / QUE-44)', () => {
@@ -255,5 +276,151 @@ describe('AnalyticsPage (range analytics — FR-ADM-03 / QUE-44)', () => {
     expect(screen.getByTestId('analytics-export')).toBeDisabled();
     // The inverted range must not trigger a load.
     expect(stubs.getRangeReport.mock.calls.length).toBe(initialCalls);
+  });
+
+  it('blocks a MALFORMED date and fires no getRangeReport', async () => {
+    // The field is a text input now (DateField), so it accepts a partial or
+    // impossible key where `type="date"` silently coerced to ''. `isDateKey`
+    // catches it client-side before the request goes out.
+    const { api, stubs } = makeApi();
+    renderPage(api);
+    await screen.findByTestId('metric-total');
+    const initialCalls = stubs.getRangeReport.mock.calls.length;
+
+    // Half-typed, then an impossible civil date — neither may reach the API.
+    fireEvent.change(screen.getByTestId('analytics-from'), { target: { value: '2026-07' } });
+    expect(await screen.findByTestId('analytics-range-invalid')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId('analytics-from'), { target: { value: '2026-02-31' } });
+    expect(screen.getByTestId('analytics-range-invalid')).toBeInTheDocument();
+    expect(screen.getByTestId('analytics-export')).toBeDisabled();
+    expect(screen.getByTestId('analytics-from')).toHaveAttribute('aria-invalid', 'true');
+    expect(stubs.getRangeReport.mock.calls.length).toBe(initialCalls);
+
+    // A complete, real date resumes loading.
+    fireEvent.change(screen.getByTestId('analytics-from'), { target: { value: '2026-07-01' } });
+    await waitFor(() =>
+      expect(stubs.getRangeReport.mock.calls.length).toBeGreaterThan(initialCalls),
+    );
+  });
+});
+
+describe('AnalyticsPage — per-field range validity', () => {
+  it('flags ONLY the malformed field, and describes it by the error node', async () => {
+    const { api } = makeApi();
+    renderPage(api);
+    await screen.findByTestId('metric-total');
+
+    fireEvent.change(screen.getByTestId('analytics-from'), { target: { value: '2026-0' } });
+
+    const from = screen.getByTestId('analytics-from');
+    const to = screen.getByTestId('analytics-to');
+    expect(from).toHaveAttribute('aria-invalid', 'true');
+    // `to` is still a perfectly good date — flagging it would misdirect the fix.
+    expect(to).not.toHaveAttribute('aria-invalid');
+
+    // aria-invalid and aria-describedby travel together (repo convention), and
+    // the id must resolve to a node that actually exists.
+    const error = screen.getByTestId('analytics-range-invalid');
+    expect(from).toHaveAttribute('aria-describedby', error.id);
+    expect(to).not.toHaveAttribute('aria-describedby');
+  });
+
+  it('flags ONLY the malformed field when it sorts ABOVE the other (mirror case)', async () => {
+    // The sibling test's `2026-0` happens to sort BELOW the default `to`, so it
+    // would pass even with the inversion test ungated. These two mis-attribute
+    // the fault to the valid field unless `from > to` is gated on both sides
+    // being well-formed: `'2026-1' > '2026-08-11'` is true char-wise
+    // (`'1' > '0'`), and `'2026-08-05' > ''` is true for any non-empty string.
+    const { api } = makeApi();
+    renderPage(api);
+    await screen.findByTestId('metric-total');
+
+    fireEvent.change(screen.getByTestId('analytics-from'), { target: { value: '2026-1' } });
+    expect(screen.getByTestId('analytics-from')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByTestId('analytics-to')).not.toHaveAttribute('aria-invalid');
+
+    // And the reverse: clearing `to` must not flag a perfectly valid `from`.
+    fireEvent.change(screen.getByTestId('analytics-from'), { target: { value: '2026-08-05' } });
+    fireEvent.change(screen.getByTestId('analytics-to'), { target: { value: '' } });
+    expect(screen.getByTestId('analytics-to')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByTestId('analytics-from')).not.toHaveAttribute('aria-invalid');
+  });
+
+  it('flags BOTH fields when the range is inverted (the pair is what is wrong)', async () => {
+    const { api } = makeApi();
+    renderPage(api);
+    await screen.findByTestId('metric-total');
+
+    fireEvent.change(screen.getByTestId('analytics-from'), { target: { value: '2026-12-31' } });
+    fireEvent.change(screen.getByTestId('analytics-to'), { target: { value: '2026-01-01' } });
+
+    const error = await screen.findByTestId('analytics-range-invalid');
+    expect(screen.getByTestId('analytics-from')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByTestId('analytics-to')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByTestId('analytics-from')).toHaveAttribute('aria-describedby', error.id);
+    expect(screen.getByTestId('analytics-to')).toHaveAttribute('aria-describedby', error.id);
+  });
+
+  it('clears both flags once the range is valid again', async () => {
+    const { api } = makeApi();
+    renderPage(api);
+    await screen.findByTestId('metric-total');
+
+    fireEvent.change(screen.getByTestId('analytics-from'), { target: { value: '2026-0' } });
+    expect(screen.getByTestId('analytics-from')).toHaveAttribute('aria-invalid', 'true');
+
+    fireEvent.change(screen.getByTestId('analytics-from'), { target: { value: '2026-01-01' } });
+    await waitFor(() =>
+      expect(screen.queryByTestId('analytics-range-invalid')).not.toBeInTheDocument(),
+    );
+    expect(screen.getByTestId('analytics-from')).not.toHaveAttribute('aria-invalid');
+    expect(screen.getByTestId('analytics-from')).not.toHaveAttribute('aria-describedby');
+  });
+});
+
+describe('AnalyticsPage — export feedback', () => {
+  it('announces a successful export', async () => {
+    const exporter = vi.fn(async () => {});
+    const { api } = makeApi();
+    renderPage(api, exporter);
+    await screen.findByTestId('metric-total');
+
+    fireEvent.click(screen.getByTestId('analytics-export'));
+
+    expect(
+      await politeRegion().findByText('Laporan .xlsx berhasil diunduh.'),
+    ).toBeInTheDocument();
+  });
+
+  it('announces a FAILED export instead of swallowing the rejection', async () => {
+    // `handleExport` had try/finally with no catch, so an exporter rejection was
+    // silently dropped: the button returned to "Ekspor .xlsx" and the manager
+    // believed a file had been written.
+    const exporter = vi.fn(() => Promise.reject(new Error('disk penuh')));
+    const { api } = makeApi();
+    renderPage(api, exporter);
+    await screen.findByTestId('metric-total');
+
+    fireEvent.click(screen.getByTestId('analytics-export'));
+
+    expect(await alertRegion().findByText(/disk penuh/)).toBeInTheDocument();
+    expect(alertRegion().getByText(/^Gagal mengekspor laporan: /)).toBeInTheDocument();
+    // The button is released for a retry.
+    await waitFor(() => expect(screen.getByTestId('analytics-export')).not.toBeDisabled());
+  });
+
+  it('two same-tick export clicks run the exporter exactly once', async () => {
+    const exporter = vi.fn(async () => {});
+    const { api } = makeApi();
+    renderPage(api, exporter);
+    await screen.findByTestId('metric-total');
+
+    const button = screen.getByTestId('analytics-export');
+    fireEvent.click(button);
+    fireEvent.click(button);
+
+    await politeRegion().findByText('Laporan .xlsx berhasil diunduh.');
+    expect(exporter).toHaveBeenCalledTimes(1);
   });
 });

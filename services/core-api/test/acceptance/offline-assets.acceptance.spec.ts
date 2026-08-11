@@ -27,6 +27,11 @@ const ALLOWED_HOSTS = new Set([
   'www.w3.org', // SVG/XML/XHTML/XLink/MathML namespace identifiers (not fetched)
   'reactjs.org', // React dev error-decoder doc link (not fetched in production)
   'bit.ly', // Workbox precache/cacheable-response doc links (warning text only)
+  // `date-fns` (transitive dep of react-day-picker, admin-service DateField):
+  // `_lib/protectedTokens` embeds a docs link in the text of the RangeError it
+  // throws for a misused format token (`YYYY` instead of `yyyy`). It is a thrown
+  // error message, never fetched — same class as the reactjs.org error-decoder URL.
+  'github.com',
   // SheetJS (`xlsx`) embedded identifiers — written into the generated .xlsx XML
   // as OOXML/ODF namespace URIs and metadata, never fetched at runtime (the
   // export is a pure client-side Blob build, NFR-REL-01). Same class as w3.org.

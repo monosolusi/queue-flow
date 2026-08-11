@@ -22,6 +22,8 @@ import { validateCustomCategories, validateResetTo } from '../lib/categories';
 import { validateStoreName } from '../lib/store-name';
 import { CounterRoutingEditor } from '../components/CounterRoutingEditor';
 import { StateMachineEditor } from '../components/StateMachineEditor';
+import { TimeField } from '../components/TimeField';
+import { useToast } from '../toast/useToast';
 import {
   type StateMachineForm,
   isDefaultGraph,
@@ -143,6 +145,7 @@ function describedBy(
  * a separate refactor — out of scope for this fix.)
  */
 export function AdminPanel({ api }: { api: IAdminApi }) {
+  const toast = useToast();
   const [state, setState] = useState<PanelState>({ status: 'loading' });
   // Bumped by the error state's "Coba Lagi" to re-run the load effect. Driving
   // the retry through the effect's own dependency (rather than calling a shared
@@ -151,8 +154,6 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
   // genuinely cancellable on unmount.
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [submitting, setSubmitting] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [savedAt, setSavedAt] = useState<number | null>(null);
   // Synchronous in-flight guard so two clicks in the same tick produce exactly
   // one save (mirrors the kiosk double-tap guard; `disabled` alone lags a
   // re-render).
@@ -161,8 +162,6 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
   // --- Manual override operations (FR-ADM-02 / QUE-25) ---
   // Manual daily-reset state + the synchronous in-flight guard (double-tap).
   const [resetting, setResetting] = useState(false);
-  const [resetResult, setResetResult] = useState<string | null>(null);
-  const [resetError, setResetError] = useState<string | null>(null);
   const resetInFlight = useRef(false);
   // Transaction-log cleanup state + its own in-flight guard. retentionDays
   // defaults to 90 (the UI default); the backend-enforced 7-day floor is
@@ -170,8 +169,6 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
   // on an invalid value.
   const [retentionDays, setRetentionDays] = useState(90);
   const [cleaning, setCleaning] = useState(false);
-  const [cleanupResult, setCleanupResult] = useState<string | null>(null);
-  const [cleanupError, setCleanupError] = useState<string | null>(null);
   const cleanupInFlight = useRef(false);
   const retentionError = validateRetentionDays(retentionDays);
   // The app-wide configuration. The panel keeps its own load (below) because it
@@ -278,63 +275,92 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
   const smErrors = form.stateMachine.mode === 'custom' ? validateCustomStateMachine(form.stateMachine) : [];
   const stateMachineValid = smErrors.length === 0;
 
+  /**
+   * PUTs the whole configuration, then re-reads it so server-minted category
+   * ids land back in the editable draft.
+   *
+   * **The write and the follow-up re-read have separate `catch`es**, because
+   * they fail for different reasons and the manager must be told which one
+   * happened. Sharing one `catch` would report a failed *re-read* as
+   * `Gagal menyimpan: …` ("failed to save") right next to the success toast —
+   * telling the manager their change was both saved and not saved. The re-read
+   * only re-seeds the local draft and app chrome; the write has already
+   * committed, so its message says so explicitly.
+   */
   async function save() {
     if (submittingRef.current) return;
     submittingRef.current = true;
     setSubmitting(true);
-    setSaveError(null);
+    // The outer try owns the in-flight guard, so the button stays disabled for
+    // the WHOLE sequence (write + re-read) exactly as it did before the split.
     try {
-      await api.saveSystemConfig({
-        storeName: form.storeName,
-        // Strip the client-only `mode` preset — never on the wire — via the same
-        // shared mapper the wizard's finalize uses. It ALSO force-resets to the
-        // PRD §7 graph in default mode: relying on the editor's default-radio
-        // having already replaced the graph would make this surface silently PUT
-        // a half-edited custom graph as "the default" the day that radio changes.
-        stateMachine: toStateMachineDto(form.stateMachine),
-        brandColor: form.brandColor,
-        serviceThemes: form.serviceThemes,
-        dailyReset: {
-          mode: form.dailyReset.mode,
-          cronExpression:
-            form.dailyReset.mode === 'AUTOMATIC_CRON' ? form.dailyReset.cronExpression : null,
-          resetTicketNumberTo: form.dailyReset.resetTicketNumberTo,
-          archivePreviousDayData: form.dailyReset.archivePreviousDayData,
-          timezone: form.dailyReset.timezone,
-        },
-        // Preserve `id` on existing categories; omit it for rows added this
-        // session so the backend mints fresh ids.
-        categories: form.categories.map((c) =>
-          c.id ? { id: c.id, code: c.code, name: c.name } : { code: c.code, name: c.name },
-        ),
-        // Strip the client-only `rowKey` (a React key) at the boundary so it
-        // never travels on the wire — `WizardRoutingRuleDto` carries no
-        // `rowKey`, and the PUT payload type is `readonly WizardRoutingRuleDto[]`.
-        routingRules: form.routingRules.map(({ rowKey, ...rest }) => rest),
-      });
-      setSavedAt(Date.now());
-      // Reload so newly added categories get their server-minted ids into the
-      // form (keeps a subsequent edit id-stable) and the UI reflects saved state.
-      // This read is the panel's own: it re-seeds the editable draft, which the
-      // shared snapshot must not do (a later `refresh()` would clobber an
-      // in-progress edit).
-      const config = await api.getSystemConfig();
-      // Re-apply the runtime `--accent` so a manager who changed the brand color
-      // sees it take effect immediately, without a full page reload (QUE-35).
-      applyBrandColor(config.brandColor);
-      // Re-apply this panel's own theme so the admin UI reflects an admin-theme
-      // change immediately (QUE-47 — mirrors the brandColor re-apply). Both
-      // re-applies are idempotent with the App-level effect that runs off the
-      // shared refresh below; they are kept so the panel still re-themes when
-      // rendered standalone (its own spec does exactly that).
-      applyThemeMode(config.serviceThemes.admin);
-      setState({ status: 'ready', form: toForm(config) });
-      // Re-read the shared snapshot so app-wide chrome fed by it updates now —
-      // above all the shell's sidebar brand, which would otherwise keep showing
-      // the OLD store name until a full page reload.
-      await refreshSharedConfig();
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : String(err));
+      try {
+        await api.saveSystemConfig({
+          storeName: form.storeName,
+          // Strip the client-only `mode` preset — never on the wire — via the same
+          // shared mapper the wizard's finalize uses. It ALSO force-resets to the
+          // PRD §7 graph in default mode: relying on the editor's default-radio
+          // having already replaced the graph would make this surface silently PUT
+          // a half-edited custom graph as "the default" the day that radio changes.
+          stateMachine: toStateMachineDto(form.stateMachine),
+          brandColor: form.brandColor,
+          serviceThemes: form.serviceThemes,
+          dailyReset: {
+            mode: form.dailyReset.mode,
+            cronExpression:
+              form.dailyReset.mode === 'AUTOMATIC_CRON' ? form.dailyReset.cronExpression : null,
+            resetTicketNumberTo: form.dailyReset.resetTicketNumberTo,
+            archivePreviousDayData: form.dailyReset.archivePreviousDayData,
+            timezone: form.dailyReset.timezone,
+          },
+          // Preserve `id` on existing categories; omit it for rows added this
+          // session so the backend mints fresh ids.
+          categories: form.categories.map((c) =>
+            c.id ? { id: c.id, code: c.code, name: c.name } : { code: c.code, name: c.name },
+          ),
+          // Strip the client-only `rowKey` (a React key) at the boundary so it
+          // never travels on the wire — `WizardRoutingRuleDto` carries no
+          // `rowKey`, and the PUT payload type is `readonly WizardRoutingRuleDto[]`.
+          routingRules: form.routingRules.map(({ rowKey, ...rest }) => rest),
+        });
+      } catch (err) {
+        // The `Gagal menyimpan: ` prefix is load-bearing — existing assertions
+        // match a backend validation message inside it.
+        toast.error(`Gagal menyimpan: ${err instanceof Error ? err.message : String(err)}`);
+        return;
+      }
+      toast.success('Konfigurasi tersimpan.');
+
+      try {
+        // Reload so newly added categories get their server-minted ids into the
+        // form (keeps a subsequent edit id-stable) and the UI reflects saved state.
+        // This read is the panel's own: it re-seeds the editable draft, which the
+        // shared snapshot must not do (a later `refresh()` would clobber an
+        // in-progress edit).
+        const config = await api.getSystemConfig();
+        // Re-apply the runtime `--accent` so a manager who changed the brand color
+        // sees it take effect immediately, without a full page reload (QUE-35).
+        applyBrandColor(config.brandColor);
+        // Re-apply this panel's own theme so the admin UI reflects an admin-theme
+        // change immediately (QUE-47 — mirrors the brandColor re-apply). Both
+        // re-applies are idempotent with the App-level effect that runs off the
+        // shared refresh below; they are kept so the panel still re-themes when
+        // rendered standalone (its own spec does exactly that).
+        applyThemeMode(config.serviceThemes.admin);
+        setState({ status: 'ready', form: toForm(config) });
+        // Re-read the shared snapshot so app-wide chrome fed by it updates now —
+        // above all the shell's sidebar brand, which would otherwise keep showing
+        // the OLD store name until a full page reload.
+        await refreshSharedConfig();
+      } catch (err) {
+        // The write already committed — say so, so the manager does not re-submit
+        // a change that is already persisted. Only the local view is stale.
+        toast.error(
+          `Gagal memuat ulang konfigurasi (perubahan sudah tersimpan): ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
@@ -350,17 +376,15 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
     if (!window.confirm('Reset antrian harian sekarang? Nomor antrian akan dikembalikan ke awal.')) return;
     resetInFlight.current = true;
     setResetting(true);
-    setResetError(null);
-    setResetResult(null);
     try {
       const result = await api.triggerManualReset();
-      setResetResult(
+      toast.success(
         `Reset berhasil — nomor kembali ke ${result.resetTo} (${result.date})${
           result.archivedCount !== undefined ? `, ${result.archivedCount} tiket diarsipkan` : ''
         }.`,
       );
     } catch (err) {
-      setResetError(err instanceof Error ? err.message : String(err));
+      toast.error(`Gagal reset: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       resetInFlight.current = false;
       setResetting(false);
@@ -382,13 +406,13 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
       return;
     cleanupInFlight.current = true;
     setCleaning(true);
-    setCleanupError(null);
-    setCleanupResult(null);
     try {
       const result = await api.cleanupTransactionLogs(retentionDays);
-      setCleanupResult(`${result.deletedCount} transaksi arsip dihapus (retensi ${result.retentionDays} hari).`);
+      toast.success(
+        `${result.deletedCount} transaksi arsip dihapus (retensi ${result.retentionDays} hari).`,
+      );
     } catch (err) {
-      setCleanupError(err instanceof Error ? err.message : String(err));
+      toast.error(`Gagal membersihkan log: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       cleanupInFlight.current = false;
       setCleaning(false);
@@ -404,12 +428,11 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
         </div>
       </header>
 
-      {savedAt && !saveError && (
-        <p className="admin-panel__success" role="status">
-          Konfigurasi tersimpan.
-        </p>
-      )}
-      {saveError && <p className="admin-panel__error">Gagal menyimpan: {saveError}</p>}
+      {/* Save / reset / cleanup outcomes are announced by the app-wide toast
+          stack (auto-dismissing for successes, sticky for errors). The inline
+          paragraphs that used to sit here were set and never cleared. Inline
+          messaging is reserved for page content: the config-load failure above
+          and every `*-errors` validation list below. */}
 
       {/* Store profile — store name (migrated from the wizard; the wizard is
           first-run only now). */}
@@ -613,27 +636,23 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
         </label>
         {form.dailyReset.mode === 'AUTOMATIC_CRON' && (
           <>
-            <label className="field">
-              <span className="field__label">
-                Waktu reset harian<span aria-hidden="true"> *</span>
-              </span>
-              <input
-                className="field__input"
-                type="time"
-                value={cronToTime(form.dailyReset.cronExpression) ?? '00:00'}
-                onChange={(e) =>
-                  setState({ status: 'ready', form: { ...form, dailyReset: { ...form.dailyReset, cronExpression: timeToCron(e.target.value) } } })
-                }
-                aria-label="Waktu reset harian"
-                required
-                {...describedBy('cron-error', Boolean(cronError))}
-              />
+            <TimeField
+              label="Waktu reset harian"
+              value={cronToTime(form.dailyReset.cronExpression) ?? '00:00'}
+              onChange={(hhmm) =>
+                setState({ status: 'ready', form: { ...form, dailyReset: { ...form.dailyReset, cronExpression: timeToCron(hhmm) } } })
+              }
+              ariaLabel="Waktu reset harian"
+              required
+              invalid={Boolean(cronError)}
+              describedById={cronError ? 'cron-error' : undefined}
+            >
               {cronError && (
                 <span className="field__error" id="cron-error" data-testid="cron-error">
                   {cronError}
                 </span>
               )}
-            </label>
+            </TimeField>
             <label className="field">
               <span className="field__label">Zona waktu</span>
               <select
@@ -754,16 +773,6 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
             {resetting ? 'Meriset…' : 'Reset Harian Sekarang'}
           </button>
         </div>
-        {resetResult && (
-          <p className="admin-panel__success" role="status" data-testid="reset-result">
-            {resetResult}
-          </p>
-        )}
-        {resetError && (
-          <p className="admin-panel__error" data-testid="reset-error">
-            Gagal meriset: {resetError}
-          </p>
-        )}
 
         <div className="entry-row entry-row--override">
           <div className="entry-row__label">
@@ -801,16 +810,6 @@ export function AdminPanel({ api }: { api: IAdminApi }) {
         {retentionError && (
           <p className="admin-panel__error" id="retention-error" data-testid="retention-error">
             {retentionError}
-          </p>
-        )}
-        {cleanupResult && (
-          <p className="admin-panel__success" role="status" data-testid="cleanup-result">
-            {cleanupResult}
-          </p>
-        )}
-        {cleanupError && (
-          <p className="admin-panel__error" data-testid="cleanup-error">
-            Gagal membersihkan: {cleanupError}
           </p>
         )}
       </section>

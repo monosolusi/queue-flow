@@ -9,6 +9,7 @@ import { AppShell } from './components/AppShell';
 import { AuthProvider } from './auth/auth-context';
 import { RequireAuth } from './auth/RequireAuth';
 import { SystemConfigProvider, useSystemConfigContext } from './config/system-config-context';
+import { ToastProvider } from './toast/toast-context';
 import { AdminPanel } from './pages/AdminPanel';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { AuditLogPage } from './pages/AuditLogPage';
@@ -68,6 +69,23 @@ import { WizardPage } from './pages/WizardPage';
  * finalize or a store rename calls the provider's `refresh()` and the whole app
  * updates coherently instead of holding four divergent copies until a reload.
  *
+ * **{@link ToastProvider} is composed INNERMOST, and it renders the notification
+ * viewport itself.** Innermost because it depends on neither auth nor config —
+ * wrapping it outside either would put a third provider between them and their
+ * consumers for no reason and risk perturbing their probe-once semantics. Above
+ * `<Routes>` so a toast raised by a write survives the navigation that often
+ * follows it (a logout failure must stay readable after the redirect). The
+ * provider owning the viewport is what makes "is the provider mounted?" the only
+ * thing a page can get wrong — and the context's no-op default covers even that,
+ * so a page rendered in isolation drops its notifications rather than crashing.
+ *
+ * The viewport therefore lands OUTSIDE `<main id="main-content">`: {@link AppShell}
+ * renders a bare `<main>` for `/wizard` and `/login`, so mounting the viewport
+ * inside the shell would either bury a global live region inside the page
+ * landmark or drop it entirely on those two routes. Keeping it a sibling
+ * preserves the single-`<main>` invariant (AC8) and gives wizard/login toasts
+ * for free.
+ *
  * **SetupGuard is composed OUTSIDE RequireAuth on every operational route
  * (`<SetupGuard><RequireAuth>…</RequireAuth></SetupGuard>`): setup first, then
  * auth.** A first-run visitor has no account, so the setup check must precede
@@ -83,7 +101,9 @@ export function App({ api }: { api?: IAdminAppApi } = {}) {
   return (
     <AuthProvider api={adminApi}>
       <SystemConfigProvider api={adminApi}>
-        <AppRoutes api={adminApi} />
+        <ToastProvider>
+          <AppRoutes api={adminApi} />
+        </ToastProvider>
       </SystemConfigProvider>
     </AuthProvider>
   );

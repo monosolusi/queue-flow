@@ -48,6 +48,32 @@ function atRuleBlock(prelude: string): string {
   throw new Error(`unbalanced braces in at-rule: ${prelude}`);
 }
 
+/** Every block sharing a prelude (a breakpoint may be declared more than once,
+ *  each next to the section it adjusts). */
+function atRuleBlocks(prelude: string): string[] {
+  const escaped = prelude.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`${escaped}\\s*\\{`, 'g');
+  const blocks: string[] = [];
+  for (let m = re.exec(css); m !== null; m = re.exec(css)) {
+    let depth = 0;
+    let bodyStart = -1;
+    for (let i = m.index; i < css.length; i++) {
+      if (css[i] === '{') {
+        if (depth === 0) bodyStart = i + 1;
+        depth++;
+      } else if (css[i] === '}') {
+        depth--;
+        if (depth === 0) {
+          blocks.push(css.slice(bodyStart, i));
+          break;
+        }
+      }
+    }
+  }
+  if (blocks.length === 0) throw new Error(`at-rule not found: ${prelude}`);
+  return blocks;
+}
+
 describe('styles.css AC guards', () => {
   it('wizard hint inside .field resets margin-top so it does not overlap the input above', () => {
     expect(rule('.field .wizard__hint')).toContain('margin-top: 0');
@@ -127,6 +153,16 @@ describe('styles.css AC guards', () => {
     expect(rule('.admin-panel__warning')).toContain('var(--warn)');
   });
 
+  it('the warning carries NO border-left accent stripe (the side-tab idiom must not creep back)', () => {
+    // Same uniform-border + color-mix idiom as `.wizard__errors` and `.toast`, so
+    // caution, validation errors and toasts read as one family. The grouped
+    // selector means this covers `.sm-warning` on the shared StateMachineEditor
+    // (which renders under both `.admin-panel` and `.wizard`) too.
+    const warning = rule('.admin-panel__warning');
+    expect(warning).not.toMatch(/border-left|border-inline-start/);
+    expect(warning).toContain('border: 1px solid color-mix(in srgb, var(--warn) 35%,');
+  });
+
   it('the warning bullet list stays inside the tinted box (no default 40px indent)', () => {
     expect(rule('.sm-warning__list')).toContain('padding-left: 1.2rem');
   });
@@ -153,6 +189,151 @@ describe('QUE-47 — per-service theme settings section', () => {
 
   it('the row label uses the muted text token so it flips with the admin theme', () => {
     expect(rule('.service-themes__label')).toContain('color: var(--text-muted)');
+  });
+});
+
+describe('toast notifications', () => {
+  it('stacks above the routing modal overlay but below the skip link', () => {
+    // .modal__overlay is 50 (a toast fired from inside the modal must be
+    // readable); .skip-link is 100 (never coverable).
+    expect(rule('.toast-viewport')).toContain('z-index: 60');
+    expect(rule('.modal__overlay')).toContain('z-index: 50');
+    expect(rule('.skip-link')).toContain('z-index: 100');
+  });
+
+  it('is click-through as a viewport but clickable per toast', () => {
+    expect(rule('.toast-viewport')).toContain('pointer-events: none');
+    expect(rule('.toast')).toContain('pointer-events: auto');
+    expect(rule('.toast-viewport')).toContain('position: fixed');
+  });
+
+  it('gives each live-region wrapper a real box (NOT display: contents)', () => {
+    // `display: contents` removes the element from the a11y tree in several
+    // engines, which would silently destroy the live region.
+    const live = rule('.toast-viewport__live');
+    expect(live).toContain('display: flex');
+    expect(live).not.toContain('display: contents');
+  });
+
+  it('tints each variant with its own semantic token (uniform border + background)', () => {
+    // The `.wizard__errors` idiom: a uniform border in the variant hue plus a
+    // color-mix tint — NOT a side-tab accent stripe.
+    for (const [variant, token] of [
+      ['success', '--success'],
+      ['error', '--danger'],
+      ['info', '--accent'],
+    ] as const) {
+      const decls = rule(`.toast--${variant}`);
+      expect(decls, variant).toContain(`border-color: color-mix(in srgb, var(${token}) 35%,`);
+      expect(decls, variant).toContain(`background: color-mix(in srgb, var(${token}) 10%,`);
+    }
+    expect(rule('.toast--success .toast__icon')).toContain('background: var(--success)');
+    expect(rule('.toast--error .toast__icon')).toContain('background: var(--danger)');
+    expect(rule('.toast--info .toast__icon')).toContain('background: var(--accent)');
+  });
+
+  it('carries NO border-left accent stripe (the side-tab idiom must not creep back)', () => {
+    for (const sel of ['.toast', '.toast--success', '.toast--error', '.toast--info']) {
+      expect(rule(sel), sel).not.toMatch(/border-left|border-inline-start/);
+    }
+    expect(rule('.toast')).toContain('border: 1px solid var(--surface-2)');
+  });
+
+  it('keeps the dismiss button at the ≥44px touch target', () => {
+    const dismiss = rule('.toast__dismiss');
+    expect(dismiss).toContain('min-height: 2.75rem');
+    expect(dismiss).toContain('min-width: 2.75rem');
+  });
+
+  it('animates in, and disables the animation under prefers-reduced-motion', () => {
+    expect(rule('.toast')).toContain('animation: toast-in');
+    // The `@media` parenthetical `)` sits between the keyword and the block
+    // brace, so the matcher must tolerate it (documented gotcha).
+    const reduced = css.match(/prefers-reduced-motion:\s*reduce\)\s*\{[^}]*\.toast\s*\{([^}]*)\}/);
+    expect(reduced).not.toBeNull();
+    expect(reduced![1]).toContain('animation: none');
+  });
+
+  it('spans the width on narrow viewports', () => {
+    const viewport = atRuleBlocks('@media (max-width: 640px)')
+      .map((b) => b.match(/\.toast-viewport\s*\{([^}]*)\}/))
+      .find((m) => m !== null);
+    expect(viewport).toBeDefined();
+    expect(viewport![1]).toContain('width: auto');
+    expect(viewport![1]).toContain('left:');
+  });
+
+  it('uses zero hardcoded color literals (so [data-theme="dark"] flips for free)', () => {
+    for (const sel of [
+      '.toast',
+      '.toast--success',
+      '.toast--error',
+      '.toast--info',
+      '.toast__icon',
+      '.toast__dismiss',
+    ]) {
+      expect(rule(sel), sel).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    }
+  });
+});
+
+describe('date & time fields', () => {
+  it('keeps every new control at the ≥44px touch target', () => {
+    for (const sel of [
+      '.datefield__toggle',
+      '.datefield__clear',
+      '.timefield__toggle',
+      '.timefield__option',
+    ]) {
+      expect(rule(sel), sel).toContain('min-height: 2.75rem');
+      expect(rule(sel), sel).toContain('min-width: 2.75rem');
+    }
+  });
+
+  it('positions the popover against the control', () => {
+    expect(rule('.datefield__control, .timefield__control')).toContain('position: relative');
+    expect(rule('.datefield__popover, .timefield__popover')).toContain('position: absolute');
+  });
+
+  it('drives the calendar from our design tokens (the library blue is overridden)', () => {
+    const rdp = rule('.datefield__popover .rdp-root');
+    expect(rdp).toContain('--rdp-accent-color: var(--accent)');
+    expect(rdp).toContain('--rdp-day-height: 2.75rem');
+    expect(rdp).toContain('--rdp-day-width: 2.75rem');
+    expect(rdp).toContain('color: var(--text)');
+  });
+
+  it('scopes the calendar override one class deeper than the library rule', () => {
+    // .datefield__popover .rdp-root is 0-2-0 vs the library's 0-1-0, so the
+    // override wins regardless of stylesheet import order.
+    expect(css).toContain('.datefield__popover .rdp-root {');
+  });
+
+  it('declares the day hover BEFORE the selected fill (equal specificity, order decides)', () => {
+    const hover = css.indexOf('.datefield__popover .rdp-day_button:hover');
+    const selected = css.indexOf('.datefield__popover .rdp-selected .rdp-day_button');
+    expect(hover).toBeGreaterThan(-1);
+    expect(selected).toBeGreaterThan(hover);
+  });
+
+  it('selects a time cell off the ARIA state itself (no --selected modifier to drift)', () => {
+    expect(css).toContain(".timefield__option[aria-pressed='true'] {");
+    expect(css).not.toContain('.timefield__option--selected');
+  });
+
+  it('uses zero hardcoded color literals', () => {
+    for (const sel of [
+      '.datefield__toggle',
+      '.datefield__clear',
+      '.timefield__toggle',
+      '.timefield__option',
+      '.timefield__column-label',
+      '.datefield__popover, .timefield__popover',
+      '.datefield__popover .rdp-root',
+      '.datefield__popover .rdp-selected .rdp-day_button',
+    ]) {
+      expect(rule(sel), sel).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    }
   });
 });
 

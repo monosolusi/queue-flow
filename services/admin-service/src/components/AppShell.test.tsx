@@ -1,8 +1,47 @@
-import { describe, expect, it } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AppShell } from './AppShell';
+import { ToastProvider } from '../toast/toast-context';
+import type { AuthState } from '../auth/useAuth';
 
+/**
+ * `useAuthContext` is stubbed so the logout tests can drive the ONE seam that
+ * matters here: the `AuthState.logout` promise. The shipped `useAuth.logout`
+ * deliberately swallows a failing `POST /api/auth/logout` ("best-effort — local
+ * logout proceeds regardless"), so a rejecting `IAuthApi` would never reach the
+ * shell; injecting a rejecting `AuthState` tests the shell's own contract with
+ * the port (the abstraction) rather than the provider's internals.
+ *
+ * {@link DEFAULT_AUTH} is byte-identical to the real `AuthContext` default (null
+ * user, no-op handlers), so every test that does not opt in behaves exactly as
+ * it did when this file rendered the shell with no provider at all.
+ *
+ * The holder is a single module-level closure shared by every test in the file,
+ * so a describe that mutates it MUST NOT leak into the next one (the CLAUDE.md
+ * `vi.hoisted` accumulation trap). The file-scope `afterEach` below restores
+ * the default unconditionally, so a describe appended later starts clean
+ * whether or not it remembers to set up its own state.
+ */
+const authState = vi.hoisted(() => {
+  const value: { current: AuthState } = {
+    current: { user: null, loading: false, refresh: async () => {}, logout: async () => {} },
+  };
+  return value;
+});
+
+const DEFAULT_AUTH: AuthState = authState.current;
+
+vi.mock('../auth/auth-context', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../auth/auth-context')>()),
+  useAuthContext: () => authState.current,
+}));
+
+afterEach(() => {
+  authState.current = DEFAULT_AUTH;
+});
+
+/** The shell with the default (unauthenticated, no-op) auth state. */
 function renderShell(path: string, storeName?: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
@@ -214,5 +253,79 @@ describe('AppShell', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  });
+});
+
+describe('AppShell — logout outcome handling', () => {
+  // Derived from DEFAULT_AUTH so the two cannot drift; the file-scope afterEach
+  // restores the default, so this never leaks into a later describe.
+  beforeEach(() => {
+    authState.current = {
+      ...DEFAULT_AUTH,
+      user: { id: 'u-1', username: 'manajer', role: 'admin' },
+    };
+  });
+
+  /** The shell with a real ToastProvider so the two live regions exist. */
+  function renderAuthedShell() {
+    return render(
+      <MemoryRouter initialEntries={['/']}>
+        <ToastProvider>
+          <AppShell storeName="Apotek Sehat">
+            <div data-testid="child">child content</div>
+          </AppShell>
+        </ToastProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  function openLogout() {
+    fireEvent.click(screen.getByRole('button', { name: /manajer/i }));
+    return screen.getByTestId('profile-logout');
+  }
+
+  it('a rejecting logout raises an error toast and releases the "Keluar…" button', async () => {
+    // There was no `.catch()` at all before: a rejection left the item stuck on
+    // "Keluar…" with aria-busy="true" AND surfaced as an unhandled rejection.
+    authState.current = {
+      ...authState.current,
+      logout: vi.fn(() => Promise.reject(new Error('jaringan terputus'))),
+    };
+    renderAuthedShell();
+
+    fireEvent.click(openLogout());
+
+    expect(
+      await within(screen.getByRole('alert')).findByText(/jaringan terputus/),
+    ).toBeInTheDocument();
+    const logoutItem = screen.getByTestId('profile-logout');
+    await waitFor(() => expect(logoutItem).toHaveAttribute('aria-busy', 'false'));
+    expect(logoutItem).toHaveTextContent('Keluar');
+    expect(logoutItem).not.toHaveTextContent('Keluar…');
+    expect(logoutItem).not.toBeDisabled();
+  });
+
+  it('a successful logout raises NO toast (landing on /login is the confirmation)', async () => {
+    const logout = vi.fn(() => Promise.resolve());
+    authState.current = { ...authState.current, logout };
+    renderAuthedShell();
+
+    fireEvent.click(openLogout());
+
+    await waitFor(() => expect(logout).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('status')).toBeEmptyDOMElement();
+    expect(screen.getByRole('alert')).toBeEmptyDOMElement();
+  });
+
+  it('two same-tick logout clicks call logout exactly once (synchronous ref guard)', async () => {
+    const logout = vi.fn(() => Promise.resolve());
+    authState.current = { ...authState.current, logout };
+    renderAuthedShell();
+
+    const logoutItem = openLogout();
+    fireEvent.click(logoutItem);
+    fireEvent.click(logoutItem);
+
+    await waitFor(() => expect(logout).toHaveBeenCalledTimes(1));
   });
 });

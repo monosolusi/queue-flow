@@ -117,9 +117,10 @@ fieldset {
 .admin-panel__error {
   color: var(--danger-on-surface);
 }
-.admin-panel__success {
-  color: var(--success);
-}
+/* `.admin-panel__success` was removed with the inline save/reset/cleanup
+   confirmations it styled — those outcomes are toasts now (`.toast--success`),
+   which auto-dismiss. Re-adding an inline success paragraph would reintroduce
+   the "message never clears" bug; AdminPanel.test.tsx guards against it. */
 .admin-panel__hint {
   margin: 0.5rem 0 0;
   color: var(--text-muted);
@@ -134,13 +135,17 @@ fieldset {
    dropped-standard-status caution. It carries a block-neutral name because that
    editor renders under BOTH `.admin-panel` and `.wizard`, so an `admin-panel__`
    class there would be a cross-block leak. The two share one declaration block
-   so the caution never drifts between the two surfaces. */
+   so the caution never drifts between the two surfaces.
+
+   The hue rides a uniform 1px border + a `color-mix` tint — the same idiom as
+   `.wizard__errors` and `.toast`, so caution, validation errors and toasts read
+   as one family. Deliberately NOT a `border-left` accent stripe. */
 .sm-warning,
 .admin-panel__warning {
   margin: 0.75rem 0 0;
   padding: 0.6rem 0.8rem;
   border-radius: var(--radius);
-  border-left: 3px solid var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
   background: color-mix(in srgb, var(--warn) 12%, transparent);
   color: var(--text);
   font-size: 0.9rem;
@@ -150,7 +155,7 @@ fieldset {
   margin: 0;
 }
 /* Keep the bullets inside the tinted box rather than at the browser's default
-   ~40px indent, which would push them past the border-left rule. */
+   ~40px indent, which would push the markers out past the box's padding. */
 .sm-warning__list {
   margin: 0.4rem 0;
   padding-left: 1.2rem;
@@ -855,6 +860,321 @@ fieldset {
   justify-content: flex-end;
   gap: 0.5rem;
   margin-top: 0.5rem;
+}
+
+/* Toast notifications ------------------------------------------------------
+   The single success/error channel for every admin write. Stacked bottom-right
+   above the routing modal (z-index 60 > .modal__overlay's 50, so a toast fired
+   from inside the modal is still readable) but below the skip link (100), which
+   must never be covered.
+
+   The viewport itself is click-through (`pointer-events: none`) so the fixed
+   corner does not swallow clicks on the page beneath it; each `.toast` opts back
+   in so its ✕ stays clickable.
+
+   The variant treatment reuses the `.wizard__errors` idiom — a UNIFORM border in
+   the variant hue plus a `color-mix` tint — so validation errors and toasts read
+   as one family; this is also the success-tinted box the panel previously had no
+   vocabulary for. Deliberately NOT a `border-left` accent stripe: the variant
+   semantics ride the tint, the border hue, and the filled `.toast__icon` badge,
+   which is enough without a side tab. */
+.toast-viewport {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: min(26rem, calc(100vw - 2rem));
+  pointer-events: none;
+}
+/* A real flex container, NOT `display: contents`: that value removes the box
+   from the accessibility tree in several engines, which would silently destroy
+   the live region these wrappers exist to provide. */
+.toast-viewport__live {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--surface-2);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.92rem;
+  box-shadow: 0 10px 30px color-mix(in srgb, var(--text) 18%, transparent);
+  animation: toast-in 160ms ease-out;
+}
+.toast--success {
+  border-color: color-mix(in srgb, var(--success) 35%, transparent);
+  background: color-mix(in srgb, var(--success) 10%, var(--surface));
+}
+.toast--error {
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+}
+.toast--info {
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+/* Decorative variant glyph (aria-hidden) — a filled badge, so the hue is a
+   fill, not text on the surface (hence `--success`/`--danger`/`--accent` rather
+   than their `-on-surface` variants).
+
+   The glyph sits at ~3.3:1 against `--success`, below the 4.5:1 text threshold.
+   That is acceptable here and only here: the span is `aria-hidden` decoration
+   carrying no information the manager needs — the variant is already conveyed by
+   the tint, the border hue and the message text itself, all of which meet
+   contrast. Do not reuse this pairing for anything readable.
+
+   There is no `background` fallback: `ToastVariant` is an exhaustive
+   `'success' | 'error' | 'info'` union and each arm sets one below, so a
+   default would be unreachable code. */
+.toast__icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 100%;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--accent-contrast);
+}
+.toast--success .toast__icon {
+  background: var(--success);
+}
+.toast--error .toast__icon {
+  background: var(--danger);
+}
+.toast--info .toast__icon {
+  background: var(--accent);
+}
+.toast__message {
+  flex: 1;
+  min-width: 0;
+  align-self: center;
+  overflow-wrap: anywhere;
+}
+.toast__dismiss {
+  flex: none;
+  min-height: 2.75rem;
+  min-width: 2.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 1.2rem;
+  line-height: 1;
+}
+.toast__dismiss:hover {
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+  color: var(--text);
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+}
+/* Narrow viewports: span the width so a long message is not squeezed into a
+   corner column. */
+@media (max-width: 640px) {
+  .toast-viewport {
+    left: 0.75rem;
+    right: 0.75rem;
+    width: auto;
+  }
+}
+
+/* Date & time fields -------------------------------------------------------
+   `DateField` (react-day-picker calendar) and `TimeField` (hand-rolled Jam /
+   Menit columns) replace the native `<input type="date">` / `<input type="time">`,
+   whose picker chrome was browser-supplied and therefore ignored both the store
+   brand color and the admin light/dark setting.
+
+   Every control here is ≥2.75rem (44px) in both axes — the same touch-target
+   rule the nav links and ghost buttons follow. */
+.datefield__control,
+.timefield__control {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.datefield__input,
+.timefield__input {
+  flex: 1;
+  min-width: 0;
+}
+.datefield__toggle {
+  flex: none;
+  min-height: 2.75rem;
+  min-width: 2.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--surface-2);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-muted);
+}
+.datefield__toggle:hover {
+  color: var(--accent-on-surface);
+  border-color: var(--accent);
+}
+.datefield__clear {
+  flex: none;
+  min-height: 2.75rem;
+  min-width: 2.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 1.2rem;
+  line-height: 1;
+}
+.datefield__clear:hover {
+  color: var(--danger-on-surface);
+  border-color: var(--surface-2);
+}
+.timefield__toggle {
+  flex: none;
+  min-height: 2.75rem;
+  min-width: 2.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--surface-2);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-muted);
+}
+.timefield__toggle:hover {
+  color: var(--accent-on-surface);
+  border-color: var(--accent);
+}
+.datefield__toggle svg,
+.timefield__toggle svg {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+.datefield__popover,
+.timefield__popover {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  z-index: 20;
+  padding: 0.5rem;
+  border: 1px solid var(--surface-2);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 10px 30px color-mix(in srgb, var(--text) 18%, transparent);
+}
+.timefield__popover {
+  display: flex;
+  gap: 0.75rem;
+}
+.timefield__column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+/* Non-heading visible label — a real heading inside a popover would invert the
+   page outline, so the grouping semantic lives on `.timefield__options`
+   (role="group" + aria-label) instead. */
+.timefield__column-label {
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.timefield__options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  max-height: 13.75rem;
+  overflow-y: auto;
+  padding-right: 0.2rem;
+}
+.timefield__option {
+  min-height: 2.75rem;
+  min-width: 2.75rem;
+  padding: 0 0.6rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+}
+.timefield__option:hover {
+  background: var(--surface-2);
+}
+/* The ARIA state IS the selector — there is no `--selected` modifier class, so
+   the visual and the announced state cannot drift apart. */
+.timefield__option[aria-pressed='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+}
+
+/* react-day-picker theming. The library ships a stylesheet whose rules read
+   exclusively from `--rdp-*` variables (only its own variable block holds
+   literals), so re-pointing those variables at our design tokens re-themes the
+   whole calendar — light/dark and the manager's brand color included — without
+   re-declaring a single element class.
+   Scoped under `.datefield__popover` (specificity 0-2-0 vs the library's 0-1-0)
+   so the override wins regardless of stylesheet import order. */
+.datefield__popover .rdp-root {
+  --rdp-accent-color: var(--accent);
+  --rdp-accent-background-color: color-mix(in srgb, var(--accent) 18%, transparent);
+  --rdp-day-height: 2.75rem;
+  --rdp-day-width: 2.75rem;
+  --rdp-day_button-height: 2.5rem;
+  --rdp-day_button-width: 2.5rem;
+  --rdp-today-color: var(--accent-on-surface);
+  --rdp-nav_button-height: 2.75rem;
+  --rdp-nav_button-width: 2.75rem;
+  color: var(--text);
+  font-size: 0.95rem;
+}
+.datefield__popover .rdp-weekday {
+  color: var(--text-muted);
+}
+.datefield__popover .rdp-chevron {
+  fill: var(--accent);
+}
+/* Declared BEFORE the selected rule: both are specificity 0-3-0, so source
+   order decides, and a hover over the selected day must not repaint it. */
+.datefield__popover .rdp-day_button:hover {
+  background: var(--surface-2);
+}
+.datefield__popover .rdp-selected .rdp-day_button {
+  background: var(--accent);
+  color: var(--accent-contrast);
 }
 
 /* Searchable category select (Step 2 modal). */

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { IUsersApi } from '../api/admin-api';
 import type { UserDto, UserRole } from '../api/types';
 import { useAuthContext } from '../auth/auth-context';
+import { useToast } from '../toast/useToast';
 import { USER_ROLE_DESCRIPTIONS, USER_ROLE_LABELS } from '../lib/labels';
 
 /** Username invariant mirror (QUE-43 — mirrors core-api's `Username` VO). */
@@ -304,9 +305,16 @@ function ConfirmDeleteUserModal({
  */
 export function UsersPage({ api }: { api: IUsersApi }) {
   const { user: me } = useAuthContext();
+  const toast = useToast();
   const [users, setUsers] = useState<readonly UserDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Synchronous double-submit guards for the two mutations. `creating` /
+  // `deleting` only take effect after a re-render, so a state-only check lets
+  // two same-tick clicks through; these flip before the first `await`.
+  const creatingRef = useRef(false);
+  const deletingRef = useRef(false);
 
   // Create modal state. `createTrigger` captures the "Tambah Pengguna" button at
   // click time so the modal can return focus to it on close (a11y WCAG 2.4.3).
@@ -347,7 +355,23 @@ export function UsersPage({ api }: { api: IUsersApi }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api]);
 
+  /**
+   * Creates the account, then announces the outcome.
+   *
+   * The success toast is the reported gap: the modal closes and the row appears,
+   * but a manager who was looking at the button got no confirmation that the
+   * account was actually created. The failure path deliberately stays INLINE in
+   * the modal (`createError`) rather than becoming a toast — the modal stays
+   * open on failure, so the message belongs next to the field the manager has
+   * to correct, not in a corner of the screen.
+   */
   async function onCreate(form: CreateForm) {
+    // Synchronous double-submit guard — `creating` only lands after a
+    // re-render, so two clicks in the same tick would both pass a state-based
+    // check and create two accounts (CLAUDE.md touch-surface rule). The ref
+    // flips before the first `await`; `creating` stays the visible affordance.
+    if (creatingRef.current) return;
+    creatingRef.current = true;
     setCreating(true);
     setCreateError(null);
     try {
@@ -355,14 +379,22 @@ export function UsersPage({ api }: { api: IUsersApi }) {
       setShowCreate(false);
       setCreateError(null);
       await reload();
+      toast.success(`Pengguna "${form.username}" ditambahkan.`);
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : String(err));
     } finally {
+      creatingRef.current = false;
       setCreating(false);
     }
   }
 
+  /** Deletes the account, announcing success; the refusal stays inline (the
+   *  modal stays open so the manager reads why next to the Hapus they pressed). */
   async function onDelete(id: string) {
+    // Same synchronous guard as `onCreate` — a double-tap must delete once.
+    if (deletingRef.current) return;
+    deletingRef.current = true;
+    const username = users.find((u) => u.id === id)?.username ?? '';
     setDeleting(true);
     setDeleteError(null);
     try {
@@ -378,11 +410,13 @@ export function UsersPage({ api }: { api: IUsersApi }) {
       setDeletingUser(null);
       setDeleteError(null);
       await reload();
+      toast.success(`Pengguna "${username}" dihapus.`);
     } catch (err) {
       // The backend guards the last admin with 400; surface the message so the
       // manager sees why the delete was refused. The modal stays open.
       setDeleteError(err instanceof Error ? err.message : String(err));
     } finally {
+      deletingRef.current = false;
       setDeleting(false);
     }
   }

@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { AdminPanel } from './AdminPanel';
 import { SystemConfigProvider, useSystemConfigContext } from '../config/system-config-context';
+import { ToastProvider } from '../toast/toast-context';
 import type { IAdminApi, ISystemConfigApi } from '../api/admin-api';
 import {
   DEFAULT_STATE_MACHINE,
@@ -96,12 +97,39 @@ function makeApi(
   return { api, save, getConfig, triggerManualReset, cleanupTransactionLogs };
 }
 
+/**
+ * The panel is wrapped in a real {@link ToastProvider} because save / reset /
+ * cleanup outcomes are announced through the toast stack now — the provider
+ * also renders the viewport, so the two live regions the assertions scope into
+ * (`role="status"` polite, `role="alert"` assertive) exist here.
+ */
 function renderPanel(api: IAdminApi) {
   return render(
     <MemoryRouter>
-      <AdminPanel api={api} />
+      <ToastProvider>
+        <AdminPanel api={api} />
+      </ToastProvider>
     </MemoryRouter>,
   );
+}
+
+/**
+ * The toast viewport landmark. Scoping through it keeps these helpers
+ * unambiguous even though the page owns its own inline `role="alert"` (the
+ * config-load error, `AdminPanel.tsx:204`) — that node is not rendered in the
+ * states these tests drive, but an unscoped `getByRole('alert')` would start
+ * throwing the day a ready-state alert lands.
+ */
+function toastViewport() {
+  return within(screen.getByRole('region', { name: 'Notifikasi' }));
+}
+/** The polite live region — success/info toasts land here. */
+function politeRegion() {
+  return within(toastViewport().getByRole('status'));
+}
+/** The assertive live region — error toasts land here. */
+function alertRegion() {
+  return within(toastViewport().getByRole('alert'));
 }
 
 /** The `<li>` row that owns the labelled input. */
@@ -129,6 +157,28 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     // shared StateMachineEditor's mode fieldset renders.
     expect(screen.getByText('Alur Status Tiket')).toBeInTheDocument();
     expect(screen.getByTestId('sm-mode')).toBeInTheDocument();
+  });
+
+  it('announces a save through the polite toast region, with no inline success paragraph left behind', async () => {
+    // The ~15 sibling assertions in this file only do `findByText('Konfigurasi
+    // tersimpan.')`, which would pass just as happily against a stray inline
+    // <p class="admin-panel__success"> that never clears — the exact bug this
+    // change removes. This test pins the message to the live region AND asserts
+    // the inline element is gone, so a regression cannot hide behind them. (The
+    // `.admin-panel__success` CSS rule was deleted along with the markup; this
+    // is the DOM-level guard against it being reintroduced.)
+    const { api } = makeApi();
+    const { container } = renderPanel(api);
+    await screen.findByText('Apotek Sehat');
+
+    await userEvent.click(screen.getByTestId('admin-save'));
+
+    expect(await politeRegion().findByText('Konfigurasi tersimpan.')).toBeInTheDocument();
+    expect(container.querySelector('.admin-panel__success')).toBeNull();
+    // Dismissible, and dismissing removes it (the live region itself stays).
+    await userEvent.click(screen.getByRole('button', { name: 'Tutup notifikasi' }));
+    expect(screen.queryByText('Konfigurasi tersimpan.')).not.toBeInTheDocument();
+    expect(screen.getByRole('status')).toBeEmptyDOMElement();
   });
 
   it('preserves existing category ids and omits id for newly added ones on save', async () => {
@@ -417,7 +467,10 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     await screen.findByText('Apotek Sehat');
 
     await userEvent.click(screen.getByTestId('admin-save'));
-    expect(await screen.findByText(/kode kategori tidak valid/i)).toBeInTheDocument();
+    // Sticky error toast in the assertive region; the `Gagal menyimpan: ` prefix
+    // is part of the contract (it wraps the backend's validation message).
+    expect(await alertRegion().findByText(/kode kategori tidak valid/i)).toBeInTheDocument();
+    expect(alertRegion().getByText(/^Gagal menyimpan: /)).toBeInTheDocument();
     expect(save).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('admin-save')).not.toBeDisabled();
   });
@@ -683,8 +736,10 @@ describe('AdminPanel shared-config coherence', () => {
     render(
       <MemoryRouter>
         <SystemConfigProvider api={providerApi}>
-          <SharedStoreName />
-          <AdminPanel api={api} />
+          <ToastProvider>
+            <SharedStoreName />
+            <AdminPanel api={api} />
+          </ToastProvider>
         </SystemConfigProvider>
       </MemoryRouter>,
     );
@@ -727,8 +782,8 @@ describe('AdminPanel manual override operations (QUE-25 / FR-ADM-02)', () => {
     await userEvent.click(screen.getByTestId('manual-reset'));
 
     expect(triggerManualReset).toHaveBeenCalledTimes(1);
-    expect(await screen.findByTestId('reset-result')).toBeInTheDocument();
-    expect(screen.getByTestId('reset-result').textContent).toContain('kembali ke 1');
+    // The outcome is a toast in the polite live region, not an inline paragraph.
+    expect(await politeRegion().findByText(/kembali ke 1/)).toBeInTheDocument();
   });
 
   it('two rapid manual-reset taps produce exactly one call (synchronous double-tap guard)', async () => {
@@ -740,7 +795,7 @@ describe('AdminPanel manual override operations (QUE-25 / FR-ADM-02)', () => {
     fireEvent.click(screen.getByTestId('manual-reset'));
     fireEvent.click(screen.getByTestId('manual-reset'));
 
-    await screen.findByTestId('reset-result');
+    await politeRegion().findByText(/kembali ke 1/);
     expect(triggerManualReset).toHaveBeenCalledTimes(1);
   });
 
@@ -763,8 +818,8 @@ describe('AdminPanel manual override operations (QUE-25 / FR-ADM-02)', () => {
 
     await userEvent.click(screen.getByTestId('manual-reset'));
 
-    expect(await screen.findByTestId('reset-error')).toBeInTheDocument();
-    expect(screen.getByTestId('reset-error').textContent).toContain('core-api down');
+    // Failures are assertive (sticky) toasts, so they land in role="alert".
+    expect(await alertRegion().findByText(/core-api down/)).toBeInTheDocument();
     expect(triggerManualReset).toHaveBeenCalledTimes(1);
   });
 
@@ -775,8 +830,7 @@ describe('AdminPanel manual override operations (QUE-25 / FR-ADM-02)', () => {
     await userEvent.click(screen.getByTestId('cleanup-run'));
 
     expect(cleanupTransactionLogs).toHaveBeenCalledWith(90);
-    expect(await screen.findByTestId('cleanup-result')).toBeInTheDocument();
-    expect(screen.getByTestId('cleanup-result').textContent).toContain('5 transaksi');
+    expect(await politeRegion().findByText(/5 transaksi/)).toBeInTheDocument();
   });
 
   it('cleanup button is disabled and shows an error when retentionDays is below the 7-day floor', async () => {

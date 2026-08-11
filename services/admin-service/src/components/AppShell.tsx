@@ -1,6 +1,7 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthContext } from '../auth/auth-context';
+import { useToast } from '../toast/useToast';
 import { NAV_GROUPS } from './nav-config';
 import { ConfigIcon } from './nav-icons';
 
@@ -50,9 +51,11 @@ function pageTitleFor(pathname: string): string {
  */
 function ProfileMenu() {
   const { user, logout } = useAuthContext();
+  const toast = useToast();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const signingOutRef = useRef(false);
   const menuId = useId();
 
   const displayName = user?.username ?? 'Manajer';
@@ -134,16 +137,33 @@ function ProfileMenu() {
             data-testid="profile-logout"
             onClick={(e) => {
               e.stopPropagation();
-              if (signingOut) return;
+              // The ref flips before the first await; `signingOut` only lands
+              // after a re-render, so a state-only guard would let two same-tick
+              // clicks both fire (CLAUDE.md touch-surface rule).
+              if (signingOutRef.current) return;
+              signingOutRef.current = true;
               setSigningOut(true);
-              void logout().then(() => {
-                setOpen(false);
-                setSigningOut(false);
-                // Dropping the cached user to null lets RequireAuth redirect to
-                // /login; an explicit navigation guarantees the redirect even
-                // on a route not gated by RequireAuth (defensive).
-                navigate('/login', { replace: true });
-              });
+              void logout()
+                .then(() => {
+                  setOpen(false);
+                  // Dropping the cached user to null lets RequireAuth redirect
+                  // to /login; an explicit navigation guarantees the redirect
+                  // even on a route not gated by RequireAuth (defensive). No
+                  // success toast — landing on /login IS the confirmation.
+                  navigate('/login', { replace: true });
+                })
+                .catch((err) => {
+                  // Previously there was no catch at all: a rejected logout left
+                  // the item stuck on "Keluar…" forever AND raised an unhandled
+                  // rejection. The manager stays signed in, so say so.
+                  toast.error(
+                    `Gagal keluar: ${err instanceof Error ? err.message : String(err)}`,
+                  );
+                })
+                .finally(() => {
+                  signingOutRef.current = false;
+                  setSigningOut(false);
+                });
             }}
           >
             <span className="profile__menuicon" aria-hidden="true">

@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { IAdminApi } from '../api/admin-api';
 import type { AuditLogEntryDto } from '../api/types';
+import { isDateKey, localDayKey } from '../lib/date';
 import { labelForAuditAction } from '../lib/labels';
+import { DateField } from '../components/DateField';
 
 /**
  * The dedicated audit-log page (QUE-45). Promotes the audit trail — previously
@@ -21,6 +23,9 @@ import { labelForAuditAction } from '../lib/labels';
  * `AnalyticsPage` / `DashboardPage` (loading / error / ready / empty) so the
  * manager sees a consistent shape across read pages.
  */
+/** Id of the filter-validation message, wired to the field's `aria-describedby`. */
+const FILTER_ERROR_ID = 'audit-filter-error';
+
 type AuditState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
@@ -32,20 +37,19 @@ function formatSnapshot(snap: AuditLogEntryDto['before']): string {
   return snap === null ? '—' : JSON.stringify(snap);
 }
 
-/** Local `YYYY-MM-DD` for an epoch-ms timestamp (single on-premise box, NFR-SEC-01). */
-function localDayKey(ms: number): string {
-  const d = new Date(ms);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
 export function AuditLogPage({ api }: { api: IAdminApi }) {
   const [state, setState] = useState<AuditState>({ status: 'loading' });
   // Client-side date filter — empty means "show all entries". The API returns
   // the whole trail, so filtering is purely on the fetched set.
   const [filterDate, setFilterDate] = useState<string>('');
+  // The filter is a text input now (DateField), so it accepts a partial or
+  // impossible key where `type="date"` coerced to ''. A malformed value is an
+  // INPUT error, not a data statement: filtering on `2026-0` would match nothing
+  // and the empty state would report "Tidak ada entri audit pada 2026-0.", which
+  // reads as a fact about the log. So a malformed value simply does not filter
+  // (the trail stays fully visible) and the field says why — the same
+  // treat-it-as-input-error stance `AnalyticsPage` takes on its range.
+  const filterApplied = isDateKey(filterDate);
 
   useEffect(() => {
     let cancelled = false;
@@ -71,10 +75,8 @@ export function AuditLogPage({ api }: { api: IAdminApi }) {
   const visible = useMemo(() => {
     if (state.status !== 'ready') return [];
     const ordered = [...state.entries].reverse();
-    return filterDate === ''
-      ? ordered
-      : ordered.filter((e) => localDayKey(e.occurredAt) === filterDate);
-  }, [state, filterDate]);
+    return filterApplied ? ordered.filter((e) => localDayKey(e.occurredAt) === filterDate) : ordered;
+  }, [state, filterDate, filterApplied]);
 
   if (state.status === 'loading') {
     return (
@@ -105,7 +107,9 @@ export function AuditLogPage({ api }: { api: IAdminApi }) {
       <div className="analytics">
         <AuditHeader filterDate={filterDate} onFilterDateChange={setFilterDate} />
         <p className="analytics__empty" data-testid="audit-empty">
-          {filterDate !== ''
+          {/* Only claim "nothing on that date" when a real date is filtering;
+              a malformed value is reported by the field, not as a data fact. */}
+          {filterApplied
             ? `Tidak ada entri audit pada ${filterDate}.`
             : 'Belum ada entri audit.'}
         </p>
@@ -147,6 +151,12 @@ export function AuditLogPage({ api }: { api: IAdminApi }) {
   );
 }
 
+/**
+ * The header owns the filter field, so it also owns that field's validation
+ * message — every page branch renders this header, so the message follows the
+ * field everywhere with no duplication. `''` is valid (it means "tampilkan
+ * semua"); only a non-empty non-date is an error.
+ */
 function AuditHeader({
   filterDate,
   onFilterDateChange,
@@ -154,6 +164,7 @@ function AuditHeader({
   filterDate: string;
   onFilterDateChange: (d: string) => void;
 }) {
+  const invalid = filterDate !== '' && !isDateKey(filterDate);
   return (
     <header className="analytics__header">
       <div>
@@ -161,17 +172,29 @@ function AuditHeader({
         <p className="analytics__subtitle">Riwayat tindakan sensitif</p>
       </div>
       <div className="analytics__controls">
-        <label className="field">
-          <span className="field__label">Filter tanggal</span>
-          <input
-            className="field__input"
-            type="date"
-            value={filterDate}
-            onChange={(e) => onFilterDateChange(e.target.value)}
-            aria-label="Filter tanggal audit"
-            data-testid="audit-filter-date"
-          />
-        </label>
+        {/* `clearable` only here: '' is this field's meaningful "tampilkan
+            semua" state, and the native date input used to give Chrome users a
+            clear affordance that a plain text input does not. */}
+        <DateField
+          label="Filter tanggal"
+          value={filterDate}
+          onChange={onFilterDateChange}
+          ariaLabel="Filter tanggal audit"
+          testId="audit-filter-date"
+          clearable
+          invalid={invalid}
+          describedById={invalid ? FILTER_ERROR_ID : undefined}
+        >
+          {invalid && (
+            <span
+              className="field__error"
+              id={FILTER_ERROR_ID}
+              data-testid="audit-filter-invalid"
+            >
+              Isi tanggal dengan format YYYY-MM-DD, atau kosongkan untuk menampilkan semua.
+            </span>
+          )}
+        </DateField>
       </div>
     </header>
   );

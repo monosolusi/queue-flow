@@ -5,17 +5,10 @@ import { AuditLogPage } from './AuditLogPage';
 import type { IAdminApi } from '../api/admin-api';
 import type { AuditLogEntryDto, SystemConfigurationDto } from '../api/types';
 import { DEFAULT_STATE_MACHINE, DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES } from '../api/types';
-
-/** Local `YYYY-MM-DD` for an epoch-ms timestamp — mirrors the page helper so the
- *  date-filter test is TZ-independent (the runner's local TZ determines the civil
- *  date; computing the filter value the same way the page does keeps them aligned). */
-function localDayKey(ms: number): string {
-  const d = new Date(ms);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
+// The same helper the page uses, so the date-filter test is TZ-independent (the
+// runner's local TZ determines the civil date). It used to be a fourth private
+// copy of the `YYYY-MM-DD` logic; `lib/date` is now its single owner.
+import { localDayKey } from '../lib/date';
 
 function configuredStore(): SystemConfigurationDto {
   return {
@@ -151,6 +144,53 @@ describe('AuditLogPage (QUE-45)', () => {
     // A date with no entries → the empty state (not a blank table).
     fireEvent.change(screen.getByTestId('audit-filter-date'), { target: { value: '2020-01-01' } });
     expect(await screen.findByTestId('audit-empty')).toBeInTheDocument();
+  });
+
+  it('treats a MALFORMED filter as an input error, not as a fact about the log', async () => {
+    // The filter is a text input now, so it accepts `2026-0`. Filtering on that
+    // would match nothing and the empty state would read "Tidak ada entri audit
+    // pada 2026-0." — a data statement for what is really a typo.
+    const { api } = makeApi();
+    renderPage(api);
+    await screen.findByText('Reset Antrian Manual');
+
+    fireEvent.change(screen.getByTestId('audit-filter-date'), { target: { value: '2026-0' } });
+
+    // The trail stays fully visible — a half-typed date filters nothing.
+    expect(screen.getByText('Reset Antrian Manual')).toBeInTheDocument();
+    expect(screen.getByText('Ubah Alur Status')).toBeInTheDocument();
+    expect(screen.queryByTestId('audit-empty')).not.toBeInTheDocument();
+
+    // The field says why, and says it through the a11y channel too.
+    const error = screen.getByTestId('audit-filter-invalid');
+    expect(error).toBeInTheDocument();
+    const input = screen.getByTestId('audit-filter-date');
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(input).toHaveAttribute('aria-describedby', error.id);
+  });
+
+  it('rejects an impossible civil date the same way', async () => {
+    const { api } = makeApi();
+    renderPage(api);
+    await screen.findByText('Reset Antrian Manual');
+
+    fireEvent.change(screen.getByTestId('audit-filter-date'), { target: { value: '2026-02-31' } });
+
+    expect(screen.getByTestId('audit-filter-invalid')).toBeInTheDocument();
+    expect(screen.getByText('Reset Antrian Manual')).toBeInTheDocument();
+  });
+
+  it('treats the empty filter as valid ("tampilkan semua"), never as an error', async () => {
+    const { api } = makeApi();
+    renderPage(api);
+    await screen.findByText('Reset Antrian Manual');
+
+    fireEvent.change(screen.getByTestId('audit-filter-date'), { target: { value: '2026-0' } });
+    expect(screen.getByTestId('audit-filter-invalid')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId('audit-filter-date'), { target: { value: '' } });
+    expect(screen.queryByTestId('audit-filter-invalid')).not.toBeInTheDocument();
+    expect(screen.getByTestId('audit-filter-date')).not.toHaveAttribute('aria-invalid');
   });
 
   it('renders the page <h1> on the loading and ready states (page owns the h1)', () => {

@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { AuthProvider } from '../auth/auth-context';
+import { ToastProvider } from '../toast/toast-context';
 import { clearToken, writeToken } from '../auth/token-store';
 import { UsersPage } from './UsersPage';
 import type { IAuthApi, IUsersApi } from '../api/admin-api';
@@ -37,14 +38,27 @@ function makeUsersApi(
   return { api: { listUsers, createUser, deleteUser }, listUsers, createUser, deleteUser };
 }
 
+/** Wrapped in a real ToastProvider — create/delete SUCCESS is announced there
+ *  (failures stay inline in the modal, next to the field to correct). */
 function renderUsers(authApi: IAuthApi, usersApi: IUsersApi) {
   return render(
     <MemoryRouter>
       <AuthProvider api={authApi}>
-        <UsersPage api={usersApi} />
+        <ToastProvider>
+          <UsersPage api={usersApi} />
+        </ToastProvider>
       </AuthProvider>
     </MemoryRouter>,
   );
+}
+
+/**
+ * The polite live region, scoped through the toast viewport's `region`
+ * landmark. The page owns its own inline `role="alert"` nodes, so an unscoped
+ * query would be ambiguous the day one of them renders alongside a toast.
+ */
+function politeRegion() {
+  return within(within(screen.getByRole('region', { name: 'Notifikasi' })).getByRole('status'));
 }
 
 describe('UsersPage (QUE-43)', () => {
@@ -174,5 +188,52 @@ describe('UsersPage (QUE-43)', () => {
     // The modal stays open and surfaces the backend error inside the dialog.
     expect(await screen.findByTestId('users-delete-error')).toHaveTextContent('Tidak dapat menghapus administrator terakhir');
     expect(screen.getByTestId('user-confirm-u-3')).toBeInTheDocument();
+  });
+  it('announces a successful create in the polite live region', async () => {
+    writeToken('t');
+    const { api } = makeUsersApi();
+    renderUsers(makeAuthApi(ADMIN), api);
+    await screen.findByTestId('user-row-u-1');
+
+    await userEvent.click(screen.getByTestId('users-add-btn'));
+    await userEvent.type(screen.getByLabelText('Username'), 'loket2');
+    await userEvent.type(screen.getByLabelText('Kata sandi'), 'rahasia123');
+    await userEvent.click(screen.getByTestId('create-submit'));
+
+    // The reported gap: the modal closing is not itself a confirmation that the
+    // account was created. The toast is.
+    expect(await politeRegion().findByText('Pengguna "loket2" ditambahkan.')).toBeInTheDocument();
+  });
+
+  it('announces a successful delete in the polite live region', async () => {
+    writeToken('t');
+    const { api } = makeUsersApi();
+    renderUsers(makeAuthApi(ADMIN), api);
+    await screen.findByTestId('user-row-u-2');
+
+    await userEvent.click(screen.getByTestId('user-delete-u-2'));
+    await userEvent.click(screen.getByTestId('user-confirm-delete-u-2'));
+
+    expect(await politeRegion().findByText('Pengguna "loket1" dihapus.')).toBeInTheDocument();
+  });
+
+  it('creates exactly once when the submit is double-tapped in the same tick', async () => {
+    writeToken('t');
+    const { api, createUser } = makeUsersApi();
+    renderUsers(makeAuthApi(ADMIN), api);
+    await screen.findByTestId('user-row-u-1');
+
+    await userEvent.click(screen.getByTestId('users-add-btn'));
+    await userEvent.type(screen.getByLabelText('Username'), 'loket2');
+    await userEvent.type(screen.getByLabelText('Kata sandi'), 'rahasia123');
+
+    // `fireEvent` (not userEvent) so both clicks land in ONE tick — `creating`
+    // has not re-rendered yet, so only the synchronous ref guard can stop the
+    // second submit. A state-only guard would create two accounts.
+    const submit = screen.getByTestId('create-submit');
+    fireEvent.click(submit);
+    fireEvent.click(submit);
+
+    await waitFor(() => expect(createUser).toHaveBeenCalledTimes(1));
   });
 });

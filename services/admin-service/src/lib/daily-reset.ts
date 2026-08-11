@@ -1,10 +1,15 @@
 /**
  * Time ↔ cron derivation for the daily-reset "automatic" mode (FR-WZD-05 /
- * QUE-34). The manager picks a reset time of day via `<input type="time">`
- * (`HH:MM`); this helper derives the 5-field cron the backend
- * `DailyResetPolicy` / `validateCronExpression` expect, and parses a daily
- * cron back into `HH:MM` for prefill. This replaces the old raw-cron text
- * input so the manager never types cron jargon (AC3).
+ * QUE-34). The manager picks a reset time of day with the repo's `TimeField`
+ * (a buffered `HH:MM` text input plus a Jam/Menit popover); this helper derives
+ * the 5-field cron the backend `DailyResetPolicy` / `validateCronExpression`
+ * expect, and parses a daily cron back into `HH:MM` for prefill. This replaces
+ * the old raw-cron text input so the manager never types cron jargon (AC3).
+ *
+ * The buffering matters to this file: `timeToCron` falls back to `'0 0 * * *'`
+ * on anything malformed, so `TimeField` withholds `onChange` until the typed
+ * value is complete — otherwise every intermediate keystroke would round-trip
+ * through here and snap the field to midnight.
  *
  * A 5-field cron is `minute hour day-of-month month day-of-week`. "Every day
  * at HH:MM" is therefore `MM HH * * *` — the PRD §7 default `0 0 * * *` is

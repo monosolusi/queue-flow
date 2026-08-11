@@ -10,9 +10,12 @@ import { useAuth, type AuthState } from './useAuth';
  * probed exactly once per page load (a redundant cheap GET on a single-user
  * manager device — the same precedent as the brand-color fetch).
  *
- * The default value lets {@link AppShell} render in isolation (its test renders
- * without a provider) with a null user + no-op handlers, so the presentational
- * fallback ("Manajer") stays assertable without wiring the provider.
+ * The default value lets a consumer render in isolation with a null user + no-op
+ * handlers, so the presentational fallback ("Manajer") stays assertable without
+ * wiring the provider. {@link WizardPage} is the live witness — its spec renders
+ * the page (which calls `useAuthContext`) with no provider. `AppShell.test.tsx`
+ * no longer reaches this default: it module-mocks `useAuthContext` so it can
+ * inject a rejecting `logout` and exercise the shell's failure path.
  */
 const AuthContext = createContext<AuthState>({
   user: null,

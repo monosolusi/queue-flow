@@ -25,6 +25,7 @@ import { validateStoreName } from '../lib/store-name';
 import { RoutingGraph } from '../components/RoutingGraph';
 import { CounterRoutingEditor } from '../components/CounterRoutingEditor';
 import { StateMachineEditor } from '../components/StateMachineEditor';
+import { TimeField } from '../components/TimeField';
 import {
   type StateMachineForm,
   defaultStateMachineForm,
@@ -826,27 +827,23 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
             </label>
             {form.dailyReset.mode === 'AUTOMATIC_CRON' && (
               <>
-                <label className="field">
-                  <span className="field__label">
-                    Waktu reset harian<span aria-hidden="true"> *</span>
-                  </span>
-                  <input
-                    className="field__input"
-                    type="time"
-                    value={cronToTime(form.dailyReset.cronExpression) ?? '00:00'}
-                    onChange={(e) =>
-                      setForm({ ...form, dailyReset: { ...form.dailyReset, cronExpression: timeToCron(e.target.value) } })
-                    }
-                    aria-label="Waktu reset harian"
-                    required
-                    {...describedBy('cron-error', Boolean(cronError))}
-                  />
+                <TimeField
+                  label="Waktu reset harian"
+                  value={cronToTime(form.dailyReset.cronExpression) ?? '00:00'}
+                  onChange={(hhmm) =>
+                    setForm({ ...form, dailyReset: { ...form.dailyReset, cronExpression: timeToCron(hhmm) } })
+                  }
+                  ariaLabel="Waktu reset harian"
+                  required
+                  invalid={Boolean(cronError)}
+                  describedById={cronError ? 'cron-error' : undefined}
+                >
                   {cronError && (
                     <span className="field__error" id="cron-error" data-testid="cron-error">
                       {cronError}
                     </span>
                   )}
-                </label>
+                </TimeField>
                 <label className="field">
                   <span className="field__label">Zona waktu</span>
                   <select
