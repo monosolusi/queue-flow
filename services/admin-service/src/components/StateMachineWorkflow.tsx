@@ -62,6 +62,7 @@ import {
   type FlowNode,
 } from '../lib/state-machine-flow';
 import {
+  StateIcon,
   WorkflowContext,
   edgeTypes,
   nodeTypes,
@@ -103,7 +104,7 @@ export function StateMachineWorkflow({
   const lastEmitted = useRef<string>(signatureOf(value));
   // Monotonic per-instance counter for newly minted edge ids. Edges rebuilt by
   // `formToFlow` (external reset) use index-based ids `${from}->${to}#${i}`;
-  // edges minted here (`onConnect` / "+ Tambah Transisi") use `sm-edge-N` — a
+  // edges minted here (`onConnect` / "Tambah Transisi") use `sm-edge-N` — a
   // distinct prefix so the two id spaces NEVER collide, and ids no longer
   // encode source/target (so a state rename never leaves a stale edge id).
   // Monotonic ⇒ unique across adds even after deletes leave gaps in the
@@ -112,7 +113,7 @@ export function StateMachineWorkflow({
   const edgeIdSeq = useRef(0);
   const mintEdgeId = useCallback(() => `sm-edge-${edgeIdSeq.current++}`, []);
   // Touch-surface double-tap guard (CLAUDE.md: flip the ref before the first
-  // await, reset after the commit flushes). "+ Tambah Status" / "+ Tambah
+  // await, reset after the commit flushes). "Tambah Status" / "Tambah
   // Transisi" are synchronous, but two same-tap clicks land before the parent
   // re-renders; the ref absorbs the second. Reset unconditionally in the
   // value-sync effect (below) which runs after every `onChange` round-trip —
@@ -130,6 +131,21 @@ export function StateMachineWorkflow({
   // node that no longer exists.
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+
+  // Clear the canvas selection — used by the right panel's "Kembali ke pilihan
+  // status" back button so the manager returns from the node/edge editor to the
+  // node-picker (palette) view. Mirrors the single-select semantics of
+  // `onNodeClick`/`onEdgeClick`: clear the `selected` flag on every node AND
+  // edge in local state (so React Flow's `.selected` class drops via the
+  // `StoreUpdater` sync) and clear the tracked ids. The `onSelectionChange`
+  // callback then fires from the store sync and reaffirms `null` here — the
+  // tracked-id setters below are the authoritative clear for the panel switch.
+  const clearSelection = useCallback(() => {
+    setNodes((prev) => prev.map((n) => ({ ...n, selected: false })));
+    setEdges((prev) => prev.map((e) => ({ ...e, selected: false })));
+    setSelectedNodeId(null);
+    setSelectedEdgeId(null);
+  }, []);
 
   // External reset: rebuild nodes/edges from the incoming value, PRESERVING
   // positions for surviving state names (a post-save re-seed keeps the nodes
@@ -431,38 +447,6 @@ export function StateMachineWorkflow({
         aria-label="Editor alur status"
         aria-describedby={editorDescribedBy}
       >
-        {isCustom && (
-          <aside className="sm-palette" data-testid="sm-palette">
-            <p className="sm-palette__hint">Seret kartu ke kanvas untuk menambah status.</p>
-            <div
-              className="sm-palette__item"
-              draggable
-              onDragStart={(e) => {
-                e.dataTransfer.setData('application/reactflow', 'state');
-                e.dataTransfer.effectAllowed = 'move';
-              }}
-            >
-              Status
-            </div>
-            <button
-              type="button"
-              className="btn btn--secondary"
-              data-testid="sm-add-state"
-              onClick={addStateButton}
-            >
-              + Tambah Status
-            </button>
-            <button
-              type="button"
-              className="btn btn--secondary"
-              data-testid="sm-add-transition"
-              onClick={addTransitionButton}
-              disabled={value.states.length === 0}
-            >
-              + Tambah Transisi
-            </button>
-          </aside>
-        )}
         <ReactFlowProvider>
           <FlowCanvas
             nodes={nodes}
@@ -478,7 +462,7 @@ export function StateMachineWorkflow({
             handlers={handlers}
           />
         </ReactFlowProvider>
-        {isCustom && (
+        {isCustom && (selectedNodeId || selectedEdgeId ? (
           <StateMachineWorkflowProperties
             mode={value.mode}
             selectedNodeId={selectedNodeId}
@@ -487,8 +471,44 @@ export function StateMachineWorkflow({
             nodes={nodes}
             edges={edges}
             handlers={handlers}
+            onClearSelection={clearSelection}
           />
-        )}
+        ) : (
+          <aside className="sm-properties" data-testid="sm-palette" aria-label="Pilihan status">
+            <p className="sm-properties__heading">Pilihan status</p>
+            <p className="sm-palette__hint">Seret kartu ke kanvas untuk menambah status.</p>
+            <div
+              className="sm-palette__item"
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData('application/reactflow', 'state');
+                e.dataTransfer.effectAllowed = 'move';
+              }}
+            >
+              <StateIcon size={18} />
+              <span>Status</span>
+            </div>
+            <button
+              type="button"
+              className="btn btn--secondary"
+              data-testid="sm-add-state"
+              onClick={addStateButton}
+            >
+              <StateIcon size={16} />
+              Tambah Status
+            </button>
+            <button
+              type="button"
+              className="btn btn--secondary"
+              data-testid="sm-add-transition"
+              onClick={addTransitionButton}
+              disabled={value.states.length === 0}
+            >
+              <StateIcon size={16} />
+              Tambah Transisi
+            </button>
+          </aside>
+        ))}
       </div>
 
       {isCustom && errors.length > 0 && (

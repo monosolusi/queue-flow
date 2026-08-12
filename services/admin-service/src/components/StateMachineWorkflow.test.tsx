@@ -192,7 +192,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
 
   // --- Regression tests pinning the arch-reviewer's applied fixes ---
 
-  it('absorbs a same-tick double-tap on "+ Tambah Status" (m3: exactly one add)', () => {
+  it('absorbs a same-tick double-tap on "Tambah Status" (m3: exactly one add)', () => {
     // `disabled` only takes effect after a re-render, so two clicks landing in
     // the same tick both pass a state-only guard. The ref guard must flip BEFORE
     // the first commit and stay set until the value-sync effect resets it after
@@ -209,7 +209,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     expect(next.states).toHaveLength(DEFAULT_STATE_MACHINE.states.length + 1);
   });
 
-  it('no-ops "+ Tambah Transisi" when a self-edge on the first state already exists (m1)', () => {
+  it('no-ops "Tambah Transisi" when a self-edge on the first state already exists (m1)', () => {
     // The default graph has no self-edges, so seed one on WAITING (the first
     // state). The button must mirror onConnect's duplicate-edge guard and skip
     // instead of minting a second self-edge (which the M1 length-based id bug
@@ -290,7 +290,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
   });
 
   it('mints opaque `sm-edge-N` ids for newly added edges (M1: disjoint id space)', () => {
-    // Newly minted edges (onConnect / "+ Tambah Transisi") use an opaque
+    // Newly minted edges (onConnect / "Tambah Transisi") use an opaque
     // `sm-edge-N` id from a per-instance monotonic counter — a DISTINCT prefix
     // from `formToFlow`'s index-based `${from}->${to}#${i}` ids — so a delete
     // (which leaves gaps in the index space) can never collide with a re-add.
@@ -311,13 +311,26 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
 
   // --- Panel selection tests (redesign: select on canvas → edit in panel) ---
 
-  it('shows the empty hint in the properties panel when nothing is selected', () => {
+  it('shows the node picker (palette) in the right panel when nothing is selected', () => {
     renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
-    const panel = screen.getByTestId('sm-properties');
-    expect(panel).toHaveTextContent('Pilih status atau transisi untuk mengedit.');
-    // No node/edge editor inputs in the empty-hint state.
+    // Nothing selected → the right panel is the node picker (palette), not the editor.
+    expect(screen.getByTestId('sm-palette')).toBeInTheDocument();
+    expect(screen.queryByTestId('sm-properties')).not.toBeInTheDocument();
+    // No node/edge editor inputs in the palette state.
     expect(screen.queryByTestId('panel-state-name')).not.toBeInTheDocument();
     expect(screen.queryByTestId('panel-action-label')).not.toBeInTheDocument();
+  });
+
+  it('the panel back button clears selection and returns to the node picker', () => {
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
+    // Select a node → the right panel switches to the properties editor.
+    selectStateNode('CALLING');
+    expect(screen.getByTestId('sm-properties')).toBeInTheDocument();
+    expect(screen.queryByTestId('sm-palette')).not.toBeInTheDocument();
+    // The back button returns to the node picker (palette) by clearing selection.
+    fireEvent.click(screen.getByTestId('sm-panel-back'));
+    expect(screen.queryByTestId('sm-properties')).not.toBeInTheDocument();
+    expect(screen.getByTestId('sm-palette')).toBeInTheDocument();
   });
 
   it('selecting a node shows its panel (name input + description + delete button)', () => {
@@ -389,7 +402,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     // The description lives on `data.description` (computed by `formToFlow`/
     // `withDescriptions`), NOT derived from the form prop at render. So a
     // mutation that changes a state's outgoing count (here: adding a self-edge
-    // on the first state via "+ Tambah Transisi") must refresh the node card's
+    // on the first state via "Tambah Transisi") must refresh the node card's
     // description via `commit`'s `withDescriptions` call — even though the
     // vi.fn() parent never feeds the new form back.
     const onChange = vi.fn();
