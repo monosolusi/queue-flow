@@ -412,6 +412,35 @@ describe('TvLayoutPage', () => {
     expect(dialog.getAttribute('aria-modal')).toBe('true');
   });
 
+  it('a11y (WCAG 2.4.3): focus moves into the dialog on open and restores to the Edit trigger on close', async () => {
+    const { api, providerApi } = makeApi();
+    renderPage(api, providerApi);
+    const editBtn = await screen.findByTestId('tv-layout-edit');
+    editBtn.focus();
+    expect(document.activeElement).toBe(editBtn);
+    // Opening the dialog moves focus into the dialog container (tabindex={-1}).
+    fireEvent.click(editBtn);
+    const dialog = await screen.findByRole('dialog', { name: 'Sunting Tampilan TV' });
+    await waitFor(() => expect(document.activeElement).toBe(dialog));
+    // Closing via "Selesai" restores focus to the captured Edit trigger.
+    fireEvent.click(screen.getByTestId('tv-layout-close'));
+    await waitFor(() => expect(document.activeElement).toBe(editBtn));
+  });
+
+  it('a11y: the background preview is aria-hidden while the editor dialog is open', async () => {
+    const { api, providerApi } = makeApi();
+    renderPage(api, providerApi);
+    await enterEditMode();
+    // The page h1 lives in the background wrapper — it is aria-hidden while the
+    // modal is open so AT does not reach background content behind the dialog.
+    expect(screen.queryByRole('heading', { level: 1, name: 'Tampilan TV' })).toBeNull();
+    // Closing the dialog re-exposes the background heading.
+    fireEvent.click(screen.getByTestId('tv-layout-close'));
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { level: 1, name: 'Tampilan TV' })).toBeInTheDocument(),
+    );
+  });
+
   it('Save is disabled when the layout is invalid (defense-in-depth for a corrupt prefill)', async () => {
     // A config with an out-of-range widget width. coerceTvGridLayout rejects the
     // invalid array and falls back to the DEFAULT, so the page is valid — this

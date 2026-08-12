@@ -2128,11 +2128,6 @@ fieldset {
 .tv-layout-page__loading {
   color: var(--text-muted);
 }
-.tv-layout-page__save {
-  margin-top: 1rem;
-  display: flex;
-  justify-content: flex-end;
-}
 .tv-layout-editor {
   margin-top: 1rem;
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { IAdminApi } from '../api/admin-api';
 import { useSystemConfigContext } from '../config/system-config-context';
 import {
@@ -80,6 +80,16 @@ export function TvLayoutPage({ api }: { api: IAdminApi }) {
   // same `layout` state), so a "Selesai" that returns to the preview still
   // shows the in-progress edits — the preview is a live preview of the draft.
   const [mode, setMode] = useState<'preview' | 'edit'>('preview');
+  // A11y (WCAG 2.4.3): capture the "Edit Tampilan" trigger at click time so the
+  // overlay can restore focus to it on close. By mount time `document.activeElement`
+  // has already moved into the dialog, so the trigger must be captured in the
+  // click handler — mirrors the established `UserCreateModal` `returnFocusTo`
+  // pattern (see `UsersPage`).
+  const [editTrigger, setEditTrigger] = useState<HTMLElement | null>(null);
+  // Stable close handler so the overlay's Escape `useEffect` does not re-subscribe
+  // on every parent render (the listener is idempotent, but a fresh inline `onClose`
+  // each render would churn the deps needlessly).
+  const closeEditor = useCallback(() => setMode('preview'), []);
 
   // Initialize the local draft from the resolved config (coerced — a corrupt
   // GET projection never breaks the editor). `config` is `null` until the
@@ -162,26 +172,33 @@ export function TvLayoutPage({ api }: { api: IAdminApi }) {
     );
   }
 
-  // The preview is always mounted (it owns the page `<h1>` region context +
-  // stays as the behind-overlay content); the overlay floats above it when
-  // editing. This keeps a stable document structure across the two modes.
+  // The preview + header stay mounted while editing (the overlay floats above
+  // them as a sibling). They are `aria-hidden` while the modal is open so AT
+  // does not reach the background content behind the dialog — the overlay is
+  // rendered as a sibling OUTSIDE the `aria-hidden` subtree, so the dialog
+  // itself stays in the a11y tree.
   return (
-    <div className="page tv-layout-page">
-      <PageHeader
-        title="Tampilan TV"
-        subtitle="Susun komponen TV Display pada kisi 12 kolom. Perubahan diterapkan saat TV Display dimuat ulang."
-        actions={
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={() => setMode('edit')}
-            data-testid="tv-layout-edit"
-          >
-            Edit Tampilan
-          </button>
-        }
-      />
-      <TvLayoutPreview layout={layout} />
+    <>
+      <div className="page tv-layout-page" aria-hidden={mode === 'edit' ? true : undefined}>
+        <PageHeader
+          title="Tampilan TV"
+          subtitle="Susun komponen TV Display pada kisi 12 kolom. Perubahan diterapkan saat TV Display dimuat ulang."
+          actions={
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={(e) => {
+                setEditTrigger(e.currentTarget as HTMLElement);
+                setMode('edit');
+              }}
+              data-testid="tv-layout-edit"
+            >
+              Edit Tampilan
+            </button>
+          }
+        />
+        <TvLayoutPreview layout={layout} />
+      </div>
       {mode === 'edit' && (
         <TvLayoutEditOverlay
           layout={layout}
@@ -190,10 +207,11 @@ export function TvLayoutPage({ api }: { api: IAdminApi }) {
           valid={valid}
           onSave={save}
           onReset={resetToDefault}
-          onClose={() => setMode('preview')}
+          onClose={closeEditor}
+          returnFocusTo={editTrigger}
         />
       )}
-    </div>
+    </>
   );
 }
 
@@ -318,6 +336,9 @@ interface TvLayoutEditOverlayProps {
   onSave: () => void;
   onReset: () => void;
   onClose: () => void;
+  /** The element to return focus to when the dialog closes (WCAG 2.4.3) —
+   *  captured at trigger-click time by the parent page. */
+  returnFocusTo: HTMLElement | null;
 }
 
 /**
@@ -326,8 +347,14 @@ interface TvLayoutEditOverlayProps {
  * is a modal dialog (`role="dialog" aria-modal="true"`): Escape or "Selesai"
  * returns to the preview. The header carries the save/reset/close actions; the
  * body is the reusable presentational {@link TvLayoutEditor} (palette + large
- * canvas). Presentational (SRP) — fed by `layout` + callbacks; owns no state
- * except the Escape listener.
+ * canvas).
+ *
+ * **Focus management (WCAG 2.4.3)** follows the established `UserCreateModal`
+ * shape: on open, focus moves into the dialog (the container is `tabindex={-1}`
+ * so it can receive focus; Tab then reaches the first control); on close,
+ * focus restores to the "Edit Tampilan" trigger captured by the parent.
+ * Presentational (SRP) — fed by `layout` + callbacks; owns no state except the
+ * focus + Escape listeners.
  */
 function TvLayoutEditOverlay({
   layout,
@@ -337,11 +364,32 @@ function TvLayoutEditOverlay({
   onSave,
   onReset,
   onClose,
+  returnFocusTo,
 }: TvLayoutEditOverlayProps) {
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+
+  // A11y (WCAG 2.4.3): move focus into the dialog on open. The dialog container
+  // is `tabindex={-1}` so it can receive focus; Tab then moves to the first
+  // control (the "Kembalikan ke Default" button). Mirrors `UserCreateModal`'s
+  // `autoFocus` pattern (the editor has no primary input to focus, so the
+  // dialog container itself is the focus target).
+  useEffect(() => {
+    dialogRef.current?.focus();
+  }, []);
+
+  // A11y (WCAG 2.4.3): restore focus to the "Edit Tampilan" trigger when the
+  // dialog unmounts (Selesai / Escape / a successful save). `returnFocusTo` was
+  // captured at click time before focus moved into the dialog.
+  useEffect(() => {
+    return () => {
+      returnFocusTo?.focus?.();
+    };
+  }, [returnFocusTo]);
+
   // Escape closes the dialog (guarded while saving so a mid-save Escape does
   // not yank the manager out before the toast lands). The draft persists in
   // the page's `layout` state, so close is non-destructive — "Selesai" is a
-  // view switch, not a discard.
+  // view switch, not a discard. `onClose` is stable (parent `useCallback`).
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape' && !saving) onClose();
@@ -356,6 +404,8 @@ function TvLayoutEditOverlay({
       role="dialog"
       aria-modal="true"
       aria-label="Sunting Tampilan TV"
+      tabIndex={-1}
+      ref={dialogRef}
       data-testid="tv-layout-editor-overlay"
     >
       <header className="tv-layout-editor-overlay__header">
