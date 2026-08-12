@@ -13,16 +13,22 @@
  * mapper). Positions live only in the component's internal node state — they
  * never reach the wire form.
  */
-import type { StateMachineForm, Transition } from './state-machine';
+import { describeState, type StateMachineForm, type Transition } from './state-machine';
 import { DEFAULT_STATE_MACHINE } from '../api/types';
 
 /** Node payload: the state name (the node id IS the state name — names are
- *  unique per `validateCustomStateMachine`, so they are valid unique node ids).
- *  The index signature makes it assignable to React Flow's
- *  `data: Record<string, unknown>` constraint so `FlowNode` is structurally
- *  compatible with `@xyflow/react`'s `Node` without a cast. */
+ *  unique per `validateCustomStateMachine`, so they are valid unique node ids)
+ *  + a short manager-facing description derived client-side via
+ *  {@link describeState} (canonical copy for the 5 PRD §7 defaults, else a
+ *  summary of the outgoing-transition count). The description is CANVAS-ONLY —
+ *  {@link flowToGraph} reads just `name` (never `description`), so it never
+ *  reaches the wire {@link Transition} / {@link StateMachineDto}. The index
+ *  signature makes it assignable to React Flow's `data: Record<string, unknown>`
+ *  constraint so `FlowNode` is structurally compatible with `@xyflow/react`'s
+ *  `Node` without a cast. */
 export interface FlowNodeData {
   name: string;
+  description: string;
   [key: string]: unknown;
 }
 
@@ -214,7 +220,11 @@ export function autoLayout(
 
 /**
  * Derive React Flow nodes/edges from the form. Node `id` = the state name.
- * Each node: `{ id: name, type: 'state', position, data: { name } }`. Each
+ * Each node: `{ id: name, type: 'state', position, data: { name, description } }`
+ * — the `description` is a client-side derivation via {@link describeState}
+ * (canonical copy for the 5 PRD §7 defaults, else `${n} transisi keluar` or
+ * `Status kustom`), computed here so the node card renders it with no form
+ * dependency (the context stays behavior-only — see `WorkflowHandlers`). Each
  * edge: `{ id: \`${t.from}->${t.to}#${i}\`, source, target, type: 'transition',
  * data: { actionLabel } }`. Positions reuse `positions[name]` when present
  * (surviving state names keep their canvas spot on an external re-seed),
@@ -235,7 +245,7 @@ export function formToFlow(
     id: name,
     type: 'state',
     position: positions[name] ?? auto[name] ?? { x: 0, y: 0 },
-    data: { name },
+    data: { name, description: describeState(value, name) },
   }));
   const edges: FlowEdge[] = value.transitions.map((t, i) => {
     const prev = handleMap?.[`${t.from}->${t.to}`];
@@ -261,6 +271,8 @@ export function formToFlow(
  * The inverse of {@link formToFlow}: graph structure only (no positions).
  * `states` preserves the node array order; `transitions` resolves each edge's
  * `source`/`target` (node ids = state names) back to transition `from`/`to`.
+ * Reads only `data.name` (never `data.description`) — the description is
+ * CANVAS-ONLY and never reaches the wire {@link Transition}.
  */
 export function flowToGraph(
   nodes: readonly FlowNode[],
@@ -275,6 +287,17 @@ export function flowToGraph(
     actionLabel: e.data.actionLabel,
   }));
   return { states, transitions };
+}
+
+/**
+ * Re-stamp each node's `data.description` from the form via {@link describeState}.
+ * Pure helper the parent calls inside `commit` so a mutation that changes a
+ * state's outgoing-transition count (delete state, delete/add transition) also
+ * refreshes the affected node cards' descriptions. The description is
+ * CANVAS-ONLY — this never changes the wire form ({@link flowToGraph} ignores it).
+ */
+export function withDescriptions(nodes: readonly FlowNode[], form: StateMachineForm): FlowNode[] {
+  return nodes.map((n) => ({ ...n, data: { ...n.data, description: describeState(form, n.data.name) } }));
 }
 
 /**

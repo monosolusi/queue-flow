@@ -31,25 +31,21 @@ import {
   type NodeProps,
 } from '@xyflow/react';
 import { DEFAULT_STATE_MACHINE } from '../api/types';
-import { describeState, type StateMachineForm } from '../lib/state-machine';
 import { HANDLE_IDS, type FlowEdgeData, type FlowNodeData } from '../lib/state-machine-flow';
 
 /**
- * Handlers the parent provides via context. The node/edge components are
- * presentational; every mutation lifts through these so the parent owns the
- * `StateMachineForm` (controlled). `mode` toggles read-only vs editable; the
+ * Handlers the parent provides via context. Behavior-only — no `form` data
+ * field (ISP: the {@link StateNode} reads `data.description` computed by
+ * `formToFlow`/`withDescriptions` on the node payload, so the context carries
+ * no data, only mutation callbacks). `mode` toggles read-only vs editable; the
  * edge Hapus button is gated on `transitionsCount` to preserve the ≥1-transition
  * invariant. With the panel redesign these handlers are consumed by the
  * properties panel (not the node/edge), but the context type is kept so the
- * panel can share the same handler surface. `form` is exposed read-only so the
- * {@link StateNode} can derive its description via `describeState` (the
- * description is a client-side derivation — never on the wire — and depends on
- * the graph's outgoing-transition count for custom states).
+ * panel can share the same handler surface.
  */
 export interface WorkflowHandlers {
   mode: 'default' | 'custom';
   transitionsCount: number;
-  form: StateMachineForm;
   onRenameState: (oldName: string, newName: string) => void;
   onDeleteState: (name: string) => void;
   onEditTransitionLabel: (edgeId: string, label: string) => void;
@@ -192,11 +188,10 @@ export function StateNode({ data }: NodeProps): JSX.Element {
   const isCanonical = CANONICAL_STATES.has(name);
   const readOnly = ctx.mode === 'default';
   const connectable = !readOnly;
-  // The description is a CLIENT-SIDE derivation only (never serialized). It
-  // depends on the graph's outgoing-transition count for custom states, so the
-  // form is exposed via context and read here; the panel reads the same helper
-  // so the card and the panel stay in lock-step.
-  const description = describeState(ctx.form, name);
+  // The description is a CLIENT-SIDE derivation (never serialized) computed by
+  // `formToFlow`/`withDescriptions` on the parent — the node reads it from its
+  // payload, with no form dependency (the context stays behavior-only, ISP).
+  const description = nodeData.description;
   return (
     <div
       className={`state-node${isCanonical ? ' state-node--canonical' : ''}`}

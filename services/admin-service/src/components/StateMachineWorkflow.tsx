@@ -38,8 +38,11 @@ import {
   applyNodeChanges,
   useReactFlow,
   type Connection,
+  type Edge,
   type EdgeChange,
+  type Node,
   type NodeChange,
+  type OnSelectionChangeParams,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import {
@@ -52,6 +55,7 @@ import {
   flowToGraph,
   formToFlow,
   nextStateName,
+  withDescriptions,
   DEFAULT_SOURCE_HANDLE,
   DEFAULT_TARGET_HANDLE,
   type FlowEdge,
@@ -176,13 +180,19 @@ export function StateMachineWorkflow({
   }, [value.mode]);
 
   // Lift a node/edge mutation to the parent + stamp the last-emitted signature
-  // so the sync effect above skips the round-trip (positions preserved).
+  // so the sync effect above skips the round-trip (positions preserved). Also
+  // refresh every node's `data.description` from the next form — a mutation
+  // that changes a state's outgoing-transition count (delete state, delete/add
+  // transition) must update the affected node cards' descriptions. The
+  // description is CANVAS-ONLY (`flowToGraph` ignores it), so this never changes
+  // the wire form.
   const commit = useCallback(
     (nextNodes: FlowNode[], nextEdges: FlowEdge[]) => {
-      setNodes(nextNodes);
-      setEdges(nextEdges);
       const { states, transitions } = flowToGraph(nextNodes, nextEdges);
       const form: StateMachineForm = { mode: value.mode, states, transitions };
+      const refreshed = withDescriptions(nextNodes, form);
+      setNodes(refreshed);
+      setEdges(nextEdges);
       lastEmitted.current = signatureOf(form);
       onChange(form);
     },
@@ -237,11 +247,13 @@ export function StateMachineWorkflow({
 
   // Add a new state node (drag-drop + button share this). The name is generated
   // via `nextStateName` (non-colliding with existing + canonical names) so the
-  // manager never lands on a duplicate the validation would reject.
+  // manager never lands on a duplicate the validation would reject. The
+  // `description` placeholder is refreshed by `commit` (via `withDescriptions`
+  // from the next form) before it reaches `setNodes`, so it never renders.
   const addStateAt = useCallback(
     (position: { x: number; y: number }) => {
       const newName = nextStateName(value.states);
-      const newNode: FlowNode = { id: newName, type: 'state', position, data: { name: newName } };
+      const newNode: FlowNode = { id: newName, type: 'state', position, data: { name: newName, description: '' } };
       commit([...nodes, newNode], edges);
     },
     [nodes, edges, value.states, commit],
@@ -285,16 +297,15 @@ export function StateMachineWorkflow({
   }, [nodes, edges, value.states, commit, mintEdgeId]);
 
   // Handlers the custom node/edge components + the properties panel reach via
-  // context (the panel receives them as a prop). Recreated when the graph/mode
-  // changes so they always read the latest committed state. `form` is exposed
-  // read-only so the StateNode card can derive its description via
-  // `describeState` (custom-state descriptions depend on the outgoing-transition
-  // count, which lives in the form).
+  // context (the panel receives them as a prop). Behavior-only — no `form` data
+  // field (ISP: the panel takes `form` as its own prop, and `StateNode` reads
+  // `data.description` computed by `formToFlow`/`withDescriptions`, so the
+  // context carries no data). Recreated when the graph/mode changes so they
+  // always read the latest committed state.
   const handlers = useMemo<WorkflowHandlers>(
     () => ({
       mode: value.mode,
       transitionsCount: value.transitions.length,
-      form: value,
       onRenameState: (oldName, newName) => {
         if (newName === oldName) return;
         // Guard a rename onto an existing state name — the node id IS the state
@@ -304,7 +315,7 @@ export function StateMachineWorkflow({
         // the canvas. Mirrors onConnect's duplicate-edge guard structurally.
         if (nodes.some((n) => n.id === newName)) return;
         const nextNodes = nodes.map((n) =>
-          n.id === oldName ? { ...n, id: newName, data: { name: newName } } : n,
+          n.id === oldName ? { ...n, id: newName, data: { ...n.data, name: newName, description: '' } } : n,
         );
         // Propagate the rename to every referencing edge so no edge dangles.
         const nextEdges = edges.map((e) => ({
@@ -316,6 +327,8 @@ export function StateMachineWorkflow({
         // renamed node (the manager types in the panel's name input — losing
         // selection mid-rename would close the panel and break the flow).
         if (selectedNodeId === oldName) setSelectedNodeId(newName);
+        // `commit` refreshes the renamed node's `description` from the next form
+        // via `withDescriptions` (the placeholder above is never rendered).
         commit(nextNodes, nextEdges);
       },
       onDeleteState: (name) => {
@@ -341,7 +354,7 @@ export function StateMachineWorkflow({
         commit(nodes, nextEdges);
       },
     }),
-    [value, value.mode, value.transitions.length, nodes, edges, commit, selectedNodeId, selectedEdgeId],
+    [value, nodes, edges, commit, selectedNodeId, selectedEdgeId],
   );
 
   // Click-to-select: mark the clicked node as the sole selected node (clear any
@@ -351,16 +364,18 @@ export function StateMachineWorkflow({
   // `.selected` class applies via the prop-driven `StoreUpdater` sync and
   // `onSelectionChange` fires as the single source of truth for the ids. This
   // is the primary selection path; React Flow's own drag-select / keyboard
-  // selection also fires `onSelectionChange` (same store path).
+  // selection also fires `onSelectionChange` (same store path). The handler
+  // signatures use the proper React Flow `Node`/`Edge` types (the `id` field is
+  // the only field read; the rest is structurally compatible).
   const onNodeClick = useCallback(
-    (_event: unknown, node: { id: string }) => {
+    (_event: unknown, node: Node) => {
       setNodes((prev) => prev.map((n) => ({ ...n, selected: n.id === node.id })));
       setEdges((prev) => prev.map((e) => ({ ...e, selected: false })));
     },
     [],
   );
   const onEdgeClick = useCallback(
-    (_event: unknown, edge: { id: string }) => {
+    (_event: unknown, edge: Edge) => {
       setEdges((prev) => prev.map((e) => ({ ...e, selected: e.id === edge.id })));
       setNodes((prev) => prev.map((n) => ({ ...n, selected: false })));
     },
@@ -370,7 +385,7 @@ export function StateMachineWorkflow({
   // store's selectedNodes/selectedEdges (which our local-state flag updates
   // propagate to via `StoreUpdater`). Single-select: take the first if multi.
   const onSelectionChange = useCallback(
-    ({ nodes: selNodes, edges: selEdges }: { nodes: { id: string }[]; edges: { id: string }[] }) => {
+    ({ nodes: selNodes, edges: selEdges }: OnSelectionChangeParams) => {
       setSelectedNodeId(selNodes[0]?.id ?? null);
       setSelectedEdgeId(selEdges[0]?.id ?? null);
     },
@@ -535,9 +550,9 @@ function FlowCanvas({
   onNodesChange: (changes: NodeChange[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
   onConnect: (connection: Connection) => void;
-  onNodeClick: (event: unknown, node: { id: string }) => void;
-  onEdgeClick: (event: unknown, edge: { id: string }) => void;
-  onSelectionChange: (params: { nodes: { id: string }[]; edges: { id: string }[] }) => void;
+  onNodeClick: (event: unknown, node: Node) => void;
+  onEdgeClick: (event: unknown, edge: Edge) => void;
+  onSelectionChange: (params: OnSelectionChangeParams) => void;
   onDropPosition: (position: { x: number; y: number }) => void;
   handlers: WorkflowHandlers;
 }): JSX.Element {

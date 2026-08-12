@@ -384,4 +384,34 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     );
     expect(screen.queryByTestId('sm-properties')).not.toBeInTheDocument();
   });
+
+  it('refreshes a node card description after a mutation changes its outgoing-transition count', () => {
+    // The description lives on `data.description` (computed by `formToFlow`/
+    // `withDescriptions`), NOT derived from the form prop at render. So a
+    // mutation that changes a state's outgoing count (here: adding a self-edge
+    // on the first state via "+ Tambah Transisi") must refresh the node card's
+    // description via `commit`'s `withDescriptions` call — even though the
+    // vi.fn() parent never feeds the new form back.
+    const onChange = vi.fn();
+    // ONHOLD is a custom state with 0 outgoing → "Status kustom" initially.
+    // After a self-edge is added, it has 1 outgoing → "1 transisi keluar".
+    renderWorkflow(
+      {
+        mode: 'custom',
+        states: ['ONHOLD', 'CALLING'],
+        transitions: [{ from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut' }],
+      },
+      [],
+      onChange,
+    );
+    // ONHOLD already has 1 outgoing (to CALLING) → "1 transisi keluar".
+    const card = screen.getByTestId('sm-node-card-ONHOLD');
+    expect(card).toHaveTextContent('1 transisi keluar');
+    // Add a self-edge on ONHOLD (the first state) via the button → 2 outgoing.
+    fireEvent.click(screen.getByTestId('sm-add-transition'));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    // The node card description refreshes via `withDescriptions` in `commit`.
+    const refreshedCard = screen.getByTestId('sm-node-card-ONHOLD');
+    expect(refreshedCard).toHaveTextContent('2 transisi keluar');
+  });
 });

@@ -4,6 +4,7 @@ import {
   flowToGraph,
   formToFlow,
   nextStateName,
+  withDescriptions,
   HANDLE_IDS,
   DEFAULT_SOURCE_HANDLE,
   DEFAULT_TARGET_HANDLE,
@@ -148,8 +149,8 @@ describe('flowToGraph', () => {
 
   it('preserves node array order as the states order', () => {
     const nodes = [
-      { id: 'C', type: 'state', position: { x: 0, y: 0 }, data: { name: 'C' } },
-      { id: 'A', type: 'state', position: { x: 0, y: 0 }, data: { name: 'A' } },
+      { id: 'C', type: 'state', position: { x: 0, y: 0 }, data: { name: 'C', description: '' } },
+      { id: 'A', type: 'state', position: { x: 0, y: 0 }, data: { name: 'A', description: '' } },
     ];
     const { states } = flowToGraph(nodes, []);
     expect(states).toEqual(['C', 'A']);
@@ -163,8 +164,8 @@ describe('flowToGraph', () => {
     // unchanged. An explicit keys assertion gives a clear regression message
     // (the round-trip toEqual guards it implicitly but doesn't name the rule).
     const nodes = [
-      { id: 'A', type: 'state', position: { x: 0, y: 0 }, data: { name: 'A' } },
-      { id: 'B', type: 'state', position: { x: 0, y: 0 }, data: { name: 'B' } },
+      { id: 'A', type: 'state', position: { x: 0, y: 0 }, data: { name: 'A', description: '' } },
+      { id: 'B', type: 'state', position: { x: 0, y: 0 }, data: { name: 'B', description: '' } },
     ];
     const edges: import('./state-machine-flow').FlowEdge[] = [
       {
@@ -181,6 +182,65 @@ describe('flowToGraph', () => {
     expect(transitions).toHaveLength(1);
     expect(Object.keys(transitions[0]).sort()).toEqual(['actionLabel', 'from', 'to']);
     expect(transitions[0]).toEqual({ from: 'A', to: 'B', actionLabel: 'go' });
+  });
+
+  it('drops data.description — the client-side description never reaches the wire', () => {
+    // The description is a CANVAS-ONLY field on FlowNodeData (computed by
+    // `formToFlow`/`withDescriptions` for the SVG card). `flowToGraph` reads
+    // only `data.name` — the description must NOT leak into the wire
+    // `StateMachineForm.states` (a string array) or anywhere else. An explicit
+    // keys assertion on the states entry guards the wire contract: states is a
+    // `string[]`, so this is a type-level guarantee, but the test also confirms
+    // `flowToGraph` never surfaces description in any output key.
+    const nodes: import('./state-machine-flow').FlowNode[] = [
+      { id: 'A', type: 'state', position: { x: 0, y: 0 }, data: { name: 'A', description: 'Tiket menunggu dipanggil' } },
+      { id: 'B', type: 'state', position: { x: 0, y: 0 }, data: { name: 'B', description: 'Status kustom' } },
+    ];
+    const result = flowToGraph(nodes, []);
+    expect(result.states).toEqual(['A', 'B']);
+    // The states array is `string[]` — no object carries the description.
+    expect(result.states.every((s) => typeof s === 'string')).toBe(true);
+    // The output shape is exactly `{ states, transitions }` — no `description` key.
+    expect(Object.keys(result).sort()).toEqual(['states', 'transitions']);
+  });
+
+  it('formToFlow stamps data.description from describeState on every node', () => {
+    // formToFlow is the construction site for the canvas model; it computes the
+    // client-side description so the StateNode card reads `data.description`
+    // with no form dependency (ISP — the context stays behavior-only).
+    const form = defaultStateMachineForm();
+    const { nodes } = formToFlow(form, {});
+    const waiting = nodes.find((n) => n.id === 'WAITING');
+    expect(waiting?.data.description).toBe('Tiket menunggu dipanggil');
+    const calling = nodes.find((n) => n.id === 'CALLING');
+    expect(calling?.data.description).toBe('Sedang dipanggil ke counter');
+  });
+
+  it('withDescriptions refreshes descriptions from the live form after a mutation', () => {
+    // A mutation that changes a state's outgoing-transition count (e.g.
+    // deleting a transition) must refresh the affected node cards' descriptions.
+    // `withDescriptions` is the pure helper `commit` calls to re-stamp every
+    // node's `data.description` from the next form.
+    const form: import('./state-machine').StateMachineForm = {
+      mode: 'custom',
+      states: ['WAITING', 'ONHOLD', 'CALLING'],
+      transitions: [
+        { from: 'ONHOLD', to: 'WAITING', actionLabel: 'Kembali' },
+        { from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut' },
+      ],
+    };
+    const nodes: import('./state-machine-flow').FlowNode[] = [
+      { id: 'WAITING', type: 'state', position: { x: 0, y: 0 }, data: { name: 'WAITING', description: '' } },
+      { id: 'ONHOLD', type: 'state', position: { x: 0, y: 0 }, data: { name: 'ONHOLD', description: '' } },
+      { id: 'CALLING', type: 'state', position: { x: 0, y: 0 }, data: { name: 'CALLING', description: '' } },
+    ];
+    const refreshed = withDescriptions(nodes, form);
+    // ONHOLD has 2 outgoing transitions → derived summary.
+    expect(refreshed.find((n) => n.id === 'ONHOLD')?.data.description).toBe('2 transisi keluar');
+    // WAITING is canonical → canonical description wins.
+    expect(refreshed.find((n) => n.id === 'WAITING')?.data.description).toBe('Tiket menunggu dipanggil');
+    // CALLING is canonical → canonical description wins.
+    expect(refreshed.find((n) => n.id === 'CALLING')?.data.description).toBe('Sedang dipanggil ke counter');
   });
 });
 
