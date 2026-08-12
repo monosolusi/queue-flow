@@ -42,14 +42,58 @@ export interface FlowEdgeData {
   [key: string]: unknown;
 }
 
-/** A React Flow edge, structurally compatible with `@xyflow/react`'s `Edge`. */
+/** A React Flow edge, structurally compatible with `@xyflow/react`'s `Edge`.
+ *  `sourceHandle`/`targetHandle` reference the connection-point ids on the
+ *  source/target nodes (see {@link HANDLE_IDS}). They are CANVAS-ONLY — never
+ *  serialized to the wire {@link Transition} (`flowToGraph` drops them) — and
+ *  exist so a node with multiple handles per side routes each edge through the
+ *  exact handle the manager dragged, not an ambiguous default. */
 export interface FlowEdge {
   id: string;
   source: string;
   target: string;
   type: string;
   data: FlowEdgeData;
+  sourceHandle?: string;
+  targetHandle?: string;
 }
+
+/**
+ * Connection-point (handle) ids for the custom {@link StateNode}. Each of the
+ * four sides carries BOTH a source (outgoing) and a target (incoming) handle,
+ * so the manager can draw a transition edge in ANY direction — out any side,
+ * into any side (down, up, left, right) — not just left-to-right. The edge's
+ * `sourceHandle`/`targetHandle` reference these ids; React Flow derives the
+ * bezier's exit/entry direction from the handle's `Position`, so a vertical
+ * edge (top/bottom handles) renders vertically with NO edge-component change
+ * (`TransitionEdge` already forwards `sourcePosition`/`targetPosition`).
+ *
+ * Defined here (the framework-free lib) rather than the node component so
+ * {@link formToFlow} can seed the default-graph edges with the canonical
+ * left-to-right routing (`rightSource` → `leftTarget`) from a single source of
+ * truth — the ids MUST match the `id` props on the `Handle` elements in
+ * `StateMachineWorkflowNodes.tsx` exactly.
+ */
+export const HANDLE_IDS = {
+  topSource: 'top-source',
+  topTarget: 'top-target',
+  rightSource: 'right-source',
+  rightTarget: 'right-target',
+  bottomSource: 'bottom-source',
+  bottomTarget: 'bottom-target',
+  leftSource: 'left-source',
+  leftTarget: 'left-target',
+} as const;
+
+/**
+ * The default edge routing for a seed/re-seed edge (one with no manager-chosen
+ * handle): out the right, into the left — the canonical left-to-right flow the
+ * PRD §7 default state machine reads as. A manager-drawn edge carries the
+ * actual dragged handle ids (see `onConnect`), so this default only applies to
+ * edges rebuilt from a wire {@link Transition} (initial mount + external reset).
+ */
+export const DEFAULT_SOURCE_HANDLE = HANDLE_IDS.rightSource;
+export const DEFAULT_TARGET_HANDLE = HANDLE_IDS.leftTarget;
 
 /** Horizontal gap between ranks (left-to-right flow). */
 const X_SPACING = 240;
@@ -166,11 +210,17 @@ export function autoLayout(
  * edge: `{ id: \`${t.from}->${t.to}#${i}\`, source, target, type: 'transition',
  * data: { actionLabel } }`. Positions reuse `positions[name]` when present
  * (surviving state names keep their canvas spot on an external re-seed),
- * otherwise fall back to the `autoLayout` placement.
+ * otherwise fall back to the `autoLayout` placement. Handle routing reuses
+ * `handleMap[\`${from}->${to}\`]` when present (a surviving edge keeps the side
+ * the manager dragged it on — vertical stays vertical — across an external
+ * re-seed, mirroring the position-preservation pattern), otherwise falls back
+ * to the canonical L→R default. `validateCustomStateMachine` forbids duplicate
+ * `from->to` edges, so the key is unique per graph.
  */
 export function formToFlow(
   value: StateMachineForm,
   positions: Record<string, { x: number; y: number }>,
+  handleMap?: Record<string, { sourceHandle?: string; targetHandle?: string }>,
 ): { nodes: FlowNode[]; edges: FlowEdge[] } {
   const auto = autoLayout(value.states, value.transitions);
   const nodes: FlowNode[] = value.states.map((name) => ({
@@ -179,13 +229,23 @@ export function formToFlow(
     position: positions[name] ?? auto[name] ?? { x: 0, y: 0 },
     data: { name },
   }));
-  const edges: FlowEdge[] = value.transitions.map((t, i) => ({
-    id: `${t.from}->${t.to}#${i}`,
-    source: t.from,
-    target: t.to,
-    type: 'transition',
-    data: { actionLabel: t.actionLabel },
-  }));
+  const edges: FlowEdge[] = value.transitions.map((t, i) => {
+    const prev = handleMap?.[`${t.from}->${t.to}`];
+    return {
+      id: `${t.from}->${t.to}#${i}`,
+      source: t.from,
+      target: t.to,
+      type: 'transition',
+      data: { actionLabel: t.actionLabel },
+      // Reuse the prior routing when present (surviving edge keeps its side on
+      // an external re-seed); else seed the canonical L→R default. A manager-
+      // drawn edge carries the actual dragged handle ids (see `onConnect`); the
+      // default only applies to edges rebuilt from a wire Transition that
+      // carries no handle info (canvas-only).
+      sourceHandle: prev?.sourceHandle ?? DEFAULT_SOURCE_HANDLE,
+      targetHandle: prev?.targetHandle ?? DEFAULT_TARGET_HANDLE,
+    };
+  });
   return { nodes, edges };
 }
 

@@ -52,6 +52,8 @@ import {
   flowToGraph,
   formToFlow,
   nextStateName,
+  DEFAULT_SOURCE_HANDLE,
+  DEFAULT_TARGET_HANDLE,
   type FlowEdge,
   type FlowNode,
 } from '../lib/state-machine-flow';
@@ -126,7 +128,20 @@ export function StateMachineWorkflow({
         for (const n of prev) oldPositions[n.data.name] = n.position;
         return formToFlow(value, oldPositions).nodes;
       });
-      setEdges(formToFlow(value, {}).edges);
+      setEdges((prev) => {
+        // Preserve the manager-chosen handle routing for surviving edges
+        // (mirroring the position-preservation above): a vertical edge stays
+        // vertical across an external re-seed instead of snapping back to L→R.
+        // Keyed by `from->to` (unique per validateCustomStateMachine).
+        const oldHandles: Record<string, { sourceHandle?: string; targetHandle?: string }> = {};
+        for (const e of prev) {
+          oldHandles[`${e.source}->${e.target}`] = {
+            sourceHandle: e.sourceHandle,
+            targetHandle: e.targetHandle,
+          };
+        }
+        return formToFlow(value, {}, oldHandles).edges;
+      });
     }
     // Always reset the double-tap guard after a value round-trip. By the time
     // this effect runs, the parent has re-rendered with our emitted change
@@ -184,6 +199,12 @@ export function StateMachineWorkflow({
         target: to,
         type: 'transition',
         data: { actionLabel: '' },
+        // Carry the exact handles the manager dragged (which side → which
+        // side) so the bezier routes through them — vertical when a top/bottom
+        // handle was used. React Flow supplies `sourceHandle`/`targetHandle` on
+        // the connection; fall back to the canonical L→R default if absent.
+        sourceHandle: connection.sourceHandle ?? DEFAULT_SOURCE_HANDLE,
+        targetHandle: connection.targetHandle ?? DEFAULT_TARGET_HANDLE,
       };
       commit(nodes, [...edges, newEdge]);
     },
@@ -233,6 +254,8 @@ export function StateMachineWorkflow({
       target: firstState,
       type: 'transition',
       data: { actionLabel: '' },
+      sourceHandle: DEFAULT_SOURCE_HANDLE,
+      targetHandle: DEFAULT_TARGET_HANDLE,
     };
     commit(nodes, [...edges, newEdge]);
   }, [nodes, edges, value.states, commit, mintEdgeId]);
