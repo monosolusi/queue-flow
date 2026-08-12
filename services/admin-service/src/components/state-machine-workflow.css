@@ -177,7 +177,7 @@
   background: var(--surface);
   color: var(--text);
   font-size: 0.9rem;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--text) 12%, transparent);
   cursor: pointer;
 }
 .state-node__icon {
@@ -273,7 +273,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 8%, transparent);
 }
 
 /* Stack the palette + panel above/below the canvas on narrow screens. */
@@ -332,7 +332,10 @@
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
-.sm-view-toggle__btn--active {
+/* Active view selected off the ARIA state itself (no `--active` modifier to
+   drift from the announced state) — mirrors `.timefield__option[aria-pressed]`,
+   `.relative-range__btn[aria-pressed]`, `.range-trend__mode-btn[aria-pressed]`. */
+.sm-view-toggle__btn[aria-pressed='true'] {
   background: var(--accent);
   color: var(--accent-contrast);
 }

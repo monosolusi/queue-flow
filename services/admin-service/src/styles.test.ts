@@ -632,14 +632,17 @@ describe('relative-range presets + range-trend bar/line toggle', () => {
 });
 
 describe('Alur Status Tiket designer — warning relocation + dedicated full-page diagram', () => {
-  it('the section warning is hoisted to the very top with breathing room (manager feedback: terlalu dempat)', () => {
-    // The "Perhatian" warning was too close to the status-flow type selector.
-    // `.admin-panel__warning--top` overrides the grouped selector's
-    // `margin: 0.75rem 0 0` (same specificity, source-order win — the grouped
-    // block stays untouched so its guard holds) with a 1rem bottom margin so the
-    // <h2> below it has space.
-    const top = rule('.admin-panel__warning--top');
-    expect(top).toContain('margin: 0 0 1rem');
+  it('the section warning sits before the action (not hoisted above the title — the `--top` modifier is gone)', () => {
+    // Manager feedback moved this twice: the warning was first hoisted to the
+    // VERY TOP of the card (above the <h2>) via `--top`; that overcorrected — a
+    // caution detached from the action it cautions. It now sits at the decision
+    // point, immediately before the "Lihat Diagram" link, and the title is the
+    // first child again (matches every other config section). Lock the reversal:
+    // the `--top` modifier rule is gone, and the base `.admin-panel__warning`
+    // rule still carries its margin.
+    expect(css).not.toMatch(/\.admin-panel__warning--top\s*\{/);
+    const base = rule('.admin-panel__warning');
+    expect(base).toContain('margin:');
   });
 
   it('the designer page root drops the 920px cap so the canvas fills <main> width', () => {
@@ -663,11 +666,16 @@ describe('Alur Status Tiket designer — warning relocation + dedicated full-pag
     expect(canvas).toContain('min-height: 30rem');
   });
 
-  it('the Diagram↔Source segmented toggle active button uses the accent token', () => {
+  it('selects the active view off the ARIA state itself (no --active modifier to drift)', () => {
     // The active view button reads as the selected affordance via the brand
     // accent (token-driven so light/dark + brandColor re-themes apply), NOT a
-    // hardcoded color literal.
-    const active = wfRule('.sm-view-toggle__btn--active');
+    // hardcoded color literal. Following the codebase convention
+    // (`timefield__option`, `relative-range__btn`, `range-trend__mode-btn`),
+    // the ARIA state IS the selector — so the visual and announced state cannot
+    // drift. No `--active` modifier class duplicates the ARIA state.
+    expect(wfCss).toContain(".sm-view-toggle__btn[aria-pressed='true']");
+    expect(wfCss).not.toContain('.sm-view-toggle__btn--active');
+    const active = wfRule(".sm-view-toggle__btn[aria-pressed='true']");
     expect(active).toContain('background: var(--accent)');
     expect(active).toContain('color: var(--accent-contrast)');
   });

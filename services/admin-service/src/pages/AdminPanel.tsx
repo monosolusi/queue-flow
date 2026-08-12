@@ -597,38 +597,12 @@ export function AdminPanel() {
               {/* State machine — editable (migrated from the wizard; the wizard
                   is first-run only now). The visual diagram moved to a dedicated
                   full-page designer at `/config/alur-status` (the inline canvas was
-                  too small per manager feedback); this section now states the
-                  live-ticket risk up top, summarizes the current graph, surfaces any
-                  validation errors, and links into the designer. The designer edits
-                  the SAME shared draft (ConfigDraftProvider), so an edit there is
-                  reflected here on return and both ride one full save. */}
+                  too small per manager feedback); this section summarizes the current
+                  graph, surfaces any validation errors, states the live-ticket risk,
+                  and links into the designer. The designer edits the SAME shared
+                  draft (ConfigDraftProvider), so an edit there is reflected here on
+                  return and both ride one full save. */}
               <section className="config-card">
-                {/* Live-ticket warning at the VERY TOP of the card (manager
-                    feedback: it was dempet-dempet against the editor below and got
-                    missed). `--top` gives it breathing room + pins it as the first
-                    child so it commands attention before anything else.
-
-                    The active alur status is resolved per operation, so a ticket
-                    sitting in a status that this save removes or renames has no
-                    legal next step: the caller's action buttons for it disappear and
-                    the ticket can only be cleared by a daily reset. The wizard framed
-                    this as one-time guided setup; here it sits next to Kategori on a
-                    panel the manager opens daily, so the risk has to be stated. A
-                    backend guard is out of scope for this change.
-
-                    The complementary hazard — a custom flow that DROPS a standard
-                    status, which breaks a caller action (and the report's
-                    service-time average) for every FUTURE ticket — is warned about
-                    inside the designer's StateMachineWorkflow (it derives from the
-                    form alone, so the designer gets it with no prop threading). */}
-                <p
-                  className="admin-panel__warning admin-panel__warning--top"
-                  data-testid="state-machine-warning"
-                >
-                  Perhatian: mengubah atau menghapus status yang sedang dipakai tiket aktif membuat tiket
-                  tersebut tidak bisa dilanjutkan — tombol aksinya hilang di panel caller. Ubah alur status
-                  saat antrian kosong, misalnya setelah reset harian.
-                </p>
                 <h2 className="config-card__title">Alur Status Tiket</h2>
                 <p className="admin-panel__hint">
                   Pilih alur status standar atau susun sendiri. Label aksi menjadi tombol di panel caller.
@@ -652,11 +626,55 @@ export function AdminPanel() {
                     ))}
                   </ul>
                 )}
+                {/* Live-ticket warning at the DECISION POINT — immediately before
+                    the "Lihat Diagram" action, not above the <h2>. Manager feedback
+                    moved this twice: first from the bottom of the card (where it was
+                    dempet-dempet against the editor and got missed) to the VERY TOP
+                    via `--top`; that overcorrected — a caution floating above the
+                    title detaches from the context of what the manager is about to
+                    do, and breaks the title-first rhythm every other config section
+                    follows. The right spot is right before the action: the
+                    consequence caution carries maximum persuasive weight at the
+                    moment the manager is about to act, and the title-first invariant
+                    now matches the rest of the section. The `--top` modifier is
+                    dropped (no longer in CSS); the base `.admin-panel__warning`
+                    margin gives breathing room, and `admin-panel__card-action` adds
+                    the top spacing the link needs following the warning.
+
+                    The active alur status is resolved per operation, so a ticket
+                    sitting in a status that this save removes or renames has no
+                    legal next step: the caller's action buttons for it disappear and
+                    the ticket can only be cleared by a daily reset. The wizard framed
+                    this as one-time guided setup; here it sits next to Kategori on a
+                    panel the manager opens daily, so the risk has to be stated. A
+                    backend guard is out of scope for this change.
+
+                    The complementary hazard — a custom flow that DROPS a standard
+                    status, which breaks a caller action (and the report's
+                    service-time average) for every FUTURE ticket — is warned about
+                    inside the designer's StateMachineWorkflow (it derives from the
+                    form alone, so the designer gets it with no prop threading). */}
+                <p className="admin-panel__warning" data-testid="state-machine-warning">
+                  Perhatian: mengubah atau menghapus status yang sedang dipakai tiket aktif membuat tiket
+                  tersebut tidak bisa dilanjutkan — tombol aksinya hilang di panel caller. Ubah alur status
+                  saat antrian kosong, misalnya setelah reset harian.
+                </p>
                 {/* Open the dedicated full-page diagram designer. A relative Link
                     (→ /config/alur-status) so it is a real anchor: keyboard-
                     accessible, bookmarkable, and testable. The shared draft persists
-                    across the navigation (ConfigDraftProvider is the route element). */}
-                <Link to="alur-status" className="btn btn--primary" data-testid="sm-open-designer">
+                    across the navigation (ConfigDraftProvider is the route element).
+
+                    Secondary (not primary): the section's single commit action is
+                    `Simpan` (`admin-config__section-save`, `btn--primary`) — every
+                    other config section reserves `btn--primary` for save. A
+                    navigation link is subordinate, so `btn--secondary` (surface-2)
+                    gives it a distinct, non-colliding visual rather than a second
+                    accent bar stacked against the save button. */}
+                <Link
+                  to="alur-status"
+                  className="btn btn--secondary admin-panel__card-action"
+                  data-testid="sm-open-designer"
+                >
                   Lihat Diagram
                 </Link>
               </section>

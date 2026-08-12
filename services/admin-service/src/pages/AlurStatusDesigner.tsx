@@ -197,7 +197,7 @@ export function AlurStatusDesigner(): JSX.Element {
       <div className="sm-view-toggle" role="group" aria-label="Tampilan editor alur status">
         <button
           type="button"
-          className={`sm-view-toggle__btn${view === 'diagram' ? ' sm-view-toggle__btn--active' : ''}`}
+          className="sm-view-toggle__btn"
           aria-pressed={view === 'diagram'}
           onClick={switchToDiagram}
           data-testid="sm-view-diagram"
@@ -206,7 +206,7 @@ export function AlurStatusDesigner(): JSX.Element {
         </button>
         <button
           type="button"
-          className={`sm-view-toggle__btn${view === 'source' ? ' sm-view-toggle__btn--active' : ''}`}
+          className="sm-view-toggle__btn"
           aria-pressed={view === 'source'}
           onClick={switchToSource}
           data-testid="sm-view-source"
