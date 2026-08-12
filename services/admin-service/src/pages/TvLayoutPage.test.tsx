@@ -100,15 +100,49 @@ function renderPage(
   );
 }
 
+/**
+ * The page opens in preview mode (a read-only miniature). Most tests exercise
+ * the editor, so they first open it via the "Edit Tampilan" button and await
+ * the full-page overlay dialog. This helper is the shared entry point.
+ */
+async function enterEditMode() {
+  const editBtn = await screen.findByTestId('tv-layout-edit');
+  fireEvent.click(editBtn);
+  await screen.findByTestId('tv-layout-editor-overlay');
+}
+
 describe('TvLayoutPage', () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it('renders the palette (5 component chips) + the default 5 placed widgets', async () => {
+  // --- preview-first WYSIWYG flow ---
+
+  it('renders the preview miniature on load (not the editor) with an Edit button', async () => {
     const { api, providerApi } = makeApi();
     renderPage(api, providerApi);
     expect(await screen.findByRole('heading', { level: 1, name: 'Tampilan TV' })).toBeInTheDocument();
+    // The preview miniature is present…
+    expect(screen.getByTestId('tv-preview')).toBeInTheDocument();
+    // …with one rendered widget per default-layout widget, at its real id.
+    for (const w of DEFAULT_TV_GRID_LAYOUT) {
+      expect(screen.getByTestId(`tv-preview__widget--${w.id}`)).toBeInTheDocument();
+    }
+    // …and the Edit Tampilan button is the entry point to the editor.
+    expect(screen.getByTestId('tv-layout-edit')).toBeInTheDocument();
+    // The editor is NOT mounted until Edit is pressed (the canvas/palette are
+    // absent in preview mode).
+    expect(screen.queryByTestId('tv-layout__palette')).toBeNull();
+    expect(screen.queryByTestId('tv-layout__canvas')).toBeNull();
+  });
+
+  it('clicking Edit opens the full-page editor overlay dialog (palette + 5 widgets)', async () => {
+    const { api, providerApi } = makeApi();
+    renderPage(api, providerApi);
+    await enterEditMode();
+    // The overlay is a labelled modal dialog.
+    expect(screen.getByRole('dialog', { name: 'Sunting Tampilan TV' })).toBeInTheDocument();
+    expect(screen.getByTestId('tv-layout-editor-overlay')).toBeInTheDocument();
     // The palette is a labelled group with one chip per component type.
     const palette = screen.getByRole('group', { name: 'Komponen TV' });
     for (const type of TV_COMPONENT_TYPES) {
@@ -122,10 +156,41 @@ describe('TvLayoutPage', () => {
     }
   });
 
+  it('Selesai returns to the preview (overlay unmounts, preview stays)', async () => {
+    const { api, providerApi } = makeApi();
+    renderPage(api, providerApi);
+    await enterEditMode();
+    fireEvent.click(screen.getByTestId('tv-layout-close'));
+    expect(screen.queryByTestId('tv-layout-editor-overlay')).toBeNull();
+    expect(screen.getByTestId('tv-preview')).toBeInTheDocument();
+  });
+
+  it('Escape closes the editor and returns to the preview', async () => {
+    const { api, providerApi } = makeApi();
+    renderPage(api, providerApi);
+    await enterEditMode();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByTestId('tv-layout-editor-overlay')).toBeNull();
+    expect(screen.getByTestId('tv-preview')).toBeInTheDocument();
+  });
+
+  it('save returns to the preview on success and announces the toast', async () => {
+    const { api, providerApi } = makeApi();
+    renderPage(api, providerApi);
+    await enterEditMode();
+    fireEvent.click(screen.getByTestId('tv-layout-save'));
+    await waitFor(() => expect(screen.getByText('Tampilan TV disimpan.')).toBeInTheDocument());
+    // A successful save returns to the preview (overlay unmounts).
+    expect(screen.queryByTestId('tv-layout-editor-overlay')).toBeNull();
+    expect(screen.getByTestId('tv-preview')).toBeInTheDocument();
+  });
+
+  // --- editor interactions (entered via Edit) ---
+
   it('removes a widget via the × button', async () => {
     const { api, providerApi } = makeApi();
     renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout__widget--callHistory');
+    await enterEditMode();
     expect(screen.getByTestId('tv-layout__widget--callHistory')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('tv-layout__remove--callHistory'));
     expect(screen.queryByTestId('tv-layout__widget--callHistory')).toBeNull();
@@ -135,7 +200,7 @@ describe('TvLayoutPage', () => {
   it('the Kolom stepper moves a widget that has room (after removing its neighbor)', async () => {
     const { api, providerApi } = makeApi();
     renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout__widget--waitingQueue');
+    await enterEditMode();
     // callHistory sits to the right of waitingQueue — remove it so waitingQueue
     // can shift right without an overlap no-op.
     fireEvent.click(screen.getByTestId('tv-layout__remove--callHistory'));
@@ -149,7 +214,7 @@ describe('TvLayoutPage', () => {
   it('the Lebar stepper resizes a widget that has room (after removing its neighbor)', async () => {
     const { api, providerApi } = makeApi();
     renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout__widget--waitingQueue');
+    await enterEditMode();
     fireEvent.click(screen.getByTestId('tv-layout__remove--callHistory'));
     const stepper = screen.getByTestId('tv-layout__stepper-w--waitingQueue');
     const input = within(stepper).getByLabelText('Lebar') as HTMLInputElement;
@@ -161,7 +226,7 @@ describe('TvLayoutPage', () => {
   it('an overlap-blocked resize is a no-op (the stepper value does not change)', async () => {
     const { api, providerApi } = makeApi();
     renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout__widget--waitingQueue');
+    await enterEditMode();
     // callHistory is still to the right → widening waitingQueue to 7 overlaps it.
     const stepper = screen.getByTestId('tv-layout__stepper-w--waitingQueue');
     const input = within(stepper).getByLabelText('Lebar') as HTMLInputElement;
@@ -174,7 +239,7 @@ describe('TvLayoutPage', () => {
   it('the Baris/Tinggi steppers change a widget row position + height', async () => {
     const { api, providerApi } = makeApi();
     renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout__widget--runningText');
+    await enterEditMode();
     // runningText is at y=10,h=1. It can grow taller (rows 10..19 are free).
     const hStepper = screen.getByTestId('tv-layout__stepper-h--runningText');
     const hInput = within(hStepper).getByLabelText('Tinggi') as HTMLInputElement;
@@ -186,7 +251,7 @@ describe('TvLayoutPage', () => {
   it('the Kolom stepper is clamped at min (0) — the − button is disabled', async () => {
     const { api, providerApi } = makeApi();
     renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout__widget--nowServing');
+    await enterEditMode();
     const stepper = screen.getByTestId('tv-layout__stepper-x--nowServing');
     expect(within(stepper).getByLabelText('Kolom kurang')).toBeDisabled();
   });
@@ -194,7 +259,7 @@ describe('TvLayoutPage', () => {
   it('a full-width widget hits max Lebar — the + button is disabled', async () => {
     const { api, providerApi } = makeApi();
     renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout__widget--nowServing');
+    await enterEditMode();
     const stepper = screen.getByTestId('tv-layout__stepper-w--nowServing');
     // nowServing is x=0,w=12 → max = GRID_COLS - x = 12 → atMax.
     expect(within(stepper).getByLabelText('Lebar tambah')).toBeDisabled();
@@ -209,7 +274,7 @@ describe('TvLayoutPage', () => {
     };
     const { api, providerApi } = makeApi(fullGrid);
     renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout__widget--filler');
+    await enterEditMode();
     fireEvent.click(screen.getByTestId('tv-layout__chip--runningText'));
     await waitFor(() =>
       expect(screen.getByText('Tidak ada ruang kosong untuk komponen baru.')).toBeInTheDocument(),
@@ -221,7 +286,7 @@ describe('TvLayoutPage', () => {
   it('clicking a palette chip after freeing space adds the component back', async () => {
     const { api, providerApi } = makeApi();
     renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout__widget--runningText');
+    await enterEditMode();
     // Remove runningText (a 12×1 strip) → its row frees up.
     fireEvent.click(screen.getByTestId('tv-layout__remove--runningText'));
     expect(screen.getAllByTestId(/^tv-layout__widget--/)).toHaveLength(4);
@@ -233,7 +298,7 @@ describe('TvLayoutPage', () => {
   it('Kembalikan ke Default restores the 5 default widgets', async () => {
     const { api, providerApi } = makeApi();
     renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout__widget--callHistory');
+    await enterEditMode();
     fireEvent.click(screen.getByTestId('tv-layout__remove--callHistory'));
     fireEvent.click(screen.getByTestId('tv-layout__remove--runningText'));
     expect(screen.getAllByTestId(/^tv-layout__widget--/)).toHaveLength(3);
@@ -247,7 +312,7 @@ describe('TvLayoutPage', () => {
   it('save sends the edited tvPanelLayout + passthrough of every other field', async () => {
     const { api, save, providerApi } = makeApi();
     renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout__widget--callHistory');
+    await enterEditMode();
     // Edit: remove callHistory + move waitingQueue one column right (needs the
     // neighbor gone, which the remove just accomplished).
     fireEvent.click(screen.getByTestId('tv-layout__remove--callHistory'));
@@ -276,37 +341,32 @@ describe('TvLayoutPage', () => {
     ]);
   });
 
-  it('announces "Tampilan TV disimpan." via the polite toast region', async () => {
-    const { api, providerApi } = makeApi();
-    renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout__widget--nowServing');
-    fireEvent.click(screen.getByTestId('tv-layout-save'));
-    await waitFor(() => expect(screen.getByText('Tampilan TV disimpan.')).toBeInTheDocument());
-  });
-
-  it('a save failure is announced via the error toast and does not throw', async () => {
+  it('a save failure is announced via the error toast and keeps the editor open', async () => {
     const { api, save, providerApi } = makeApi(
       configuredStore(),
       () => Promise.reject(new Error('backend down')),
     );
     renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout__widget--nowServing');
+    await enterEditMode();
     fireEvent.click(screen.getByTestId('tv-layout-save'));
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
     expect(await screen.findByText(/Gagal menyimpan: backend down/)).toBeInTheDocument();
+    // A failed save stays in the editor so the manager can retry (the overlay
+    // does not unmount — contrast with the success-returns-to-preview test).
+    expect(screen.getByTestId('tv-layout-editor-overlay')).toBeInTheDocument();
   });
 
   it('a11y: the palette is a role=group labelled "Komponen TV"', async () => {
     const { api, providerApi } = makeApi();
     renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout__palette');
+    await enterEditMode();
     expect(screen.getByRole('group', { name: 'Komponen TV' })).toBeInTheDocument();
   });
 
   it('a11y: each palette chip has an aria-label naming the component it adds', async () => {
     const { api, providerApi } = makeApi();
     renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout__palette');
+    await enterEditMode();
     expect(screen.getByLabelText('Tambah Sedang Dilayani')).toBeInTheDocument();
     expect(screen.getByLabelText('Tambah Teks Berjalan')).toBeInTheDocument();
   });
@@ -314,7 +374,7 @@ describe('TvLayoutPage', () => {
   it('a11y: each widget steppers group is labelled naming the component', async () => {
     const { api, providerApi } = makeApi();
     renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout__widget--nowServing');
+    await enterEditMode();
     expect(
       screen.getByRole('group', { name: 'Posisi dan ukuran Sedang Dilayani' }),
     ).toBeInTheDocument();
@@ -323,7 +383,7 @@ describe('TvLayoutPage', () => {
   it('a11y: each widget has a resize slider labelled "Ubah Ukuran"', async () => {
     const { api, providerApi } = makeApi();
     renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout__widget--nowServing');
+    await enterEditMode();
     // One slider per widget — scope to a widget to disambiguate.
     const handle = within(screen.getByTestId('tv-layout__widget--nowServing')).getByRole('slider', {
       name: 'Ubah Ukuran',
@@ -336,11 +396,20 @@ describe('TvLayoutPage', () => {
   it('a11y: each widget remove button has an accessible name', async () => {
     const { api, providerApi } = makeApi();
     renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout__widget--nowServing');
+    await enterEditMode();
     // One remove button per widget — all share the "Hapus Komponen" label.
     expect(screen.getAllByLabelText('Hapus Komponen')).toHaveLength(5);
     const btn = within(screen.getByTestId('tv-layout__widget--nowServing')).getByLabelText('Hapus Komponen');
     expect(btn).toBeInTheDocument();
+  });
+
+  it('a11y: the editor overlay is a modal dialog (aria-modal="true")', async () => {
+    const { api, providerApi } = makeApi();
+    renderPage(api, providerApi);
+    await enterEditMode();
+    const dialog = screen.getByRole('dialog', { name: 'Sunting Tampilan TV' });
+    expect(dialog).toBeInTheDocument();
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
   });
 
   it('Save is disabled when the layout is invalid (defense-in-depth for a corrupt prefill)', async () => {
@@ -353,7 +422,7 @@ describe('TvLayoutPage', () => {
     };
     const { api, providerApi } = makeApi(corrupt);
     renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout__widget--nowServing');
+    await enterEditMode();
     // Coerced back to the default → nowServing default widget present + Save enabled.
     expect(screen.getByTestId('tv-layout__widget--nowServing')).toBeInTheDocument();
     expect(screen.getByTestId('tv-layout-save')).not.toBeDisabled();
