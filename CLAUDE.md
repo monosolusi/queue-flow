@@ -231,7 +231,14 @@ in that area). Each area's load-bearing essence:
   options (never a pre-built instance); React 18 batching; synchronous
   double-tap guard on touch surfaces; caller WS projections recover missing
   fields from local state; ARIA rules (`role="group"` not `option`, sibling
-  `<label>`, `role="img"` on glyph spans). → memory `frontend-conventions-gotchas`
+  `<label>`, `role="img"` on glyph spans); **draggable card with an interactive
+  child** (button/stepper inside a card whose `onPointerDown` starts a drag) →
+  `onPointerDown={(e) => e.stopPropagation()}` on the child, else the drag's
+  `setPointerCapture` redirects `pointerup` to the card and the child's `click`
+  never fires (real-browser-only — jsdom's `fireEvent.pointerDown` strips
+  `isPrimary`/`button` and the global `PointerEvent` ctor is absent, so the bug
+  is jsdom-undetectable; mirror the existing resize-handle stopPropagation).
+  → memory `frontend-conventions-gotchas`
 - **TV board** — `QueuedAudioProvider` decorator over `SequencerAudioProvider`
   (drain single-flight guard is load-bearing, FIFO not interrupt); history
   retains on `COMPLETED` only (never `SKIPPED`/`WAITING`); idle = empty

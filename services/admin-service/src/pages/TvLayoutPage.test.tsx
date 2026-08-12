@@ -197,19 +197,16 @@ describe('TvLayoutPage', () => {
     expect(screen.getAllByTestId(/^tv-layout__widget--/)).toHaveLength(4);
   });
 
-  it('the Kolom stepper moves a widget that has room (after removing its neighbor)', async () => {
-    const { api, providerApi } = makeApi();
-    renderPage(api, providerApi);
-    await enterEditMode();
-    // callHistory sits to the right of waitingQueue — remove it so waitingQueue
-    // can shift right without an overlap no-op.
-    fireEvent.click(screen.getByTestId('tv-layout__remove--callHistory'));
-    const stepper = screen.getByTestId('tv-layout__stepper-x--waitingQueue');
-    const input = within(stepper).getByLabelText('Kolom') as HTMLInputElement;
-    expect(input.value).toBe('0');
-    fireEvent.click(within(stepper).getByLabelText('Kolom tambah'));
-    expect(input.value).toBe('1');
-  });
+  // Note: the × button and the steppers container carry onPointerDown
+  // stopPropagation so a real-browser press does not begin a widget drag +
+  // setPointerCapture (which would swallow the click — delete broken, +/−
+  // "tidak berguna"). jsdom cannot reproduce pointer-capture (RTL's
+  // fireEvent.pointerDown strips isPrimary/button and the global PointerEvent
+  // ctor is absent in this env), so the stopPropagation is a real-browser-only
+  // fix verified by reasoning + the existing resize-handle precedent, not by a
+  // unit test (same class as the resize handle's own stopPropagation, which is
+  // likewise jsdom-untested). The click-based tests below cover the click
+  // handler logic; the pointerdown-bubbling interaction is browser-only.
 
   it('the Lebar stepper resizes a widget that has room (after removing its neighbor)', async () => {
     const { api, providerApi } = makeApi();
@@ -236,7 +233,7 @@ describe('TvLayoutPage', () => {
     expect(input.value).toBe('6');
   });
 
-  it('the Baris/Tinggi steppers change a widget row position + height', async () => {
+  it('the Tinggi stepper changes a widget height', async () => {
     const { api, providerApi } = makeApi();
     renderPage(api, providerApi);
     await enterEditMode();
@@ -248,12 +245,13 @@ describe('TvLayoutPage', () => {
     expect(hInput.value).toBe('2');
   });
 
-  it('the Kolom stepper is clamped at min (0) — the − button is disabled', async () => {
+  it('the Tinggi stepper is clamped at min (1) — the − button is disabled', async () => {
     const { api, providerApi } = makeApi();
     renderPage(api, providerApi);
     await enterEditMode();
-    const stepper = screen.getByTestId('tv-layout__stepper-x--nowServing');
-    expect(within(stepper).getByLabelText('Kolom kurang')).toBeDisabled();
+    // runningText has h=1 (GRID_MIN_H) → Tinggi kurang is disabled at min.
+    const stepper = screen.getByTestId('tv-layout__stepper-h--runningText');
+    expect(within(stepper).getByLabelText('Tinggi kurang')).toBeDisabled();
   });
 
   it('a full-width widget hits max Lebar — the + button is disabled', async () => {
@@ -313,18 +311,18 @@ describe('TvLayoutPage', () => {
     const { api, save, providerApi } = makeApi();
     renderPage(api, providerApi);
     await enterEditMode();
-    // Edit: remove callHistory + move waitingQueue one column right (needs the
-    // neighbor gone, which the remove just accomplished).
+    // Edit: remove callHistory (waitingQueue's right neighbor) + widen
+    // waitingQueue one column (needs the neighbor gone so it doesn't overlap).
     fireEvent.click(screen.getByTestId('tv-layout__remove--callHistory'));
-    fireEvent.click(within(screen.getByTestId('tv-layout__stepper-x--waitingQueue')).getByLabelText('Kolom tambah'));
+    fireEvent.click(within(screen.getByTestId('tv-layout__stepper-w--waitingQueue')).getByLabelText('Lebar tambah'));
     fireEvent.click(screen.getByTestId('tv-layout-save'));
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
     const payload = save.mock.calls[0][0] as SaveSystemConfigurationPayload;
-    // tvPanelLayout: 4 widgets, no callHistory, waitingQueue at x=1.
+    // tvPanelLayout: 4 widgets, no callHistory, waitingQueue widened to w=7.
     expect(payload.tvPanelLayout).toHaveLength(4);
     expect(payload.tvPanelLayout.find((w) => w.component === 'callHistory')).toBeUndefined();
     const waiting = payload.tvPanelLayout.find((w) => w.component === 'waitingQueue');
-    expect(waiting?.x).toBe(1);
+    expect(waiting?.w).toBe(7);
     // Passthrough fields unchanged from the config.
     expect(payload.storeName).toBe('Apotek Sehat');
     expect(payload.brandColor).toBe(DEFAULT_BRAND_COLOR);
@@ -376,7 +374,7 @@ describe('TvLayoutPage', () => {
     renderPage(api, providerApi);
     await enterEditMode();
     expect(
-      screen.getByRole('group', { name: 'Posisi dan ukuran Sedang Dilayani' }),
+      screen.getByRole('group', { name: 'Ukuran Sedang Dilayani' }),
     ).toBeInTheDocument();
   });
 

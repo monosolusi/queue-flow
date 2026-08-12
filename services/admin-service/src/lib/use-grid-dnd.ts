@@ -13,9 +13,14 @@ import { hasOverlap } from './tv-grid-layout';
  * on every pointermove to convert client coords into grid cell coords. jsdom
  * has no real layout (`getBoundingClientRect` returns zeros), so the pointer-
  * move path is exercised only in a real browser; the per-widget stepper
- * controls (Kolom/Baris/Lebar/Tinggi) are the keyboard/AT-accessible + jsdom-
- * tested path (the tested backbone), mirroring the `use-drag-reorder`
- * precedent.
+ * controls (Lebar/Tinggi) are the keyboard/AT-accessible + jsdom-tested path
+ * (the tested backbone for SIZE), mirroring the `use-drag-reorder`
+ * precedent. POSITION has no keyboard/AT path: the former Kolom/Baris steppers
+ * were removed per the manager's explicit "jangan tampilkan, tampilkan hanya
+ * yang digunakan" request, and repositioning is pointer-drag-only — an
+ * accepted tradeoff for this single-manager internal tool (a future
+ * tabIndex+arrow-key move on the card would restore it without re-adding the
+ * unclear steppers, if ever needed).
  *
  * The hook is single-flight: a second pointerdown while a drag is in flight is
  * ignored (the active widget id is pinned in a ref before the first await).

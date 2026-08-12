@@ -593,6 +593,18 @@ function TvLayoutEditor({ layout, onChange }: TvLayoutEditorProps) {
                         e.stopPropagation();
                         onChange(removeWidget(layout, widget.id));
                       }}
+                      // Stop pointerdown from bubbling to the widget card's drag
+                      // handler. Without this, pressing × in a real browser begins
+                      // a drag + setPointerCapture on the card, which redirects
+                      // the pointerup to the card so the click never reaches the
+                      // button — delete appears broken (manager feedback: "tidak
+                      // dapat dihapus"). jsdom cannot reproduce pointer-capture
+                      // (RTL's fireEvent.pointerDown strips isPrimary/button and
+                      // the global PointerEvent ctor is absent in this env), so
+                      // this is a real-browser-only fix verified by reasoning + the
+                      // existing resize-handle stopPropagation precedent — same
+                      // class as that jsdom-untested stopPropagation.
+                      onPointerDown={(e) => e.stopPropagation()}
                       data-testid={`tv-layout__remove--${widget.id}`}
                     >
                       ×
@@ -652,23 +664,23 @@ interface WidgetSteppersProps {
 
 function WidgetSteppers({ widget, layout, onChange }: WidgetSteppersProps) {
   return (
-    <div className="tv-layout__steppers" role="group" aria-label={`Posisi dan ukuran ${TV_COMPONENT_LABELS[widget.component]}`}>
-      <Stepper
-        label="Kolom"
-        value={widget.x}
-        min={0}
-        max={GRID_COLS - widget.w}
-        testId={`tv-layout__stepper-x--${widget.id}`}
-        onChange={(nx) => onChange(moveWidget(layout, widget.id, nx, widget.y))}
-      />
-      <Stepper
-        label="Baris"
-        value={widget.y}
-        min={0}
-        max={GRID_MAX_ROWS - widget.h}
-        testId={`tv-layout__stepper-y--${widget.id}`}
-        onChange={(ny) => onChange(moveWidget(layout, widget.id, widget.x, ny))}
-      />
+    <div
+      className="tv-layout__steppers"
+      role="group"
+      aria-label={`Ukuran ${TV_COMPONENT_LABELS[widget.component]}`}
+      // Stop pointerdown from bubbling to the widget card's drag handler so the
+      // +/- buttons + number input are clickable in a real browser. Without this,
+      // pressing a stepper control begins a drag + setPointerCapture on the card,
+      // which redirects the pointerup to the card so the click never reaches the
+      // stepper — the +/- appear "tidak berguna" (manager feedback). Position is
+      // set by dragging the card; only the size (Lebar/Tinggi) steppers remain —
+      // the Kolom/Baris position steppers were removed per the manager's "jangan
+      // tampilkan, tampilkan hanya yang digunakan" (unclear + redundant with
+      // drag). jsdom cannot reproduce pointer-capture (see the remove-button
+      // comment above), so this is a real-browser-only fix verified by reasoning
+      // + the resize-handle stopPropagation precedent — same class.
+      onPointerDown={(e) => e.stopPropagation()}
+    >
       <Stepper
         label="Lebar"
         value={widget.w}

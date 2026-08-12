@@ -2122,7 +2122,7 @@ fieldset {
  * The `/tv-layout` page: a palette of draggable component chips on the left
  * + a 12-column grid canvas on the right. The manager drags (or clicks) a
  * chip to add a widget, drags a card to move, drags the corner grip to resize,
- * and uses the per-widget steppers (Kolom/Baris/Lebar/Tinggi) as the precise,
+ * and uses the per-widget steppers (Lebar/Tinggi) as the precise,
  * keyboard/AT-accessible path (the jsdom-tested backbone). Tokens only — no
  * hardcoded color literals; `--radius` is the per-service value (QUE-37). */
 .tv-layout-page__loading {
@@ -2262,7 +2262,8 @@ fieldset {
   overflow: hidden;
   text-align: center;
 }
-/* Per-widget steppers: the precise, a11y, jsdom-tested position/size controls. */
+/* Per-widget steppers: the precise, a11y, jsdom-tested size controls (Lebar/
+   Tinggi). Position (Kolom/Baris) is set by dragging the card, not steppers. */
 .tv-layout__steppers {
   display: grid;
   grid-template-columns: 1fr 1fr;
