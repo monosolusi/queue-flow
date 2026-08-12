@@ -170,7 +170,10 @@ export function TransitionEdge(props: EdgeProps): JSX.Element {
   const label = edgeData.actionLabel;
   return (
     <>
-      <BaseEdge id={props.id} path={edgePath} />
+      {/* Forward the resolved arrowhead url so the closed arrow renders on the
+          path — direction reads on back-edges (e.g. SKIPPED → CALLING) and on
+          parallel edges, the manager's "garis tidak ada panah" feedback. */}
+      <BaseEdge id={props.id} path={edgePath} markerEnd={props.markerEnd} />
       <EdgeLabelRenderer>
         <div
           className="transition-edge__label"
