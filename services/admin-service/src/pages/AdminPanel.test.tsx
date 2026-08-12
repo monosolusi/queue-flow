@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { AdminPanel } from './AdminPanel';
+import { AlurStatusDesigner } from './AlurStatusDesigner';
+import { ConfigDraftProvider } from './admin-config/config-draft-context';
 import { SystemConfigProvider, useSystemConfigContext } from '../config/system-config-context';
 import { ToastProvider } from '../toast/toast-context';
 import type { IAdminApi, ISystemConfigApi } from '../api/admin-api';
@@ -111,19 +113,46 @@ function makeApi(
 }
 
 /**
+ * Renders the REAL nested `/config` route tree (the production wiring from
+ * `App.tsx`): `MemoryRouter` → `SystemConfigProvider` → `ToastProvider` →
+ * `Routes` with `/config`'s element = `ConfigDraftProvider` (rendering its
+ * `<Outlet/>`), the index child = `AdminPanel`, and the `alur-status` child =
+ * `AlurStatusDesigner`. `AdminPanel`/`AlurStatusDesigner` take NO `api` prop —
+ * they read the shared draft from `useConfigDraft()` — so the only way to mount
+ * them is through the provider, exactly as production routes them. The provider
+ * is the route element so it stays mounted across `/config ↔ /config/alur-status`
+ * → the shared draft persists (the cross-section-edit-rides-one-save invariant
+ * the combined-save test pins). `SystemConfigProvider` wraps it because
+ * `ConfigDraftProvider` calls `useSystemConfigContext().refresh()` after a save.
+ *
+ * No `AuthProvider`/`RequireAuth`/`SetupGuard` — the tests drive the panel
+ * directly (the old harness did too); auth is covered by the auth-context specs.
+ */
+function renderConfigRoute(api: IAdminApi, initialEntry = '/config') {
+  return render(
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <SystemConfigProvider api={api}>
+        <ToastProvider>
+          <Routes>
+            <Route path="/config" element={<ConfigDraftProvider api={api} />}>
+              <Route index element={<AdminPanel />} />
+              <Route path="alur-status" element={<AlurStatusDesigner />} />
+            </Route>
+          </Routes>
+        </ToastProvider>
+      </SystemConfigProvider>
+    </MemoryRouter>,
+  );
+}
+
+/**
  * The panel is wrapped in a real {@link ToastProvider} because save / reset /
  * cleanup outcomes are announced through the toast stack now — the provider
  * also renders the viewport, so the two live regions the assertions scope into
  * (`role="status"` polite, `role="alert"` assertive) exist here.
  */
 function renderPanel(api: IAdminApi) {
-  return render(
-    <MemoryRouter>
-      <ToastProvider>
-        <AdminPanel api={api} />
-      </ToastProvider>
-    </MemoryRouter>,
-  );
+  return renderConfigRoute(api);
 }
 
 /**
@@ -192,11 +221,13 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     expect(screen.getByTestId('routing-categories-0')).toHaveTextContent('Customer Service');
 
     // State machine is editable now (migrated from the wizard; the wizard is
-    // first-run only). The heading text is now a tab label (always visible → a
-    // tab-label assertion would false-pass), so assert via the editor's sm-mode
-    // testid instead.
+    // first-run only). The visual diagram moved to a dedicated full-page
+    // designer at `/config/alur-status` (manager feedback: the inline canvas was
+    // too small), so the section now shows a graph summary + a "Lihat Diagram"
+    // link into that designer (the `sm-mode` editor lives on the designer now).
     await goToSection('Alur Status Tiket');
-    expect(screen.getByTestId('sm-mode')).toBeInTheDocument();
+    expect(screen.getByTestId('sm-summary')).toHaveTextContent(/Alur standar/);
+    expect(screen.getByTestId('sm-open-designer')).toHaveTextContent('Lihat Diagram');
   });
 
   it('announces a save through the polite toast region, with no inline success paragraph left behind', async () => {
@@ -333,10 +364,16 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     await userEvent.clear(storeNameInput);
     await userEvent.type(storeNameInput, 'Toko Baru');
 
-    // Switch to the state-machine section and edit the first transition's
-    // label. The draft persists across the switch, so both edits ride ONE save
-    // (a per-section save still sends the full payload — do NOT split into two).
+    // The state-machine EDITOR moved to a dedicated full-page designer at
+    // `/config/alur-status`. Navigate there via the "Lihat Diagram" link. The
+    // ConfigDraftProvider is the `/config` route element, so it stays mounted
+    // across the navigation → the store-name edit persists, and both edits ride
+    // ONE full-payload save (a per-section save still sends the full payload —
+    // do NOT split into two).
     await goToSection('Alur Status Tiket');
+    await userEvent.click(screen.getByTestId('sm-open-designer'));
+    // The designer renders the StateMachineWorkflow (Diagram view) by default.
+    await screen.findByTestId('sm-mode');
     await userEvent.click(screen.getByLabelText(/Susun alur status sendiri/));
     const labelInputs = screen.getAllByLabelText('Label aksi');
     fireEvent.change(labelInputs[0], { target: { value: 'Panggil Cepat' } });
@@ -728,11 +765,15 @@ describe('AdminPanel (post-wizard safety rails)', () => {
   it('blocks save on an invalid custom ticket flow and explains why', async () => {
     // Mirrors the wizard's step-3 gate via the same shared
     // `validateCustomStateMachine`: an empty action label is a graph the backend
-    // rejects, and the panel is now the only post-setup editor of the flow.
+    // rejects, and the panel is now the only post-setup editor of the flow. The
+    // editor lives on the dedicated `/config/alur-status` designer now (the
+    // inline canvas was too small per manager feedback).
     const { api, save } = makeApi();
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
     await goToSection('Alur Status Tiket');
+    await userEvent.click(screen.getByTestId('sm-open-designer'));
+    await screen.findByTestId('sm-mode');
 
     await userEvent.click(screen.getByLabelText(/Susun alur status sendiri/));
     // Controlled input bound to derived state — set via fireEvent.change.
@@ -751,13 +792,37 @@ describe('AdminPanel (post-wizard safety rails)', () => {
     expect(screen.getByTestId('admin-save')).not.toBeDisabled();
   });
 
+  it('an invalid custom flow on the designer is reflected on the /config section + nav badge (shared draft)', async () => {
+    // The designer edits the SAME draft as the panel (ConfigDraftProvider is the
+    // route element). So an invalid edit made on the designer must surface on the
+    // panel's section as an inline `sm-errors` + a nav badge when the manager
+    // navigates back — the validity is computed from the shared draft by
+    // `computeFormValidity` in both places.
+    const { api } = makeApi();
+    renderPanel(api);
+    await screen.findByText('Apotek Sehat');
+    await goToSection('Alur Status Tiket');
+    await userEvent.click(screen.getByTestId('sm-open-designer'));
+    await screen.findByTestId('sm-mode');
+    await userEvent.click(screen.getByLabelText(/Susun alur status sendiri/));
+    fireEvent.change(screen.getAllByLabelText('Label aksi')[0], { target: { value: '' } });
+
+    // Back to /config — the section's inline sm-errors + the nav badge both show.
+    await userEvent.click(screen.getByTestId('designer-back'));
+    await goToSection('Alur Status Tiket');
+    expect(screen.getByTestId('sm-errors')).toHaveTextContent('Label aksi tidak boleh kosong.');
+    const smTab = screen.getByRole('tab', { name: /Alur Status Tiket belum valid/ });
+    expect(smTab).toHaveTextContent('belum valid');
+  });
+
   it('warns — without blocking save — when the ticket flow drops a standard status', async () => {
     // The bigger hazard than a live ticket: core-api's queue engine transitions
     // to the standard status names as literals, but `StateSchema` carries no
     // invariant that they survive a custom graph. Dropping COMPLETED breaks
     // "Selesai Layan" for every FUTURE ticket and stops stamping completed_at
     // (the analytics average). The manager is warned; the save still goes
-    // through, because a custom flow may legitimately skip a status.
+    // through, because a custom flow may legitimately skip a status. The warning
+    // travels with the StateMachineWorkflow, which now lives on the designer.
     const trimmedFlow: SystemConfigurationDto = {
       ...configuredStore(),
       stateMachine: {
@@ -769,6 +834,8 @@ describe('AdminPanel (post-wizard safety rails)', () => {
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
     await goToSection('Alur Status Tiket');
+    await userEvent.click(screen.getByTestId('sm-open-designer'));
+    await screen.findByTestId('sm-mode');
 
     const warning = screen.getByTestId('sm-standard-warning');
     expect(warning).toHaveTextContent('SERVING');
@@ -788,7 +855,9 @@ describe('AdminPanel (post-wizard safety rails)', () => {
     // The alur status is resolved per operation, so a ticket sitting in a status
     // this save removes has no legal next step — its caller action buttons
     // vanish. The wizard framed this as one-time guided setup; the panel is a
-    // daily surface, so the consequence has to be stated.
+    // daily surface, so the consequence has to be stated. Manager feedback: the
+    // warning was dempet-dempet against the editor and got missed — it now sits
+    // at the VERY TOP of the section card so it commands attention first.
     const { api } = makeApi();
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
@@ -797,6 +866,13 @@ describe('AdminPanel (post-wizard safety rails)', () => {
     const warning = screen.getByTestId('state-machine-warning');
     expect(warning).toHaveTextContent(/tidak bisa dilanjutkan/i);
     expect(warning).toHaveTextContent(/panel caller/i);
+    // Pinned at the top of the section: the warning is the config card's first
+    // child (before the <h2>), so it is the first thing the manager reads.
+    const card = warning.closest('.config-card');
+    expect(card).not.toBeNull();
+    expect(card!.firstElementChild).toBe(warning);
+    // And it has the `--top` modifier (breathing room before the <h2>).
+    expect(warning).toHaveClass('admin-panel__warning--top');
   });
 
   it('shows a nav error badge on an invalid section and clears it once fixed', async () => {
@@ -845,7 +921,12 @@ describe('AdminPanel config load failure (retry)', () => {
     expect(await screen.findByText(/Gagal memuat konfigurasi/i)).toBeInTheDocument();
     await userEvent.click(screen.getByTestId('config-retry'));
     expect(await screen.findByText('Apotek Sehat')).toBeInTheDocument();
-    expect(calls).toBe(2);
+    // Three probes total: (1) the ConfigDraftProvider mount — rejects → error
+    // state; (2) the SystemConfigProvider mount — resolves (the shared snapshot
+    // loads independently of the draft); (3) the retry — resolves → draft loads.
+    // Effects fire child-first, so the draft's probe (1) precedes the shared
+    // provider's (2); the retry re-runs only the draft's effect (3).
+    expect(calls).toBe(3);
   });
 });
 
@@ -859,7 +940,10 @@ describe('AdminPanel shared-config coherence', () => {
   it('refreshes the shared config after a save so the app chrome shows the new store name', async () => {
     // The shell's sidebar brand reads the shared snapshot. Before this, a
     // rename saved fine but the chrome kept the OLD name until a full reload,
-    // because App held its own independent copy of the config.
+    // because App held its own independent copy of the config. The draft owner
+    // is now the ConfigDraftProvider (the /config route element), so the route
+    // tree is rendered for real — but the shared snapshot is still driven by a
+    // separate providerApi so the probe count stays observable.
     let shared: SystemConfigurationDto = { ...configuredStore(), storeName: 'Toko Lama' };
     const { api } = makeApi();
     (api.saveSystemConfig as ReturnType<typeof vi.fn>).mockImplementation(
@@ -877,11 +961,16 @@ describe('AdminPanel shared-config coherence', () => {
     const providerApi: ISystemConfigApi = { getSystemConfig: vi.fn(() => Promise.resolve(shared)) };
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={['/config']}>
         <SystemConfigProvider api={providerApi}>
           <ToastProvider>
             <SharedStoreName />
-            <AdminPanel api={api} />
+            <Routes>
+              <Route path="/config" element={<ConfigDraftProvider api={api} />}>
+                <Route index element={<AdminPanel />} />
+                <Route path="alur-status" element={<AlurStatusDesigner />} />
+              </Route>
+            </Routes>
           </ToastProvider>
         </SystemConfigProvider>
       </MemoryRouter>,
@@ -899,7 +988,7 @@ describe('AdminPanel shared-config coherence', () => {
       expect(screen.getByTestId('shared-store-name')).toHaveTextContent('Toko Baru'),
     );
     // Exactly two shared probes: the mount resolution + the post-save refresh
-    // (the panel's own reload uses its own api, not the shared one).
+    // (the provider's own reload uses its own api, not the shared one).
     expect(providerApi.getSystemConfig).toHaveBeenCalledTimes(2);
   });
 });

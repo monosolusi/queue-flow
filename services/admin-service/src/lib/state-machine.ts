@@ -204,3 +204,101 @@ export function addState(form: StateMachineForm): StateMachineForm {
 export function removeState(form: StateMachineForm, i: number): StateMachineForm {
   return { ...form, states: form.states.filter((_, idx) => idx !== i) };
 }
+
+// --- JSON source view (Kaleo-style "Source" view of the graph) ----------------
+
+/**
+ * Serializes the editable state machine into the indented JSON shown in the
+ * designer's Source view. The `mode` preset is deliberately NOT included — the
+ * source is the graph only (`{ states, transitions }`), and `mode` is a
+ * client-only UI preset that never travels on the wire ({@link toStateMachineDto}
+ * owns stripping it). Key order is `states` then `transitions` so the output is
+ * deterministic and stable across re-serializations (a flickering diff while the
+ * manager types would be noise).
+ */
+export function formToJson(form: StateMachineForm): string {
+  return JSON.stringify(
+    { states: form.states, transitions: form.transitions },
+    null,
+    2,
+  );
+}
+
+/** A successful {@link jsonToForm} parse — the rebuilt form (always custom mode). */
+export interface JsonToFormOk {
+  ok: true;
+  form: StateMachineForm;
+}
+
+/** A failed parse — a single manager-facing (Indonesian) error message. */
+export interface JsonToFormErr {
+  ok: false;
+  error: string;
+}
+
+/**
+ * Parses the Source view's JSON text back into a {@link StateMachineForm}.
+ *
+ * **Never throws** — every failure (malformed JSON, wrong shape, a graph the
+ * backend would 400) is returned as `{ ok: false, error }` so a half-typed
+ * textarea can never crash the designer page. The textarea is the one untrusted
+ * input on this surface; funneling every failure through a result type keeps the
+ * page resilient (mirrors the domain rule that a shared VO's construction
+ * failure is a result/400, not an uncaught throw).
+ *
+ * The returned form is ALWAYS `mode: 'custom'` — editing the source is an
+ * explicit custom-graph intent, so even a JSON that deep-equals the PRD §7
+ * default graph is treated as custom (the manager typed it). This matches
+ * {@link toStateMachineDto}'s contract: it force-resets to the default graph
+ * only when `mode === 'default'`, and a manager who touched the source chose
+ * custom.
+ *
+ * Unknown top-level keys are ignored (lenient on extras, strict on the required
+ * `states`/`transitions` shape); per-transition unknown keys are likewise
+ * ignored. Validation runs through the shared {@link validateCustomStateMachine}
+ * so the source view and the visual diagram enforce the same invariants — the
+ * first error is returned (one message at a time stays readable in the textarea
+ * gutter; the full list is visible in the Diagram view's `sm-errors`).
+ */
+export function jsonToForm(json: string): JsonToFormOk | JsonToFormErr {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch (err) {
+    return { ok: false, error: `JSON tidak valid: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { ok: false, error: 'JSON harus berupa objek dengan "states" dan "transitions".' };
+  }
+  const obj = parsed as Record<string, unknown>;
+  if (!Array.isArray(obj.states)) {
+    return { ok: false, error: 'Field "states" harus berupa daftar (array).' };
+  }
+  if (!Array.isArray(obj.transitions)) {
+    return { ok: false, error: 'Field "transitions" harus berupa daftar (array).' };
+  }
+  for (const s of obj.states) {
+    if (typeof s !== 'string') {
+      return { ok: false, error: 'Setiap status harus berupa teks (string).' };
+    }
+  }
+  for (const t of obj.transitions) {
+    if (t === null || typeof t !== 'object' || Array.isArray(t)) {
+      return { ok: false, error: 'Setiap transisi harus berupa objek.' };
+    }
+    const tr = t as Record<string, unknown>;
+    if (typeof tr.from !== 'string' || typeof tr.to !== 'string' || typeof tr.actionLabel !== 'string') {
+      return { ok: false, error: 'Setiap transisi harus memiliki "from", "to", dan "actionLabel" berupa teks.' };
+    }
+  }
+  const form: StateMachineForm = {
+    mode: 'custom',
+    states: obj.states as string[],
+    transitions: obj.transitions as Transition[],
+  };
+  const errors = validateCustomStateMachine(form);
+  if (errors.length > 0) {
+    return { ok: false, error: errors[0] };
+  }
+  return { ok: true, form };
+}

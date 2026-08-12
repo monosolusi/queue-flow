@@ -134,6 +134,36 @@ fieldset {
   flex-direction: column;
   gap: 1.25rem;
 }
+/* The dedicated Alur Status Tiket designer (/config/alur-status). Deliberately
+   NOT `.page` — drops the 920px max-width so the React Flow canvas fills the
+   `<main>` width (manager feedback: the inline diagram was too small). Keeps
+   the same padding/flex rhythm as `.page` so the layout reads as one family.
+   AC8 holds: the page still renders inside AppShell's single `<main>` and owns
+   its `<h1>` via PageHeader. */
+.alur-status-designer {
+  padding: 1.5rem 1rem 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+.alur-status-designer--loading {
+  color: var(--text-muted);
+}
+/* One-line graph summary on the config section (mode + counts). Muted so it
+   reads as a status line, not a heading. */
+.sm-summary {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+.alur-status-designer__hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+.alur-status-designer__hint a {
+  color: var(--accent-on-surface);
+}
 .page-header {
   display: flex;
   align-items: center;
@@ -211,6 +241,15 @@ fieldset {
   background: color-mix(in srgb, var(--warn) 12%, transparent);
   color: var(--text);
   font-size: 0.9rem;
+}
+/* `--top` relocates the live-ticket warning to the VERY TOP of its config card
+   (manager feedback: it was dempet-dempet against the editor and got missed).
+   Source order lets this single-class rule override the grouped
+   `.sm-warning, .admin-panel__warning` `margin: 0.75rem 0 0` (same specificity
+   0-1-0) — the grouped block is NOT touched (its styles.test.ts guard stays
+   green). The bottom margin gives breathing room before the <h2>. */
+.admin-panel__warning--top {
+  margin: 0 0 1rem;
 }
 .sm-warning__intro,
 .sm-warning__outro {
