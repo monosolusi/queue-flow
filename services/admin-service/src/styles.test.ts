@@ -559,25 +559,44 @@ describe('relative-range presets + range-trend bar/line toggle', () => {
     expect(active).toContain('color: var(--accent-contrast)');
   });
 
-  it('.analytics__custom-range is gone (replaced by a single always-visible DateRangeField, no wrapper)', () => {
+  it('.analytics__custom-range is gone (the manual range is a single DateRangeField rendered directly, no wrapper)', () => {
     // The manual Dari/Sampai panel used to be a flex-wrap row of two DateFields
-    // revealed on "Kustom". The unification (manager feedback) replaces it with
-    // a single always-visible `DateRangeField` rendered directly below the
-    // PageHeader — no wrapper class, so the old `.analytics__custom-range` rule
-    // must be gone entirely (no orphan selector to drift).
+    // under a `.analytics__custom-range` wrapper. The unified `DateRangeField`
+    // (now reveal-on-custom per manager feedback) renders directly below the
+    // PageHeader with NO wrapper class, so the old `.analytics__custom-range`
+    // rule must be gone entirely (no orphan selector to drift).
     expect(css).not.toMatch(/\.analytics__custom-range\s*\{/);
   });
 
-  it('.date-range-field__trigger is a full-width ≥44px textbox-styled button (grouped, no separate calendar button)', () => {
-    // Manager feedback: unify the separate Kustom / calendar / textbox
-    // affordances into one grouped box. The trigger is a single button styled
-    // as a textbox; the calendar glyph lives INSIDE it (no separate toggle).
+  it('.date-range-field__trigger is a ≥44px textbox-styled button capped to a comfortable width (manager feedback: rentang tanggal terlalu wide)', () => {
+    // The trigger is a single button styled as a textbox; the calendar glyph
+    // lives INSIDE it (no separate toggle). `width:100%` lets it fill narrow
+    // containers, while `max-width` caps it on the wide analytics page so the
+    // rentang tanggal is no longer terlalu wide. The popover anchors to the
+    // full-width `.date-range-field` root, so the cap does NOT shrink the
+    // two-month calendar popover.
     const t = rule('.date-range-field__trigger');
     expect(t).toContain('display: inline-flex');
     expect(t).toContain('width: 100%');
+    expect(t).toContain('max-width: 22rem');
     expect(t).toContain('min-height: 2.75rem');
     expect(t).toContain('text-align: left');
     expect(t).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+  });
+
+  it('.range-trend__svg has a FIXED height (no height:auto → dashboard layout stays stable across ranges + modes)', () => {
+    // Manager feedback: "Tren Pengunjung heightnya terlalu dinamis". The prior
+    // `height:auto` + a viewBox width that grew with the day count made the
+    // rendered height swing from tall (7 days) to short (90 days), so the
+    // dashboard jumped on every range/mode change. The viewBox width is now
+    // fixed (RangeTrendChart) and the CSS height is fixed here — guard the
+    // fixed height and the absence of `height:auto` so the dynamism cannot
+    // silently creep back (jsdom runs css:false, so this is a static guard).
+    // Strip CSS comments first — the explanatory comment mentions `height:auto`
+    // by name and would otherwise self-trip the `not.toMatch`.
+    const svg = rule('.range-trend__svg').replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(svg).toContain('height: 15rem');
+    expect(svg).not.toMatch(/height:\s*auto/);
   });
 
   it('.date-range-field__popover is an absolute 2-month-wide panel under the trigger', () => {

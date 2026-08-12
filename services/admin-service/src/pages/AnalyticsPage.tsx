@@ -66,6 +66,12 @@ export function AnalyticsPage({
   // Synchronous double-click guard — `exporting` only lands after a re-render,
   // so two same-tick clicks would both start a SheetJS build (CLAUDE.md).
   const exportRef = useRef(false);
+  // Reveal-on-custom (manager feedback: the rentang tanggal was too wide and
+  // should only appear when "Kustom" is pressed). "Kustom" is a real toggle —
+  // pressing it again hides the manual range and returns to preset mode (which
+  // honestly shows the matching preset pressed). Default false — the page opens
+  // on the 7-hari preset with the manual `DateRangeField` hidden.
+  const [showCustomRange, setShowCustomRange] = useState(false);
 
   // Defensive range guard — the calendar (`DateRangeField`) and the presets
   // only ever produce a pair of well-formed, in-order local `YYYY-MM-DD` keys,
@@ -81,11 +87,11 @@ export function AnalyticsPage({
   // NO separate `preset` state to drift. A preset `days` is active iff `to` is
   // today AND `from` is exactly `daysAgoLocalKey(days - 1)` (the preset's first
   // day). The default page state (`from=daysAgoLocalKey(6)`, `to=todayLocalKey()`)
-  // → "7 hari" is active on first render. There is no more `customMode` gate:
-  // the manual range is always visible as a `DateRangeField`, and a hand-picked
-  // range that coincidentally matches a preset honestly shows that preset
-  // pressed (cleaner than suppressing the match).
-  const activeDays = useMemo(() => {
+  // → "7 hari" is active on first render. While `showCustomRange` is true the
+  // page suppresses this to `null` (passed to the picker) so no preset shows
+  // pressed alongside the "Kustom" toggle — the manual range is the active
+  // affordance, even if it coincidentally lands on a preset window.
+  const derivedActiveDays = useMemo(() => {
     if (to !== todayLocalKey()) return null;
     for (const p of RELATIVE_PRESETS) {
       if (from === daysAgoLocalKey(p.days - 1)) return p.days;
@@ -96,12 +102,15 @@ export function AnalyticsPage({
     // need to be in the dep array (the memo recomputes whenever from/to do).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [from, to]);
+  const activeDays = showCustomRange ? null : derivedActiveDays;
 
   /** Jumps the range to the last `days` days. A preset click always produces a
-   *  pair of well-formed, in-order keys, so it never trips `rangeInvalid`. */
+   *  pair of well-formed, in-order keys, so it never trips `rangeInvalid`, and
+   *  it leaves preset mode (hides the manual range). */
   function selectRelative(days: number) {
     setFrom(daysAgoLocalKey(days - 1));
     setTo(todayLocalKey());
+    setShowCustomRange(false);
   }
 
   /** Commits a complete, in-order range picked via the `DateRangeField`
@@ -172,6 +181,8 @@ export function AnalyticsPage({
     rangeInvalid,
     activeDays,
     onSelectRelative: selectRelative,
+    onSelectCustom: () => setShowCustomRange((v) => !v),
+    showCustomRange,
   };
 
   if (state.status === 'loading') {
@@ -313,6 +324,8 @@ function AnalyticsHeader({
   rangeInvalid,
   activeDays,
   onSelectRelative,
+  onSelectCustom,
+  showCustomRange,
 }: {
   from: string;
   to: string;
@@ -323,10 +336,16 @@ function AnalyticsHeader({
   /** Defensive range guard — gates the export button and renders the shared
    *  error node. Unreachable from the calendar/presets UI (defense in depth). */
   rangeInvalid: boolean;
-  /** The derived active relative-range preset (`null` = no preset matches). */
+  /** The derived active relative-range preset (`null` = no preset matches, or
+   *  suppressed while custom mode is active). */
   activeDays: number | null;
   /** Jump the range to the last `days` days. */
   onSelectRelative: (days: number) => void;
+  /** Toggle the manual range on/off (the "Kustom" toggle). */
+  onSelectCustom: () => void;
+  /** Whether the manual range selector is currently shown (also drives the
+   *  picker's `customActive` so the "Kustom" toggle reflects it). */
+  showCustomRange: boolean;
 }) {
   return (
     <>
@@ -335,12 +354,17 @@ function AnalyticsHeader({
         subtitle="Ekspor laporan lokal (.xlsx)"
         actions={
           <>
-            {/* Quick relative-range presets. The manual range is always visible
-                as a `DateRangeField` below the header (no "Kustom" toggle —
-                manager feedback: unify the separate Kustom / calendar / textbox
-                affordances into one grouped box). The actions row is all
-                equal-height buttons, so the default center alignment applies. */}
-            <RelativeRangePicker activeDays={activeDays} onSelect={onSelectRelative} />
+            {/* Quick relative-range presets + a "Kustom" toggle that reveals the
+                manual `DateRangeField` below the header (manager feedback: the
+                rentang tanggal was too wide and should only appear on custom).
+                The actions row is all equal-height buttons, so the default
+                center alignment applies. */}
+            <RelativeRangePicker
+              activeDays={activeDays}
+              customActive={showCustomRange}
+              onSelect={onSelectRelative}
+              onSelectCustom={onSelectCustom}
+            />
             <button
               type="button"
               className="btn btn--primary"
@@ -358,18 +382,21 @@ function AnalyticsHeader({
           </>
         }
       />
-      {/* The manual range selector — ALWAYS visible (no reveal step). One
-          grouped textbox that opens a two-month range calendar on click. The
+      {/* The manual range selector — reveal-on-custom (manager feedback: only
+          show the rentang tanggal when "Kustom" is pressed, and keep it narrow).
+          One grouped textbox that opens a two-month range calendar on click. The
           `DateRangeField` owns its own `role="group"` (the field root), so no
           wrapping group here. Pre-filled with the current `from`/`to` so the
           manager sees the range they are customizing from. */}
-      <DateRangeField
-        from={from}
-        to={to}
-        onRangeChange={onRangeChange}
-        invalid={rangeInvalid}
-        describedById={rangeInvalid ? RANGE_ERROR_ID : undefined}
-      />
+      {showCustomRange && (
+        <DateRangeField
+          from={from}
+          to={to}
+          onRangeChange={onRangeChange}
+          invalid={rangeInvalid}
+          describedById={rangeInvalid ? RANGE_ERROR_ID : undefined}
+        />
+      )}
       {/* Owned by AnalyticsHeader, not by a single view branch, so it renders
           in every state the page can be in (loading / error / ready all render
           this header). A failed load leaves the page on its error branch while
@@ -377,8 +404,10 @@ function AnalyticsHeader({
           branch only would let `aria-invalid` travel without the
           `aria-describedby` target that explains it. Rendered as a sibling
           after the DateRangeField; the `id`/`aria-describedby` wiring is
-          DOM-location-independent so the association is unchanged. */}
-      {rangeInvalid && (
+          DOM-location-independent so the association is unchanged. Only shown
+          alongside the manual range (presets structurally cannot produce an
+          invalid range, so the node is irrelevant in preset mode). */}
+      {showCustomRange && rangeInvalid && (
         <p className="admin-panel__error" id={RANGE_ERROR_ID} data-testid="analytics-range-invalid">
           Isi kedua tanggal dengan format YYYY-MM-DD, dan pastikan tanggal mulai sebelum atau sama
           dengan tanggal akhir.

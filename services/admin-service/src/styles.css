@@ -916,7 +916,15 @@ fieldset {
 }
 .range-trend__svg {
   width: 100%;
-  height: auto;
+  /* Fixed height (manager feedback: Tren Pengunjung height "terlalu dinamis" —
+   * the prior `height:auto` + a viewBox width that grew with the day count made
+   * the rendered height swing from tall (7 days) to short (90 days), so the
+   * dashboard layout jumped on every range/mode change). The viewBox width is
+   * now fixed (RangeTrendChart); this fixed CSS height makes the BOX a stable
+   * unit so the card below never shifts. `preserveAspectRatio="xMidYMid meet"`
+   * letterboxes the content within the box (fills the card width on the
+   * analytics page with minimal vertical centering) — no sudden change. */
+  height: 15rem;
   display: block;
 }
 .range-trend__axis {
@@ -1434,6 +1442,12 @@ fieldset {
   align-items: center;
   gap: 0.5rem;
   width: 100%;
+  /* Manager feedback: the rentang tanggal was terlalu wide (full content
+   * width). Cap it to a comfortable date-input width. `width:100%` is kept so
+   * the trigger still fills narrower containers; on the wide analytics page the
+   * cap wins. The popover anchors to the full-width `.date-range-field` root,
+   * so capping the trigger does NOT shrink the two-month calendar popover. */
+  max-width: 22rem;
   min-height: 2.75rem;
   padding: 0 0.75rem;
   border: 1px solid var(--surface-2);
