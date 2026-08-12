@@ -242,14 +242,14 @@ fieldset {
   color: var(--text);
   font-size: 0.9rem;
 }
-/* `--top` relocates the live-ticket warning to the VERY TOP of its config card
-   (manager feedback: it was dempet-dempet against the editor and got missed).
-   Source order lets this single-class rule override the grouped
-   `.sm-warning, .admin-panel__warning` `margin: 0.75rem 0 0` (same specificity
-   0-1-0) — the grouped block is NOT touched (its styles.test.ts guard stays
-   green). The bottom margin gives breathing room before the <h2>. */
-.admin-panel__warning--top {
-  margin: 0 0 1rem;
+/* In-card action (e.g. the "Lihat Diagram" link in the state-machine section).
+   Mirrors the per-section save button's top spacing so a secondary action
+   following the warning has breathing room. The state-machine warning now sits
+   immediately before this action (the caution at the decision point), and the
+   base `.admin-panel__warning` margin gives the spacing above — this class only
+   adds the top gap the link needs. */
+.admin-panel__card-action {
+  margin-top: 1rem;
 }
 .sm-warning__intro,
 .sm-warning__outro {

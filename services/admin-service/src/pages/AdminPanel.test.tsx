@@ -863,9 +863,15 @@ describe('AdminPanel (post-wizard safety rails)', () => {
     // The alur status is resolved per operation, so a ticket sitting in a status
     // this save removes has no legal next step — its caller action buttons
     // vanish. The wizard framed this as one-time guided setup; the panel is a
-    // daily surface, so the consequence has to be stated. Manager feedback: the
-    // warning was dempet-dempet against the editor and got missed — it now sits
-    // at the VERY TOP of the section card so it commands attention first.
+    // daily surface, so the consequence has to be stated. Manager feedback moved
+    // this twice: first from the bottom of the card (dempat-dempet, missed) to
+    // the VERY TOP; that overcorrected — a caution above the <h2> detaches from
+    // what the manager is about to do and breaks the title-first rhythm every
+    // other section follows. It now sits at the DECISION POINT: immediately
+    // before the "Lihat Diagram" action, so the consequence carries maximum
+    // weight at the moment of action. The title is the first child again, and
+    // the `--top` modifier is gone (the base `.admin-panel__warning` margin gives
+    // the spacing, `admin-panel__card-action` gaps the link below it).
     const { api } = makeApi();
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
@@ -874,13 +880,23 @@ describe('AdminPanel (post-wizard safety rails)', () => {
     const warning = screen.getByTestId('state-machine-warning');
     expect(warning).toHaveTextContent(/tidak bisa dilanjutkan/i);
     expect(warning).toHaveTextContent(/panel caller/i);
-    // Pinned at the top of the section: the warning is the config card's first
-    // child (before the <h2>), so it is the first thing the manager reads.
+    // Title-first (matches every other config section): the config card's first
+    // child is the <h2>, NOT the warning.
     const card = warning.closest('.config-card');
     expect(card).not.toBeNull();
-    expect(card!.firstElementChild).toBe(warning);
-    // And it has the `--top` modifier (breathing room before the <h2>).
-    expect(warning).toHaveClass('admin-panel__warning--top');
+    expect(card!.firstElementChild).toHaveClass('config-card__title');
+    // The `--top` modifier is gone (dropped from CSS).
+    expect(warning).not.toHaveClass('admin-panel__warning--top');
+    // The warning sits AFTER the summary and BEFORE the "Lihat Diagram" link —
+    // i.e. at the decision point, right before the action it cautions.
+    const summary = screen.getByTestId('sm-summary');
+    const link = screen.getByTestId('sm-open-designer');
+    expect(
+      warning.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_PRECEDING,
+    ).toBeTruthy();
+    expect(
+      warning.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it('shows a nav error badge on an invalid section and clears it once fixed', async () => {
