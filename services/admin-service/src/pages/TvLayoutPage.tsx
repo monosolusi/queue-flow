@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { IAdminApi } from '../api/admin-api';
 import { useSystemConfigContext } from '../config/system-config-context';
 import {
@@ -29,14 +29,23 @@ import { toForm } from './admin-config/form';
 import { toStateMachineDto } from '../lib/state-machine';
 
 /**
- * The TV-display grid layout editor — a TradingView-style 12-column canvas
- * with a component palette. The manager drags components from the palette
- * onto the grid (or clicks a chip to add at the first free spot), drags placed
- * widgets to move them, drags the bottom-right resize handle to resize, and
- * removes widgets with a `×` button. Per-widget stepper controls (Kolom /
- * Baris / Lebar / Tinggi) are the precise, keyboard/AT-accessible path — the
- * jsdom-tested backbone (pointer DnD is browser-only, mirroring the
- * `use-drag-reorder` precedent).
+ * The TV-display grid layout page — a two-mode WYSIWYG flow.
+ *
+ * **Preview mode (default):** a read-only miniature "TV" rendering the layout
+ * at a small scale so the manager sees how the result looks BEFORE editing —
+ * each widget renders a representative visual of its component (a fake
+ * now-serving number, a waiting list, counter chips, a marquee strip), placed
+ * at its real grid rect. A single "Edit Tampilan" button opens the editor.
+ *
+ * **Edit mode:** a full-viewport fixed-overlay WYSIWYG editor (`role="dialog"
+ * aria-modal="true"`) — the palette + a large 12-column canvas that fills the
+ * viewport (no 70vh cap), so it finally reads as a WYSIWYG editor instead of a
+ * cramped embedded panel. "Selesai" (or Escape) returns to the preview; a
+ * successful save also returns to the preview so the manager sees the saved
+ * result. The overlay sits at `z-index: 40` — above the app shell (topbar
+ * `z-index: 10`, sticky sidebar) but below the toast viewport (`z-index: 60`),
+ * so a save toast stays readable above it (same layering rationale as the
+ * routing modal at `z-index: 50`).
  *
  * The page is a thin editor over the existing config save surface: it reads
  * the full config (`GET /api/system/config` via the shared
@@ -48,10 +57,13 @@ import { toStateMachineDto } from '../lib/state-machine';
  * "Tampilan TV disimpan" and calls the shared `refresh()` so every consumer
  * sees the new layout.
  *
- * SRP split: {@link TvLayoutEditor} is presentational (fed by `layout` +
- * `onChange`); this page owns the config read, the local draft, and the save.
- * The pure `lib/tv-grid-layout` helpers own validation/move/resize/add/remove
- * (the tested core); the pointer hooks are the browser-only UI layer.
+ * SRP split: {@link TvLayoutPreview} + {@link TvPreviewWidget} are
+ * presentational (fed by `layout`); {@link TvLayoutEditOverlay} is the
+ * presentational dialog chrome around the reusable {@link TvLayoutEditor}
+ * (palette + canvas, fed by `layout` + `onChange`); this page owns the config
+ * read, the local draft, the mode, and the save. The pure `lib/tv-grid-layout`
+ * helpers own validation/move/resize/add/remove (the tested core); the pointer
+ * hooks are the browser-only UI layer.
  *
  * `runningText` is no longer special-cased — it is a first-class widget placed
  * on the grid like the other four (the TV renders it wherever its rect lands,
@@ -63,6 +75,21 @@ export function TvLayoutPage({ api }: { api: IAdminApi }) {
   const [layout, setLayout] = useState<TvGridLayout | null>(null);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
+  // Preview-first WYSIWYG flow: the manager sees the small result, then opens
+  // the full-page editor. The draft persists across the two modes (it is the
+  // same `layout` state), so a "Selesai" that returns to the preview still
+  // shows the in-progress edits — the preview is a live preview of the draft.
+  const [mode, setMode] = useState<'preview' | 'edit'>('preview');
+  // A11y (WCAG 2.4.3): capture the "Edit Tampilan" trigger at click time so the
+  // overlay can restore focus to it on close. By mount time `document.activeElement`
+  // has already moved into the dialog, so the trigger must be captured in the
+  // click handler — mirrors the established `UserCreateModal` `returnFocusTo`
+  // pattern (see `UsersPage`).
+  const [editTrigger, setEditTrigger] = useState<HTMLElement | null>(null);
+  // Stable close handler so the overlay's Escape `useEffect` does not re-subscribe
+  // on every parent render (the listener is idempotent, but a fresh inline `onClose`
+  // each render would churn the deps needlessly).
+  const closeEditor = useCallback(() => setMode('preview'), []);
 
   // Initialize the local draft from the resolved config (coerced — a corrupt
   // GET projection never breaks the editor). `config` is `null` until the
@@ -124,6 +151,9 @@ export function TvLayoutPage({ api }: { api: IAdminApi }) {
       // Re-read the shared snapshot so every consumer (the TV service on its
       // next boot, the app chrome) sees the new layout.
       await refresh();
+      // A successful save returns to the preview so the manager sees the
+      // persisted result. A failed save stays in the editor so they can retry.
+      setMode('preview');
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -142,33 +172,280 @@ export function TvLayoutPage({ api }: { api: IAdminApi }) {
     );
   }
 
+  // The preview + header stay mounted while editing (the overlay floats above
+  // them as a sibling). They are `aria-hidden` while the modal is open so AT
+  // does not reach the background content behind the dialog — the overlay is
+  // rendered as a sibling OUTSIDE the `aria-hidden` subtree, so the dialog
+  // itself stays in the a11y tree.
   return (
-    <div className="page tv-layout-page">
-      <PageHeader
-        title="Tampilan TV"
-        subtitle="Susun komponen TV Display pada kisi 12 kolom. Perubahan diterapkan saat TV Display dimuat ulang."
-        actions={
+    <>
+      <div className="page tv-layout-page" aria-hidden={mode === 'edit' ? true : undefined}>
+        <PageHeader
+          title="Tampilan TV"
+          subtitle="Susun komponen TV Display pada kisi 12 kolom. Perubahan diterapkan saat TV Display dimuat ulang."
+          actions={
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={(e) => {
+                setEditTrigger(e.currentTarget as HTMLElement);
+                setMode('edit');
+              }}
+              data-testid="tv-layout-edit"
+            >
+              Edit Tampilan
+            </button>
+          }
+        />
+        <TvLayoutPreview layout={layout} />
+      </div>
+      {mode === 'edit' && (
+        <TvLayoutEditOverlay
+          layout={layout}
+          onChange={setLayout}
+          saving={saving}
+          valid={valid}
+          onSave={save}
+          onReset={resetToDefault}
+          onClose={closeEditor}
+          returnFocusTo={editTrigger}
+        />
+      )}
+    </>
+  );
+}
+
+// --- preview (read-only miniature TV) ---
+
+interface TvLayoutPreviewProps {
+  layout: TvGridLayout;
+}
+
+/** The preview's fixed CSS row height in px (a scaled-down miniature). */
+const PREVIEW_ROW_PX = 30;
+
+/**
+ * The read-only miniature "TV" — a small-scale rendering of the layout so the
+ * manager sees how the result looks before pressing "Edit Tampilan". Each
+ * widget is placed at its real grid rect and shows a representative visual of
+ * its component (fake data — a now-serving number, a waiting list, counter
+ * chips, a marquee strip). The grid is `aria-hidden` because the miniature is
+ * a decorative visual; the page heading + hint carry the a11y meaning.
+ *
+ * Presentational (SRP): fed by `layout`, no callbacks, no config context.
+ */
+function TvLayoutPreview({ layout }: TvLayoutPreviewProps) {
+  return (
+    <section className="tv-layout-preview" aria-labelledby="tv-layout-preview-title">
+      <div className="tv-layout-preview__caption">
+        <h2 id="tv-layout-preview-title" className="tv-layout-preview__title">
+          Pratinjau Tampilan TV
+        </h2>
+        <p className="tv-layout-preview__hint">
+          Ini tampilan TV Display dengan tata letak saat ini. Tekan &quot;Edit Tampilan&quot; untuk membuka editor halaman penuh.
+        </p>
+      </div>
+      <div className="tv-preview" data-testid="tv-preview">
+        <div className="tv-preview__bezel" data-testid="tv-preview__bezel">
+          <div className="tv-preview__screen">
+            <div
+              className="tv-preview__grid"
+              style={{
+                gridTemplateColumns: `repeat(${GRID_COLS}, 1fr)`,
+                gridAutoRows: `${PREVIEW_ROW_PX}px`,
+              }}
+              aria-hidden="true"
+            >
+              {layout.map((widget) => (
+                <div
+                  key={widget.id}
+                  className="tv-preview__widget"
+                  style={{
+                    gridColumn: `${widget.x + 1} / span ${widget.w}`,
+                    gridRow: `${widget.y + 1} / span ${widget.h}`,
+                  }}
+                  data-testid={`tv-preview__widget--${widget.id}`}
+                >
+                  <TvPreviewWidget component={widget.component} />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * A representative miniature visual for one TV component. The content is
+ * illustrative fake data (a placeholder number/list/chips/marquee) — it is NOT
+ * wired to live queue state. The preview answers "what will the TV look
+ * like?", not "what is being served right now?" (that is the TV board itself).
+ * The parent grid is `aria-hidden`, so this content is not exposed to AT.
+ */
+function TvPreviewWidget({ component }: { component: TvComponentType }) {
+  switch (component) {
+    case 'nowServing':
+      return (
+        <div className="tv-preview__now">
+          <span className="tv-preview__eyebrow">PERGI KE COUNTER</span>
+          <span className="tv-preview__num">A-001</span>
+          <span className="tv-preview__counter">Counter 1</span>
+        </div>
+      );
+    case 'waitingQueue':
+      return (
+        <ul className="tv-preview__list">
+          <li>A-002</li>
+          <li>A-003</li>
+          <li>A-004</li>
+        </ul>
+      );
+    case 'callHistory':
+      return (
+        <ul className="tv-preview__list tv-preview__list--muted">
+          <li>A-001 · Counter 1</li>
+          <li>B-001 · Counter 2</li>
+        </ul>
+      );
+    case 'countersServing':
+      return (
+        <div className="tv-preview__counters">
+          <span>1: A-001</span>
+          <span>2: —</span>
+          <span>3: B-002</span>
+        </div>
+      );
+    case 'runningText':
+      return (
+        <div className="tv-preview__marquee">
+          Nomor antrian tidak selalu berurutan — harap perhatikan panggilan nomor Anda.
+        </div>
+      );
+  }
+}
+
+// --- full-page edit overlay (WYSIWYG editor chrome) ---
+
+interface TvLayoutEditOverlayProps {
+  layout: TvGridLayout;
+  onChange: (next: TvGridLayout) => void;
+  saving: boolean;
+  valid: boolean;
+  onSave: () => void;
+  onReset: () => void;
+  onClose: () => void;
+  /** The element to return focus to when the dialog closes (WCAG 2.4.3) —
+   *  captured at trigger-click time by the parent page. */
+  returnFocusTo: HTMLElement | null;
+}
+
+/**
+ * The full-viewport editor dialog — a fixed overlay (`position: fixed; inset:
+ * 0`) that escapes the app shell for a true full-page WYSIWYG experience. It
+ * is a modal dialog (`role="dialog" aria-modal="true"`): Escape or "Selesai"
+ * returns to the preview. The header carries the save/reset/close actions; the
+ * body is the reusable presentational {@link TvLayoutEditor} (palette + large
+ * canvas).
+ *
+ * **Focus management (WCAG 2.4.3)** follows the established `UserCreateModal`
+ * shape: on open, focus moves into the dialog (the container is `tabindex={-1}`
+ * so it can receive focus; Tab then reaches the first control); on close,
+ * focus restores to the "Edit Tampilan" trigger captured by the parent.
+ * Presentational (SRP) — fed by `layout` + callbacks; owns no state except the
+ * focus + Escape listeners.
+ */
+function TvLayoutEditOverlay({
+  layout,
+  onChange,
+  saving,
+  valid,
+  onSave,
+  onReset,
+  onClose,
+  returnFocusTo,
+}: TvLayoutEditOverlayProps) {
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+
+  // A11y (WCAG 2.4.3): move focus into the dialog on open. The dialog container
+  // is `tabindex={-1}` so it can receive focus; Tab then moves to the first
+  // control (the "Kembalikan ke Default" button). Mirrors `UserCreateModal`'s
+  // `autoFocus` pattern (the editor has no primary input to focus, so the
+  // dialog container itself is the focus target).
+  useEffect(() => {
+    dialogRef.current?.focus();
+  }, []);
+
+  // A11y (WCAG 2.4.3): restore focus to the "Edit Tampilan" trigger when the
+  // dialog unmounts (Selesai / Escape / a successful save). `returnFocusTo` was
+  // captured at click time before focus moved into the dialog.
+  useEffect(() => {
+    return () => {
+      returnFocusTo?.focus?.();
+    };
+  }, [returnFocusTo]);
+
+  // Escape closes the dialog (guarded while saving so a mid-save Escape does
+  // not yank the manager out before the toast lands). The draft persists in
+  // the page's `layout` state, so close is non-destructive — "Selesai" is a
+  // view switch, not a discard. `onClose` is stable (parent `useCallback`).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape' && !saving) onClose();
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [saving, onClose]);
+
+  return (
+    <div
+      className="tv-layout-editor-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Sunting Tampilan TV"
+      tabIndex={-1}
+      ref={dialogRef}
+      data-testid="tv-layout-editor-overlay"
+    >
+      <header className="tv-layout-editor-overlay__header">
+        <div className="tv-layout-editor-overlay__heading">
+          <h2 className="tv-layout-editor-overlay__title">Sunting Tampilan TV</h2>
+          <p className="tv-layout-editor-overlay__subtitle">
+            Seret komponen dari panel kiri, atau klik untuk menambah. Seret kartu untuk memindahkan, seret gagang sudut untuk mengubah ukuran.
+          </p>
+        </div>
+        <div className="tv-layout-editor-overlay__actions">
           <button
             type="button"
             className="btn btn--ghost"
-            onClick={resetToDefault}
+            onClick={onReset}
             data-testid="tv-layout-reset"
           >
             Kembalikan ke Default
           </button>
-        }
-      />
-      <TvLayoutEditor layout={layout} onChange={setLayout} />
-      <div className="tv-layout-page__save">
-        <button
-          type="button"
-          className="btn btn--primary"
-          onClick={save}
-          disabled={saving || !valid}
-          data-testid="tv-layout-save"
-        >
-          {saving ? 'Menyimpan…' : 'Simpan'}
-        </button>
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={onSave}
+            disabled={saving || !valid}
+            data-testid="tv-layout-save"
+          >
+            {saving ? 'Menyimpan…' : 'Simpan'}
+          </button>
+          <button
+            type="button"
+            className="btn btn--ghost"
+            onClick={onClose}
+            disabled={saving}
+            data-testid="tv-layout-close"
+          >
+            Selesai
+          </button>
+        </div>
+      </header>
+      <div className="tv-layout-editor-overlay__body">
+        <TvLayoutEditor layout={layout} onChange={onChange} />
       </div>
     </div>
   );
