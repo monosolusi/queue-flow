@@ -81,6 +81,29 @@
   font-size: 0.9rem;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
+
+/* Connection handles — eight per node (source + target on every side) so a
+   transition edge can be drawn in any direction (down/up/left/right), not just
+   left-to-right. Themed to the accent with a surface ring so each dot reads
+   against the node; sized up from React Flow's 6px default so it is an easy
+   drag target. Non-connectable handles (default/read-only mode) are hidden by
+   React Flow so the read-only board stays clean. */
+.sm-canvas .react-flow__handle {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.sm-canvas .react-flow__handle.connectable {
+  cursor: crosshair;
+}
+/* Keep the connection-line + selected-edge accents on-brand too. */
+.sm-canvas .react-flow__connectionline .react-flow__edge-path,
+.sm-canvas .react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--accent);
+}
 /* Canonical (PRD §7 default) states get an accent border so the standard flow
    is recognizable at a glance. */
 .state-node--canonical {

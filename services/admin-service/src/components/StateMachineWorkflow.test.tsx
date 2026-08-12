@@ -222,6 +222,45 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it('renders vertical (top + bottom) connection handles on every node', () => {
+    // Feedback fix: the manager can draw a transition edge down/up only if each
+    // node has top + bottom connection handles (source + target), not just the
+    // left-right pair. Pin their presence + per-node count so a regression to
+    // the two-handle (left/right only) node is caught. React Flow stamps each
+    // handle with `data-handlepos` (top/right/bottom/left); one source + one
+    // target per side ⇒ 2 per side per node.
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
+    const stateCount = DEFAULT_STATE_MACHINE.states.length;
+    const top = document.querySelectorAll('.react-flow__handle[data-handlepos="top"]');
+    const bottom = document.querySelectorAll('.react-flow__handle[data-handlepos="bottom"]');
+    const left = document.querySelectorAll('.react-flow__handle[data-handlepos="left"]');
+    const right = document.querySelectorAll('.react-flow__handle[data-handlepos="right"]');
+    expect(top.length).toBe(stateCount * 2);
+    expect(bottom.length).toBe(stateCount * 2);
+    expect(left.length).toBe(stateCount * 2);
+    expect(right.length).toBe(stateCount * 2);
+  });
+
+  it('stamps the vertical handle ids matching HANDLE_IDS', () => {
+    // The edge's sourceHandle/targetHandle reference these ids; they MUST
+    // match the ids `formToFlow` seeds (DEFAULT_SOURCE_HANDLE etc.) exactly, or
+    // a seed edge would attach to no handle and render at the node center.
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
+    const handleIds = new Set(
+      Array.from(document.querySelectorAll('.react-flow__handle')).map(
+        (h) => h.getAttribute('data-handleid') ?? '',
+      ),
+    );
+    expect(handleIds.has('top-source')).toBe(true);
+    expect(handleIds.has('top-target')).toBe(true);
+    expect(handleIds.has('bottom-source')).toBe(true);
+    expect(handleIds.has('bottom-target')).toBe(true);
+    expect(handleIds.has('right-source')).toBe(true);
+    expect(handleIds.has('right-target')).toBe(true);
+    expect(handleIds.has('left-source')).toBe(true);
+    expect(handleIds.has('left-target')).toBe(true);
+  });
+
   it('mints opaque `sm-edge-N` ids for newly added edges (M1: disjoint id space)', () => {
     // Newly minted edges (onConnect / "+ Tambah Transisi") use an opaque
     // `sm-edge-N` id from a per-instance monotonic counter — a DISTINCT prefix

@@ -20,7 +20,7 @@ import {
   type NodeProps,
 } from '@xyflow/react';
 import { DEFAULT_STATE_MACHINE } from '../api/types';
-import type { FlowEdgeData, FlowNodeData } from '../lib/state-machine-flow';
+import { HANDLE_IDS, type FlowEdgeData, type FlowNodeData } from '../lib/state-machine-flow';
 
 /**
  * Handlers the parent provides via context. The node/edge components are
@@ -43,11 +43,29 @@ export const WorkflowContext = createContext<WorkflowHandlers | null>(null);
 /** The 5 PRD §7 default status names — used to flag canonical nodes visually. */
 const CANONICAL_STATES = new Set<string>(DEFAULT_STATE_MACHINE.states);
 
+/* Handle offset styles — the source/target pair on a side is spread along the
+ * side (30% / 70%) so both connection points are independently grabbable and
+ * never overlap. Top/bottom sides offset along the node width (`left`); left/
+ * right sides offset along the node height (`top`). React Flow centers a
+ * handle on its side by default; these inline overrides win. */
+const H_TOPBOT_START = { left: '30%' };
+const H_TOPBOT_END = { left: '70%' };
+const H_LEFTRT_START = { top: '30%' };
+const H_LEFTRT_END = { top: '70%' };
+
 /**
  * A state node: an editable name input (uppercased on input, mirroring the form
- * editor) flanked by left target + right source {@link Handle}s. The "Hapus"
- * button removes the state and cascades its transitions (parent handler). In
- * default mode the input is read-only and the Hapus button is hidden.
+ * editor) wrapped by EIGHT connection {@link Handle}s — source + target on
+ * every side (top, right, bottom, left) — so the manager can draw a transition
+ * edge in ANY direction (down, up, left, right), not just left-to-right. The
+ * "Hapus" button removes the state and cascades its transitions (parent
+ * handler). In default mode the input is read-only and the Hapus button is
+ * hidden (handles are non-connectable so no edge can be drawn).
+ *
+ * The handle `id`s match {@link HANDLE_IDS} exactly; an edge's
+ * `sourceHandle`/`targetHandle` reference them, and React Flow derives the
+ * bezier's exit/entry direction from the handle's `Position` — so a vertical
+ * edge (top/bottom handle) renders vertically with no edge-component change.
  */
 export function StateNode({ id, data }: NodeProps): JSX.Element {
   const ctx = useContext(WorkflowContext);
@@ -56,9 +74,17 @@ export function StateNode({ id, data }: NodeProps): JSX.Element {
   if (!ctx) return <></>;
   const isCanonical = CANONICAL_STATES.has(name);
   const readOnly = ctx.mode === 'default';
+  const connectable = !readOnly;
   return (
     <div className={`state-node${isCanonical ? ' state-node--canonical' : ''}`}>
-      <Handle type="target" position={Position.Left} isConnectable={!readOnly} />
+      <Handle type="source" position={Position.Top} id={HANDLE_IDS.topSource} isConnectable={connectable} style={H_TOPBOT_START} />
+      <Handle type="target" position={Position.Top} id={HANDLE_IDS.topTarget} isConnectable={connectable} style={H_TOPBOT_END} />
+      <Handle type="source" position={Position.Right} id={HANDLE_IDS.rightSource} isConnectable={connectable} style={H_LEFTRT_START} />
+      <Handle type="target" position={Position.Right} id={HANDLE_IDS.rightTarget} isConnectable={connectable} style={H_LEFTRT_END} />
+      <Handle type="source" position={Position.Bottom} id={HANDLE_IDS.bottomSource} isConnectable={connectable} style={H_TOPBOT_START} />
+      <Handle type="target" position={Position.Bottom} id={HANDLE_IDS.bottomTarget} isConnectable={connectable} style={H_TOPBOT_END} />
+      <Handle type="target" position={Position.Left} id={HANDLE_IDS.leftTarget} isConnectable={connectable} style={H_LEFTRT_START} />
+      <Handle type="source" position={Position.Left} id={HANDLE_IDS.leftSource} isConnectable={connectable} style={H_LEFTRT_END} />
       <input
         className="state-node__input"
         type="text"
@@ -77,7 +103,6 @@ export function StateNode({ id, data }: NodeProps): JSX.Element {
           Hapus
         </button>
       )}
-      <Handle type="source" position={Position.Right} isConnectable={!readOnly} />
     </div>
   );
 }

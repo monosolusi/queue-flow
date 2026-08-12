@@ -4,6 +4,9 @@ import {
   flowToGraph,
   formToFlow,
   nextStateName,
+  HANDLE_IDS,
+  DEFAULT_SOURCE_HANDLE,
+  DEFAULT_TARGET_HANDLE,
 } from './state-machine-flow';
 import { defaultStateMachineForm } from './state-machine';
 import { DEFAULT_STATE_MACHINE } from '../api/types';
@@ -71,6 +74,57 @@ describe('formToFlow', () => {
     expect(edges[0].data.actionLabel).toBe('Panggil Berikutnya');
   });
 
+  it('seeds every edge with the canonical L→R routing handles', () => {
+    // A seed/re-seed edge (rebuilt from a wire Transition, which carries no
+    // handle info) must get the default routing — out the right, into the left
+    // — so the default graph still reads left-to-right. The handle ids MUST
+    // match the `id` props on the StateNode's Handle elements exactly.
+    const form = defaultStateMachineForm();
+    const { edges } = formToFlow(form, {});
+    expect(edges.length).toBeGreaterThan(0);
+    for (const e of edges) {
+      expect(e.sourceHandle).toBe(DEFAULT_SOURCE_HANDLE);
+      expect(e.targetHandle).toBe(DEFAULT_TARGET_HANDLE);
+    }
+    expect(DEFAULT_SOURCE_HANDLE).toBe(HANDLE_IDS.rightSource);
+    expect(DEFAULT_TARGET_HANDLE).toBe(HANDLE_IDS.leftTarget);
+  });
+
+  it('preserves prior handle routing for surviving edges across a re-seed', () => {
+    // External re-seed preserves the manager-chosen side (a vertical edge
+    // stays vertical) via the handleMap arg, mirroring position preservation.
+    // Edges with no prior routing entry fall back to the L→R default.
+    const form = defaultStateMachineForm();
+    const handleMap = {
+      // WAITING->CALLING was a manager-drawn vertical edge (out the bottom,
+      // into the top) — it must keep that routing, not snap back to L→R.
+      'WAITING->CALLING': {
+        sourceHandle: HANDLE_IDS.bottomSource,
+        targetHandle: HANDLE_IDS.topTarget,
+      },
+    };
+    const { edges } = formToFlow(form, {}, handleMap);
+    const waitingCalling = edges.find((e) => e.source === 'WAITING' && e.target === 'CALLING')!;
+    expect(waitingCalling.sourceHandle).toBe(HANDLE_IDS.bottomSource);
+    expect(waitingCalling.targetHandle).toBe(HANDLE_IDS.topTarget);
+    // An edge with no prior routing entry falls back to the L→R default.
+    const callingServing = edges.find((e) => e.source === 'CALLING' && e.target === 'SERVING')!;
+    expect(callingServing.sourceHandle).toBe(DEFAULT_SOURCE_HANDLE);
+    expect(callingServing.targetHandle).toBe(DEFAULT_TARGET_HANDLE);
+  });
+
+  it('exposes eight handle ids — source + target on every side', () => {
+    // The manager can draw an edge in any direction (down/up/left/right) only
+    // if every side has both an outgoing (source) and incoming (target) handle.
+    // Pinning the full set guards against a regression that drops a side.
+    const ids = new Set(Object.values(HANDLE_IDS));
+    expect(ids.size).toBe(8);
+    for (const side of ['top', 'right', 'bottom', 'left'] as const) {
+      expect(HANDLE_IDS[`${side}Source` as keyof typeof HANDLE_IDS]).toBe(`${side}-source`);
+      expect(HANDLE_IDS[`${side}Target` as keyof typeof HANDLE_IDS]).toBe(`${side}-target`);
+    }
+  });
+
   it('reuses provided positions for surviving names and auto-layouts the rest', () => {
     const form = defaultStateMachineForm();
     const positions = { WAITING: { x: 10, y: 20 } };
@@ -99,6 +153,34 @@ describe('flowToGraph', () => {
     ];
     const { states } = flowToGraph(nodes, []);
     expect(states).toEqual(['C', 'A']);
+  });
+
+  it('drops sourceHandle/targetHandle — handle routing never reaches the wire', () => {
+    // The load-bearing invariant of the vertical-edges feature: handle fields
+    // are CANVAS-ONLY. flowToGraph must emit a Transition with exactly
+    // { from, to, actionLabel } — never sourceHandle/targetHandle — so the PUT
+    // /api/system/config payload (and the StateMachineDto wire contract) is
+    // unchanged. An explicit keys assertion gives a clear regression message
+    // (the round-trip toEqual guards it implicitly but doesn't name the rule).
+    const nodes = [
+      { id: 'A', type: 'state', position: { x: 0, y: 0 }, data: { name: 'A' } },
+      { id: 'B', type: 'state', position: { x: 0, y: 0 }, data: { name: 'B' } },
+    ];
+    const edges: import('./state-machine-flow').FlowEdge[] = [
+      {
+        id: 'A->B#0',
+        source: 'A',
+        target: 'B',
+        type: 'transition',
+        data: { actionLabel: 'go' },
+        sourceHandle: HANDLE_IDS.bottomSource,
+        targetHandle: HANDLE_IDS.topTarget,
+      },
+    ];
+    const { transitions } = flowToGraph(nodes, edges);
+    expect(transitions).toHaveLength(1);
+    expect(Object.keys(transitions[0]).sort()).toEqual(['actionLabel', 'from', 'to']);
+    expect(transitions[0]).toEqual({ from: 'A', to: 'B', actionLabel: 'go' });
   });
 });
 
