@@ -1460,6 +1460,25 @@ Token conventions:
 - The focus baseline uses `:where(...):focus-visible` for **zero
   specificity** so service overrides win; `.pressable` is the opt-in `:active`
   pressed-state utility for cards.
+- **`.btn` must be element-agnostic — `display: inline-block` +
+  `text-decoration: none` + `text-align: center` on the base `.btn` rule.**
+  The utility is applied to BOTH native `<button>` (caller/kiosk) and `<Link>`
+  anchors (admin: "Lihat Diagram", "Kembali", dashboard/analytics/audit nav).
+  An anchor is `display: inline` by default, so without `inline-block` its
+  vertical padding (0.9rem) overflows the line box and **overlaps neighbouring
+  content** (the "tumpang tindih" manager reported on `/admin/config` Alur Status
+  Tiket — the "Lihat Diagram" Link's padded box collided with the summary above
+  and the Simpan button below), and it keeps the default anchor **underline**
+  ("button ada garis bawahnya") so it didn't read as the shared button component.
+  A native `<button>` is already inline-block with no underline and centered
+  text, so the three declarations are a **no-op for button-based `.btn`** and
+  only lift anchor-based `.btn` to parity. jsdom runs `css: false` so the
+  detector can't catch a regression — a static guard in
+  `admin-service/src/styles.test.ts` (`intRule('.btn')` asserting the three
+  declarations) is the regression backstop. This is a shared-baseline concern
+  (the utility promised "button" but only delivered it for `<button>`), so it
+  lives in the canonical `shared/design-tokens/interactions.css` and re-syncs to
+  the vendored copies — NOT a per-service admin override.
 - **`:where()` is for a SHARED baseline yielding to service overrides — NEVER
   for a service rule overriding its own base.** `:where(.x[aria-pressed='true'])`
   zeroes the whole selector to specificity (0,0,0); the service's own `.x` base
