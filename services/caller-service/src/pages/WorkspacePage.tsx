@@ -42,7 +42,7 @@ export function WorkspacePage({ bound, onUnbind }: WorkspacePageProps) {
         <div className="workspace__body">
           <ActiveTicketCard ticket={active} />
           <WaitingQueueList tickets={state.waiting} waitingCount={state.waitingCount} />
-          <ActionControls api={api} bound={bound} active={active} />
+          <ActionControls api={api} bound={bound} active={active} configVersion={state.configVersion} />
         </div>
       )}
     </main>

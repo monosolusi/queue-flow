@@ -152,7 +152,8 @@ export type QueueLifecycleEventType =
   | 'TICKET_CALLED'
   | 'STATUS_UPDATED'
   | 'SYSTEM_RESET'
-  | 'TICKET_TRANSFERRED';
+  | 'TICKET_TRANSFERRED'
+  | 'SYSTEM_CONFIG_CHANGED';
 
 export interface TicketCreatedPayload {
   readonly ticketNumber: string;
@@ -177,13 +178,22 @@ export interface TicketTransferredPayload {
   readonly fromTicketNumber: string;
   readonly toTicketNumber: string;
 }
+/**
+ * `SYSTEM_CONFIG_CHANGED` carries no fields — a pure refetch signal. The TV
+ * does not act on it (its reducer's `default` ignores it); the type is mirrored
+ * only to keep the duplicated wire contract in lock-step with core-api
+ * (frontend-conventions-gotchas). A future TV that refetches config on this
+ * event would handle it here.
+ */
+export interface SystemConfigChangedPayload {}
 
 export type QueueLifecyclePayload =
   | TicketCreatedPayload
   | TicketCalledPayload
   | StatusUpdatedPayload
   | SystemResetPayload
-  | TicketTransferredPayload;
+  | TicketTransferredPayload
+  | SystemConfigChangedPayload;
 
 /** The broadcast envelope every connected LAN client receives on /ws. */
 export interface QueueLifecycleWireEvent {

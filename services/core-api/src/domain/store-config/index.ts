@@ -1,4 +1,5 @@
 export * from './counter-routing-rule.aggregate';
+export * from './events/system-configuration-changed.event';
 export * from './repositories/counter-routing-rule.repository';
 export * from './repositories/system-configuration.repository';
 export * from './scheduler.port';

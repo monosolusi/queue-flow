@@ -41,6 +41,20 @@ module.exports = {
       to: { path: '^src/domain/store-config/' },
     },
     {
+      // Bounded-context anti-corruption (application layer): a Store Config use
+      // case must not reach into the Queue context's application layer. Cross-
+      // context realtime/audit seams go through shared-kernel ports
+      // (IEventDispatcher for the SYSTEM_CONFIG_CHANGED broadcast — FR-CLR-02,
+      // IDailyResetSchedulerPort for cron re-arm), not a Queue-owned concrete
+      // class. Mirrors `queue-no-store-config` at the application tier so the
+      // dependency points at the abstraction (DIP), keeping the contexts
+      // substitutable independently.
+      name: 'application-store-config-no-queue',
+      severity: 'error',
+      from: { path: '^src/application/store-config/' },
+      to: { path: '^src/application/queue/' },
+    },
+    {
       // Bounded-context anti-corruption (QUE-43): the Identity context must not
       // import any other bounded context's internals. Identity (users/sessions/
       // auth) is self-contained — it shares only the shared kernel (Identifier,

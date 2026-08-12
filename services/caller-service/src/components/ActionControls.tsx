@@ -24,12 +24,19 @@ export interface ActionControlsProps {
   readonly active: TicketStateDto | null;
   /** Test seam: inject the state machine directly instead of fetching it. */
   readonly stateMachine?: StateMachineDto | null;
+  /** Monotonic counter bumped by the store on every `SYSTEM_CONFIG_CHANGED`
+   *  WS event. A bump re-runs the fetch effect so the panel reflects the
+   *  admin-designed flow + its `actionLabel` wording without a reload
+   *  (FR-CLR-02). Omitted in unit tests that inject {@link stateMachine}. */
+  readonly configVersion?: number;
 }
 
 /**
  * Dynamic action buttons driven by the active state machine (FR-CLR-02 /
- * QUE-20). The always-present primary "Panggil Berikutnya" button issues
- * `call-next` for the bound counter (it is not tied to a specific ticket). It
+ * QUE-20). The always-present primary call-next button issues `call-next` for
+ * the bound counter (it is not tied to a specific ticket) and is labeled with
+ * the admin-configured `WAITING → CALLING` transition's `actionLabel`, so the
+ * panel honors the admin's wording for that edge too (not a hardcoded literal). It
  * is **disabled while an unresolved active ticket occupies the counter**: the
  * caller store projects `active` to only non-terminal in-progress tickets
  * (CALLING / SERVING / a custom in-progress state), so `active !== null` means
@@ -47,7 +54,7 @@ export interface ActionControlsProps {
  * pending flag guards against double-fire. Illegal transitions surface as an
  * inline error (core-api returns 409).
  */
-export function ActionControls({ api, bound, active, stateMachine }: ActionControlsProps) {
+export function ActionControls({ api, bound, active, stateMachine, configVersion }: ActionControlsProps) {
   const [sm, setSm] = useState<StateMachineDto | null>(stateMachine ?? null);
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +71,10 @@ export function ActionControls({ api, bound, active, stateMachine }: ActionContr
   // flipped before the first `await` so the second tap is blocked synchronously.
   const inFlightRef = useRef(false);
 
-  // Load the active state machine once (or use the injected test seam).
+  // Load the active state machine, and refetch it whenever the store signals a
+  // SYSTEM_CONFIG_CHANGED event (bumps `configVersion`). The injected test seam
+  // short-circuits the fetch; a `configVersion` bump under the seam just re-sets
+  // the seam (harmless — no fetch), so the prop is a no-op in seam-backed tests.
   useEffect(() => {
     if (stateMachine !== undefined) {
       setSm(stateMachine);
@@ -84,7 +94,21 @@ export function ActionControls({ api, bound, active, stateMachine }: ActionContr
     return () => {
       cancelled = true;
     };
-  }, [api, stateMachine]);
+  }, [api, stateMachine, configVersion]);
+
+  /** The admin-configured label for the `WAITING → CALLING` transition — the
+   *  one the call-next button actually drives (callNext pulls a WAITING ticket
+   *  and the aggregate validates that exact edge, so it must exist whenever
+   *  call-next is functional). The button therefore uses the admin's wording,
+   *  not a hardcoded literal, falling back to the PRD default when the edge is
+   *  absent or the graph has not loaded yet (FR-CLR-02). */
+  const callNextLabel = useMemo(() => {
+    if (!sm) return 'Panggil Berikutnya';
+    return (
+      sm.transitions.find((t) => t.from === 'WAITING' && t.to === 'CALLING')?.actionLabel ??
+      'Panggil Berikutnya'
+    );
+  }, [sm]);
 
   const edges = useMemo<readonly StateTransitionDto[]>(() => {
     if (!sm || !active) return [];
@@ -138,7 +162,7 @@ export function ActionControls({ api, bound, active, stateMachine }: ActionContr
         disabled={pending === 'call-next' || active !== null}
         title={active !== null ? 'Selesaikan tiket aktif terlebih dahulu (layani, lewati, atau selesaikan)' : undefined}
       >
-        {pending === 'call-next' ? 'Memanggil…' : 'Panggil Berikutnya'}
+        {pending === 'call-next' ? 'Memanggil…' : callNextLabel}
       </button>
 
       {/* "Panggil Lagi" — re-announce the currently-calling ticket. A fixed

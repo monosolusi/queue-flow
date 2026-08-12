@@ -1,5 +1,5 @@
 import { DomainEvent } from '../../src/domain/shared/domain-event';
-import { Identifier } from '../../src/domain/shared';
+import { Identifier, SYSTEM_AGGREGATE_ID } from '../../src/domain/shared';
 import {
   DailyQueueResetEvent,
   TicketCalledEvent,
@@ -7,6 +7,7 @@ import {
   TicketStatusChangedEvent,
   TicketTransferredEvent,
 } from '../../src/domain/queue';
+import { SystemConfigurationChangedEvent } from '../../src/domain/store-config';
 import { WireEventMapper } from '../../src/interface-adapters/websocket/wire-event.mapper';
 
 describe('WireEventMapper', () => {
@@ -75,6 +76,18 @@ describe('WireEventMapper', () => {
         fromTicketNumber: 'A-001',
         toTicketNumber: 'B-007',
       },
+    });
+  });
+
+  it('maps SystemConfigurationChangedEvent to a SYSTEM_CONFIG_CHANGED envelope', () => {
+    const wire = mapper.toWire(new SystemConfigurationChangedEvent(now));
+    expect(wire).toEqual({
+      type: 'SYSTEM_CONFIG_CHANGED',
+      aggregateId: SYSTEM_AGGREGATE_ID,
+      occurredAt: now,
+      version: 1,
+      // Pure refetch signal — no fields (FR-CLR-02).
+      payload: {},
     });
   });
 

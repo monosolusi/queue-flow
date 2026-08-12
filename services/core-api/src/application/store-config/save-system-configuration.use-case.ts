@@ -15,12 +15,14 @@ import { type IDailyResetSchedulerPort } from '../../domain/store-config';
 import {
   Identifier,
   InvalidValueObjectException,
+  type IEventDispatcher,
   type ITransactionManager,
   NoOpTransactionManager,
   type PriorityPolicy,
 } from '../../domain/shared';
 import { AuditAction, toSnapshot } from '../../domain/audit';
 import { type RecordAuditEntryUseCase } from '../audit/record-audit-entry.use-case';
+import { SystemConfigurationChangedEvent } from '../../domain/store-config';
 import {
   type ConfigCategoryDto,
   type ConfigRoutingRuleDto,
@@ -155,12 +157,22 @@ function dailyResetPolicySnapshot(p: DailyResetPolicy): {
  * to an un-persisted policy (NFR-REL-02), the same dispatch-after-commit pattern
  * the daily-reset engine uses for `SYSTEM_RESET`.
  *
- * `recordAudit`, `txManager`, and `scheduler` are optional with no-op/null
- * defaults, so unit tests can construct the use case directly with just the
- * three repository ports. Depends only on ports + the application-layer audit
- * seam (DIP): no ORM, HTTP framework, or I/O library (NFR-MNT-01). The
- * controller is the anti-corruption translation point that turns the HTTP
- * wizard payload into this command.
+ * Also post-commit, the use case broadcasts a {@link SystemConfigurationChangedEvent}
+ * so connected caller panels refetch the active state machine and reflect the
+ * admin-designed flow + its `actionLabel` wording without a page reload
+ * (FR-CLR-02). Without this, a mid-session reconfiguration leaves a caller
+ * panel on a stale snapshot — rendering removed transitions as buttons that
+ * 409 on tap and hiding newly added / relabeled ones.
+ *
+ * `recordAudit`, `txManager`, `scheduler`, and `dispatcher` are optional with
+ * no-op/null defaults, so unit tests can construct the use case directly with
+ * just the three repository ports. Depends only on ports (DIP): no ORM, HTTP
+ * framework, or I/O library (NFR-MNT-01). The `dispatcher` port lives in the
+ * shared kernel (`IEventDispatcher`), so this Store Config use case never
+ * reaches into the Queue context's application layer to broadcast — the
+ * interface-adapter layer wires the Queue-owned `QueueEventDispatcher` under
+ * the shared token. The controller is the anti-corruption translation point
+ * that turns the HTTP wizard payload into this command.
  */
 export class SaveSystemConfigurationUseCase {
   constructor(
@@ -170,6 +182,18 @@ export class SaveSystemConfigurationUseCase {
     private readonly txManager: ITransactionManager = new NoOpTransactionManager(),
     private readonly recordAudit: RecordAuditEntryUseCase | null = null,
     private readonly scheduler: IDailyResetSchedulerPort | null = null,
+    /**
+     * Broadcasts {@link SystemConfigurationChangedEvent} post-commit so connected
+     * caller panels refetch the active state machine and reflect the new flow +
+     * `actionLabel` wording without a reload (FR-CLR-02). Optional with a null
+     * default so unit tests construct the use case with the three repository
+     * ports alone; the interface-adapter layer wires the
+     * {@link IEventDispatcher} port (the Queue-owned `QueueEventDispatcher` is
+     * the concrete implementation). The port lives in the shared kernel, so
+     * this Store Config use case depends on the abstraction, not on a
+     * Queue-owned concrete class (DIP / bounded-context anti-corruption).
+     */
+    private readonly dispatcher: IEventDispatcher | null = null,
   ) {}
 
   public async execute(
@@ -305,6 +329,16 @@ export class SaveSystemConfigurationUseCase {
     //    null in unit tests that don't care about the cron.
     if (this.scheduler && dailyResetPolicyChanged) {
       await this.scheduler.reArm();
+    }
+
+    // 4. Post-commit: broadcast SYSTEM_CONFIG_CHANGED so connected caller
+    //    panels refetch the active state machine and reflect the admin-designed
+    //    flow + its `actionLabel` wording without a page reload (FR-CLR-02).
+    //    Post-commit for the same reason as the scheduler re-arm — a rolled-back
+    //    save never announces an un-persisted configuration (NFR-REL-02). The
+    //    event is a pure refetch signal; `dispatcher` is null in unit tests.
+    if (this.dispatcher) {
+      await this.dispatcher.dispatchEvents([new SystemConfigurationChangedEvent()]);
     }
 
     return result;
