@@ -522,6 +522,17 @@ describe('relative-range presets + range-trend bar/line toggle', () => {
     expect(active).toContain('color: var(--accent-contrast)');
   });
 
+  it('.analytics__custom-range is a flex-wrap row that resets the .field margin', () => {
+    const r = rule('.analytics__custom-range');
+    expect(r).toContain('display: flex');
+    expect(r).toContain('flex-wrap: wrap');
+    // The `.field` base carries `margin-bottom: 1rem` for stacked form rows;
+    // inside the single-row custom panel it must be reset to 0 so the labeled
+    // Dari/Sampai inputs do not droop below the preset buttons above.
+    const fieldReset = rule('.analytics__custom-range .field');
+    expect(fieldReset).toContain('margin-bottom: 0');
+  });
+
   it('.range-trend__head lays the h2 + mode toggle in a space-between flex row', () => {
     const head = rule('.range-trend__head');
     expect(head).toContain('display: flex');

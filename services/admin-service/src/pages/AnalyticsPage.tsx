@@ -61,6 +61,13 @@ export function AnalyticsPage({
   const toast = useToast();
   const [from, setFrom] = useState<string>(daysAgoLocalKey(6));
   const [to, setTo] = useState<string>(todayLocalKey());
+  // Whether the manual Dari/Sampai date-range panel is open. The panel is
+  // hidden by default — the manager picks a quick relative-range preset, and
+  // taps "Kustom" only when they need a hand-picked range. This is an explicit
+  // UI mode, NOT a duplicate of `from`/`to`: the reveal is orthogonal to the
+  // range value (see RelativeRangePicker for why an explicit flag beats a pure
+  // derivation now that a "Kustom" affordance exists).
+  const [customMode, setCustomMode] = useState(false);
   const [state, setState] = useState<ViewState>({ status: 'loading' });
   const [exporting, setExporting] = useState(false);
   // Synchronous double-click guard — `exporting` only lands after a re-render,
@@ -95,9 +102,11 @@ export function AnalyticsPage({
   // NO separate `preset` state to drift. A preset `days` is active iff `to` is
   // today AND `from` is exactly `daysAgoLocalKey(days - 1)` (the preset's first
   // day). The default page state (`from=daysAgoLocalKey(6)`, `to=todayLocalKey()`)
-  // → "7 hari" is active on first render. The moment the manager manually edits
-  // either DateField, the derivation returns `null` (custom) with no extra
-  // wiring — `aria-pressed` on the preset buttons follows for free.
+  // → "7 hari" is active on first render. This derivation is only consulted for
+  // the preset buttons' `aria-pressed` while NOT in `customMode` (see
+  // RelativeRangePicker) — entering custom mode clears the pressed preset
+  // explicitly, so a hand-edited range that coincidentally lands on a preset
+  // does not flip the mode back.
   const activeDays = useMemo(() => {
     if (to !== todayLocalKey()) return null;
     for (const p of RELATIVE_PRESETS) {
@@ -110,11 +119,19 @@ export function AnalyticsPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [from, to]);
 
-  /** Jumps the range to the last `days` days. A preset click always produces a
-   *  pair of well-formed, in-order keys, so it never trips `rangeInvalid`. */
+  /** Jumps the range to the last `days` days and closes the custom panel. A
+   *  preset click always produces a pair of well-formed, in-order keys, so it
+   *  never trips `rangeInvalid`. */
   function selectRelative(days: number) {
+    setCustomMode(false);
     setFrom(daysAgoLocalKey(days - 1));
     setTo(todayLocalKey());
+  }
+
+  /** Reveals the manual Dari/Sampai date-range panel. Keeps the current
+   *  `from`/`to` so the manager sees the range they are customizing from. */
+  function selectCustom() {
+    setCustomMode(true);
   }
 
   useEffect(() => {
@@ -179,7 +196,9 @@ export function AnalyticsPage({
     toInvalid,
     rangeInvalid,
     activeDays,
+    customMode,
     onSelectRelative: selectRelative,
+    onSelectCustom: selectCustom,
   };
 
   if (state.status === 'loading') {
@@ -323,7 +342,9 @@ function AnalyticsHeader({
   toInvalid,
   rangeInvalid,
   activeDays,
+  customMode,
   onSelectRelative,
+  onSelectCustom,
 }: {
   from: string;
   to: string;
@@ -337,41 +358,35 @@ function AnalyticsHeader({
   toInvalid: boolean;
   /** Their union — gates the export button and renders the shared error node. */
   rangeInvalid: boolean;
-  /** The derived active relative-range preset (`null` = custom range). */
+  /** The derived active relative-range preset (`null` = custom range). Only
+   *  consulted for the preset buttons' `aria-pressed` while `!customMode`. */
   activeDays: number | null;
-  /** Jump the range to the last `days` days. */
+  /** Whether the manual Dari/Sampai panel is open. */
+  customMode: boolean;
+  /** Jump the range to the last `days` days (and close the custom panel). */
   onSelectRelative: (days: number) => void;
+  /** Reveal the manual Dari/Sampai date-range panel. */
+  onSelectCustom: () => void;
 }) {
   return (
     <>
       <PageHeader
         title="Analitik & Laporan"
         subtitle="Ekspor laporan lokal (.xlsx)"
-        actionsAlign="end"
         actions={
           <>
-            {/* Quick relative-range presets — rendered BEFORE the manual Dari/
-                Sampai pickers so the manager can one-tap a common range, then
-                fine-tune with the date fields. The actions row flex-wraps, so
-                the preset group + the two date fields lay out without overflow. */}
-            <RelativeRangePicker activeDays={activeDays} onSelect={onSelectRelative} />
-            <DateField
-              label="Dari"
-              value={from}
-              onChange={onFromChange}
-              ariaLabel="Tanggal mulai"
-              testId="analytics-from"
-              invalid={fromInvalid}
-              describedById={fromInvalid ? RANGE_ERROR_ID : undefined}
-            />
-            <DateField
-              label="Sampai"
-              value={to}
-              onChange={onToChange}
-              ariaLabel="Tanggal akhir"
-              testId="analytics-to"
-              invalid={toInvalid}
-              describedById={toInvalid ? RANGE_ERROR_ID : undefined}
+            {/* The range selector — quick relative-range presets + a "Kustom"
+                toggle that reveals the manual Dari/Sampai fields below. The
+                actions row is all equal-height buttons now (no labeled fields
+                in the row), so it uses the default center alignment — the
+                prior `actionsAlign="end"` was a workaround for mixing labeled
+                DateFields with unlabeled buttons in one row, which is exactly
+                the misalignment the manager reported. */}
+            <RelativeRangePicker
+              activeDays={activeDays}
+              customMode={customMode}
+              onSelect={onSelectRelative}
+              onSelectCustom={onSelectCustom}
             />
             <button
               type="button"
@@ -390,6 +405,34 @@ function AnalyticsHeader({
           </>
         }
       />
+      {/* The manual date-range panel — revealed only when the manager taps
+          "Kustom". It lives on its own row below the header (not in the
+          actions row) so the labeled Dari/Sampai fields no longer clash with
+          the unlabeled preset buttons above. The `from`/`to` the header holds
+          are pre-filled with the current range, so the manager customizes from
+          whatever preset they were on. */}
+      {customMode && (
+        <div className="analytics__custom-range" role="group" aria-label="Rentang kustom">
+          <DateField
+            label="Dari"
+            value={from}
+            onChange={onFromChange}
+            ariaLabel="Tanggal mulai"
+            testId="analytics-from"
+            invalid={fromInvalid}
+            describedById={fromInvalid ? RANGE_ERROR_ID : undefined}
+          />
+          <DateField
+            label="Sampai"
+            value={to}
+            onChange={onToChange}
+            ariaLabel="Tanggal akhir"
+            testId="analytics-to"
+            invalid={toInvalid}
+            describedById={toInvalid ? RANGE_ERROR_ID : undefined}
+          />
+        </div>
+      )}
       {/* Owned by AnalyticsHeader, not by a single view branch, so it renders
           in every state the page can be in (loading / error / ready all render
           this header). The fields are flagged from the same `from`/`to` the
