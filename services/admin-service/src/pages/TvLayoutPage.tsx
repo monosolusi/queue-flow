@@ -22,7 +22,6 @@ import {
   resizeWidget,
 } from '../lib/tv-grid-layout';
 import { useGridDnd } from '../lib/use-grid-dnd';
-import { usePalettePlace } from '../lib/use-palette-place';
 import { PageHeader } from '../components/PageHeader';
 import { useToast } from '../toast/useToast';
 import { toForm } from './admin-config/form';
@@ -62,8 +61,9 @@ import { toStateMachineDto } from '../lib/state-machine';
  * presentational dialog chrome around the reusable {@link TvLayoutEditor}
  * (palette + canvas, fed by `layout` + `onChange`); this page owns the config
  * read, the local draft, the mode, and the save. The pure `lib/tv-grid-layout`
- * helpers own validation/move/resize/add/remove (the tested core); the pointer
- * hooks are the browser-only UI layer.
+ * helpers own validation/move/resize/add/remove (the tested core); the
+ * in-canvas pointer DnD hook (`useGridDnd`) is the browser-only UI layer;
+ * palette add is click-to-add (a11y + jsdom-tested).
  *
  * `runningText` is no longer special-cased — it is a first-class widget placed
  * on the grid like the other four (the TV renders it wherever its rect lands,
@@ -412,7 +412,7 @@ function TvLayoutEditOverlay({
         <div className="tv-layout-editor-overlay__heading">
           <h2 className="tv-layout-editor-overlay__title">Sunting Tampilan TV</h2>
           <p className="tv-layout-editor-overlay__subtitle">
-            Seret komponen dari panel kiri, atau klik untuk menambah. Seret kartu untuk memindahkan, seret gagang sudut untuk mengubah ukuran.
+            Klik komponen di panel kiri untuk menambah. Seret kartu untuk memindahkan, seret gagang sudut untuk mengubah ukuran.
           </p>
         </div>
         <div className="tv-layout-editor-overlay__actions">
@@ -462,10 +462,12 @@ interface TvLayoutEditorProps {
 const ROW_HEIGHT_PX = 56;
 
 /**
- * The presentational editor: a palette of draggable component chips + a
+ * The presentational editor: a palette of click-to-add component chips + a
  * 12-column grid canvas of placed widgets. Fed by `layout` + `onChange` — no
- * config context, no save (SRP). The pointer DnD (move/resize/palette-place)
- * is the fast path; the per-widget steppers are the precise + a11y path.
+ * config context, no save (SRP). The in-canvas pointer DnD (move card + drag
+ * the corner grip to resize) is the fast path; the per-widget steppers are
+ * the precise + a11y path. Adding a component is click-to-add (the chip's
+ * `onClick` calls `addWidget(layout, component)` → free-spot placement).
  */
 function TvLayoutEditor({ layout, onChange }: TvLayoutEditorProps) {
   const canvasRef = useRef<HTMLDivElement | null>(null);
@@ -476,24 +478,6 @@ function TvLayoutEditor({ layout, onChange }: TvLayoutEditorProps) {
     layout,
     onMove: (id, x, y) => onChange(moveWidget(layout, id, x, y)),
     onResize: (id, w, h) => onChange(resizeWidget(layout, id, w, h)),
-  });
-
-  const palette = usePalettePlace({
-    canvasRef,
-    rowHeight: ROW_HEIGHT_PX,
-    layout,
-    onPlace: (component, x, y) => {
-      const result = addWidget(layout, component, { x, y });
-      if (result === null) {
-        // The preview was valid, but a concurrent edit could still leave no
-        // room — fall back to free-spot. If still none, the editor toasts.
-        const fallback = addWidget(layout, component);
-        if (fallback === null) return;
-        onChange(fallback.layout);
-        return;
-      }
-      onChange(result.layout);
-    },
   });
 
   // A tiny local toast channel for the palette's "no room" message — the page-
@@ -512,27 +496,17 @@ function TvLayoutEditor({ layout, onChange }: TvLayoutEditorProps) {
     onChange(result.layout);
   }
 
-  // Merge pointer handlers from both hooks onto the canvas.
-  function handleCanvasPointerMove(e: React.PointerEvent) {
-    dnd.onPointerMove(e);
-    palette.onPointerMove(e);
-  }
-  function handleCanvasPointerUp() {
-    dnd.onPointerUp();
-    palette.onPointerUp();
-  }
-
   return (
     <div className="tv-layout-editor">
       <div className="tv-layout__page">
         <div className="tv-layout__palette" role="group" aria-label="Komponen TV" data-testid="tv-layout__palette">
+          <p className="tv-layout__caption tv-layout__palette-caption">Komponen</p>
           {TV_COMPONENT_TYPES.map((type) => (
             <button
               key={type}
               type="button"
-              className={`tv-layout__chip${palette.placing === type ? ' tv-layout__chip--placing' : ''}`}
+              className="tv-layout__chip"
               onClick={() => handleChipClick(type)}
-              onPointerDown={(e) => palette.onChipPointerDown(e, type)}
               aria-label={`Tambah ${TV_COMPONENT_LABELS[type]}`}
               data-testid={`tv-layout__chip--${type}`}
             >
@@ -542,108 +516,105 @@ function TvLayoutEditor({ layout, onChange }: TvLayoutEditorProps) {
           ))}
         </div>
 
-        <div
-          className="tv-layout__canvas"
-          ref={canvasRef}
-          onPointerMove={handleCanvasPointerMove}
-          onPointerUp={handleCanvasPointerUp}
-          onPointerCancel={handleCanvasPointerUp}
-          data-testid="tv-layout__canvas"
-        >
-          <div
-            className="tv-layout__grid"
-            style={{
-              gridTemplateColumns: `repeat(${GRID_COLS}, 1fr)`,
-              gridAutoRows: `${ROW_HEIGHT_PX}px`,
-            }}
-            aria-label="Kisi tata letak TV"
-          >
-            {layout.map((widget) => {
-              const isDragging = dnd.activeId === widget.id;
-              const preview = dnd.preview?.id === widget.id ? dnd.preview : null;
-              const invalid = preview !== null && !preview.valid;
-              // When dragging, render the widget at its preview rect so the
-              // manager sees the live move; otherwise at its committed rect.
-              const x = preview?.x ?? widget.x;
-              const y = preview?.y ?? widget.y;
-              const w = preview?.w ?? widget.w;
-              const h = preview?.h ?? widget.h;
-              return (
-                <div
-                  key={widget.id}
-                  className={
-                    `tv-layout__widget` +
-                    (isDragging ? ' tv-layout__widget--dragging' : '') +
-                    (invalid ? ' tv-layout__widget--invalid' : '')
-                  }
-                  style={{
-                    gridColumn: `${x + 1} / span ${w}`,
-                    gridRow: `${y + 1} / span ${h}`,
-                  }}
-                  onPointerDown={(e) => dnd.onWidgetPointerDown(e, widget)}
-                  data-testid={`tv-layout__widget--${widget.id}`}
-                >
-                  <div className="tv-layout__widget-header">
-                    <span className="tv-layout__widget-name">{TV_COMPONENT_LABELS[widget.component]}</span>
-                    <button
-                      type="button"
-                      className="tv-layout__widget-remove"
-                      aria-label="Hapus Komponen"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onChange(removeWidget(layout, widget.id));
-                      }}
-                      // Stop pointerdown from bubbling to the widget card's drag
-                      // handler. Without this, pressing × in a real browser begins
-                      // a drag + setPointerCapture on the card, which redirects
-                      // the pointerup to the card so the click never reaches the
-                      // button — delete appears broken (manager feedback: "tidak
-                      // dapat dihapus"). jsdom cannot reproduce pointer-capture
-                      // (RTL's fireEvent.pointerDown strips isPrimary/button and
-                      // the global PointerEvent ctor is absent in this env), so
-                      // this is a real-browser-only fix verified by reasoning + the
-                      // existing resize-handle stopPropagation precedent — same
-                      // class as that jsdom-untested stopPropagation.
-                      onPointerDown={(e) => e.stopPropagation()}
-                      data-testid={`tv-layout__remove--${widget.id}`}
-                    >
-                      ×
-                    </button>
-                  </div>
-                  <div className="tv-layout__widget-body" aria-hidden="true">
-                    {TV_COMPONENT_LABELS[widget.component]}
-                  </div>
-                  <WidgetSteppers
-                    widget={widget}
-                    layout={layout}
-                    onChange={onChange}
-                  />
-                  <div
-                    className="tv-layout__resize-handle"
-                    role="slider"
-                    aria-label="Ubah Ukuran"
-                    onPointerDown={(e) => {
-                      e.stopPropagation();
-                      dnd.onResizeHandlePointerDown(e, widget);
-                    }}
-                    data-testid={`tv-layout__resize--${widget.id}`}
-                  />
-                </div>
-              );
-            })}
-            {palette.preview !== null && (
+        <div className="tv-layout__tv-area">
+          <p className="tv-layout__caption">Layar TV</p>
+          <div className="tv-layout__tv-bezel" data-testid="tv-layout__tv-bezel">
+            <div className="tv-layout__tv-screen">
               <div
-                className={`tv-layout__ghost${palette.preview.valid ? '' : ' tv-layout__ghost--invalid'}`}
-                style={{
-                  gridColumn: `${palette.preview.x + 1} / span ${palette.preview.w}`,
-                  gridRow: `${palette.preview.y + 1} / span ${palette.preview.h}`,
-                }}
-                aria-hidden="true"
-              />
-            )}
+                className="tv-layout__canvas"
+                ref={canvasRef}
+                onPointerMove={dnd.onPointerMove}
+                onPointerUp={dnd.onPointerUp}
+                onPointerCancel={dnd.onPointerUp}
+                data-testid="tv-layout__canvas"
+              >
+                <div
+                  className="tv-layout__grid"
+                  style={{
+                    gridTemplateColumns: `repeat(${GRID_COLS}, 1fr)`,
+                    gridAutoRows: `${ROW_HEIGHT_PX}px`,
+                  }}
+                  aria-label="Kisi tata letak TV"
+                >
+                  {layout.map((widget) => {
+                    const isDragging = dnd.activeId === widget.id;
+                    const preview = dnd.preview?.id === widget.id ? dnd.preview : null;
+                    const invalid = preview !== null && !preview.valid;
+                    // When dragging, render the widget at its preview rect so the
+                    // manager sees the live move; otherwise at its committed rect.
+                    const x = preview?.x ?? widget.x;
+                    const y = preview?.y ?? widget.y;
+                    const w = preview?.w ?? widget.w;
+                    const h = preview?.h ?? widget.h;
+                    return (
+                      <div
+                        key={widget.id}
+                        className={
+                          `tv-layout__widget` +
+                          (isDragging ? ' tv-layout__widget--dragging' : '') +
+                          (invalid ? ' tv-layout__widget--invalid' : '')
+                        }
+                        style={{
+                          gridColumn: `${x + 1} / span ${w}`,
+                          gridRow: `${y + 1} / span ${h}`,
+                        }}
+                        onPointerDown={(e) => dnd.onWidgetPointerDown(e, widget)}
+                        data-testid={`tv-layout__widget--${widget.id}`}
+                      >
+                        <div className="tv-layout__widget-header">
+                          <span className="tv-layout__widget-name">{TV_COMPONENT_LABELS[widget.component]}</span>
+                          <button
+                            type="button"
+                            className="tv-layout__widget-remove"
+                            aria-label="Hapus Komponen"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onChange(removeWidget(layout, widget.id));
+                            }}
+                            // Stop pointerdown from bubbling to the widget card's drag
+                            // handler. Without this, pressing × in a real browser begins
+                            // a drag + setPointerCapture on the card, which redirects
+                            // the pointerup to the card so the click never reaches the
+                            // button — delete appears broken (manager feedback: "tidak
+                            // dapat dihapus"). jsdom cannot reproduce pointer-capture
+                            // (RTL's fireEvent.pointerDown strips isPrimary/button and
+                            // the global PointerEvent ctor is absent in this env), so
+                            // this is a real-browser-only fix verified by reasoning + the
+                            // existing resize-handle stopPropagation precedent — same
+                            // class as that jsdom-untested stopPropagation.
+                            onPointerDown={(e) => e.stopPropagation()}
+                            data-testid={`tv-layout__remove--${widget.id}`}
+                          >
+                            ×
+                          </button>
+                        </div>
+                        <div className="tv-layout__widget-body" aria-hidden="true">
+                          {TV_COMPONENT_LABELS[widget.component]}
+                        </div>
+                        <WidgetSteppers
+                          widget={widget}
+                          layout={layout}
+                          onChange={onChange}
+                        />
+                        <div
+                          className="tv-layout__resize-handle"
+                          role="slider"
+                          aria-label="Ubah Ukuran"
+                          onPointerDown={(e) => {
+                            e.stopPropagation();
+                            dnd.onResizeHandlePointerDown(e, widget);
+                          }}
+                          data-testid={`tv-layout__resize--${widget.id}`}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
           </div>
           <p className="tv-layout__canvas-hint">
-            Seret komponen dari panel kiri, atau klik untuk menambah. Seret kartu untuk memindahkan, seret gagang sudut untuk mengubah ukuran.
+            Klik komponen di panel kiri untuk menambah. Seret kartu untuk memindahkan, seret gagang sudut untuk mengubah ukuran.
           </p>
           <p className="tv-layout__status" role="status" aria-live="polite">
             {toastQueue.message}

@@ -154,6 +154,12 @@ describe('TvLayoutPage', () => {
     for (const type of TV_COMPONENT_TYPES) {
       expect(screen.getByTestId(`tv-layout__widget--${type}`)).toBeInTheDocument();
     }
+    // The canvas is wrapped in a TV frame (bezel) so the manager can tell
+    // which side is the TV area vs the component palette, with visible area
+    // captions on each side.
+    expect(screen.getByTestId('tv-layout__tv-bezel')).toBeInTheDocument();
+    expect(screen.getByText('Layar TV')).toBeInTheDocument();
+    expect(screen.getByText('Komponen')).toBeInTheDocument();
   });
 
   it('Selesai returns to the preview (overlay unmounts, preview stays)', async () => {

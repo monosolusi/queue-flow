@@ -2185,10 +2185,10 @@ fieldset {
 }
 
 /* === TV layout editor (12-column grid + component palette) =============
- * The `/tv-layout` page: a palette of draggable component chips on the left
- * + a 12-column grid canvas on the right. The manager drags (or clicks) a
- * chip to add a widget, drags a card to move, drags the corner grip to resize,
- * and uses the per-widget steppers (Lebar/Tinggi) as the precise,
+ * The `/tv-layout` page: a palette of click-to-add component chips on the
+ * left + a 12-column grid canvas on the right, framed as a TV. The manager
+ * clicks a chip to add a widget, drags a card to move, drags the corner grip
+ * to resize, and uses the per-widget steppers (Lebar/Tinggi) as the precise,
  * keyboard/AT-accessible path (the jsdom-tested backbone). Tokens only — no
  * hardcoded color literals; `--radius` is the per-service value (QUE-37). */
 .tv-layout-page__loading {
@@ -2208,7 +2208,7 @@ fieldset {
     grid-template-columns: 1fr;
   }
 }
-/* Palette: a labelled column of draggable component chips. */
+/* Palette: a labelled column of click-to-add component chips. */
 .tv-layout__palette {
   display: flex;
   flex-direction: column;
@@ -2217,6 +2217,17 @@ fieldset {
   background: var(--surface);
   border: 1px solid var(--surface-2);
   border-radius: var(--radius);
+}
+/* Shared caption base for the palette + TV-area labels (DRY — one place owns
+ * the caption type style; each side only overrides its own margin). */
+.tv-layout__caption {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.tv-layout__palette-caption {
+  margin-bottom: 0.25rem;
 }
 .tv-layout__chip {
   display: flex;
@@ -2231,16 +2242,11 @@ fieldset {
   color: var(--text);
   font-size: 0.95rem;
   font-weight: 500;
-  cursor: grab;
-  touch-action: none; /* pointer DnD owns the gesture */
+  cursor: pointer;
   text-align: left;
 }
 .tv-layout__chip:hover {
   border-color: var(--accent);
-}
-.tv-layout__chip--placing {
-  border-color: var(--accent);
-  color: var(--accent-on-surface);
 }
 .tv-layout__chip-label {
   flex: 1;
@@ -2250,14 +2256,47 @@ fieldset {
   font-weight: 600;
   color: var(--accent-on-surface);
 }
-/* Canvas: the scrollable 12-column grid drop area. */
-.tv-layout__canvas {
-  border: 1px dashed var(--surface-2);
-  border-radius: var(--radius);
+/* TV frame: a caption + bezel + screen wrapping the canvas, mirroring the
+ * read-only preview's TV treatment so the manager can tell which side is the
+ * TV area vs the component palette. */
+.tv-layout__tv-area {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+  min-height: 0;
+}
+.tv-layout__tv-bezel {
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 0.75rem;
-  background: var(--surface);
-  max-height: 70vh;
+  background: var(--surface-2);
+  border: 1px solid var(--surface-2);
+  border-radius: calc(var(--radius) * 1.3);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--bg) 20%, transparent);
+}
+.tv-layout__tv-screen {
+  height: 100%;
+  min-height: 0;
+  background: var(--bg);
+  border-radius: calc(var(--radius) * 0.9);
+  padding: 0.5rem;
+  overflow: hidden;
+  display: flex;
+}
+.tv-layout__tv-screen > .tv-layout__canvas {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+/* Canvas: the scrollable 12-column grid area (the bezel/screen provide the
+ * visible frame, so the canvas itself is just the inner scroll container). */
+.tv-layout__canvas {
+  min-width: 0;
+  min-height: 0;
   overflow: auto;
+  padding: 0.25rem;
+  max-height: 70vh; /* default cap for standalone use; overlay clears it */
 }
 .tv-layout__grid {
   display: grid;
@@ -2393,16 +2432,6 @@ fieldset {
   border-radius: 4px;
   cursor: nwse-resize;
   touch-action: none;
-}
-/* Live ghost preview for a palette-drag placement. */
-.tv-layout__ghost {
-  border: 2px dashed var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  border-radius: calc(var(--radius) * 0.75);
-}
-.tv-layout__ghost--invalid {
-  border-color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
 }
 .tv-layout__canvas-hint {
   margin: 0.75rem 0 0;
