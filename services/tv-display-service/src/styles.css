@@ -106,71 +106,95 @@ body,
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.75rem;
+  gap: clamp(0.25rem, 1.5cqh, 0.75rem);
   background: var(--surface);
   border-radius: var(--radius);
-  padding: 2rem;
+  padding: clamp(0.75rem, 4cqh, 2rem);
   /* Grid-cell containment (AC3): let the column shrink below the number's
      intrinsic width and clip overflow instead of pushing the grid wider. */
   min-width: 0;
   overflow: hidden;
-  /* Inline-size container so the number sizes to the widget wrapper, not the
-     viewport — the one-line guarantee (FR-TV responsiveness). In the 12-col
-     grid the wrapper is the widget's column span, so the number scales to
-     that column width (full-width when w=12, narrower for a side span). */
-  container-type: inline-size;
+  /* Size container so the number scales to BOTH the widget wrapper width
+     (cqw, the one-line guarantee) and its height (cqh, fits short cells such
+     as a 1-row grid span) — FR-TV responsiveness. In the 12-col grid the
+     wrapper is the widget's column span, so the number scales to that column
+     width (full-width when w=12, narrower for a side span); the cqh cap also
+     shrinks it for short (h=1) cells. The wrapper's height is determinate
+     (grid row span → flex column), so size containment is safe. */
+  container-type: size;
 }
 .now-serving--empty {
   color: var(--text-muted);
 }
 .now-serving__empty-text {
-  font-size: 2rem;
+  font-size: clamp(1rem, 5cqh, 2rem);
   margin: 0;
 }
 .now-serving__label {
   margin: 0; /* h2 reset */
-  font-size: 1.5rem;
+  font-size: clamp(0.85rem, 2.5cqh, 1.5rem);
   font-weight: 600;
   letter-spacing: 0.05em; /* AC8: ≤0.08em (was 0.25em) */
   color: var(--text-muted);
 }
 .now-serving__number {
-  font-size: clamp(5rem, 18cqw, 22rem); /* AC3: fluid to the widget wrapper, not the viewport */
+  /* AC3: fluid to the widget wrapper, not the viewport. cqw stays the width
+     one-line driver (number never wraps); the cqh cap inside min() also
+     shrinks the number for short (h=1) cells so it never overflows/clips. */
+  font-size: clamp(2.5rem, min(18cqw, 24cqh), 22rem);
   font-weight: 800;
   letter-spacing: 0.05em;
   line-height: 1;
   /* One-line guarantee (FR-TV responsiveness): the queue number never wraps.
-     The cqw clamp scales to the column so nowrap never clips it. */
+     The cqw clamp scales to the column so nowrap never clips it; the cqh cap
+     keeps it inside the cell height too. */
   white-space: nowrap;
 }
 .now-serving__counter {
-  font-size: 2.5rem;
+  font-size: clamp(1rem, 6cqh, 2.5rem);
   color: var(--accent-on-surface); /* AC2: #60a5fa 5.75:1 (QUE-37) */
   font-weight: 700;
 }
 
 /* Call history ------------------------------------------------------------ */
+/* Mirrors .waiting-queue: a size container so rows scale to the panel height
+   via cqh units — fits a short (h=1) cell without clipping. The panel height
+   is determinate (`.tv-board__widget` grid row span → flex column), so size
+   containment is safe. The inner __list is scrollable as a safety-net so no
+   ticket is ever invisible even in extreme overflow. */
 .call-history {
   background: var(--surface);
   border-radius: var(--radius);
-  padding: 1.5rem;
+  padding: clamp(0.75rem, 3cqh, 1.5rem);
   overflow: hidden;
   min-width: 0; /* grid-cell containment (AC3) */
+  display: flex;
+  flex-direction: column;
+  container-type: size;
 }
 .call-history__title {
-  margin: 0 0 1rem;
-  font-size: 1.5rem;
+  margin: 0 0 clamp(0.5rem, 1.5cqh, 1rem);
+  font-size: clamp(1.1rem, 4cqh, 1.5rem);
+  flex: 0 0 auto;
 }
 .call-history__empty {
   color: var(--text-muted);
-  font-size: 1.25rem;
+  font-size: clamp(0.9rem, 3cqh, 1.25rem);
+  flex: 1 1 auto;
+  min-height: 0;
 }
+/* Scrollable safety-net: if items exceed the panel even at the min font clamp,
+   scroll instead of clipping so no ticket is ever invisible. The cqh scaling
+   normally fits all rows; the scrollbar appears only in extreme overflow. */
 .call-history__list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
   gap: 0; /* dividers carry the spacing; gap+border would double up */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 /* Flatten the nested card-in-card (AC4): drop the inner card background +
    radius and use a hairline divider instead. --text-muted clears WCAG 1.4.11
@@ -180,54 +204,69 @@ body,
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1rem 0.25rem;
+  padding: clamp(0.3rem, 1cqh, 1rem) 0.25rem;
   border-bottom: 1px solid var(--text-muted);
 }
 .call-history__item:last-child {
   border-bottom: none;
 }
 .call-history__number {
-  font-size: 2.5rem;
+  font-size: clamp(1.25rem, 5.5cqh, 2.5rem);
   font-weight: 700;
 }
 .call-history__counter {
   color: var(--text-muted);
-  font-size: 1.25rem;
+  font-size: clamp(0.9rem, 2.5cqh, 1.25rem);
 }
 
 /* Counters serving ("Sedang Melayani") ------------------------------------- */
-/* Mirrors .call-history: a surface card with hairline dividers (AC4) and
-   grid-cell containment (AC3). Uses the per-service var(--radius), --surface,
-   and --text-muted directly — no new shared token (per the per-service-override
-   rule). Stays in the service's own styles.css (NOT _tokens.css — no shared-
-   token change, drift gate stays green). */
+/* Mirrors .call-history/.waiting-queue: a size container so rows scale to the
+   panel height via cqh units — fits a short (h=1) cell without clipping. The
+   panel height is determinate (`.tv-board__widget` grid row span → flex
+   column), so size containment is safe. Uses the per-service var(--radius),
+   --surface, and --text-muted directly — no new shared token (per the
+   per-service-override rule). Stays in the service's own styles.css (NOT
+   _tokens.css — no shared-token change, drift gate stays green). The inner
+   __list is scrollable as a safety-net so no ticket is ever invisible. */
 .counters-serving {
   background: var(--surface);
   border-radius: var(--radius);
-  padding: 1.5rem;
+  padding: clamp(0.75rem, 3cqh, 1.5rem);
   overflow: hidden;
   min-width: 0; /* grid-cell containment (AC3) */
+  display: flex;
+  flex-direction: column;
+  container-type: size;
 }
 .counters-serving__title {
-  margin: 0 0 1rem;
-  font-size: 1.5rem;
+  margin: 0 0 clamp(0.5rem, 1.5cqh, 1rem);
+  font-size: clamp(1.1rem, 4cqh, 1.5rem);
+  flex: 0 0 auto;
 }
 .counters-serving__empty {
   color: var(--text-muted);
-  font-size: 1.25rem;
+  font-size: clamp(0.9rem, 3cqh, 1.25rem);
+  flex: 1 1 auto;
+  min-height: 0;
 }
+/* Scrollable safety-net: if items exceed the panel even at the min font clamp,
+   scroll instead of clipping so no ticket is ever invisible. The cqh scaling
+   normally fits all rows; the scrollbar appears only in extreme overflow. */
 .counters-serving__list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
   gap: 0; /* dividers carry the spacing; gap+border would double up */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 .counters-serving__item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1rem 0.25rem;
+  padding: clamp(0.3rem, 1cqh, 1rem) 0.25rem;
   border-bottom: 1px solid var(--text-muted);
 }
 .counters-serving__item:last-child {
@@ -235,10 +274,10 @@ body,
 }
 .counters-serving__counter {
   font-weight: 700;
-  font-size: 1.5rem;
+  font-size: clamp(0.9rem, 2.5cqh, 1.5rem);
 }
 .counters-serving__number {
-  font-size: 2.5rem;
+  font-size: clamp(1.25rem, 5.5cqh, 2.5rem);
   font-weight: 700;
 }
 /* Idle counter (no active ticket): the number is an em dash, muted via the
@@ -418,22 +457,31 @@ body,
    (cqw) so it stays on one line at the wider column width. */
 @media (min-width: 2560px) {
   .now-serving__number {
-    font-size: clamp(10rem, 18cqw, 40rem);
+    font-size: clamp(5rem, min(18cqw, 24cqh), 40rem);
   }
   .now-serving__counter {
-    font-size: clamp(3rem, 3vw, 5rem);
+    font-size: clamp(2rem, min(3vw, 6cqh), 5rem);
   }
   .now-serving__label {
-    font-size: clamp(1.75rem, 1.5vw, 2.5rem);
+    font-size: clamp(1.25rem, min(1.5vw, 3cqh), 2.5rem);
   }
   .now-serving__empty-text {
-    font-size: clamp(2.5rem, 3vw, 4rem);
+    font-size: clamp(2rem, min(3vw, 5cqh), 4rem);
   }
   .call-history__number {
-    font-size: clamp(3rem, 3vw, 5rem);
+    font-size: clamp(2rem, min(3vw, 6cqh), 5rem);
   }
   .call-history__title {
-    font-size: clamp(1.75rem, 1.5vw, 2.5rem);
+    font-size: clamp(1.5rem, min(1.5vw, 4cqh), 2.5rem);
+  }
+  .counters-serving__number {
+    font-size: clamp(2rem, min(3vw, 6cqh), 5rem);
+  }
+  .counters-serving__counter {
+    font-size: clamp(1.5rem, min(1.5vw, 3cqh), 2.5rem);
+  }
+  .counters-serving__title {
+    font-size: clamp(1.5rem, min(1.5vw, 4cqh), 2.5rem);
   }
   .waiting-queue__number {
     font-size: clamp(2rem, 5.5cqh, 5rem);
