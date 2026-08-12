@@ -1,5 +1,6 @@
 import type { AggregateRoot } from '../../domain/shared/aggregate-root';
 import type { DomainEvent } from '../../domain/shared/domain-event';
+import type { IEventDispatcher } from '../../domain/shared/event-dispatcher.port';
 import type { IQueueEventPublisher } from '../../domain/queue/event-publisher.port';
 
 /**
@@ -15,8 +16,15 @@ import type { IQueueEventPublisher } from '../../domain/queue/event-publisher.po
  * `application-no-framework-imports`). {@link RealtimeModule} wires it via a
  * factory injecting the {@link QUEUE_EVENT_PUBLISHER} Symbol token; use-case
  * modules then inject the `QueueEventDispatcher` class token it exports.
+ *
+ * `implements IEventDispatcher` exposes the system-event shape
+ * (`dispatchEvents`) as a shared-kernel port so cross-context consumers (the
+ * Store Config save use case, FR-CLR-02) depend on the abstraction in
+ * `domain/shared`, not on this Queue-owned concrete class — preserving the
+ * bounded-context seam (DIP). The Queue context's own use cases still inject
+ * this class token directly for the aggregate-draining `dispatch` shape.
  */
-export class QueueEventDispatcher {
+export class QueueEventDispatcher implements IEventDispatcher {
   constructor(private readonly publisher: IQueueEventPublisher) {}
 
   public async dispatch(aggregate: AggregateRoot): Promise<void> {

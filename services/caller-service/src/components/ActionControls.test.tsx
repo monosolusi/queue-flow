@@ -306,4 +306,60 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
     resolveTransition!();
     expect(await screen.findByTestId('action-apply-transition-PREPARING')).not.toBeDisabled();
   });
+
+  it('labels the call-next button with the admin-configured WAITING→CALLING actionLabel (FR-CLR-02)', () => {
+    // The call-next button drives the WAITING → CALLING transition (callNext
+    // pulls a WAITING ticket and the aggregate validates that exact edge), so
+    // its label is the admin's wording for that edge — not a hardcoded literal.
+    const graph: StateMachineDto = {
+      states: ['WAITING', 'CALLING', 'SERVING', 'COMPLETED'],
+      transitions: [
+        { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Tiket Baru' },
+        { from: 'CALLING', to: 'SERVING', actionLabel: 'Mulai Melayani' },
+      ],
+    };
+    const api = makeApi();
+    render(<ActionControls api={api} bound={bound} active={null} stateMachine={graph} />);
+    expect(screen.getByRole('button', { name: 'Panggil Tiket Baru' })).toBeInTheDocument();
+  });
+
+  it('falls back to "Panggil Berikutnya" when the WAITING→CALLING edge is absent', () => {
+    // A custom graph that omits the WAITING → CALLING edge (call-next would 409
+    // on the backend) still renders the call-next button with the PRD-default
+    // label rather than no text.
+    const graph: StateMachineDto = {
+      states: ['WAITING', 'CALLING', 'SERVING'],
+      transitions: [{ from: 'CALLING', to: 'SERVING', actionLabel: 'Mulai Melayani' }],
+    };
+    const api = makeApi();
+    render(<ActionControls api={api} bound={bound} active={null} stateMachine={graph} />);
+    expect(screen.getByRole('button', { name: 'Panggil Berikutnya' })).toBeInTheDocument();
+  });
+
+  it('refetches the state machine and reflects a relabeled flow when configVersion bumps (FR-CLR-02)', async () => {
+    // Simulates the store bumping `configVersion` after a SYSTEM_CONFIG_CHANGED
+    // WS event (admin re-saved the state machine mid-session). The panel must
+    // refetch and show the new wording without a page reload.
+    let graph: StateMachineDto = defaultStateMachine;
+    const api = makeApi({ getActiveStateMachine: vi.fn(() => Promise.resolve(graph)) });
+    const { rerender } = render(
+      <ActionControls api={api} bound={bound} active={ticket('SERVING')} configVersion={0} />,
+    );
+    // Initial fetch seeds the SERVING → COMPLETED edge with the default wording.
+    expect(await screen.findByTestId('action-complete')).toHaveTextContent('Selesai Layan');
+    expect(api.getActiveStateMachine).toHaveBeenCalledTimes(1);
+
+    // Admin relabels SERVING → COMPLETED and saves → store bumps configVersion.
+    graph = {
+      ...defaultStateMachine,
+      transitions: defaultStateMachine.transitions.map((t) =>
+        t.from === 'SERVING' && t.to === 'COMPLETED' ? { ...t, actionLabel: 'Selesaikan Layanan' } : t,
+      ),
+    };
+    rerender(<ActionControls api={api} bound={bound} active={ticket('SERVING')} configVersion={1} />);
+
+    // The bump re-runs the fetch effect; the relabeled wording now shows.
+    expect(api.getActiveStateMachine).toHaveBeenCalledTimes(2);
+    expect(await screen.findByText('Selesaikan Layanan')).toBeInTheDocument();
+  });
 });

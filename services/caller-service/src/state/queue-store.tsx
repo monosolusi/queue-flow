@@ -34,6 +34,12 @@ export interface QueueState {
   readonly loadError: string | null;
   /** When true, the store will refetch the snapshot (set on SYSTEM_RESET). */
   readonly stale: boolean;
+  /** Monotonic counter bumped on every `SYSTEM_CONFIG_CHANGED` event. The
+   *  workspace passes it to {@link ActionControls} so the panel refetches the
+   *  active state machine and reflects the admin-designed flow + its
+   *  `actionLabel` wording without a reload (FR-CLR-02). Starts at 0 and never
+   *  resets — a bump is the signal, not the value. */
+  readonly configVersion: number;
 }
 
 export type QueueAction =
@@ -52,6 +58,7 @@ const initialState = (counterId: number): QueueState => ({
   loadStatus: 'loading',
   loadError: null,
   stale: false,
+  configVersion: 0,
 });
 
 /**
@@ -205,6 +212,14 @@ function projectEvent(state: QueueState, e: QueueLifecycleWireEvent, ctx: QueueC
     case 'SYSTEM_RESET':
       // The provider refetches the snapshot; mark stale as a signal.
       return { ...state, stale: true };
+    case 'SYSTEM_CONFIG_CHANGED':
+      // The admin re-saved the system configuration. Bump the config version so
+      // the workspace signals ActionControls to refetch the active state
+      // machine — the caller must reflect the admin-designed flow + its
+      // `actionLabel` wording without a reload (FR-CLR-02). Pure signal: the
+      // store does not own the state machine (ActionControls fetches it), so
+      // unlike SYSTEM_RESET there is no local projection to invalidate.
+      return { ...state, configVersion: state.configVersion + 1 };
     default:
       return state;
   }

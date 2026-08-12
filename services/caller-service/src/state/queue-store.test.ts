@@ -15,6 +15,7 @@ const baseState: QueueState = {
   loadStatus: 'loaded',
   loadError: null,
   stale: false,
+  configVersion: 0,
 };
 
 const waitingTicket = (id: string, num: string, categoryId = 'cat-a'): TicketStateDto => ({
@@ -246,5 +247,23 @@ describe('queueReducer — SYSTEM_RESET', () => {
   it('marks the state stale so the provider refetches', () => {
     const next = reducer(baseState, event('SYSTEM_RESET', 'sys', { resetTo: 1, date: '2026-07-30' }));
     expect(next.stale).toBe(true);
+  });
+});
+
+describe('queueReducer — SYSTEM_CONFIG_CHANGED (FR-CLR-02)', () => {
+  it('bumps configVersion so the workspace signals ActionControls to refetch the state machine', () => {
+    const next = reducer(baseState, event('SYSTEM_CONFIG_CHANGED', 'system', {}));
+    expect(next.configVersion).toBe(1);
+    // No other state mutated — the store does not own the state machine.
+    expect(next.active).toBe(baseState.active);
+    expect(next.waiting).toBe(baseState.waiting);
+    expect(next.stale).toBe(baseState.stale);
+  });
+
+  it('is monotonic across repeated config-change events', () => {
+    let next = reducer(baseState, event('SYSTEM_CONFIG_CHANGED', 'system', {}));
+    next = reducer(next, event('SYSTEM_CONFIG_CHANGED', 'system', {}));
+    next = reducer(next, event('SYSTEM_CONFIG_CHANGED', 'system', {}));
+    expect(next.configVersion).toBe(3);
   });
 });

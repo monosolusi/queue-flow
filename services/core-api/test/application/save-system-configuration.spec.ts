@@ -3,7 +3,13 @@ import {
   projectStateMachine,
   type SaveSystemConfigurationCommand,
 } from '../../src/application/store-config';
-import { StateMachine, DailyResetMode } from '../../src/domain/store-config';
+import {
+  StateMachine,
+  DailyResetMode,
+  SystemConfigurationChangedEvent,
+} from '../../src/domain/store-config';
+import type { DomainEvent } from '../../src/domain/shared/domain-event';
+import type { IEventDispatcher } from '../../src/domain/shared/event-dispatcher.port';
 import { InvalidValueObjectException } from '../../src/domain/shared/errors';
 import { PriorityPolicy, NoOpTransactionManager } from '../../src/domain/shared';
 import {
@@ -246,5 +252,121 @@ describe('SaveSystemConfigurationUseCase — brandColor (QUE-36)', () => {
     );
     // Nothing persisted — fail-fast happened before the tx opened.
     expect(await repos.config.get()).toBeNull();
+  });
+});
+
+/**
+ * FR-CLR-02 — a save broadcasts `SYSTEM_CONFIG_CHANGED` post-commit so a
+ * connected caller panel refetches the active state machine and reflects the
+ * admin-designed flow + its `actionLabel` wording without a page reload. The
+ * dispatcher is a shared-kernel port ({@link IEventDispatcher}); this spec
+ * injects a recording fake of that port (not the Queue-owned concrete
+ * `QueueEventDispatcher`) to pin that the use case depends only on the
+ * abstraction (DIP / bounded-context anti-corruption) and emits exactly one
+ * {@link SystemConfigurationChangedEvent} after a successful save, and nothing
+ * at all on a rolled-back (pre-tx validation) save.
+ */
+describe('SaveSystemConfigurationUseCase — SYSTEM_CONFIG_CHANGED broadcast (FR-CLR-02)', () => {
+  /** A recording fake of the {@link IEventDispatcher} port the use case drains
+   *  into. Depends only on the shared-kernel port, never on the Queue-owned
+   *  concrete dispatcher — mirrors how the use case itself is wired (DIP). */
+  function recordingDispatcher() {
+    const published: DomainEvent[] = [];
+    const dispatcher: IEventDispatcher = {
+      async dispatchEvents(events: readonly DomainEvent[]): Promise<void> {
+        published.push(...events);
+      },
+    };
+    return { dispatcher, published };
+  }
+
+  function baseCommand(): SaveSystemConfigurationCommand {
+    return {
+      storeName: 'Toko Contoh',
+      stateMachine: projectStateMachine(StateMachine.DEFAULT),
+      dailyReset: {
+        mode: DailyResetMode.MANUAL,
+        cronExpression: null,
+        resetTicketNumberTo: 1,
+        archivePreviousDayData: true,
+      },
+      categories: [{ code: 'A', name: 'Customer Service' }],
+      routingRules: [
+        {
+          counterId: 1,
+          counterName: 'Loket 1',
+          assignedCategoryCodes: ['A'],
+          priorityPolicy: PriorityPolicy.FIFO_GLOBAL,
+        },
+      ],
+      brandColor: '#2563eb',
+      serviceThemes: { kiosk: 'light', tv: 'light', caller: 'light', admin: 'light' },
+      tvPanelLayout: [
+        { id: 'nowServing', component: 'nowServing', x: 0, y: 0, w: 12, h: 4 },
+        { id: 'waitingQueue', component: 'waitingQueue', x: 0, y: 4, w: 6, h: 3 },
+        { id: 'callHistory', component: 'callHistory', x: 6, y: 4, w: 6, h: 3 },
+        { id: 'countersServing', component: 'countersServing', x: 0, y: 7, w: 12, h: 3 },
+        { id: 'runningText', component: 'runningText', x: 0, y: 10, w: 12, h: 1 },
+      ],
+      actor: 'admin',
+    };
+  }
+
+  it('broadcasts one SystemConfigurationChangedEvent after a successful save', async () => {
+    const config = new InMemorySystemConfigurationRepository();
+    const categories = new InMemoryCategoryRepository();
+    const routingRules = new InMemoryCounterRoutingRuleRepository();
+    const { dispatcher, published } = recordingDispatcher();
+    const useCase = new SaveSystemConfigurationUseCase(
+      config,
+      categories,
+      routingRules,
+      new NoOpTransactionManager(),
+      null,
+      null,
+      dispatcher,
+    );
+
+    await useCase.execute(baseCommand());
+
+    expect(published).toHaveLength(1);
+    expect(published[0]).toBeInstanceOf(SystemConfigurationChangedEvent);
+    expect(published[0].type).toBe('SYSTEM_CONFIG_CHANGED');
+  });
+
+  it('broadcasts nothing when the dispatcher is not wired (unit-test default)', async () => {
+    // The dispatcher is optional — construction with the three repository
+    // ports alone (audit/scheduler/dispatcher null) must not throw and must
+    // still persist (the broadcast is not on the critical save path).
+    const useCase = new SaveSystemConfigurationUseCase(
+      new InMemorySystemConfigurationRepository(),
+      new InMemoryCategoryRepository(),
+      new InMemoryCounterRoutingRuleRepository(),
+      new NoOpTransactionManager(),
+    );
+
+    await expect(useCase.execute(baseCommand())).resolves.toMatchObject({
+      storeName: 'Toko Contoh',
+      brandColor: '#2563eb',
+    });
+  });
+
+  it('broadcasts nothing on a pre-tx validation failure (no announce of an un-persisted config)', async () => {
+    const { dispatcher, published } = recordingDispatcher();
+    const useCase = new SaveSystemConfigurationUseCase(
+      new InMemorySystemConfigurationRepository(),
+      new InMemoryCategoryRepository(),
+      new InMemoryCounterRoutingRuleRepository(),
+      new NoOpTransactionManager(),
+      null,
+      null,
+      dispatcher,
+    );
+
+    await expect(useCase.execute({ ...baseCommand(), brandColor: 'not-a-color' })).rejects.toThrow(
+      InvalidValueObjectException,
+    );
+    // Post-commit broadcast never fires — the save rolled back pre-tx (NFR-REL-02).
+    expect(published).toHaveLength(0);
   });
 });

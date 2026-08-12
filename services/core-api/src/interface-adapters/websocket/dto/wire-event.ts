@@ -7,14 +7,15 @@
  *
  * `type` mirrors the {@link DomainEvent.type} constants exactly
  * (TICKET_CREATED, TICKET_CALLED, STATUS_UPDATED, SYSTEM_RESET,
- * TICKET_TRANSFERRED).
+ * TICKET_TRANSFERRED, SYSTEM_CONFIG_CHANGED).
  */
 export type QueueLifecycleEventType =
   | 'TICKET_CREATED'
   | 'TICKET_CALLED'
   | 'STATUS_UPDATED'
   | 'SYSTEM_RESET'
-  | 'TICKET_TRANSFERRED';
+  | 'TICKET_TRANSFERRED'
+  | 'SYSTEM_CONFIG_CHANGED';
 
 export interface TicketCreatedPayload {
   /** Formatted ticket number, e.g. "A-001". */
@@ -55,12 +56,22 @@ export interface TicketTransferredPayload {
   toTicketNumber: string;
 }
 
+/**
+ * `SYSTEM_CONFIG_CHANGED` carries no fields — it is a pure refetch signal
+ * (mirrors `SYSTEM_RESET`'s signal-then-refetch contract, not an inline
+ * snapshot). Connected caller panels refetch the active state machine so the
+ * admin-designed flow + its `actionLabel` wording applies without a reload
+ * (FR-CLR-02).
+ */
+export interface SystemConfigChangedPayload {}
+
 export type QueueLifecyclePayload =
   | TicketCreatedPayload
   | TicketCalledPayload
   | StatusUpdatedPayload
   | SystemResetPayload
-  | TicketTransferredPayload;
+  | TicketTransferredPayload
+  | SystemConfigChangedPayload;
 
 export interface QueueLifecycleWireEvent {
   type: QueueLifecycleEventType;

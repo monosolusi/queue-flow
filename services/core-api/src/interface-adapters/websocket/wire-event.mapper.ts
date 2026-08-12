@@ -6,6 +6,7 @@ import {
   TicketStatusChangedEvent,
   TicketTransferredEvent,
 } from '../../domain/queue';
+import { SystemConfigurationChangedEvent } from '../../domain/store-config';
 import type { QueueLifecycleWireEvent } from './dto/wire-event';
 
 /**
@@ -68,6 +69,14 @@ export class WireEventMapper {
           fromTicketNumber: event.fromTicketNumber,
           toTicketNumber: event.toTicketNumber,
         },
+      };
+    }
+    if (event instanceof SystemConfigurationChangedEvent) {
+      return {
+        type: 'SYSTEM_CONFIG_CHANGED',
+        ...base,
+        // Pure refetch signal — no fields (see SystemConfigChangedPayload).
+        payload: {},
       };
     }
 
