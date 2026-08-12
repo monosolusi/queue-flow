@@ -28,58 +28,80 @@ export const DEFAULT_SERVICE_THEMES: ServiceThemesMap = {
 };
 
 /**
- * The five TV-display panels a manager can reorder/resize/show independently.
- * The keys mirror core-api's `TvPanelKey` (`domain/store-config/value-objects/
- * tv-panel-layout.ts`) exactly — the friendly display names live in
- * {@link import('../lib/labels').TV_PANEL_LABELS}, never here.
+ * The TV-display grid layout contract — a TradingView-style 12-column grid
+ * canvas where each placed widget occupies a `{ x, y, w, h }` rect (column /
+ * row units). Replaces the former 1D panel-order/size map. The friendly
+ * display names for each component type live in
+ * {@link import('../lib/tv-grid-layout').TV_COMPONENT_LABELS}, never here.
  *
- * `runningText` is a fixed marquee footer — its `order`/`size` are stored for
- * map uniformity but ignored by the TV (always rendered last as footer). The
- * admin editor exposes only a visibility toggle for it (no drag handle / no
- * size control). Documented invariant, mirrored across core-api / admin /
- * tv-display-service (the three duplicated type definitions are intentional
- * per the standalone-service ethos — there is no shared package).
+ * The contract is intentionally duplicated across three services
+ * (core-api / admin / tv-display-service) — there is no shared package (the
+ * standalone-service ethos). The three definitions MUST stay in lock-step; a
+ * divergence is a bug. `runningText` is no longer special-cased — it is a
+ * first-class widget placed on the grid like the other four (the TV renders
+ * it wherever its rect lands, not always pinned as a footer).
  */
-export type TvPanelKey =
+export type TvComponentType =
   | 'nowServing'
   | 'waitingQueue'
   | 'callHistory'
   | 'countersServing'
   | 'runningText';
-/** Per-panel config: visibility, render order, and a 1..4 flex-height weight
- *  (1=Kecil, 2=Sedang, 3=Besar, 4=Penuh). */
-export interface TvPanelConfig {
-  visible: boolean;
-  order: number;
-  size: number;
+
+/** One placed widget on the TV grid. `id` is a client-minted UUID identifying
+ *  the widget instance (two widgets may share a `component` type but never an
+ *  `id`). Coordinates are in column/row units against the 12-col grid. */
+export interface TvWidget {
+  readonly id: string;
+  readonly component: TvComponentType;
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
 }
-/** Persisted shape: one {@link TvPanelConfig} per TV panel. */
-export type TvPanelLayoutMap = Record<TvPanelKey, TvPanelConfig>;
-/** Stable key list (matches the backend `TV_PANEL_KEYS`). */
-export const TV_PANEL_KEYS: readonly TvPanelKey[] = [
+/** Persisted shape: an ordered list of placed widgets (no key→config map — the
+ *  layout is a free-form grid, not a fixed panel set). */
+export type TvGridLayout = readonly TvWidget[];
+
+/** Grid geometry constants (mirror core-api's `TvGridLayout` VO exactly). */
+export const GRID_COLS = 12;
+export const GRID_MAX_ROWS = 20;
+export const GRID_MIN_W = 1;
+export const GRID_MIN_H = 1;
+
+/** Stable component-type list (matches the backend `TV_COMPONENT_TYPES`). */
+export const TV_COMPONENT_TYPES: readonly TvComponentType[] = [
   'nowServing',
   'waitingQueue',
   'callHistory',
   'countersServing',
   'runningText',
 ];
-/** Minimum panel size (Kecil). */
-export const TV_PANEL_SIZE_MIN = 1;
-/** Maximum panel size (Penuh). */
-export const TV_PANEL_SIZE_MAX = 4;
-/** All-visible default with the PRD §7 order + proportional sizes — matches
- *  `TvPanelLayout.DEFAULT` (the PRD default so a store that never configures
- *  this keeps the existing TV layout — zero visual regression, mirroring
- *  `DEFAULT_SERVICE_THEMES`). `nowServing` is the hero (size 4); the others
- *  share the side column at Sedang (2); `runningText` is the footer (order/size
- *  stored but ignored by the TV). */
-export const DEFAULT_TV_PANEL_LAYOUT: TvPanelLayoutMap = {
-  nowServing: { visible: true, order: 0, size: 4 },
-  waitingQueue: { visible: true, order: 1, size: 2 },
-  callHistory: { visible: true, order: 2, size: 2 },
-  countersServing: { visible: true, order: 3, size: 2 },
-  runningText: { visible: true, order: 4, size: 2 },
+
+/** Default widget size per component (palette drop / click-add). A component's
+ *  default size mirrors the PRD §7 visual emphasis — `nowServing` is the hero
+ *  (full width, 4 rows), the side-by-side panels share a 6-col row, the
+ *  `runningText` marquee is a 1-row strip. */
+export const DEFAULT_WIDGET_SIZE: Record<TvComponentType, { w: number; h: number }> = {
+  nowServing: { w: 12, h: 4 },
+  waitingQueue: { w: 6, h: 3 },
+  callHistory: { w: 6, h: 3 },
+  countersServing: { w: 12, h: 3 },
+  runningText: { w: 12, h: 1 },
 };
+
+/** All-five-widgets default layout — matches `TvGridLayout.DEFAULT` (the PRD
+ *  default so a store that never configures this keeps the existing TV layout
+ *  — zero visual regression, mirroring `DEFAULT_SERVICE_THEMES`). `nowServing`
+ *  is the hero on row 0; `waitingQueue` + `callHistory` share row 4;
+ *  `countersServing` sits below; `runningText` is the bottom strip. */
+export const DEFAULT_TV_GRID_LAYOUT: TvGridLayout = [
+  { id: 'nowServing', component: 'nowServing', x: 0, y: 0, w: 12, h: 4 },
+  { id: 'waitingQueue', component: 'waitingQueue', x: 0, y: 4, w: 6, h: 3 },
+  { id: 'callHistory', component: 'callHistory', x: 6, y: 4, w: 6, h: 3 },
+  { id: 'countersServing', component: 'countersServing', x: 0, y: 7, w: 12, h: 3 },
+  { id: 'runningText', component: 'runningText', x: 0, y: 10, w: 12, h: 1 },
+];
 
 export interface StateTransitionDto {
   readonly from: string;
@@ -128,11 +150,12 @@ export interface SystemConfigurationDto {
   /** Per-service light/dark theme map (QUE-47). Admin reads + edits the full
    *  map; each other service reads only its own surface key (ISP). */
   readonly serviceThemes: ServiceThemesMap;
-  /** Per-panel layout for the TV display (visibility, order, size). Admin reads
-   *  + edits the full map; the TV service reads the whole map at boot and lays
-   *  the visible panels out in `order` with `flex: <size> 1 0` height weights
-   *  (all-visible default — zero visual regression). */
-  readonly tvPanelLayout: TvPanelLayoutMap;
+  /** TV-display grid layout: a list of placed widgets on a 12-col grid. Admin
+   *  reads + edits the full array on the dedicated `/tv-layout` page; the TV
+   *  service reads the whole array at boot and lays each widget out at its
+   *  `{ x, y, w, h }` rect on a CSS grid (the PRD default mirrors the former
+   *  fixed-panel layout — zero visual regression). */
+  readonly tvPanelLayout: TvGridLayout;
 }
 
 /**
@@ -171,7 +194,7 @@ export interface SaveSystemConfigurationPayload {
   readonly routingRules: readonly WizardRoutingRuleDto[];
   readonly brandColor: string;
   readonly serviceThemes: ServiceThemesMap;
-  readonly tvPanelLayout: TvPanelLayoutMap;
+  readonly tvPanelLayout: TvGridLayout;
 }
 
 /** Result of `PUT /api/system/config`. */
@@ -180,7 +203,7 @@ export interface SaveSystemConfigurationResult {
   readonly storeName: string;
   readonly brandColor: string;
   readonly serviceThemes: ServiceThemesMap;
-  readonly tvPanelLayout: TvPanelLayoutMap;
+  readonly tvPanelLayout: TvGridLayout;
 }
 
 /**

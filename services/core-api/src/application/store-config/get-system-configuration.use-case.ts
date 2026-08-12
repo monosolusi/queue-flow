@@ -5,7 +5,7 @@ import { StateMachine } from '../../domain/store-config';
 import { BrandColor } from '../../domain/store-config';
 import { DailyResetPolicy, DailyResetMode } from '../../domain/store-config';
 import { ServiceThemes, type ServiceThemesMap } from '../../domain/store-config';
-import { TvPanelLayout, type TvPanelLayoutMap } from '../../domain/store-config';
+import { TvPanelLayout, type TvGridLayout } from '../../domain/store-config';
 import type { PriorityPolicy } from '../../domain/shared';
 
 /**
@@ -62,8 +62,8 @@ export interface SystemConfigurationDto {
   readonly brandColor: string;
   /** Per-service light/dark theme map (QUE-47). */
   readonly serviceThemes: ServiceThemesMap;
-  /** Per-panel TV layout (visibility + order + size). */
-  readonly tvPanelLayout: TvPanelLayoutMap;
+  /** Per-widget TV grid layout (an ordered array of placed widgets). */
+  readonly tvPanelLayout: TvGridLayout;
 }
 
 /** Projects the domain `StateMachine` into the flat {@link StateMachineDto}. */
@@ -133,9 +133,9 @@ export class GetSystemConfigurationUseCase {
         // All-light default (QUE-47) — matches the CSS `:root` light default so
         // a clean store prefills the wizard/admin theme selects with 'light'.
         serviceThemes: ServiceThemes.DEFAULT.toDto(),
-        // Default TV panel layout — matches the existing TV layout so a clean
-        // store prefills the admin TV-layout editor with every panel visible
-        // in the PRD-default order/sizes.
+        // Default TV grid layout — matches the existing TV layout so a clean
+        // store prefills the admin TV-layout editor with every widget at its
+        // PRD-default grid position.
         tvPanelLayout: TvPanelLayout.DEFAULT.toDto(),
       };
     }

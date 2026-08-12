@@ -44,49 +44,49 @@ body,
   flex: 1;
   min-height: 0;
 }
-/* The fixed, always-visible running-text disclaimer footer (manager feedback).
-   Distinct from the removed promo standby overlay: no media, no crossfade, no
-   ticket-count conditionality — a plain bottom strip. The board stays a fixed
-   flex column (header + main(flex:1) + footer) regardless of ticket count. */
-.tv-board__footer {
-  flex: 0 0 auto;
-}
 /* The active board is the single always-visible layer (the standby/promosi
    panel was removed — it flickered "kadang hilang kadang ada" on the
    crossfade; the NowServingCard empty state is now the sole idle state). It
    is a plain flex column filling the main area — no overlay, no crossfade.
-   A fixed running-text disclaimer footer (above) was added back as a
-   distinct, non-promo element. */
+   The running-text disclaimer is now a grid widget (no fixed footer). */
 .tv-board__active {
   display: flex;
   flex-direction: column;
-  /* No `gap` here — `.tv-board__active` has a single child (`.tv-board__panels`),
-     which carries its own `gap` for the panel list. A gap on a single-child
-     container is a no-op and would be misleading. */
   height: 100%;
   min-height: 0;
 }
-/* The flex column of visible content panels (tvPanelLayout). Each panel
-   carries an inline `flex: <size> 1 0` for proportional height share; this
-   container just distributes them vertically. Replaces the old fixed 2fr/1fr
-   grid — the manager now controls order + size per panel. */
-.tv-board__panels {
+/* The 12-column CSS grid of placed widgets (tvPanelLayout). Each widget
+   carries inline `grid-column` / `grid-row` spans for its `{x, y, w, h}`.
+   `grid-auto-rows: 1fr` gives every row an equal share of the available
+   height; the grid grows to fit the max row (y+h) over the placed widgets.
+   Replaces the old 1D flex-column of panels — the manager now controls a 2D
+   12-col grid (TradingView-style). */
+.tv-board__grid {
   flex: 1;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  grid-auto-rows: 1fr;
   gap: 1.25rem;
   min-height: 0;
+  min-width: 0;
 }
-/* Each panel wrapper is a flex column that lets its inner component fill the
-   cell. min-height/min-width:0 so a panel can shrink below its content's
-   intrinsic size (containment, AC3 — mirrors the panel-component rule). */
-.tv-board__panel {
+/* Each widget wrapper is a flex column that lets its inner component fill the
+   cell. min-height/min-width:0 so a widget can shrink below its content's
+   intrinsic size (containment, AC3 — mirrors the old panel-wrapper rule). */
+.tv-board__widget {
   min-height: 0;
   min-width: 0;
   display: flex;
   flex-direction: column;
 }
-/* Empty state when no content panel is visible (the manager hid all four).
+/* A widget's direct child fills the cell (flex:1 + min-height:0) so the
+   component's surface card stretches to the grid area. Without this the
+   card would size to its content and leave the cell partially empty. */
+.tv-board__widget > * {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+/* Empty state when no widget is placed (the manager removed every widget).
    Centered status text — role="status" is set in the markup. */
 .tv-board__panels-empty {
   display: flex;
@@ -114,10 +114,10 @@ body,
      intrinsic width and clip overflow instead of pushing the grid wider. */
   min-width: 0;
   overflow: hidden;
-  /* Inline-size container so the number sizes to the panel wrapper, not the
-     viewport — the one-line guarantee (FR-TV responsiveness). In the flex-
-     column model the wrapper is full-width, so the number scales to the board
-     width. */
+  /* Inline-size container so the number sizes to the widget wrapper, not the
+     viewport — the one-line guarantee (FR-TV responsiveness). In the 12-col
+     grid the wrapper is the widget's column span, so the number scales to
+     that column width (full-width when w=12, narrower for a side span). */
   container-type: inline-size;
 }
 .now-serving--empty {
@@ -135,7 +135,7 @@ body,
   color: var(--text-muted);
 }
 .now-serving__number {
-  font-size: clamp(5rem, 18cqw, 22rem); /* AC3: fluid to the panel wrapper, not the viewport */
+  font-size: clamp(5rem, 18cqw, 22rem); /* AC3: fluid to the widget wrapper, not the viewport */
   font-weight: 800;
   letter-spacing: 0.05em;
   line-height: 1;
@@ -257,9 +257,9 @@ body,
 /* The panel is a size container so children can scale to the panel's height via
    cqh units — all VISIBLE_LIMIT items always fit the panel regardless of its
    height (responsive). The panel height is determinate because the
-   `.tv-board__panel` wrapper resolves its flex share (proportional to the
-   manager-configured `size`) and the wrapper is a flex column — size
-   containment is safe (the panel's size is determined by the flex parent,
+   `.tv-board__widget` wrapper resolves its grid row span (proportional to the
+   manager-configured `h`) and the wrapper is a flex column — size
+   containment is safe (the panel's size is determined by the grid area,
    not its content). */
 .waiting-queue {
   background: var(--surface);
@@ -366,10 +366,14 @@ body,
 }
 
 /* Running-text disclaimer marquee (manager feedback) --------------------- */
-/* A fixed, always-visible bottom strip. Pure presentational (the RunningText
-   component owns no state). Uses var(--surface)/var(--text-muted)/var(--radius)
-   directly — no new shared tokens, no hardcoded color literals. Text never
-   wears the data/accent color (board convention). */
+/* A TV-grid widget (placed by the manager via tvPanelLayout). Pure
+   presentational (the RunningText component owns no state). Uses
+   var(--surface)/var(--text-muted)/var(--radius) directly — no new shared
+   tokens, no hardcoded color literals. Text never wears the data/accent
+   color (board convention). Fills its grid widget wrapper (width:100%,
+   height:100%) — the wrapper's `> *` flex-fill rule stretches this card to
+   the grid area; the `display:flex; align-items:center` centers the track
+   vertically within the (typically 1-row) cell. */
 .running-text {
   overflow: hidden;
   white-space: nowrap;
@@ -377,6 +381,8 @@ body,
   border-radius: var(--radius);
   padding: 0.5rem 1rem;
   color: var(--text-muted);
+  display: flex;
+  align-items: center;
 }
 .running-text__track {
   display: inline-flex;

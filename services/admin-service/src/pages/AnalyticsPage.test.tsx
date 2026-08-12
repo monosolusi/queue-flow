@@ -10,7 +10,7 @@ import type {
   RangeReportDto,
   SystemConfigurationDto,
 } from '../api/types';
-import { DEFAULT_STATE_MACHINE, DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES, DEFAULT_TV_PANEL_LAYOUT } from '../api/types';
+import { DEFAULT_STATE_MACHINE, DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES, DEFAULT_TV_GRID_LAYOUT } from '../api/types';
 
 /** A configured store with two categories + two counters. */
 function configuredStore(): SystemConfigurationDto {
@@ -35,7 +35,7 @@ function configuredStore(): SystemConfigurationDto {
     ],
     brandColor: DEFAULT_BRAND_COLOR,
     serviceThemes: { ...DEFAULT_SERVICE_THEMES },
-    tvPanelLayout: { ...DEFAULT_TV_PANEL_LAYOUT },
+    tvPanelLayout: DEFAULT_TV_GRID_LAYOUT,
   };
 }
 

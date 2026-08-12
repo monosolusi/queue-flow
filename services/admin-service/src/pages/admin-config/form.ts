@@ -1,8 +1,8 @@
 import type { SystemConfigurationDto } from '../../api/types';
-import { DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES, DEFAULT_TV_PANEL_LAYOUT } from '../../api/types';
-import type { DailyResetMode, PriorityPolicy, ServiceThemesMap, TvPanelLayoutMap } from '../../api/types';
+import { DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES, DEFAULT_TV_GRID_LAYOUT } from '../../api/types';
+import type { DailyResetMode, PriorityPolicy, ServiceThemesMap, TvGridLayout } from '../../api/types';
 import { coerceServiceThemes } from '../../lib/service-themes';
-import { coerceTvPanelLayout } from '../../lib/tv-panel-layout';
+import { coerceTvGridLayout } from '../../lib/tv-grid-layout';
 import { BROWSER_TIMEZONE } from '../../lib/timezone';
 import {
   type StateMachineForm,
@@ -52,11 +52,12 @@ export interface AdminForm {
   /** Editable per-service light/dark theme map (QUE-47) — the manager sets each
    *  service's theme from this one panel; each service applies its own key at boot. */
   serviceThemes: ServiceThemesMap;
-  /** TV-display panel layout (visibility, order, size). Payload-only here — the
-   *  dedicated `/tv-layout` page owns the TV-display editing surface; this field
-   *  is prefilled from GET and passed through the full-payload PUT unchanged so
-   *  the required `tvPanelLayout` wire field is always sent (never dropped). */
-  tvPanelLayout: TvPanelLayoutMap;
+  /** TV-display grid layout (a list of placed widgets on a 12-col grid).
+   *  Payload-only here — the dedicated `/tv-layout` page owns the TV-display
+   *  editing surface; this field is prefilled from GET and passed through the
+   *  full-payload PUT unchanged so the required `tvPanelLayout` wire field is
+   *  always sent (never dropped). */
+  tvPanelLayout: TvGridLayout;
   categories: CategoryRow[];
   routingRules: RoutingRow[];
   dailyReset: {
@@ -94,9 +95,9 @@ export function toForm(config: SystemConfigurationDto): AdminForm {
     // Coerce a partial/degraded GET projection into a complete 4-surface map
     // (defaults an unknown surface to light — mirrors the backend VO).
     serviceThemes: coerceServiceThemes(config.serviceThemes ?? DEFAULT_SERVICE_THEMES),
-    // Coerce a partial/degraded GET projection into a complete 5-key toggle map
-    // (defaults an unknown key to true — mirrors the backend VO).
-    tvPanelLayout: coerceTvPanelLayout(config.tvPanelLayout ?? DEFAULT_TV_PANEL_LAYOUT),
+    // Coerce a partial/degraded GET projection into a valid widget array
+    // (falls back to the PRD default on a corrupt shape — mirrors the backend VO).
+    tvPanelLayout: coerceTvGridLayout(config.tvPanelLayout ?? DEFAULT_TV_GRID_LAYOUT),
     categories:
       config.categories.length > 0
         ? config.categories.map((c) => ({ id: c.id, rowKey: `cat-${c.id}`, code: c.code, name: c.name }))

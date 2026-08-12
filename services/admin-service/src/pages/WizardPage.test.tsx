@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { WizardPage } from './WizardPage';
 import type { IAdminApi, IAuthApi } from '../api/admin-api';
-import { DEFAULT_CATEGORIES, DEFAULT_STATE_MACHINE, DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES, DEFAULT_TV_PANEL_LAYOUT, type SaveSystemConfigurationPayload, type ServiceThemesMap, type SystemConfigurationDto, type TvPanelLayoutMap } from '../api/types';
+import { DEFAULT_CATEGORIES, DEFAULT_STATE_MACHINE, DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES, DEFAULT_TV_GRID_LAYOUT, type SaveSystemConfigurationPayload, type ServiceThemesMap, type SystemConfigurationDto, type TvGridLayout } from '../api/types';
 import { BROWSER_TIMEZONE } from '../lib/timezone';
 
 /** A clean store mirrors core-api's `GetSystemConfigurationUseCase`: the default
@@ -21,7 +21,7 @@ function cleanStore(): SystemConfigurationDto {
     routingRules: [],
     brandColor: DEFAULT_BRAND_COLOR,
     serviceThemes: { ...DEFAULT_SERVICE_THEMES },
-    tvPanelLayout: { ...DEFAULT_TV_PANEL_LAYOUT },
+    tvPanelLayout: DEFAULT_TV_GRID_LAYOUT,
   };
 }
 
@@ -35,7 +35,7 @@ function prefilledStore(): SystemConfigurationDto {
 
 function makeApi(
   config: SystemConfigurationDto = prefilledStore(),
-  saveImpl?: (payload: SaveSystemConfigurationPayload) => Promise<{ isInitialSetupCompleted: boolean; storeName: string; brandColor: string; serviceThemes: ServiceThemesMap; tvPanelLayout: TvPanelLayoutMap }>,
+  saveImpl?: (payload: SaveSystemConfigurationPayload) => Promise<{ isInitialSetupCompleted: boolean; storeName: string; brandColor: string; serviceThemes: ServiceThemesMap; tvPanelLayout: TvGridLayout }>,
 ) {
   const save = vi.fn(
     saveImpl ??

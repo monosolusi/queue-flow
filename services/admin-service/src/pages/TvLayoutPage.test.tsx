@@ -9,7 +9,8 @@ import {
   DEFAULT_BRAND_COLOR,
   DEFAULT_SERVICE_THEMES,
   DEFAULT_STATE_MACHINE,
-  DEFAULT_TV_PANEL_LAYOUT,
+  DEFAULT_TV_GRID_LAYOUT,
+  TV_COMPONENT_TYPES,
   type SaveSystemConfigurationPayload,
   type SaveSystemConfigurationResult,
   type SystemConfigurationDto,
@@ -17,9 +18,11 @@ import {
 
 /**
  * A configured store — `isInitialSetupCompleted: true`, with two categories
- * (carrying ids) and one routing rule assigned to the first category. Mirrors
- * the AdminPanel test fixture so the full-payload passthrough on save maps
- * cleanly (categories with ids, routing id->code).
+ * (carrying ids) and one routing rule assigned to the first category. The
+ * `tvPanelLayout` is the default 12-col grid widget array (5 widgets with
+ * stable ids matching their component). Mirrors the AdminPanel test fixture
+ * so the full-payload passthrough on save maps cleanly (categories with ids,
+ * routing id->code).
  */
 function configuredStore(): SystemConfigurationDto {
   return {
@@ -42,7 +45,7 @@ function configuredStore(): SystemConfigurationDto {
     ],
     brandColor: DEFAULT_BRAND_COLOR,
     serviceThemes: { ...DEFAULT_SERVICE_THEMES },
-    tvPanelLayout: { ...DEFAULT_TV_PANEL_LAYOUT },
+    tvPanelLayout: DEFAULT_TV_GRID_LAYOUT.map((w) => ({ ...w })),
   };
 }
 
@@ -97,159 +100,167 @@ function renderPage(
   );
 }
 
-/** The content panels in their DEFAULT order (used to build row testids). */
-const CONTENT_IN_DEFAULT_ORDER = [
-  'nowServing',
-  'waitingQueue',
-  'callHistory',
-  'countersServing',
-] as const;
-
 describe('TvLayoutPage', () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it('renders the 4 content panels in DEFAULT order + the runningText footer row', async () => {
+  it('renders the palette (5 component chips) + the default 5 placed widgets', async () => {
     const { api, providerApi } = makeApi();
     renderPage(api, providerApi);
-    // The page heading.
     expect(await screen.findByRole('heading', { level: 1, name: 'Tampilan TV' })).toBeInTheDocument();
-    // Each content panel row is present, in order.
-    const rows = screen.getAllByRole('listitem');
-    expect(rows).toHaveLength(4);
-    expect(rows.map((r) => r.dataset.testid)).toEqual(
-      CONTENT_IN_DEFAULT_ORDER.map((k) => `tv-layout-row-${k}`),
+    // The palette is a labelled group with one chip per component type.
+    const palette = screen.getByRole('group', { name: 'Komponen TV' });
+    for (const type of TV_COMPONENT_TYPES) {
+      expect(within(palette).getByTestId(`tv-layout__chip--${type}`)).toBeInTheDocument();
+    }
+    // The default layout places 5 widgets (ids match component names).
+    const widgets = screen.getAllByTestId(/^tv-layout__widget--/);
+    expect(widgets).toHaveLength(5);
+    for (const type of TV_COMPONENT_TYPES) {
+      expect(screen.getByTestId(`tv-layout__widget--${type}`)).toBeInTheDocument();
+    }
+  });
+
+  it('removes a widget via the × button', async () => {
+    const { api, providerApi } = makeApi();
+    renderPage(api, providerApi);
+    await screen.findByTestId('tv-layout__widget--callHistory');
+    expect(screen.getByTestId('tv-layout__widget--callHistory')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('tv-layout__remove--callHistory'));
+    expect(screen.queryByTestId('tv-layout__widget--callHistory')).toBeNull();
+    expect(screen.getAllByTestId(/^tv-layout__widget--/)).toHaveLength(4);
+  });
+
+  it('the Kolom stepper moves a widget that has room (after removing its neighbor)', async () => {
+    const { api, providerApi } = makeApi();
+    renderPage(api, providerApi);
+    await screen.findByTestId('tv-layout__widget--waitingQueue');
+    // callHistory sits to the right of waitingQueue — remove it so waitingQueue
+    // can shift right without an overlap no-op.
+    fireEvent.click(screen.getByTestId('tv-layout__remove--callHistory'));
+    const stepper = screen.getByTestId('tv-layout__stepper-x--waitingQueue');
+    const input = within(stepper).getByLabelText('Kolom') as HTMLInputElement;
+    expect(input.value).toBe('0');
+    fireEvent.click(within(stepper).getByLabelText('Kolom tambah'));
+    expect(input.value).toBe('1');
+  });
+
+  it('the Lebar stepper resizes a widget that has room (after removing its neighbor)', async () => {
+    const { api, providerApi } = makeApi();
+    renderPage(api, providerApi);
+    await screen.findByTestId('tv-layout__widget--waitingQueue');
+    fireEvent.click(screen.getByTestId('tv-layout__remove--callHistory'));
+    const stepper = screen.getByTestId('tv-layout__stepper-w--waitingQueue');
+    const input = within(stepper).getByLabelText('Lebar') as HTMLInputElement;
+    expect(input.value).toBe('6');
+    fireEvent.click(within(stepper).getByLabelText('Lebar tambah'));
+    expect(input.value).toBe('7');
+  });
+
+  it('an overlap-blocked resize is a no-op (the stepper value does not change)', async () => {
+    const { api, providerApi } = makeApi();
+    renderPage(api, providerApi);
+    await screen.findByTestId('tv-layout__widget--waitingQueue');
+    // callHistory is still to the right → widening waitingQueue to 7 overlaps it.
+    const stepper = screen.getByTestId('tv-layout__stepper-w--waitingQueue');
+    const input = within(stepper).getByLabelText('Lebar') as HTMLInputElement;
+    expect(input.value).toBe('6');
+    fireEvent.click(within(stepper).getByLabelText('Lebar tambah'));
+    // resizeWidget returns the original layout on overlap → value stays 6.
+    expect(input.value).toBe('6');
+  });
+
+  it('the Baris/Tinggi steppers change a widget row position + height', async () => {
+    const { api, providerApi } = makeApi();
+    renderPage(api, providerApi);
+    await screen.findByTestId('tv-layout__widget--runningText');
+    // runningText is at y=10,h=1. It can grow taller (rows 10..19 are free).
+    const hStepper = screen.getByTestId('tv-layout__stepper-h--runningText');
+    const hInput = within(hStepper).getByLabelText('Tinggi') as HTMLInputElement;
+    expect(hInput.value).toBe('1');
+    fireEvent.click(within(hStepper).getByLabelText('Tinggi tambah'));
+    expect(hInput.value).toBe('2');
+  });
+
+  it('the Kolom stepper is clamped at min (0) — the − button is disabled', async () => {
+    const { api, providerApi } = makeApi();
+    renderPage(api, providerApi);
+    await screen.findByTestId('tv-layout__widget--nowServing');
+    const stepper = screen.getByTestId('tv-layout__stepper-x--nowServing');
+    expect(within(stepper).getByLabelText('Kolom kurang')).toBeDisabled();
+  });
+
+  it('a full-width widget hits max Lebar — the + button is disabled', async () => {
+    const { api, providerApi } = makeApi();
+    renderPage(api, providerApi);
+    await screen.findByTestId('tv-layout__widget--nowServing');
+    const stepper = screen.getByTestId('tv-layout__stepper-w--nowServing');
+    // nowServing is x=0,w=12 → max = GRID_COLS - x = 12 → atMax.
+    expect(within(stepper).getByLabelText('Lebar tambah')).toBeDisabled();
+  });
+
+  it('clicking a palette chip on a full grid surfaces the no-room status', async () => {
+    // A single 12×20 widget fills every row → no free spot for any add. (The
+    // default 5-widget layout leaves rows 11..19 empty, so it is NOT full.)
+    const fullGrid = {
+      ...configuredStore(),
+      tvPanelLayout: [{ id: 'filler', component: 'nowServing' as const, x: 0, y: 0, w: 12, h: 20 }],
+    };
+    const { api, providerApi } = makeApi(fullGrid);
+    renderPage(api, providerApi);
+    await screen.findByTestId('tv-layout__widget--filler');
+    fireEvent.click(screen.getByTestId('tv-layout__chip--runningText'));
+    await waitFor(() =>
+      expect(screen.getByText('Tidak ada ruang kosong untuk komponen baru.')).toBeInTheDocument(),
     );
-    // The runningText footer row (visibility checkbox only).
-    expect(screen.getByTestId('tv-layout-vis-runningText')).toBeInTheDocument();
-    // The runningText row carries the helper text.
-    expect(screen.getByText('Teks berjalan selalu di bagian bawah.')).toBeInTheDocument();
+    // No new widget was added.
+    expect(screen.getAllByTestId(/^tv-layout__widget--/)).toHaveLength(1);
   });
 
-  it('the Up button on the second row moves it up (reorder via the accessible backbone)', async () => {
+  it('clicking a palette chip after freeing space adds the component back', async () => {
     const { api, providerApi } = makeApi();
     renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout-row-waitingQueue');
-    // Click "Naik" on waitingQueue (index 1) -> moves to index 0.
-    fireEvent.click(screen.getByTestId('tv-layout-up-waitingQueue'));
-    const rows = screen.getAllByRole('listitem');
-    expect(rows.map((r) => r.dataset.testid)).toEqual([
-      'tv-layout-row-waitingQueue',
-      'tv-layout-row-nowServing',
-      'tv-layout-row-callHistory',
-      'tv-layout-row-countersServing',
-    ]);
+    await screen.findByTestId('tv-layout__widget--runningText');
+    // Remove runningText (a 12×1 strip) → its row frees up.
+    fireEvent.click(screen.getByTestId('tv-layout__remove--runningText'));
+    expect(screen.getAllByTestId(/^tv-layout__widget--/)).toHaveLength(4);
+    // Re-add runningText via the palette — findFreeSpot places it at the freed row.
+    fireEvent.click(screen.getByTestId('tv-layout__chip--runningText'));
+    expect(screen.getAllByTestId(/^tv-layout__widget--/)).toHaveLength(5);
   });
 
-  it('the Down button on the first row moves it down', async () => {
+  it('Kembalikan ke Default restores the 5 default widgets', async () => {
     const { api, providerApi } = makeApi();
     renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout-row-nowServing');
-    fireEvent.click(screen.getByTestId('tv-layout-down-nowServing'));
-    const rows = screen.getAllByRole('listitem');
-    expect(rows.map((r) => r.dataset.testid)).toEqual([
-      'tv-layout-row-waitingQueue',
-      'tv-layout-row-nowServing',
-      'tv-layout-row-callHistory',
-      'tv-layout-row-countersServing',
-    ]);
+    await screen.findByTestId('tv-layout__widget--callHistory');
+    fireEvent.click(screen.getByTestId('tv-layout__remove--callHistory'));
+    fireEvent.click(screen.getByTestId('tv-layout__remove--runningText'));
+    expect(screen.getAllByTestId(/^tv-layout__widget--/)).toHaveLength(3);
+    fireEvent.click(screen.getByTestId('tv-layout-reset'));
+    expect(screen.getAllByTestId(/^tv-layout__widget--/)).toHaveLength(5);
+    for (const type of TV_COMPONENT_TYPES) {
+      expect(screen.getByTestId(`tv-layout__widget--${type}`)).toBeInTheDocument();
+    }
   });
 
-  it('the Up button on the first row is disabled (no wraparound)', async () => {
-    const { api, providerApi } = makeApi();
-    renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout-row-nowServing');
-    expect(screen.getByTestId('tv-layout-up-nowServing')).toBeDisabled();
-    // The Down button on the last row is disabled too.
-    expect(screen.getByTestId('tv-layout-down-countersServing')).toBeDisabled();
-  });
-
-  it('the size segmented control changes a panel size', async () => {
-    const { api, providerApi } = makeApi();
-    renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout-row-nowServing');
-    // The nowServing default size is 4 (Penuh). Click "Sedang" (2).
-    const sedang = screen.getByTestId('tv-layout-size-nowServing-2');
-    fireEvent.click(sedang);
-    // The nowServing radio for 2 is now checked.
-    expect(sedang).toBeChecked();
-    expect(screen.getByTestId('tv-layout-size-nowServing-4')).not.toBeChecked();
-  });
-
-  it('the visibility checkbox toggles a panel off', async () => {
-    const { api, providerApi } = makeApi();
-    renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout-row-callHistory');
-    const vis = screen.getByTestId('tv-layout-vis-callHistory') as HTMLInputElement;
-    expect(vis.checked).toBe(true);
-    fireEvent.click(vis);
-    expect(vis.checked).toBe(false);
-  });
-
-  it('the preview reflects the current order + the size via flex', async () => {
-    const { api, providerApi } = makeApi();
-    renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout-preview');
-    // 4 visible content bars in DEFAULT order.
-    const bars = [
-      screen.getByTestId('tv-layout-preview-bar-nowServing'),
-      screen.getByTestId('tv-layout-preview-bar-waitingQueue'),
-      screen.getByTestId('tv-layout-preview-bar-callHistory'),
-      screen.getByTestId('tv-layout-preview-bar-countersServing'),
-    ];
-    expect(bars).toHaveLength(4);
-    // The nowServing bar carries flex: 4 1 0 (the DEFAULT hero size). jsdom
-    // appends `px` to the 0 basis, so match via regex.
-    expect(bars[0].style.flex).toMatch(/^4 1 0(px)?$/);
-    // The waitingQueue bar carries flex: 2 1 0 (the DEFAULT side-column size).
-    expect(bars[1].style.flex).toMatch(/^2 1 0(px)?$/);
-    // The footer bar is present.
-    expect(screen.getByTestId('tv-layout-preview-footer')).toBeInTheDocument();
-  });
-
-  it('the preview re-orders when a panel is moved up', async () => {
-    const { api, providerApi } = makeApi();
-    renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout-preview-bar-nowServing');
-    // Move callHistory (index 2) up to index 1.
-    fireEvent.click(screen.getByTestId('tv-layout-up-callHistory'));
-    // The preview DOM order now starts with nowServing, callHistory, ...
-    const preview = screen.getByTestId('tv-layout-preview');
-    const bars = within(preview).getAllByTestId(/tv-layout-preview-bar-/);
-    expect(bars.map((b) => b.dataset.testid)).toEqual([
-      'tv-layout-preview-bar-nowServing',
-      'tv-layout-preview-bar-callHistory',
-      'tv-layout-preview-bar-waitingQueue',
-      'tv-layout-preview-bar-countersServing',
-    ]);
-  });
-
-  it('hiding runningText removes the footer from the preview', async () => {
-    const { api, providerApi } = makeApi();
-    renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout-preview-footer');
-    fireEvent.click(screen.getByTestId('tv-layout-vis-runningText'));
-    expect(screen.queryByTestId('tv-layout-preview-footer')).toBeNull();
-  });
-
-  it('save sends tvPanelLayout with the edited layout + passthrough of other fields', async () => {
+  it('save sends the edited tvPanelLayout + passthrough of every other field', async () => {
     const { api, save, providerApi } = makeApi();
     renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout-row-callHistory');
-    // Edit: move callHistory up (index 2 -> 1) + change nowServing size to 2.
-    fireEvent.click(screen.getByTestId('tv-layout-up-callHistory'));
-    fireEvent.click(screen.getByTestId('tv-layout-size-nowServing-2'));
+    await screen.findByTestId('tv-layout__widget--callHistory');
+    // Edit: remove callHistory + move waitingQueue one column right (needs the
+    // neighbor gone, which the remove just accomplished).
+    fireEvent.click(screen.getByTestId('tv-layout__remove--callHistory'));
+    fireEvent.click(within(screen.getByTestId('tv-layout__stepper-x--waitingQueue')).getByLabelText('Kolom tambah'));
     fireEvent.click(screen.getByTestId('tv-layout-save'));
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
     const payload = save.mock.calls[0][0] as SaveSystemConfigurationPayload;
-    // tvPanelLayout reflects the edits: callHistory moved up one position
-    // (order 2 -> 1), and nowServing size changed 4 -> 2.
-    expect(payload.tvPanelLayout.callHistory.order).toBe(1);
-    expect(payload.tvPanelLayout.nowServing.size).toBe(2);
-    // waitingQueue shifted down to fill callHistory's old slot (order 1 -> 2).
-    expect(payload.tvPanelLayout.waitingQueue.order).toBe(2);
-    // Passthrough fields are unchanged from the config.
+    // tvPanelLayout: 4 widgets, no callHistory, waitingQueue at x=1.
+    expect(payload.tvPanelLayout).toHaveLength(4);
+    expect(payload.tvPanelLayout.find((w) => w.component === 'callHistory')).toBeUndefined();
+    const waiting = payload.tvPanelLayout.find((w) => w.component === 'waitingQueue');
+    expect(waiting?.x).toBe(1);
+    // Passthrough fields unchanged from the config.
     expect(payload.storeName).toBe('Apotek Sehat');
     expect(payload.brandColor).toBe(DEFAULT_BRAND_COLOR);
     expect(payload.serviceThemes).toEqual({ ...DEFAULT_SERVICE_THEMES });
@@ -265,15 +276,12 @@ describe('TvLayoutPage', () => {
     ]);
   });
 
-  it('announces "Tampilan TV disimpan" via the polite toast region', async () => {
+  it('announces "Tampilan TV disimpan." via the polite toast region', async () => {
     const { api, providerApi } = makeApi();
     renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout-row-nowServing');
+    await screen.findByTestId('tv-layout__widget--nowServing');
     fireEvent.click(screen.getByTestId('tv-layout-save'));
-    // The polite live region carries the success toast.
-    await waitFor(() =>
-      expect(screen.getByText('Tampilan TV disimpan.')).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByText('Tampilan TV disimpan.')).toBeInTheDocument());
   });
 
   it('a save failure is announced via the error toast and does not throw', async () => {
@@ -282,56 +290,72 @@ describe('TvLayoutPage', () => {
       () => Promise.reject(new Error('backend down')),
     );
     renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout-row-nowServing');
+    await screen.findByTestId('tv-layout__widget--nowServing');
     fireEvent.click(screen.getByTestId('tv-layout-save'));
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
     expect(await screen.findByText(/Gagal menyimpan: backend down/)).toBeInTheDocument();
   });
 
-  it('a11y: the size control is a radiogroup with an aria-label naming the panel', async () => {
+  it('a11y: the palette is a role=group labelled "Komponen TV"', async () => {
     const { api, providerApi } = makeApi();
     renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout-row-nowServing');
-    const rg = screen.getByRole('radiogroup', { name: 'Ukuran panel Sedang Dilayani' });
-    expect(rg).toBeInTheDocument();
-    // 4 radios inside.
-    const radios = within(rg).getAllByRole('radio');
-    expect(radios).toHaveLength(4);
+    await screen.findByTestId('tv-layout__palette');
+    expect(screen.getByRole('group', { name: 'Komponen TV' })).toBeInTheDocument();
   });
 
-  it('a11y: the drag handle has an aria-label naming the panel', async () => {
+  it('a11y: each palette chip has an aria-label naming the component it adds', async () => {
     const { api, providerApi } = makeApi();
     renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout-row-nowServing');
-    const handle = screen.getByTestId('tv-layout-handle-nowServing');
-    expect(handle).toHaveAttribute('aria-label', 'Seret Sedang Dilayani untuk mengatur urutan');
+    await screen.findByTestId('tv-layout__palette');
+    expect(screen.getByLabelText('Tambah Sedang Dilayani')).toBeInTheDocument();
+    expect(screen.getByLabelText('Tambah Teks Berjalan')).toBeInTheDocument();
   });
 
-  it('a11y: the up/down buttons have accessible names naming the panel', async () => {
+  it('a11y: each widget steppers group is labelled naming the component', async () => {
     const { api, providerApi } = makeApi();
     renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout-row-nowServing');
-    expect(screen.getByLabelText('Naikkan Sedang Dilayani')).toBeInTheDocument();
-    expect(screen.getByLabelText('Turunkan Sedang Dilayani')).toBeInTheDocument();
+    await screen.findByTestId('tv-layout__widget--nowServing');
+    expect(
+      screen.getByRole('group', { name: 'Posisi dan ukuran Sedang Dilayani' }),
+    ).toBeInTheDocument();
+  });
+
+  it('a11y: each widget has a resize slider labelled "Ubah Ukuran"', async () => {
+    const { api, providerApi } = makeApi();
+    renderPage(api, providerApi);
+    await screen.findByTestId('tv-layout__widget--nowServing');
+    // One slider per widget — scope to a widget to disambiguate.
+    const handle = within(screen.getByTestId('tv-layout__widget--nowServing')).getByRole('slider', {
+      name: 'Ubah Ukuran',
+    });
+    expect(handle).toBeInTheDocument();
+    // Every widget carries one.
+    expect(screen.getAllByRole('slider', { name: 'Ubah Ukuran' })).toHaveLength(5);
+  });
+
+  it('a11y: each widget remove button has an accessible name', async () => {
+    const { api, providerApi } = makeApi();
+    renderPage(api, providerApi);
+    await screen.findByTestId('tv-layout__widget--nowServing');
+    // One remove button per widget — all share the "Hapus Komponen" label.
+    expect(screen.getAllByLabelText('Hapus Komponen')).toHaveLength(5);
+    const btn = within(screen.getByTestId('tv-layout__widget--nowServing')).getByLabelText('Hapus Komponen');
+    expect(btn).toBeInTheDocument();
   });
 
   it('Save is disabled when the layout is invalid (defense-in-depth for a corrupt prefill)', async () => {
-    // A config with a corrupt size (out of range). coerceTvPanelLayout drops
-    // the invalid value and falls back to the DEFAULT, so the page is valid —
-    // this test asserts the Save button is ENABLED after coercion, i.e. the
-    // corrupt prefill never disables the page.
+    // A config with an out-of-range widget width. coerceTvGridLayout rejects the
+    // invalid array and falls back to the DEFAULT, so the page is valid — this
+    // asserts the corrupt prefill never disables Save (coercion backstop).
     const corrupt = {
       ...configuredStore(),
-      tvPanelLayout: {
-        ...DEFAULT_TV_PANEL_LAYOUT,
-        nowServing: { visible: true, order: 0, size: 99 },
-      },
+      tvPanelLayout: [{ id: 'bad', component: 'nowServing' as const, x: 0, y: 0, w: 99, h: 1 }],
     };
     const { api, providerApi } = makeApi(corrupt);
     renderPage(api, providerApi);
-    await screen.findByTestId('tv-layout-row-nowServing');
-    // The nowServing size was coerced back to the DEFAULT (4) — Penuh is checked.
-    expect(screen.getByTestId('tv-layout-size-nowServing-4')).toBeChecked();
+    await screen.findByTestId('tv-layout__widget--nowServing');
+    // Coerced back to the default → nowServing default widget present + Save enabled.
+    expect(screen.getByTestId('tv-layout__widget--nowServing')).toBeInTheDocument();
     expect(screen.getByTestId('tv-layout-save')).not.toBeDisabled();
   });
 });

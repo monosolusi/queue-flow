@@ -6,8 +6,8 @@ import { TvStoreProvider } from './tv-store';
 import { TvBoardPage } from '../pages/TvBoardPage';
 import type { ITvApi } from '../api/tv-api';
 import type { AudioProvider } from '../audio/audio-provider';
-import type { QueueLifecycleWireEvent, TvTicketDto, TvPanelLayoutMap } from '../api/types';
-import { DEFAULT_TV_PANEL_LAYOUT } from '../api/types';
+import type { QueueLifecycleWireEvent, TvTicketDto, TvGridLayout } from '../api/types';
+import { DEFAULT_TV_GRID_LAYOUT } from '../api/types';
 
 /** Fake WebSocket whose instances the test can reach to deliver frames. */
 class FakeWebSocket {
@@ -35,7 +35,7 @@ function makeApi(
   brandColor = '',
   waiting: TvTicketDto[] = [],
   active: TvTicketDto[] = [],
-  panelLayout: TvPanelLayoutMap = DEFAULT_TV_PANEL_LAYOUT,
+  panelLayout: TvGridLayout = DEFAULT_TV_GRID_LAYOUT,
 ): ITvApi {
   return {
     getSystemConfig: vi.fn(() =>
@@ -523,7 +523,7 @@ describe('TV board state refetch (server owns the read model)', () => {
           storeName: 'Apotek Sehat',
           brandColor: '',
           serviceThemes: { tv: 'light' as const },
-          tvPanelLayout: DEFAULT_TV_PANEL_LAYOUT,
+          tvPanelLayout: DEFAULT_TV_GRID_LAYOUT,
           routingRules: [],
         }),
       ),
@@ -704,7 +704,7 @@ describe('TvStoreProvider counters-serving projection + panel layout', () => {
           storeName: 'Apotek Sehat',
           brandColor: '',
           serviceThemes: { tv: 'light' as const },
-          tvPanelLayout: DEFAULT_TV_PANEL_LAYOUT,
+          tvPanelLayout: DEFAULT_TV_GRID_LAYOUT,
           routingRules: [{ counterId: 1, counterName: 'Loket 1' }],
         }),
       ),
@@ -769,7 +769,7 @@ describe('TvStoreProvider counters-serving projection + panel layout', () => {
     expect(screen.queryByText('Tidak ada counter yang sedang melayani.')).not.toBeInTheDocument();
   });
 
-  it('panelLayout carried from BOOT_LOADED — all visible by default renders panels in order', async () => {
+  it('panelLayout carried from BOOT_LOADED — default grid layout renders all 5 widgets', async () => {
     const active = [
       { ticketId: 't1', ticketNumber: 'A-005', categoryId: 'cat-a', status: 'CALLING', counterId: 2 },
     ];
@@ -777,38 +777,29 @@ describe('TvStoreProvider counters-serving projection + panel layout', () => {
     const audio = makeAudio();
     renderBoard(api, audio);
 
-    // All content panels visible by default. NowServing is non-null (active
-    // ticket), so the hero renders the ticket (not the idle empty state).
-    // A-005 appears in BOTH the now-serving card and the counters-serving
-    // panel, so await the nowServing panel wrapper by testid instead.
-    expect(await screen.findByTestId('tv-board__panel--nowServing')).toBeInTheDocument();
+    // All 5 widgets render by default. NowServing is non-null (active ticket),
+    // so the hero renders the ticket (not the idle empty state). A-005 appears
+    // in BOTH the now-serving card and the counters-serving panel, so await
+    // the nowServing widget wrapper by testid instead.
+    expect(await screen.findByTestId('tv-board__widget--nowServing')).toBeInTheDocument();
+    expect(screen.getByTestId('tv-board__widget--waitingQueue')).toBeInTheDocument();
+    expect(screen.getByTestId('tv-board__widget--callHistory')).toBeInTheDocument();
+    expect(screen.getByTestId('tv-board__widget--countersServing')).toBeInTheDocument();
+    expect(screen.getByTestId('tv-board__widget--runningText')).toBeInTheDocument();
+    // The component content renders inside the widget wrappers.
     expect(screen.getByText('Sedang Melayani')).toBeInTheDocument();
     expect(screen.getByText('Antrian Berikutnya')).toBeInTheDocument();
     expect(screen.getByText('Riwayat Panggilan')).toBeInTheDocument();
-    // RunningText footer is rendered.
+    // RunningText is a grid widget now (still role="marquee").
     expect(screen.getByRole('marquee')).toBeInTheDocument();
-
-    // The visible content panels render in the DEFAULT order:
-    // nowServing(0) → waitingQueue(1) → callHistory(2) → countersServing(3).
-    const order = Array.from(
-      document.querySelectorAll('[data-testid^="tv-board__panel--"]'),
-    ).map((el) => el.getAttribute('data-testid'));
-    expect(order).toEqual([
-      'tv-board__panel--nowServing',
-      'tv-board__panel--waitingQueue',
-      'tv-board__panel--callHistory',
-      'tv-board__panel--countersServing',
-    ]);
   });
 
-  it('hides a panel when visible=false (panel not in DOM; others fill the flex column)', async () => {
-    const layout: TvPanelLayoutMap = {
-      nowServing: { visible: true, order: 0, size: 4 },
-      waitingQueue: { visible: false, order: 1, size: 2 },
-      callHistory: { visible: false, order: 2, size: 2 },
-      countersServing: { visible: false, order: 3, size: 2 },
-      runningText: { visible: false, order: 4, size: 2 },
-    };
+  it('a layout with a subset of widgets renders only those (absent widget not in DOM)', async () => {
+    // A single-widget layout: only nowServing is placed. The other components
+    // are absent from the array (the new "hidden" = not placed).
+    const layout: TvGridLayout = [
+      { id: 'nowServing', component: 'nowServing', x: 0, y: 0, w: 12, h: 12 },
+    ];
     const active = [
       { ticketId: 't1', ticketNumber: 'A-005', categoryId: 'cat-a', status: 'CALLING', counterId: 2 },
     ];
@@ -816,27 +807,26 @@ describe('TvStoreProvider counters-serving projection + panel layout', () => {
     const audio = makeAudio();
     renderBoard(api, audio);
 
-    // nowServing stays visible (hero); the side panels + footer are hidden.
-    expect(await screen.findByTestId('tv-board__panel--nowServing')).toBeInTheDocument();
+    // nowServing stays placed (hero); the side widgets + runningText are absent.
+    expect(await screen.findByTestId('tv-board__widget--nowServing')).toBeInTheDocument();
+    expect(screen.queryByTestId('tv-board__widget--waitingQueue')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('tv-board__widget--callHistory')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('tv-board__widget--countersServing')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('tv-board__widget--runningText')).not.toBeInTheDocument();
     expect(screen.queryByText('Sedang Melayani')).not.toBeInTheDocument();
     expect(screen.queryByText('Antrian Berikutnya')).not.toBeInTheDocument();
     expect(screen.queryByText('Riwayat Panggilan')).not.toBeInTheDocument();
     expect(screen.queryByRole('marquee')).not.toBeInTheDocument();
-    // Only the nowServing panel wrapper is rendered.
-    const order = Array.from(
-      document.querySelectorAll('[data-testid^="tv-board__panel--"]'),
-    ).map((el) => el.getAttribute('data-testid'));
-    expect(order).toEqual(['tv-board__panel--nowServing']);
   });
 
-  it('nowServing.visible=false → NowServingCard not rendered, no misleading "Menunggu" idle copy', async () => {
-    const layout: TvPanelLayoutMap = {
-      nowServing: { visible: false, order: 0, size: 4 },
-      waitingQueue: { visible: true, order: 1, size: 2 },
-      callHistory: { visible: true, order: 2, size: 2 },
-      countersServing: { visible: true, order: 3, size: 2 },
-      runningText: { visible: true, order: 4, size: 2 },
-    };
+  it('nowServing widget absent → NowServingCard not rendered, no misleading "Menunggu" idle copy', async () => {
+    // A 4-widget layout that places every component EXCEPT nowServing.
+    const layout: TvGridLayout = [
+      { id: 'waitingQueue',    component: 'waitingQueue',    x: 0, y: 0, w: 6,  h: 6 },
+      { id: 'callHistory',     component: 'callHistory',     x: 6, y: 0, w: 6,  h: 6 },
+      { id: 'countersServing', component: 'countersServing', x: 0, y: 6, w: 12, h: 5 },
+      { id: 'runningText',     component: 'runningText',     x: 0, y: 11, w: 12, h: 1 },
+    ];
     const active = [
       { ticketId: 't1', ticketNumber: 'A-005', categoryId: 'cat-a', status: 'CALLING', counterId: 2 },
     ];
@@ -844,25 +834,29 @@ describe('TvStoreProvider counters-serving projection + panel layout', () => {
     const audio = makeAudio();
     renderBoard(api, audio);
 
-    // nowServing.hidden → no nowServing panel wrapper, no "Menunggu" idle
-    // copy, no "PERGI KE COUNTER" eyebrow (the panel is truly absent — no
-    // structural placeholder is needed in the flex-column model). A-005 may
-    // still appear in the counters-serving panel (visible=true), which is
-    // expected and not asserted here.
+    // nowServing absent → no nowServing widget wrapper, no "Menunggu" idle
+    // copy, no "PERGI KE COUNTER" eyebrow (the widget is truly absent — no
+    // structural placeholder is needed in the grid model). A-005 may still
+    // appear in the counters-serving widget, which is expected and not
+    // asserted here.
     await screen.findByText('Sedang Melayani');
-    expect(screen.queryByTestId('tv-board__panel--nowServing')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('tv-board__widget--nowServing')).not.toBeInTheDocument();
     expect(screen.queryByText('Menunggu panggilan berikutnya…')).not.toBeInTheDocument();
     expect(screen.queryByText('PERGI KE COUNTER')).not.toBeInTheDocument();
   });
 
-  it('renders panels in a custom order (callHistory first)', async () => {
-    const layout: TvPanelLayoutMap = {
-      nowServing: { visible: true, order: 2, size: 4 },
-      waitingQueue: { visible: true, order: 1, size: 2 },
-      callHistory: { visible: true, order: 0, size: 2 },
-      countersServing: { visible: true, order: 3, size: 2 },
-      runningText: { visible: false, order: 4, size: 2 },
-    };
+  it('renders widgets at custom x/y grid positions (grid-column/grid-row spans)', async () => {
+    // A custom 2D arrangement: callHistory at the top-left, nowServing at the
+    // top-right, waitingQueue + countersServing below, runningText at the
+    // bottom. Distinct from the default — verifies the page places widgets by
+    // their {x, y, w, h}, not by a fixed canonical order.
+    const layout: TvGridLayout = [
+      { id: 'callHistory',     component: 'callHistory',     x: 0, y: 0, w: 5, h: 5 },
+      { id: 'nowServing',      component: 'nowServing',      x: 5, y: 0, w: 7, h: 5 },
+      { id: 'waitingQueue',    component: 'waitingQueue',    x: 0, y: 5, w: 12, h: 4 },
+      { id: 'countersServing', component: 'countersServing', x: 0, y: 9, w: 12, h: 2 },
+      { id: 'runningText',     component: 'runningText',     x: 0, y: 11, w: 12, h: 1 },
+    ];
     const active = [
       { ticketId: 't1', ticketNumber: 'A-005', categoryId: 'cat-a', status: 'CALLING', counterId: 2 },
     ];
@@ -870,27 +864,28 @@ describe('TvStoreProvider counters-serving projection + panel layout', () => {
     const audio = makeAudio();
     renderBoard(api, audio);
 
-    await screen.findByTestId('tv-board__panel--callHistory');
-    // callHistory(0) → waitingQueue(1) → nowServing(2) → countersServing(3).
-    const order = Array.from(
-      document.querySelectorAll('[data-testid^="tv-board__panel--"]'),
-    ).map((el) => el.getAttribute('data-testid'));
-    expect(order).toEqual([
-      'tv-board__panel--callHistory',
-      'tv-board__panel--waitingQueue',
-      'tv-board__panel--nowServing',
-      'tv-board__panel--countersServing',
-    ]);
+    await screen.findByTestId('tv-board__widget--callHistory');
+    // Each widget wrapper carries inline grid-column / grid-row spans derived
+    // from its {x, y, w, h} (1-based column/row start via x+1 / y+1).
+    const callHistory = screen.getByTestId('tv-board__widget--callHistory');
+    expect(callHistory.getAttribute('style')).toContain('grid-column: 1 / span 5');
+    expect(callHistory.getAttribute('style')).toContain('grid-row: 1 / span 5');
+    const nowServing = screen.getByTestId('tv-board__widget--nowServing');
+    expect(nowServing.getAttribute('style')).toContain('grid-column: 6 / span 7');
+    expect(nowServing.getAttribute('style')).toContain('grid-row: 1 / span 5');
+    const runningText = screen.getByTestId('tv-board__widget--runningText');
+    expect(runningText.getAttribute('style')).toContain('grid-column: 1 / span 12');
+    expect(runningText.getAttribute('style')).toContain('grid-row: 12 / span 1');
   });
 
-  it('a panel wrapper carries inline flex: <size> 1 0 (proportional height share)', async () => {
-    const layout: TvPanelLayoutMap = {
-      nowServing: { visible: true, order: 0, size: 3 },
-      waitingQueue: { visible: true, order: 1, size: 1 },
-      callHistory: { visible: true, order: 2, size: 2 },
-      countersServing: { visible: false, order: 3, size: 2 },
-      runningText: { visible: false, order: 4, size: 2 },
-    };
+  it('a widget wrapper carries inline grid-column/grid-row spans from {x, y, w, h}', async () => {
+    // A layout with distinct w/h per widget — verifies the inline style maps
+    // x→column-start, y→row-start, w→column-span, h→row-span (1-based starts).
+    const layout: TvGridLayout = [
+      { id: 'nowServing',      component: 'nowServing',      x: 0, y: 0, w: 12, h: 3 },
+      { id: 'waitingQueue',    component: 'waitingQueue',    x: 0, y: 3, w: 4,  h: 1 },
+      { id: 'callHistory',     component: 'callHistory',     x: 4, y: 3, w: 8,  h: 1 },
+    ];
     const active = [
       { ticketId: 't1', ticketNumber: 'A-005', categoryId: 'cat-a', status: 'CALLING', counterId: 2 },
     ];
@@ -898,37 +893,35 @@ describe('TvStoreProvider counters-serving projection + panel layout', () => {
     const audio = makeAudio();
     renderBoard(api, audio);
 
-    await screen.findByTestId('tv-board__panel--nowServing');
-    const nowServingPanel = screen.getByTestId('tv-board__panel--nowServing');
-    expect(nowServingPanel.getAttribute('style')).toContain('flex: 3 1 0');
-    const waitingPanel = screen.getByTestId('tv-board__panel--waitingQueue');
-    expect(waitingPanel.getAttribute('style')).toContain('flex: 1 1 0');
-    const historyPanel = screen.getByTestId('tv-board__panel--callHistory');
-    expect(historyPanel.getAttribute('style')).toContain('flex: 2 1 0');
+    await screen.findByTestId('tv-board__widget--nowServing');
+    const nowServingWidget = screen.getByTestId('tv-board__widget--nowServing');
+    expect(nowServingWidget.getAttribute('style')).toContain('grid-column: 1 / span 12');
+    expect(nowServingWidget.getAttribute('style')).toContain('grid-row: 1 / span 3');
+    const waitingWidget = screen.getByTestId('tv-board__widget--waitingQueue');
+    expect(waitingWidget.getAttribute('style')).toContain('grid-column: 1 / span 4');
+    expect(waitingWidget.getAttribute('style')).toContain('grid-row: 4 / span 1');
+    const historyWidget = screen.getByTestId('tv-board__widget--callHistory');
+    expect(historyWidget.getAttribute('style')).toContain('grid-column: 5 / span 8');
+    expect(historyWidget.getAttribute('style')).toContain('grid-row: 4 / span 1');
   });
 
-  it('renders the empty-state status when all content panels are hidden', async () => {
-    const layout: TvPanelLayoutMap = {
-      nowServing: { visible: false, order: 0, size: 4 },
-      waitingQueue: { visible: false, order: 1, size: 2 },
-      callHistory: { visible: false, order: 2, size: 2 },
-      countersServing: { visible: false, order: 3, size: 2 },
-      runningText: { visible: true, order: 4, size: 2 },
-    };
+  it('renders the empty-state status when the layout array is empty (idle board)', async () => {
+    // An empty layout = no placed widgets = the board's idle empty state.
+    const layout: TvGridLayout = [];
     const api = makeApi('', [], [], layout);
     const audio = makeAudio();
     renderBoard(api, audio);
 
-    // The empty-state status div renders when no content panel is visible.
-    // Use a regex matcher (the em-dash in the literal string trips the exact
-    // text matcher); scope to the panels-empty class to disambiguate from the
+    // The empty-state status div renders when no widget is placed. Use a
+    // regex matcher (the em-dash in the literal string trips the exact text
+    // matcher); scope to the panels-empty class to disambiguate from the
     // connection-status badge (also role="status").
     const emptyStatus = await screen.findByText(/Tidak ada panel yang ditampilkan/);
     expect(emptyStatus).toHaveClass('tv-board__panels-empty');
     expect(emptyStatus.textContent).toContain('aktifkan panel di Tampilan TV');
-    // No panel wrappers render.
-    expect(document.querySelector('[data-testid^="tv-board__panel--"]')).toBeNull();
-    // The runningText footer still renders (visibility-only).
-    expect(screen.getByRole('marquee')).toBeInTheDocument();
+    // No widget wrappers render.
+    expect(document.querySelector('[data-testid^="tv-board__widget--"]')).toBeNull();
+    // No marquee renders (runningText is a widget; absent from the empty array).
+    expect(screen.queryByRole('marquee')).not.toBeInTheDocument();
   });
 });

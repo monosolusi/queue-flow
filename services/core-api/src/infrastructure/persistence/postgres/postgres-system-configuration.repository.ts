@@ -15,7 +15,7 @@ import {
 } from '../../../domain/store-config/value-objects/service-themes';
 import {
   TvPanelLayout,
-  type TvPanelLayoutMap,
+  type TvGridLayout,
 } from '../../../domain/store-config/value-objects/tv-panel-layout';
 import { StateMachine } from '../../../domain/store-config/state-machine';
 import { StateSchema } from '../../../domain/store-config/value-objects/state-schema';
@@ -31,7 +31,7 @@ interface ConfigRow {
   daily_reset_policy: DailyResetPolicyProps;
   brand_color: string;
   service_themes: ServiceThemesMap | null;
-  tv_panel_layout: TvPanelLayoutMap | null;
+  tv_panel_layout: TvGridLayout | null;
 }
 
 /**

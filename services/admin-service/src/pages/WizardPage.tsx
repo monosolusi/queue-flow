@@ -11,10 +11,10 @@ import {
   type WizardRoutingRuleDto,
   type ServiceThemesMap,
   DEFAULT_SERVICE_THEMES,
-  type TvPanelLayoutMap,
-  DEFAULT_TV_PANEL_LAYOUT,
+  type TvGridLayout,
+  DEFAULT_TV_GRID_LAYOUT,
 } from '../api/types';
-import { coerceTvPanelLayout, defaultTvPanelLayout } from '../lib/tv-panel-layout';
+import { coerceTvGridLayout, defaultTvGridLayout } from '../lib/tv-grid-layout';
 import { useAuthContext } from '../auth/auth-context';
 import { useSystemConfigContext } from '../config/system-config-context';
 import { writeToken } from '../auth/token-store';
@@ -59,12 +59,12 @@ interface WizardForm {
   // the field is prefilled from GET and passed through finalize so the required
   // `serviceThemes` wire field is always sent on the PUT (never dropped).
   serviceThemes: ServiceThemesMap;
-  // TV-display panel layout (visibility, order, size). Payload-only here — the
-  // wizard carries no TV-layout UI (the dedicated `/tv-layout` page owns the
-  // TV-display settings surface); the field is prefilled from GET and passed
-  // through finalize so the required `tvPanelLayout` wire field is always sent
-  // on the PUT (never dropped).
-  tvPanelLayout: TvPanelLayoutMap;
+  // TV-display grid layout (a list of placed widgets on a 12-col grid).
+  // Payload-only here — the wizard carries no TV-layout UI (the dedicated
+  // `/tv-layout` page owns the TV-display settings surface); the field is
+  // prefilled from GET and passed through finalize so the required
+  // `tvPanelLayout` wire field is always sent on the PUT (never dropped).
+  tvPanelLayout: TvGridLayout;
   categories: WizardCategoryDto[];
   categoriesMode: 'default' | 'custom';
   /** Raw text value of the step-1 "Jumlah counter aktif" input (digits only,
@@ -146,12 +146,13 @@ function emptyForm(): WizardForm {
     storeName: '',
     brandColor: DEFAULT_BRAND_COLOR,
     serviceThemes: { ...DEFAULT_SERVICE_THEMES },
-    // A fresh deep-ish copy of the default panel layout — reuses the editor's
+    // A fresh deep copy of the default TV grid layout — reuses the editor's
     // lib helper (one owner of the default-copy shape) instead of a local
-    // duplicate. The layout has nested objects, so a one-level spread is not
+    // duplicate. The layout is an array of plain widget objects, so a
+    // one-level `.map(w => ({ ...w }))` clone (encapsulated in the helper) is
     // enough (mirrors the `{ ...DEFAULT_SERVICE_THEMES }` theme spread, which
     // is shallow because the theme map has primitive values).
-    tvPanelLayout: defaultTvPanelLayout(),
+    tvPanelLayout: defaultTvGridLayout(),
     categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })),
     categoriesMode: 'default',
     counterCount: '1',
@@ -356,7 +357,7 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
           serviceThemes: config.serviceThemes
             ? { ...DEFAULT_SERVICE_THEMES, ...config.serviceThemes }
             : { ...DEFAULT_SERVICE_THEMES },
-          tvPanelLayout: coerceTvPanelLayout(config.tvPanelLayout ?? DEFAULT_TV_PANEL_LAYOUT),
+          tvPanelLayout: coerceTvGridLayout(config.tvPanelLayout ?? DEFAULT_TV_GRID_LAYOUT),
           categories: loadedCategories,
           // Infer the preset by code+name deep-equal (id-agnostic) so a re-edit
           // of a store that kept the default template stays in default mode and

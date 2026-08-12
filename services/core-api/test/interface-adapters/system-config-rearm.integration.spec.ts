@@ -56,13 +56,13 @@ describe('System-config scheduler re-arm + cron enforcement (integration — QUE
       ],
       brandColor: '#2563eb',
       serviceThemes: { kiosk: 'light', tv: 'light', caller: 'light', admin: 'light' },
-      tvPanelLayout: {
-        nowServing: { visible: true, order: 0, size: 4 },
-        waitingQueue: { visible: true, order: 1, size: 2 },
-        callHistory: { visible: true, order: 2, size: 2 },
-        countersServing: { visible: true, order: 3, size: 2 },
-        runningText: { visible: true, order: 4, size: 2 },
-      },
+      tvPanelLayout: [
+        { id: 'nowServing', component: 'nowServing', x: 0, y: 0, w: 12, h: 4 },
+        { id: 'waitingQueue', component: 'waitingQueue', x: 0, y: 4, w: 6, h: 3 },
+        { id: 'callHistory', component: 'callHistory', x: 6, y: 4, w: 6, h: 3 },
+        { id: 'countersServing', component: 'countersServing', x: 0, y: 7, w: 12, h: 3 },
+        { id: 'runningText', component: 'runningText', x: 0, y: 10, w: 12, h: 1 },
+      ],
     };
   }
 

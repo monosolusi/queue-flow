@@ -2118,269 +2118,244 @@ fieldset {
   font-weight: 600;
 }
 
-/* --- TV Panel Layout editor (/tv-layout) ------------------------------------
- * The dedicated TV-display layout page (replaces the old /admin/config TV
- * checkbox section). Drag-and-drop reorder + a per-panel segmented size
- * control (Kecil/Sedang/Besar/Penuh -> 1..4) + visibility toggle + a live
- * proportional preview. Uses design tokens only (zero hardcoded color
- * literals) so [data-theme="dark"] flips for free. Touch targets >= 44px
- * (AC5). Reduced-motion guarded. The runningText panel is a fixed footer
- * (order/size stored but ignored by the TV), so it renders as a separate
- * visibility-only row below the list.
- */
-.tv-layout-page {
-  /* Composes .page (max-width/padding/flex). The save button row is the only
-   * page-specific geometry — sticky to the foot so a long list never buries
-   * it. */
-}
-.tv-layout-page--loading {
-  text-align: center;
-  padding: 3rem;
+/* === TV layout editor (12-column grid + component palette) =============
+ * The `/tv-layout` page: a palette of draggable component chips on the left
+ * + a 12-column grid canvas on the right. The manager drags (or clicks) a
+ * chip to add a widget, drags a card to move, drags the corner grip to resize,
+ * and uses the per-widget steppers (Kolom/Baris/Lebar/Tinggi) as the precise,
+ * keyboard/AT-accessible path (the jsdom-tested backbone). Tokens only — no
+ * hardcoded color literals; `--radius` is the per-service value (QUE-37). */
+.tv-layout-page__loading {
   color: var(--text-muted);
 }
 .tv-layout-page__save {
+  margin-top: 1rem;
   display: flex;
   justify-content: flex-end;
 }
-
 .tv-layout-editor {
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
+  margin-top: 1rem;
 }
-
-.tv-layout-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.tv-layout__page {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 1.25rem;
+  align-items: start;
+}
+@media (max-width: 720px) {
+  .tv-layout__page {
+    grid-template-columns: 1fr;
+  }
+}
+/* Palette: a labelled column of draggable component chips. */
+.tv-layout__palette {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-}
-
-.tv-layout-row {
-  display: flex;
-  flex-direction: column;
-  background: var(--surface);
-  border: 1px solid var(--surface-2);
-  border-radius: var(--radius);
-  padding: 0.5rem 0.75rem;
-  transition: opacity 0.15s ease, box-shadow 0.15s ease;
-}
-.tv-layout-row--dragging {
-  opacity: 0.5;
-  box-shadow: 0 0 0 2px var(--accent);
-}
-
-.tv-layout-row__main {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
-.tv-layout-row__handle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 2.75rem;
-  min-height: 2.75rem;
-  padding: 0;
-  border: 1px solid var(--surface-2);
-  border-radius: var(--radius);
-  background: var(--surface);
-  color: var(--text-muted);
-  cursor: grab;
-  touch-action: none;
-  flex: 0 0 auto;
-}
-.tv-layout-row__handle:hover {
-  color: var(--text);
-  border-color: var(--text-muted);
-}
-.tv-layout-row__handle svg {
-  width: 1.25rem;
-  height: 1.25rem;
-}
-.tv-layout-row--dragging .tv-layout-row__handle,
-.tv-layout-row__handle:active {
-  cursor: grabbing;
-}
-
-.tv-layout-row__name {
-  flex: 1 1 12rem;
-  font-weight: 600;
-  color: var(--text);
-  min-width: 0;
-}
-
-/* Size segmented control (role="radiogroup"): one labeled radio per size. */
-.tv-layout-row__size {
-  display: inline-flex;
-  border: 1px solid var(--surface-2);
-  border-radius: var(--radius);
-  overflow: hidden;
-  flex: 0 0 auto;
-}
-.tv-layout-row__size-option {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 2.75rem;
-  padding: 0 0.75rem;
-  cursor: pointer;
-  color: var(--text-muted);
-  border-right: 1px solid var(--surface-2);
-  background: var(--surface);
-  font-size: 0.9rem;
-  user-select: none;
-}
-.tv-layout-row__size-option:last-child {
-  border-right: none;
-}
-.tv-layout-row__size-option input {
-  position: absolute;
-  opacity: 0;
-  width: 1px;
-  height: 1px;
-  /* sr-only-style clip so the radio stays keyboard-focusable but invisible. */
-  clip: rect(0, 0, 0, 0);
-  margin: -1px;
-}
-.tv-layout-row__size-option:focus-within {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-.tv-layout-row__size-option--selected {
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
-  color: var(--accent-on-surface);
-  font-weight: 600;
-}
-
-.tv-layout-row__vis {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  min-height: 2.75rem;
-  color: var(--text);
-  font-size: 0.9rem;
-  flex: 0 0 auto;
-}
-.tv-layout-row__vis input {
-  min-width: 2.75rem;
-  min-height: 2.75rem;
-}
-
-.tv-layout-row__move {
-  display: inline-flex;
-  gap: 0.25rem;
-  flex: 0 0 auto;
-  margin-left: auto;
-}
-.tv-layout-row__move-btn {
-  min-height: 2.75rem;
-  min-width: 2.75rem;
-  padding: 0 0.6rem;
-  border: 1px solid var(--surface-2);
-  border-radius: var(--radius);
-  background: var(--surface);
-  color: var(--text);
-  cursor: pointer;
-  font-size: 0.85rem;
-}
-.tv-layout-row__move-btn:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--accent-on-surface);
-}
-.tv-layout-row__move-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-/* Drop indicator: a 2px accent line between rows. */
-.tv-layout__drop-indicator {
-  height: 2px;
-  background: var(--accent);
-  border-radius: 1px;
-  margin: 0.25rem 0;
-}
-
-/* runningText footer row: visibility-only (no drag handle / no size control). */
-.tv-layout__running-text-row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-  padding: 0.5rem 0.75rem;
-  background: var(--surface);
-  border: 1px solid var(--surface-2);
-  border-radius: var(--radius);
-}
-.tv-layout__running-text-hint {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 0.85rem;
-}
-
-/* Live preview: a flex column of proportional bars (height ~ size) in order,
- * labeled with panel names, + a thin footer bar for runningText if visible. */
-.tv-layout-preview {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  min-height: 16rem;
   padding: 0.75rem;
-  background: var(--surface-2);
+  background: var(--surface);
   border: 1px solid var(--surface-2);
   border-radius: var(--radius);
 }
-.tv-layout-preview__bar {
+.tv-layout__chip {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
+  min-height: 44px; /* touch target (QUE-41) */
   padding: 0.5rem 0.75rem;
-  background: var(--surface);
-  border: 1px solid var(--surface-2);
+  background: var(--surface-2);
+  border: 1px solid transparent;
   border-radius: calc(var(--radius) * 0.75);
   color: var(--text);
-  min-height: 0;
-  overflow: hidden;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: grab;
+  touch-action: none; /* pointer DnD owns the gesture */
+  text-align: left;
 }
-.tv-layout-preview__label {
+.tv-layout__chip:hover {
+  border-color: var(--accent);
+}
+.tv-layout__chip--placing {
+  border-color: var(--accent);
+  color: var(--accent-on-surface);
+}
+.tv-layout__chip-label {
+  flex: 1;
+}
+.tv-layout__chip-plus {
+  font-size: 1.1rem;
   font-weight: 600;
-  font-size: 0.9rem;
-  white-space: nowrap;
+  color: var(--accent-on-surface);
+}
+/* Canvas: the scrollable 12-column grid drop area. */
+.tv-layout__canvas {
+  border: 1px dashed var(--surface-2);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+  background: var(--surface);
+  max-height: 70vh;
+  overflow: auto;
+}
+.tv-layout__grid {
+  display: grid;
+  grid-auto-rows: 56px; /* matches ROW_HEIGHT_PX in TvLayoutPage */
+  gap: 6px;
+  min-height: 280px;
+}
+.tv-layout__widget {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding: 0.5rem;
+  background: var(--surface-2);
+  border: 1px solid var(--surface-2);
+  border-radius: calc(var(--radius) * 0.75);
   overflow: hidden;
-  text-overflow: ellipsis;
+  transition: opacity 0.12s ease, border-color 0.12s ease;
 }
-.tv-layout-preview__size {
-  color: var(--text-muted);
-  font-size: 0.8rem;
-  flex: 0 0 auto;
+.tv-layout__widget:hover {
+  border-color: var(--accent);
 }
-.tv-layout-preview__footer {
+.tv-layout__widget--dragging {
+  opacity: 0.5;
+}
+.tv-layout__widget--invalid {
+  border-color: var(--danger);
+}
+.tv-layout__widget-header {
   display: flex;
   align-items: center;
-  padding: 0.4rem 0.75rem;
-  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--surface));
-  border-radius: calc(var(--radius) * 0.75);
-  color: var(--accent-on-surface);
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.tv-layout__widget-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tv-layout__widget-remove {
   flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  color: var(--danger-on-surface);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
 }
-.tv-layout-preview__empty {
-  text-align: center;
+.tv-layout__widget-remove:hover {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+.tv-layout__widget-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  place-items: center;
   color: var(--text-muted);
-  padding: 2rem;
-  font-size: 0.9rem;
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-align: center;
 }
-
-/* Reduced motion: disable the drag row transition (the only animated property
- * on this page). The @media parenthetical ) sits between the keyword and the
- * block brace, so the matcher tolerates it. */
+/* Per-widget steppers: the precise, a11y, jsdom-tested position/size controls. */
+.tv-layout__steppers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+.tv-layout__stepper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+}
+.tv-layout__stepper-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.tv-layout__stepper-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+.tv-layout__stepper-btn {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  background: var(--surface);
+  border: 1px solid var(--surface-2);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.tv-layout__stepper-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-on-surface);
+}
+.tv-layout__stepper-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.tv-layout__stepper-input {
+  width: 3ch;
+  padding: 0.15rem 0;
+  text-align: center;
+  background: var(--surface);
+  border: 1px solid var(--surface-2);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 0.8rem;
+}
+/* Bottom-right resize grip (pointer DnD; the steppers are the tested path). */
+.tv-layout__resize-handle {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 18px;
+  height: 18px;
+  background: var(--accent);
+  border-radius: 4px;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+/* Live ghost preview for a palette-drag placement. */
+.tv-layout__ghost {
+  border: 2px dashed var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-radius: calc(var(--radius) * 0.75);
+}
+.tv-layout__ghost--invalid {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.tv-layout__canvas-hint {
+  margin: 0.75rem 0 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+.tv-layout__status {
+  margin: 0.4rem 0 0;
+  min-height: 1.2em;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
 @media (prefers-reduced-motion: reduce) {
-  .tv-layout-row {
+  .tv-layout__widget {
     transition: none;
   }
 }
+
