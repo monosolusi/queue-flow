@@ -193,8 +193,8 @@ fieldset {
 }
 /* The Audit page's date pickers carry labels above their inputs, so its
    actions row aligns to the bottom (input baselines) instead of the center.
-   (Analytics no longer uses this — its date fields moved out of the actions
-   row into the .analytics__custom-range panel below the header.) */
+   (Analytics no longer uses this — its range selector moved out of the
+   actions row into the always-visible DateRangeField below the header.) */
 .page-header__actions--align-end {
   align-items: flex-end;
 }
@@ -981,25 +981,10 @@ fieldset {
   color: var(--accent-contrast);
 }
 
-/* The manual Dari/Sampai panel — revealed on its own row below the header when
- * the manager taps "Kustom". A flex-wrap row of the two labeled DateFields.
- * The `.field` base carries `margin-bottom: 1rem` (for stacked form rows), which
- * would droop the inputs inside a single-row cluster, so it is reset to 0 here.
- * The actions row above is all equal-height buttons now, so the prior
- * `align-items: flex-end` workaround for mixing labeled fields with unlabeled
- * buttons is gone — this dedicated row is the structural fix for the
- * misalignment the manager reported. */
-.analytics__custom-range {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
-  align-items: flex-end;
-}
-.analytics__custom-range .field {
-  margin-bottom: 0;
-  flex: 1 1 14rem;
-  min-width: 0;
-}
+/* The analytics range selector row — the `DateRangeField` is rendered
+ * directly below the `PageHeader` (always visible, no reveal step, no wrapper).
+ * The `.field` base carries `margin-bottom: 1rem`, which spaces the trigger
+ * from the Ringkasan section below — no extra wrapper class needed. */
 
 /* CategoryBreakdownChart — hand-rolled offline SVG horizontal bars (no chart
  * library, NFR-REL-01). One row per category (the no-overlap layout, QUE-48);
@@ -1397,9 +1382,13 @@ fieldset {
    literals), so re-pointing those variables at our design tokens re-themes the
    whole calendar — light/dark and the manager's brand color included — without
    re-declaring a single element class.
-   Scoped under `.datefield__popover` (specificity 0-2-0 vs the library's 0-1-0)
-   so the override wins regardless of stylesheet import order. */
-.datefield__popover .rdp-root {
+   Scoped under both `.datefield__popover` (single-day) and
+   `.date-range-field__popover` (range) so BOTH calendars share one theming
+   block (DRY — the range field reuses the exact same brand/dark variables).
+   Specificity 0-2-0 vs the library's 0-1-0, so the override wins regardless of
+   stylesheet import order. */
+.datefield__popover .rdp-root,
+.date-range-field__popover .rdp-root {
   --rdp-accent-color: var(--accent);
   --rdp-accent-background-color: color-mix(in srgb, var(--accent) 18%, transparent);
   --rdp-day-height: 2.75rem;
@@ -1412,20 +1401,97 @@ fieldset {
   color: var(--text);
   font-size: 0.95rem;
 }
-.datefield__popover .rdp-weekday {
+.datefield__popover .rdp-weekday,
+.date-range-field__popover .rdp-weekday {
   color: var(--text-muted);
 }
-.datefield__popover .rdp-chevron {
+.datefield__popover .rdp-chevron,
+.date-range-field__popover .rdp-chevron {
   fill: var(--accent);
 }
 /* Declared BEFORE the selected rule: both are specificity 0-3-0, so source
    order decides, and a hover over the selected day must not repaint it. */
-.datefield__popover .rdp-day_button:hover {
+.datefield__popover .rdp-day_button:hover,
+.date-range-field__popover .rdp-day_button:hover {
   background: var(--surface-2);
 }
-.datefield__popover .rdp-selected .rdp-day_button {
+.datefield__popover .rdp-selected .rdp-day_button,
+.date-range-field__popover .rdp-selected .rdp-day_button {
   background: var(--accent);
   color: var(--accent-contrast);
+}
+
+/* DateRangeField — one grouped textbox that opens a range calendar (manager
+ * feedback: unify the separate Kustom / calendar / textbox affordances). The
+ * trigger is a single button styled as a textbox: shared border, no internal
+ * gaps between the `from – to` spans, the calendar glyph inline at the end.
+ * ≥44px touch target (AC5). */
+.date-range-field {
+  position: relative;
+}
+.date-range-field__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0 0.75rem;
+  border: 1px solid var(--surface-2);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.95rem;
+  text-align: left;
+  cursor: pointer;
+}
+.date-range-field__trigger:hover {
+  border-color: var(--accent);
+}
+/* The open state reads as the focused affordance — accent border, matching
+   DateField's toggle hover. A plain attribute selector (0,1,1) beats the base
+   (0,1,0); `:where()` would zero it out. */
+.date-range-field__trigger[aria-expanded='true'] {
+  border-color: var(--accent);
+  color: var(--accent-on-surface);
+}
+.date-range-field__from,
+.date-range-field__to {
+  flex: 1 1 0;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+/* Empty sides show their placeholder ("Dari" / "Sampai") as muted. */
+.date-range-field__from--placeholder,
+.date-range-field__to--placeholder {
+  color: var(--text-muted);
+}
+.date-range-field__sep {
+  flex: none;
+  color: var(--text-muted);
+  padding: 0 0.15rem;
+}
+.date-range-field__trigger svg {
+  flex: none;
+  width: 1.15rem;
+  height: 1.15rem;
+  color: var(--text-muted);
+}
+.date-range-field__popover {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  z-index: 20;
+  /* Two months wide; let DayPicker size itself but never overflow the page. */
+  width: min-content;
+  max-width: 100%;
+  padding: 0.5rem;
+  border: 1px solid var(--surface-2);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 10px 30px color-mix(in srgb, var(--text) 18%, transparent);
 }
 
 /* Searchable category select (Step 2 modal). */

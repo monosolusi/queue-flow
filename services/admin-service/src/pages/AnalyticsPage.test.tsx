@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeAll, afterAll } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AnalyticsPage, type RangeReportExporter } from './AnalyticsPage';
@@ -11,6 +11,21 @@ import type {
   SystemConfigurationDto,
 } from '../api/types';
 import { DEFAULT_STATE_MACHINE, DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES, DEFAULT_TV_GRID_LAYOUT } from '../api/types';
+
+/**
+ * The calendar's visible month + the day-button names depend on `new Date()`
+ * (the page seeds `from`/`to` from `daysAgoLocalKey`/`todayLocalKey`). Pin the
+ * system time to 20 July 2026 so the default range is deterministic
+ * (`2026-07-14 – 2026-07-20`), the calendar opens on July 2026, and day buttons
+ * are named e.g. "1 Juli 2026". `vi.setSystemTime` does NOT fake timers, so
+ * `waitFor` (which uses `setTimeout`) still works.
+ */
+beforeAll(() => {
+  vi.setSystemTime(new Date(2026, 6, 20));
+});
+afterAll(() => {
+  vi.useRealTimers();
+});
 
 /** A configured store with two categories + two counters. */
 function configuredStore(): SystemConfigurationDto {
@@ -140,13 +155,6 @@ function renderPage(api: IAdminApi, exporter?: RangeReportExporter) {
   );
 }
 
-/** Reveals the manual Dari/Sampai date-range panel by tapping "Kustom". The
- *  fields are hidden by default (a preset is active); tests that drive the
- *  `analytics-from`/`analytics-to` inputs must open the panel first. */
-function openCustomRange() {
-  fireEvent.click(screen.getByTestId('relative-range-custom'));
-}
-
 /**
  * The toast live regions, scoped through the viewport's `region` landmark. The
  * page's own loading paragraph is also `role="status"`, so a bare
@@ -162,6 +170,11 @@ function politeRegion() {
 /** The assertive live region — error toasts land here. */
 function alertRegion() {
   return within(toastViewport().getByRole('alert'));
+}
+
+/** Opens the range calendar by clicking the grouped textbox trigger. */
+function openRangeCalendar() {
+  fireEvent.click(screen.getByTestId('analytics-range'));
 }
 
 describe('AnalyticsPage (range analytics — FR-ADM-03 / QUE-44)', () => {
@@ -248,10 +261,12 @@ describe('AnalyticsPage (range analytics — FR-ADM-03 / QUE-44)', () => {
     renderPage(api, exporter);
 
     await screen.findByTestId('metric-total');
-    // Open the custom panel, then pin the range so the file name is deterministic.
-    openCustomRange();
-    fireEvent.change(screen.getByTestId('analytics-from'), { target: { value: '2026-07-01' } });
-    fireEvent.change(screen.getByTestId('analytics-to'), { target: { value: '2026-07-07' } });
+    // Pin the range via the calendar so the file name is deterministic. The
+    // day-button accessible name is "Weekday, D Juli 2026" — the `, ` prefix
+    // disambiguates single-digit days (day 1 vs 11/21/31, day 7 vs 17/27).
+    openRangeCalendar();
+    fireEvent.click(screen.getByRole('button', { name: /, 1 Juli 2026/ }));
+    fireEvent.click(screen.getByRole('button', { name: /, 7 Juli 2026/ }));
     await waitFor(() => expect(api.getRangeReport).toHaveBeenLastCalledWith('2026-07-01', '2026-07-07'));
 
     fireEvent.click(screen.getByTestId('analytics-export'));
@@ -264,143 +279,30 @@ describe('AnalyticsPage (range analytics — FR-ADM-03 / QUE-44)', () => {
     expect(fileName).toBe('qms-report-2026-07-01_2026-07-07.xlsx');
   });
 
-  it('reloads when the from/to inputs change', async () => {
-    const { api, stubs } = makeApi();
-    renderPage(api);
-    await screen.findByTestId('metric-total');
-    expect(stubs.getRangeReport).toHaveBeenLastCalledWith(
-      expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
-      expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
-    );
-
-    openCustomRange();
-    fireEvent.change(screen.getByTestId('analytics-from'), { target: { value: '2026-07-01' } });
-    await waitFor(() =>
-      expect(stubs.getRangeReport).toHaveBeenLastCalledWith('2026-07-01', expect.any(String)),
-    );
-  });
-
-  it('rejects an inverted range (from > to): no load, export disabled, validation message', async () => {
+  it('reloads when the calendar picks a new range', async () => {
     const { api, stubs } = makeApi();
     renderPage(api);
     await screen.findByTestId('metric-total');
     const initialCalls = stubs.getRangeReport.mock.calls.length;
 
-    openCustomRange();
-    fireEvent.change(screen.getByTestId('analytics-from'), { target: { value: '2026-12-31' } });
-    fireEvent.change(screen.getByTestId('analytics-to'), { target: { value: '2026-01-01' } });
+    openRangeCalendar();
+    fireEvent.click(screen.getByRole('button', { name: /, 1 Juli 2026/ }));
+    fireEvent.click(screen.getByRole('button', { name: /, 7 Juli 2026/ }));
 
-    expect(await screen.findByTestId('analytics-range-invalid')).toBeInTheDocument();
-    expect(screen.getByTestId('analytics-export')).toBeDisabled();
-    // The inverted range must not trigger a load.
-    expect(stubs.getRangeReport.mock.calls.length).toBe(initialCalls);
-  });
-
-  it('blocks a MALFORMED date and fires no getRangeReport', async () => {
-    // The field is a text input now (DateField), so it accepts a partial or
-    // impossible key where `type="date"` silently coerced to ''. `isDateKey`
-    // catches it client-side before the request goes out.
-    const { api, stubs } = makeApi();
-    renderPage(api);
-    await screen.findByTestId('metric-total');
-    const initialCalls = stubs.getRangeReport.mock.calls.length;
-
-    // Half-typed, then an impossible civil date — neither may reach the API.
-    openCustomRange();
-    fireEvent.change(screen.getByTestId('analytics-from'), { target: { value: '2026-07' } });
-    expect(await screen.findByTestId('analytics-range-invalid')).toBeInTheDocument();
-
-    fireEvent.change(screen.getByTestId('analytics-from'), { target: { value: '2026-02-31' } });
-    expect(screen.getByTestId('analytics-range-invalid')).toBeInTheDocument();
-    expect(screen.getByTestId('analytics-export')).toBeDisabled();
-    expect(screen.getByTestId('analytics-from')).toHaveAttribute('aria-invalid', 'true');
-    expect(stubs.getRangeReport.mock.calls.length).toBe(initialCalls);
-
-    // A complete, real date resumes loading.
-    fireEvent.change(screen.getByTestId('analytics-from'), { target: { value: '2026-07-01' } });
     await waitFor(() =>
-      expect(stubs.getRangeReport.mock.calls.length).toBeGreaterThan(initialCalls),
+      expect(stubs.getRangeReport).toHaveBeenLastCalledWith('2026-07-01', '2026-07-07'),
     );
+    expect(stubs.getRangeReport.mock.calls.length).toBeGreaterThan(initialCalls);
   });
 });
 
-describe('AnalyticsPage — per-field range validity', () => {
-  it('flags ONLY the malformed field, and describes it by the error node', async () => {
-    const { api } = makeApi();
-    renderPage(api);
-    await screen.findByTestId('metric-total');
-
-    openCustomRange();
-    fireEvent.change(screen.getByTestId('analytics-from'), { target: { value: '2026-0' } });
-
-    const from = screen.getByTestId('analytics-from');
-    const to = screen.getByTestId('analytics-to');
-    expect(from).toHaveAttribute('aria-invalid', 'true');
-    // `to` is still a perfectly good date — flagging it would misdirect the fix.
-    expect(to).not.toHaveAttribute('aria-invalid');
-
-    // aria-invalid and aria-describedby travel together (repo convention), and
-    // the id must resolve to a node that actually exists.
-    const error = screen.getByTestId('analytics-range-invalid');
-    expect(from).toHaveAttribute('aria-describedby', error.id);
-    expect(to).not.toHaveAttribute('aria-describedby');
-  });
-
-  it('flags ONLY the malformed field when it sorts ABOVE the other (mirror case)', async () => {
-    // The sibling test's `2026-0` happens to sort BELOW the default `to`, so it
-    // would pass even with the inversion test ungated. These two mis-attribute
-    // the fault to the valid field unless `from > to` is gated on both sides
-    // being well-formed: `'2026-1' > '2026-08-11'` is true char-wise
-    // (`'1' > '0'`), and `'2026-08-05' > ''` is true for any non-empty string.
-    const { api } = makeApi();
-    renderPage(api);
-    await screen.findByTestId('metric-total');
-
-    openCustomRange();
-    fireEvent.change(screen.getByTestId('analytics-from'), { target: { value: '2026-1' } });
-    expect(screen.getByTestId('analytics-from')).toHaveAttribute('aria-invalid', 'true');
-    expect(screen.getByTestId('analytics-to')).not.toHaveAttribute('aria-invalid');
-
-    // And the reverse: clearing `to` must not flag a perfectly valid `from`.
-    fireEvent.change(screen.getByTestId('analytics-from'), { target: { value: '2026-08-05' } });
-    fireEvent.change(screen.getByTestId('analytics-to'), { target: { value: '' } });
-    expect(screen.getByTestId('analytics-to')).toHaveAttribute('aria-invalid', 'true');
-    expect(screen.getByTestId('analytics-from')).not.toHaveAttribute('aria-invalid');
-  });
-
-  it('flags BOTH fields when the range is inverted (the pair is what is wrong)', async () => {
-    const { api } = makeApi();
-    renderPage(api);
-    await screen.findByTestId('metric-total');
-
-    openCustomRange();
-    fireEvent.change(screen.getByTestId('analytics-from'), { target: { value: '2026-12-31' } });
-    fireEvent.change(screen.getByTestId('analytics-to'), { target: { value: '2026-01-01' } });
-
-    const error = await screen.findByTestId('analytics-range-invalid');
-    expect(screen.getByTestId('analytics-from')).toHaveAttribute('aria-invalid', 'true');
-    expect(screen.getByTestId('analytics-to')).toHaveAttribute('aria-invalid', 'true');
-    expect(screen.getByTestId('analytics-from')).toHaveAttribute('aria-describedby', error.id);
-    expect(screen.getByTestId('analytics-to')).toHaveAttribute('aria-describedby', error.id);
-  });
-
-  it('clears both flags once the range is valid again', async () => {
-    const { api } = makeApi();
-    renderPage(api);
-    await screen.findByTestId('metric-total');
-
-    openCustomRange();
-    fireEvent.change(screen.getByTestId('analytics-from'), { target: { value: '2026-0' } });
-    expect(screen.getByTestId('analytics-from')).toHaveAttribute('aria-invalid', 'true');
-
-    fireEvent.change(screen.getByTestId('analytics-from'), { target: { value: '2026-01-01' } });
-    await waitFor(() =>
-      expect(screen.queryByTestId('analytics-range-invalid')).not.toBeInTheDocument(),
-    );
-    expect(screen.getByTestId('analytics-from')).not.toHaveAttribute('aria-invalid');
-    expect(screen.getByTestId('analytics-from')).not.toHaveAttribute('aria-describedby');
-  });
-});
+// NOTE: the previous "inverted range blocks load" / "malformed date blocks
+// load" / "per-field range validity" tests are gone — typing is no longer
+// supported (the calendar is the only way to set a custom range), and the
+// calendar structurally cannot produce a malformed or inverted pair. The
+// page keeps a defensive `rangeInvalid` guard as defense-in-depth against a
+// future caller that bypasses the calendar, but it is unreachable via the
+// current UI, so there is no user-driven path to exercise it.
 
 describe('AnalyticsPage — export feedback', () => {
   it('announces a successful export', async () => {
@@ -448,21 +350,24 @@ describe('AnalyticsPage — export feedback', () => {
   });
 });
 
-describe('AnalyticsPage — relative-range presets + custom panel', () => {
-  it('the default render (last 7 days) has the "7 hari" preset pressed and the custom panel hidden', async () => {
+describe('AnalyticsPage — relative-range presets + unified range calendar', () => {
+  it('the default render (last 7 days) has the "7 hari" preset pressed and the range trigger visible with the 7-day window', async () => {
     const { api } = makeApi();
     renderPage(api);
-    // The picker renders in the header even while the report loads, so no need
-    // to await the ready state.
+    // The picker + trigger render in the header even while the report loads,
+    // so no need to await the ready state.
     expect(screen.getByTestId('relative-range-7')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('relative-range-14')).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByTestId('relative-range-30')).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByTestId('relative-range-90')).toHaveAttribute('aria-pressed', 'false');
-    // Kustom is not pressed and the manual date fields are NOT in the DOM until
-    // the manager taps "Kustom".
-    expect(screen.getByTestId('relative-range-custom')).toHaveAttribute('aria-pressed', 'false');
+    // The "Kustom" toggle is gone; the unified range trigger is ALWAYS visible
+    // and shows the current 7-day window (no separate from/to text inputs).
+    expect(screen.queryByTestId('relative-range-custom')).not.toBeInTheDocument();
     expect(screen.queryByTestId('analytics-from')).not.toBeInTheDocument();
     expect(screen.queryByTestId('analytics-to')).not.toBeInTheDocument();
+    const trigger = screen.getByTestId('analytics-range');
+    expect(trigger).toHaveTextContent(daysAgoLocalKey(6));
+    expect(trigger).toHaveTextContent(todayLocalKey());
   });
 
   it('clicking the 30-hari preset reloads with daysAgoLocalKey(29) + todayLocalKey()', async () => {
@@ -475,67 +380,13 @@ describe('AnalyticsPage — relative-range presets + custom panel', () => {
     const expectedFrom = daysAgoLocalKey(29);
     const expectedTo = todayLocalKey();
     await waitFor(() => expect(stubs.getRangeReport).toHaveBeenLastCalledWith(expectedFrom, expectedTo));
-    // The 30-hari preset is now pressed; 7-hari is not; the custom panel stays hidden.
+    // The 30-hari preset is now pressed; 7-hari is not; the trigger still shows
+    // the active window (the calendar is the single source of truth for the
+    // visible range, presets just jump it).
     expect(screen.getByTestId('relative-range-30')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('relative-range-7')).toHaveAttribute('aria-pressed', 'false');
-    expect(screen.queryByTestId('analytics-from')).not.toBeInTheDocument();
-  });
-
-  it('tapping "Kustom" reveals the Dari/Sampai fields and clears the active preset', async () => {
-    const { api } = makeApi();
-    renderPage(api);
-    await screen.findByTestId('metric-total');
-    // The default range → 7-hari pressed, fields hidden.
-    expect(screen.getByTestId('relative-range-7')).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.queryByTestId('analytics-from')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId('relative-range-custom'));
-
-    // Kustom is pressed; every preset is un-pressed; the manual fields appear,
-    // pre-filled with the current range so the manager customizes from it.
-    expect(screen.getByTestId('relative-range-custom')).toHaveAttribute('aria-pressed', 'true');
-    // The revealed panel is a labelled group (mirrors the picker's "Rentang
-    // relatif" group — a future refactor must not silently drop the grouping).
-    expect(screen.getByRole('group', { name: 'Rentang kustom' })).toBeInTheDocument();
-    expect(screen.getByTestId('relative-range-7')).toHaveAttribute('aria-pressed', 'false');
-    expect(screen.getByTestId('relative-range-14')).toHaveAttribute('aria-pressed', 'false');
-    expect(screen.getByTestId('relative-range-30')).toHaveAttribute('aria-pressed', 'false');
-    expect(screen.getByTestId('relative-range-90')).toHaveAttribute('aria-pressed', 'false');
-    const from = screen.getByTestId('analytics-from') as HTMLInputElement;
-    const to = screen.getByTestId('analytics-to') as HTMLInputElement;
-    expect(from.value).toBe(daysAgoLocalKey(6));
-    expect(to.value).toBe(todayLocalKey());
-  });
-
-  it('editing a custom date reloads with the hand-picked range', async () => {
-    const { api, stubs } = makeApi();
-    renderPage(api);
-    await screen.findByTestId('metric-total');
-
-    openCustomRange();
-    fireEvent.change(screen.getByTestId('analytics-from'), { target: { value: '2026-07-01' } });
-    await waitFor(() =>
-      expect(stubs.getRangeReport).toHaveBeenLastCalledWith('2026-07-01', expect.any(String)),
-    );
-    // Still in custom mode (Kustom pressed) after the edit.
-    expect(screen.getByTestId('relative-range-custom')).toHaveAttribute('aria-pressed', 'true');
-  });
-
-  it('clicking a preset from custom mode hides the date panel and switches back', async () => {
-    const { api, stubs } = makeApi();
-    renderPage(api);
-    await screen.findByTestId('metric-total');
-
-    // Enter custom mode → fields appear.
-    openCustomRange();
-    expect(screen.getByTestId('analytics-from')).toBeInTheDocument();
-
-    // Tap a preset → fields hide, that preset is pressed, Kustom is not.
-    fireEvent.click(screen.getByTestId('relative-range-30'));
-    await waitFor(() => expect(stubs.getRangeReport).toHaveBeenLastCalledWith(daysAgoLocalKey(29), todayLocalKey()));
-    expect(screen.queryByTestId('analytics-from')).not.toBeInTheDocument();
-    expect(screen.getByTestId('relative-range-30')).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByTestId('relative-range-custom')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('analytics-range')).toHaveTextContent(expectedFrom);
+    expect(screen.getByTestId('analytics-range')).toHaveTextContent(expectedTo);
   });
 
   it('clicking the 90-hari preset reloads with the 90-day window (the MAX_RANGE_DAYS cap)', async () => {
@@ -548,5 +399,47 @@ describe('AnalyticsPage — relative-range presets + custom panel', () => {
       expect(stubs.getRangeReport).toHaveBeenLastCalledWith(daysAgoLocalKey(89), todayLocalKey()),
     );
     expect(screen.getByTestId('relative-range-90')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('picking a custom range via the calendar reloads with the hand-picked window', async () => {
+    const { api, stubs } = makeApi();
+    renderPage(api);
+    await screen.findByTestId('metric-total');
+
+    openRangeCalendar();
+    expect(screen.getByRole('dialog', { name: 'Pilih Rentang tanggal' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /, 1 Juli 2026/ }));
+    fireEvent.click(screen.getByRole('button', { name: /, 7 Juli 2026/ }));
+
+    await waitFor(() => expect(stubs.getRangeReport).toHaveBeenLastCalledWith('2026-07-01', '2026-07-07'));
+    // The trigger now shows the hand-picked window; no preset matches, so none
+    // is pressed (the calendar is the source of truth, not a "custom mode").
+    expect(screen.getByTestId('analytics-range')).toHaveTextContent('2026-07-01');
+    expect(screen.getByTestId('analytics-range')).toHaveTextContent('2026-07-07');
+    expect(screen.getByTestId('relative-range-7')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('relative-range-30')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('clicking a preset from a hand-picked range updates the trigger to the preset window', async () => {
+    const { api, stubs } = makeApi();
+    renderPage(api);
+    await screen.findByTestId('metric-total');
+
+    // First pick a custom range via the calendar.
+    openRangeCalendar();
+    fireEvent.click(screen.getByRole('button', { name: /, 1 Juli 2026/ }));
+    fireEvent.click(screen.getByRole('button', { name: /, 7 Juli 2026/ }));
+    await waitFor(() => expect(stubs.getRangeReport).toHaveBeenLastCalledWith('2026-07-01', '2026-07-07'));
+    expect(screen.getByTestId('analytics-range')).toHaveTextContent('2026-07-01');
+
+    // Tap a preset → the trigger updates to the preset window, that preset is
+    // pressed, and the load fires with the preset range.
+    fireEvent.click(screen.getByTestId('relative-range-30'));
+    await waitFor(() =>
+      expect(stubs.getRangeReport).toHaveBeenLastCalledWith(daysAgoLocalKey(29), todayLocalKey()),
+    );
+    expect(screen.getByTestId('relative-range-30')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('analytics-range')).toHaveTextContent(daysAgoLocalKey(29));
+    expect(screen.getByTestId('analytics-range')).toHaveTextContent(todayLocalKey());
   });
 });

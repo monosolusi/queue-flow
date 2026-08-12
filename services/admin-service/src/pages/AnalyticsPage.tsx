@@ -6,7 +6,7 @@ import { daysAgoLocalKey, isDateKey, todayLocalKey } from '../lib/date';
 import { exportRangeReport } from '../lib/export-range-report';
 import { formatDuration } from '../lib/format';
 import { loadRangeOverview, type RangeOverviewData } from '../lib/analytics-loader';
-import { DateField } from '../components/DateField';
+import { DateRangeField } from '../components/DateRangeField';
 import { RangeTrendChart } from '../components/RangeTrendChart';
 import { CategoryBreakdownChart } from '../components/CategoryBreakdownChart';
 import { PageHeader } from '../components/PageHeader';
@@ -61,52 +61,30 @@ export function AnalyticsPage({
   const toast = useToast();
   const [from, setFrom] = useState<string>(daysAgoLocalKey(6));
   const [to, setTo] = useState<string>(todayLocalKey());
-  // Whether the manual Dari/Sampai date-range panel is open. The panel is
-  // hidden by default — the manager picks a quick relative-range preset, and
-  // taps "Kustom" only when they need a hand-picked range. This is an explicit
-  // UI mode, NOT a duplicate of `from`/`to`: the reveal is orthogonal to the
-  // range value (see RelativeRangePicker for why an explicit flag beats a pure
-  // derivation now that a "Kustom" affordance exists).
-  const [customMode, setCustomMode] = useState(false);
   const [state, setState] = useState<ViewState>({ status: 'loading' });
   const [exporting, setExporting] = useState(false);
   // Synchronous double-click guard — `exporting` only lands after a re-render,
   // so two same-tick clicks would both start a SheetJS build (CLAUDE.md).
   const exportRef = useRef(false);
 
-  // The date fields are text inputs now (DateField), so they accept a partial or
-  // malformed key where `type="date"` silently coerced to ''. Validating the
-  // shape here keeps a half-typed date from reaching `GetRangeReportUseCase`
-  // (which rejects malformed keys server-side — this is defense in depth).
-  //
-  // Tracked per field so only the offending input is flagged: a malformed `from`
-  // marks `from` alone, while an inverted range marks both (the pair is what is
-  // wrong). `rangeInvalid` is their union — identical to the previous single
-  // expression, so the load gate and the export button are unchanged.
-  //
-  // The inversion test is gated on BOTH sides being well-formed. `from > to` is a
-  // lexicographic compare that only means "inverted" for two real `YYYY-MM-DD`
-  // keys; run against a partial value it mis-attributes the fault to the *other*,
-  // valid field — clearing "Sampai" makes `'2026-08-05' > ''` true, and retyping
-  // "Dari" as `'2026-1'` makes `'2026-1' > '2026-08-11'` true (char-wise
-  // `'1' > '0'`). Since `DateField` is a raw passthrough, both values pass through
-  // those partial states on every keystroke.
-  const fromMalformed = !isDateKey(from);
-  const toMalformed = !isDateKey(to);
-  const inverted = !fromMalformed && !toMalformed && from > to;
-  const fromInvalid = fromMalformed || inverted;
-  const toInvalid = toMalformed || inverted;
-  const rangeInvalid = fromInvalid || toInvalid;
+  // Defensive range guard — the calendar (`DateRangeField`) and the presets
+  // only ever produce a pair of well-formed, in-order local `YYYY-MM-DD` keys,
+  // so this branch is unreachable from the current UI. It stays as
+  // defense-in-depth against a future caller that bypasses the calendar, and
+  // it still gates the load + export so a corrupted `from`/`to` cannot reach
+  // `GetRangeReportUseCase` (which rejects server-side). Typing is no longer
+  // supported, so the per-field malformed/inverted tracking the text-input
+  // variant needed is gone — one cheap expression is enough.
+  const rangeInvalid = !isDateKey(from) || !isDateKey(to) || from > to;
 
   // Derive the active relative-range preset purely from `from`/`to` — there is
   // NO separate `preset` state to drift. A preset `days` is active iff `to` is
   // today AND `from` is exactly `daysAgoLocalKey(days - 1)` (the preset's first
   // day). The default page state (`from=daysAgoLocalKey(6)`, `to=todayLocalKey()`)
-  // → "7 hari" is active on first render. This derivation is only consulted for
-  // the preset buttons' `aria-pressed` while NOT in `customMode` (see
-  // RelativeRangePicker) — entering custom mode clears the pressed preset
-  // explicitly, so a hand-edited range that coincidentally lands on a preset
-  // does not flip the mode back.
+  // → "7 hari" is active on first render. There is no more `customMode` gate:
+  // the manual range is always visible as a `DateRangeField`, and a hand-picked
+  // range that coincidentally matches a preset honestly shows that preset
+  // pressed (cleaner than suppressing the match).
   const activeDays = useMemo(() => {
     if (to !== todayLocalKey()) return null;
     for (const p of RELATIVE_PRESETS) {
@@ -119,19 +97,19 @@ export function AnalyticsPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [from, to]);
 
-  /** Jumps the range to the last `days` days and closes the custom panel. A
-   *  preset click always produces a pair of well-formed, in-order keys, so it
-   *  never trips `rangeInvalid`. */
+  /** Jumps the range to the last `days` days. A preset click always produces a
+   *  pair of well-formed, in-order keys, so it never trips `rangeInvalid`. */
   function selectRelative(days: number) {
-    setCustomMode(false);
     setFrom(daysAgoLocalKey(days - 1));
     setTo(todayLocalKey());
   }
 
-  /** Reveals the manual Dari/Sampai date-range panel. Keeps the current
-   *  `from`/`to` so the manager sees the range they are customizing from. */
-  function selectCustom() {
-    setCustomMode(true);
+  /** Commits a complete, in-order range picked via the `DateRangeField`
+   *  calendar. Atomic (one `from` + one `to` in the same tick) so the load
+   *  effect fires once, not twice. */
+  function onRangeChange(f: string, t: string) {
+    setFrom(f);
+    setTo(t);
   }
 
   useEffect(() => {
@@ -188,17 +166,12 @@ export function AnalyticsPage({
   const headerProps = {
     from,
     to,
-    onFromChange: setFrom,
-    onToChange: setTo,
+    onRangeChange,
     onExport: handleExport,
     exporting,
-    fromInvalid,
-    toInvalid,
     rangeInvalid,
     activeDays,
-    customMode,
     onSelectRelative: selectRelative,
-    onSelectCustom: selectCustom,
   };
 
   if (state.status === 'loading') {
@@ -333,40 +306,27 @@ export function AnalyticsPage({
 function AnalyticsHeader({
   from,
   to,
-  onFromChange,
-  onToChange,
+  onRangeChange,
   onExport,
   exportDisabled,
   exporting,
-  fromInvalid,
-  toInvalid,
   rangeInvalid,
   activeDays,
-  customMode,
   onSelectRelative,
-  onSelectCustom,
 }: {
   from: string;
   to: string;
-  onFromChange: (d: string) => void;
-  onToChange: (d: string) => void;
+  onRangeChange: (from: string, to: string) => void;
   onExport: () => void;
   exportDisabled: boolean;
   exporting: boolean;
-  /** Only the offending field is flagged; an inverted range flags both. */
-  fromInvalid: boolean;
-  toInvalid: boolean;
-  /** Their union — gates the export button and renders the shared error node. */
+  /** Defensive range guard — gates the export button and renders the shared
+   *  error node. Unreachable from the calendar/presets UI (defense in depth). */
   rangeInvalid: boolean;
-  /** The derived active relative-range preset (`null` = custom range). Only
-   *  consulted for the preset buttons' `aria-pressed` while `!customMode`. */
+  /** The derived active relative-range preset (`null` = no preset matches). */
   activeDays: number | null;
-  /** Whether the manual Dari/Sampai panel is open. */
-  customMode: boolean;
-  /** Jump the range to the last `days` days (and close the custom panel). */
+  /** Jump the range to the last `days` days. */
   onSelectRelative: (days: number) => void;
-  /** Reveal the manual Dari/Sampai date-range panel. */
-  onSelectCustom: () => void;
 }) {
   return (
     <>
@@ -375,19 +335,12 @@ function AnalyticsHeader({
         subtitle="Ekspor laporan lokal (.xlsx)"
         actions={
           <>
-            {/* The range selector — quick relative-range presets + a "Kustom"
-                toggle that reveals the manual Dari/Sampai fields below. The
-                actions row is all equal-height buttons now (no labeled fields
-                in the row), so it uses the default center alignment — the
-                prior `actionsAlign="end"` was a workaround for mixing labeled
-                DateFields with unlabeled buttons in one row, which is exactly
-                the misalignment the manager reported. */}
-            <RelativeRangePicker
-              activeDays={activeDays}
-              customMode={customMode}
-              onSelect={onSelectRelative}
-              onSelectCustom={onSelectCustom}
-            />
+            {/* Quick relative-range presets. The manual range is always visible
+                as a `DateRangeField` below the header (no "Kustom" toggle —
+                manager feedback: unify the separate Kustom / calendar / textbox
+                affordances into one grouped box). The actions row is all
+                equal-height buttons, so the default center alignment applies. */}
+            <RelativeRangePicker activeDays={activeDays} onSelect={onSelectRelative} />
             <button
               type="button"
               className="btn btn--primary"
@@ -405,43 +358,25 @@ function AnalyticsHeader({
           </>
         }
       />
-      {/* The manual date-range panel — revealed only when the manager taps
-          "Kustom". It lives on its own row below the header (not in the
-          actions row) so the labeled Dari/Sampai fields no longer clash with
-          the unlabeled preset buttons above. The `from`/`to` the header holds
-          are pre-filled with the current range, so the manager customizes from
-          whatever preset they were on. */}
-      {customMode && (
-        <div className="analytics__custom-range" role="group" aria-label="Rentang kustom">
-          <DateField
-            label="Dari"
-            value={from}
-            onChange={onFromChange}
-            ariaLabel="Tanggal mulai"
-            testId="analytics-from"
-            invalid={fromInvalid}
-            describedById={fromInvalid ? RANGE_ERROR_ID : undefined}
-          />
-          <DateField
-            label="Sampai"
-            value={to}
-            onChange={onToChange}
-            ariaLabel="Tanggal akhir"
-            testId="analytics-to"
-            invalid={toInvalid}
-            describedById={toInvalid ? RANGE_ERROR_ID : undefined}
-          />
-        </div>
-      )}
+      {/* The manual range selector — ALWAYS visible (no reveal step). One
+          grouped textbox that opens a two-month range calendar on click. The
+          `DateRangeField` owns its own `role="group"` (the field root), so no
+          wrapping group here. Pre-filled with the current `from`/`to` so the
+          manager sees the range they are customizing from. */}
+      <DateRangeField
+        from={from}
+        to={to}
+        onRangeChange={onRangeChange}
+        invalid={rangeInvalid}
+        describedById={rangeInvalid ? RANGE_ERROR_ID : undefined}
+      />
       {/* Owned by AnalyticsHeader, not by a single view branch, so it renders
           in every state the page can be in (loading / error / ready all render
-          this header). The fields are flagged from the same `from`/`to` the
-          header already holds, and a failed load leaves the page on its error
-          branch while the manager keeps editing dates — parking this node in
-          the ready branch only would let `aria-invalid` travel without the
+          this header). A failed load leaves the page on its error branch while
+          the manager keeps editing the range — parking this node in the ready
+          branch only would let `aria-invalid` travel without the
           `aria-describedby` target that explains it. Rendered as a sibling
-          after the PageHeader (which has no children slot) rather than inside
-          the old `<header>`, but the `id`/`aria-describedby` wiring is
+          after the DateRangeField; the `id`/`aria-describedby` wiring is
           DOM-location-independent so the association is unchanged. */}
       {rangeInvalid && (
         <p className="admin-panel__error" id={RANGE_ERROR_ID} data-testid="analytics-range-invalid">
