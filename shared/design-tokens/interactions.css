@@ -25,8 +25,20 @@
 }
 
 /* AC4 — full button-state vocabulary per variant.
-   `.btn--primary` wires the previously-dead `--accent-contrast` token. */
+   `.btn--primary` wires the previously-dead `--accent-contrast` token.
+
+   `display: inline-block` + `text-decoration: none` + `text-align: center`
+   make the utility element-agnostic: a `.btn` on an `<a>`/Link renders as the
+   SAME button box as on a `<button>`. Without these, an anchor stays
+   `display: inline` (its vertical padding overflows the line box and overlaps
+   neighbouring content) and keeps the default anchor underline — so a Link
+   styled `.btn` looked like underlined text, not a button. Native `<button>` is
+   already inline-block with no underline and centered text, so this changes
+   nothing for button-based `.btn`; it only lifts anchor-based `.btn` to parity. */
 .btn {
+  display: inline-block;
+  text-decoration: none;
+  text-align: center;
   border: none;
   border-radius: var(--radius);
   padding: 0.9rem 1.4rem;
