@@ -23,16 +23,11 @@
   margin-top: 0.75rem;
 }
 
-/* Palette sidebar — the draggable "Status" card + the accessible fallback
-   buttons. Narrow on wide screens, full-width (stacked above the canvas) on
-   narrow ones. */
-.sm-palette {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  width: 11rem;
-  flex: 0 0 11rem;
-}
+/* Palette (node picker) — the draggable "Status" card + the accessible fallback
+   buttons. Now a RIGHT-side panel sharing the `.sm-properties` container styling
+   (the panel switches between the palette and the node/edge editor based on the
+   canvas selection). The palette-specific rules below style the draggable card
+   and the hint; the container (width, padding, border, gap) is `.sm-properties`. */
 .sm-palette__hint {
   margin: 0;
   color: var(--text-muted);
@@ -42,6 +37,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 0.4rem;
   padding: 0.6rem 0.8rem;
   border-radius: 6px;
   border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
@@ -54,9 +50,13 @@
 .sm-palette__item:active {
   cursor: grabbing;
 }
-.sm-palette .btn {
+/* Full-width buttons inside the right panel (palette + editor). The editor's
+   `.sm-properties__delete` already sets `justify-content: center`; adding
+   `width: 100%` + `gap` is harmless there. */
+.sm-properties .btn {
   width: 100%;
   justify-content: center;
+  gap: 0.4rem;
 }
 
 /* The React Flow canvas wrapper. Explicit height is required by React Flow
@@ -95,16 +95,34 @@
   border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
   background: var(--surface);
 }
-.sm-properties--empty {
-  justify-content: center;
-  align-items: center;
-  text-align: center;
-}
 .sm-properties__heading {
   margin: 0;
   color: var(--text);
   font-size: 0.9rem;
   font-weight: 600;
+}
+/* Back button at the top of the node/edge editor — a subtle full-width
+   ghost/text button that returns the right panel to the node-picker (palette)
+   view by clearing the canvas selection. 44px min-height for touch targets. */
+.sm-properties__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 44px;
+  padding: 0.4rem 0.6rem;
+  margin-bottom: 0.25rem;
+  border: 1px solid color-mix(in srgb, var(--text) 15%, transparent);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  justify-content: center;
+}
+.sm-properties__back:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 .sm-properties__route {
   margin: 0;
@@ -143,9 +161,6 @@
   margin: 0;
   color: var(--text-muted);
   font-size: 0.8rem;
-}
-.sm-properties__hint--center {
-  font-size: 0.85rem;
 }
 .sm-properties__delete {
   min-height: 44px;
@@ -276,21 +291,10 @@
   box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 8%, transparent);
 }
 
-/* Stack the palette + panel above/below the canvas on narrow screens. */
+/* Stack the right panel (palette or editor) below the canvas on narrow
+   screens. The palette shares the `.sm-properties` container, so the same
+   full-width rule covers both views. */
 @media (max-width: 48rem) {
-  .sm-palette {
-    flex: 1 1 100%;
-    width: 100%;
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: center;
-  }
-  .sm-palette__hint {
-    flex: 1 1 100%;
-  }
-  .sm-palette .btn {
-    width: auto;
-  }
   .sm-properties {
     flex: 1 1 100%;
     width: 100%;
