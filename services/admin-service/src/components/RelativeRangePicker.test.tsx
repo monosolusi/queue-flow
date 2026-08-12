@@ -3,150 +3,70 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { RELATIVE_PRESETS, RelativeRangePicker } from './RelativeRangePicker';
 
 describe('RelativeRangePicker (analytics relative-range presets)', () => {
-  it('renders one button per preset + a Kustom button, each with a stable testid + label', () => {
-    render(
-      <RelativeRangePicker
-        activeDays={null}
-        customMode={false}
-        onSelect={() => {}}
-        onSelectCustom={() => {}}
-      />,
-    );
+  it('renders one button per preset, each with a stable testid + label', () => {
+    render(<RelativeRangePicker activeDays={null} onSelect={() => {}} />);
     for (const p of RELATIVE_PRESETS) {
       const btn = screen.getByTestId(`relative-range-${p.days}`);
       expect(btn).toBeInTheDocument();
       expect(btn).toHaveTextContent(p.label);
     }
-    // The four PRD-aligned presets, in order, plus the Kustom toggle.
+    // The four PRD-aligned presets, in order. The "Kustom" toggle is gone —
+    // the manual range is now always visible as a DateRangeField on the page.
     expect(RELATIVE_PRESETS.map((p) => p.days)).toEqual([7, 14, 30, 90]);
-    expect(screen.getByTestId('relative-range-custom')).toHaveTextContent('Kustom');
+    expect(screen.queryByTestId('relative-range-custom')).not.toBeInTheDocument();
   });
 
   it('is a role="group" cluster labelled "Rentang relatif"', () => {
-    render(
-      <RelativeRangePicker
-        activeDays={null}
-        customMode={false}
-        onSelect={() => {}}
-        onSelectCustom={() => {}}
-      />,
-    );
+    render(<RelativeRangePicker activeDays={null} onSelect={() => {}} />);
     expect(screen.getByRole('group', { name: 'Rentang relatif' })).toBeInTheDocument();
   });
 
-  it('reflects activeDays on the matching preset button via aria-pressed (when not custom)', () => {
+  it('reflects activeDays on the matching preset button via aria-pressed', () => {
     const { rerender } = render(
-      <RelativeRangePicker
-        activeDays={7}
-        customMode={false}
-        onSelect={() => {}}
-        onSelectCustom={() => {}}
-      />,
+      <RelativeRangePicker activeDays={7} onSelect={() => {}} />,
     );
     expect(screen.getByTestId('relative-range-7')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('relative-range-14')).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByTestId('relative-range-30')).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByTestId('relative-range-90')).toHaveAttribute('aria-pressed', 'false');
-    // Kustom is not pressed while on a preset.
-    expect(screen.getByTestId('relative-range-custom')).toHaveAttribute('aria-pressed', 'false');
 
     // Switching the active preset flips the single pressed preset button.
-    rerender(
-      <RelativeRangePicker
-        activeDays={30}
-        customMode={false}
-        onSelect={() => {}}
-        onSelectCustom={() => {}}
-      />,
-    );
+    rerender(<RelativeRangePicker activeDays={30} onSelect={() => {}} />);
     expect(screen.getByTestId('relative-range-7')).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByTestId('relative-range-30')).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('marks NO preset pressed when activeDays is null (custom range, not yet revealed)', () => {
-    render(
-      <RelativeRangePicker
-        activeDays={null}
-        customMode={false}
-        onSelect={() => {}}
-        onSelectCustom={() => {}}
-      />,
-    );
+  it('marks NO preset pressed when activeDays is null (hand-picked range, no preset matches)', () => {
+    render(<RelativeRangePicker activeDays={null} onSelect={() => {}} />);
     for (const p of RELATIVE_PRESETS) {
       expect(screen.getByTestId(`relative-range-${p.days}`)).toHaveAttribute(
         'aria-pressed',
         'false',
       );
     }
-    expect(screen.getByTestId('relative-range-custom')).toHaveAttribute('aria-pressed', 'false');
   });
 
-  it('marks ONLY Kustom pressed (no preset) when customMode is true, even if from/to match a preset', () => {
-    // A hand-edited range that coincidentally lands on the 7-hari window must
-    // NOT flip the 7-hari preset back on — the manager is in custom mode.
-    render(
-      <RelativeRangePicker
-        activeDays={7}
-        customMode={true}
-        onSelect={() => {}}
-        onSelectCustom={() => {}}
-      />,
-    );
-    for (const p of RELATIVE_PRESETS) {
-      expect(screen.getByTestId(`relative-range-${p.days}`)).toHaveAttribute(
-        'aria-pressed',
-        'false',
-      );
-    }
-    expect(screen.getByTestId('relative-range-custom')).toHaveAttribute('aria-pressed', 'true');
+  it('honestly shows a preset pressed when a hand-picked range matches it (no customMode override)', () => {
+    // The manual range is always visible now (no reveal step, no customMode
+    // flag). A hand-picked range that coincidentally lands on the 7-hari window
+    // honestly shows 7-hari pressed — cleaner than the prior customMode
+    // override that suppressed the match.
+    render(<RelativeRangePicker activeDays={7} onSelect={() => {}} />);
+    expect(screen.getByTestId('relative-range-7')).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('fires onSelect with the preset days on a preset click', () => {
     const onSelect = vi.fn();
-    const onSelectCustom = vi.fn();
-    render(
-      <RelativeRangePicker
-        activeDays={null}
-        customMode={false}
-        onSelect={onSelect}
-        onSelectCustom={onSelectCustom}
-      />,
-    );
+    render(<RelativeRangePicker activeDays={null} onSelect={onSelect} />);
     fireEvent.click(screen.getByTestId('relative-range-30'));
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect).toHaveBeenCalledWith(30);
-    // The Kustom handler is NOT fired by a preset click.
-    expect(onSelectCustom).not.toHaveBeenCalled();
-  });
-
-  it('fires onSelectCustom (and not a preset onSelect) on the Kustom click', () => {
-    const onSelect = vi.fn();
-    const onSelectCustom = vi.fn();
-    render(
-      <RelativeRangePicker
-        activeDays={null}
-        customMode={false}
-        onSelect={onSelect}
-        onSelectCustom={onSelectCustom}
-      />,
-    );
-    fireEvent.click(screen.getByTestId('relative-range-custom'));
-    expect(onSelectCustom).toHaveBeenCalledTimes(1);
-    expect(onSelect).not.toHaveBeenCalled();
   });
 
   it('each button is a type="button" (no form submit)', () => {
-    render(
-      <RelativeRangePicker
-        activeDays={null}
-        customMode={false}
-        onSelect={() => {}}
-        onSelectCustom={() => {}}
-      />,
-    );
+    render(<RelativeRangePicker activeDays={null} onSelect={() => {}} />);
     for (const p of RELATIVE_PRESETS) {
       expect(screen.getByTestId(`relative-range-${p.days}`)).toHaveAttribute('type', 'button');
     }
-    expect(screen.getByTestId('relative-range-custom')).toHaveAttribute('type', 'button');
   });
 });

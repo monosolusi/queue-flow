@@ -3,6 +3,7 @@ import { DayPicker } from 'react-day-picker';
 import { id as idLocale } from 'react-day-picker/locale';
 import { formatDateKey, parseDateKey } from '../lib/date';
 import { usePopoverDismiss } from '../lib/use-popover-dismiss';
+import { CalendarIcon } from './CalendarIcon';
 
 /**
  * The admin panel's date control — a `YYYY-MM-DD` text input paired with a
@@ -175,24 +176,5 @@ export function DateField({
       </div>
       {children}
     </div>
-  );
-}
-
-/** Decorative calendar glyph — hand-rolled inline SVG, no icon library (NFR-REL-01). */
-function CalendarIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-      focusable="false"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.8}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <rect x={3} y={5} width={18} height={16} rx={2} />
-      <path d="M3 10h18M8 3v4M16 3v4" />
-    </svg>
   );
 }

@@ -358,17 +358,23 @@ describe('date & time fields', () => {
   });
 
   it('drives the calendar from our design tokens (the library blue is overridden)', () => {
-    const rdp = rule('.datefield__popover .rdp-root');
+    // The theming block is grouped across both popovers (DRY) — the range
+    // selector is last in the list, so `rule()` (which matches `<sel> {`)
+    // resolves it. Assert the single-day selector is also in the group.
+    const rdp = rule('.date-range-field__popover .rdp-root');
     expect(rdp).toContain('--rdp-accent-color: var(--accent)');
     expect(rdp).toContain('--rdp-day-height: 2.75rem');
     expect(rdp).toContain('--rdp-day-width: 2.75rem');
     expect(rdp).toContain('color: var(--text)');
+    expect(css).toContain('.datefield__popover .rdp-root');
   });
 
   it('scopes the calendar override one class deeper than the library rule', () => {
-    // .datefield__popover .rdp-root is 0-2-0 vs the library's 0-1-0, so the
-    // override wins regardless of stylesheet import order.
-    expect(css).toContain('.datefield__popover .rdp-root {');
+    // .datefield__popover .rdp-root / .date-range-field__popover .rdp-root are
+    // 0-2-0 vs the library's 0-1-0, so the override wins regardless of
+    // stylesheet import order. Both popovers share the theming block (DRY).
+    expect(css).toContain('.datefield__popover .rdp-root');
+    expect(css).toContain('.date-range-field__popover .rdp-root');
   });
 
   it('declares the day hover BEFORE the selected fill (equal specificity, order decides)', () => {
@@ -391,8 +397,9 @@ describe('date & time fields', () => {
       '.timefield__option',
       '.timefield__column-label',
       '.datefield__popover, .timefield__popover',
-      '.datefield__popover .rdp-root',
-      '.datefield__popover .rdp-selected .rdp-day_button',
+      '.date-range-field__popover',
+      '.date-range-field__popover .rdp-root',
+      '.date-range-field__popover .rdp-selected .rdp-day_button',
     ]) {
       expect(rule(sel), sel).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
     }
@@ -552,15 +559,38 @@ describe('relative-range presets + range-trend bar/line toggle', () => {
     expect(active).toContain('color: var(--accent-contrast)');
   });
 
-  it('.analytics__custom-range is a flex-wrap row that resets the .field margin', () => {
-    const r = rule('.analytics__custom-range');
-    expect(r).toContain('display: flex');
-    expect(r).toContain('flex-wrap: wrap');
-    // The `.field` base carries `margin-bottom: 1rem` for stacked form rows;
-    // inside the single-row custom panel it must be reset to 0 so the labeled
-    // Dari/Sampai inputs do not droop below the preset buttons above.
-    const fieldReset = rule('.analytics__custom-range .field');
-    expect(fieldReset).toContain('margin-bottom: 0');
+  it('.analytics__custom-range is gone (replaced by a single always-visible DateRangeField, no wrapper)', () => {
+    // The manual Dari/Sampai panel used to be a flex-wrap row of two DateFields
+    // revealed on "Kustom". The unification (manager feedback) replaces it with
+    // a single always-visible `DateRangeField` rendered directly below the
+    // PageHeader — no wrapper class, so the old `.analytics__custom-range` rule
+    // must be gone entirely (no orphan selector to drift).
+    expect(css).not.toMatch(/\.analytics__custom-range\s*\{/);
+  });
+
+  it('.date-range-field__trigger is a full-width ≥44px textbox-styled button (grouped, no separate calendar button)', () => {
+    // Manager feedback: unify the separate Kustom / calendar / textbox
+    // affordances into one grouped box. The trigger is a single button styled
+    // as a textbox; the calendar glyph lives INSIDE it (no separate toggle).
+    const t = rule('.date-range-field__trigger');
+    expect(t).toContain('display: inline-flex');
+    expect(t).toContain('width: 100%');
+    expect(t).toContain('min-height: 2.75rem');
+    expect(t).toContain('text-align: left');
+    expect(t).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+  });
+
+  it('.date-range-field__popover is an absolute 2-month-wide panel under the trigger', () => {
+    const p = rule('.date-range-field__popover');
+    expect(p).toContain('position: absolute');
+    expect(p).toContain('z-index: 20');
+    expect(p).toContain('max-width: 100%');
+    expect(p).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+  });
+
+  it('selects the open trigger off the ARIA state itself (no --active modifier to drift)', () => {
+    expect(css).toContain(".date-range-field__trigger[aria-expanded='true']");
+    expect(css).not.toContain('.date-range-field__trigger--active');
   });
 
   it('.range-trend__head lays the h2 + mode toggle in a space-between flex row', () => {
