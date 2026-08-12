@@ -94,12 +94,14 @@ function describedBy(
  * snap the manager back to the default section on every save. The draft stays
  * centralized (all fields), so switching sections changes visibility only — a
  * manager can edit profile, switch to state-machine, edit, then save once and
- * both edits ride the one full-payload PUT. Each saved section renders its
+ * both edits ride the one full-payload PUT. Each EDITABLE section renders its
  * own save button (`data-testid="admin-save"` stays unique — only the active
  * section renders); the `manual` section has no save (its operations are
- * separate POSTs). The full PUT requires a valid whole payload, so each
- * section's save is disabled unless the WHOLE form is valid, and the nav shows
- * an error badge on items whose own section is invalid.
+ * separate POSTs), and the `state-machine` section has no save either — it is
+ * a read-only summary + launcher whose edit+save lives on the designer page.
+ * The full PUT requires a valid whole payload, so each section's save is
+ * disabled unless the WHOLE form is valid, and the nav shows an error badge on
+ * items whose own section is invalid.
  *
  * Save / reset / cleanup outcomes are announced through the app-wide toast
  * stack (`useToast`) — auto-dismissing for successes, sticky for errors. The
@@ -233,11 +235,14 @@ export function AdminPanel() {
     }
   }
 
-  // One save button element, rendered at the foot of whichever saved section
+  // One save button element, rendered at the foot of whichever EDITABLE section
   // is active. Exactly one is in the DOM at a time (only the active section
-  // renders), so `data-testid="admin-save"` stays unique. The PUT is a FULL
-  // save — every section sends the whole draft — so the button is disabled
-  // unless the WHOLE form is valid, regardless of which section it sits on.
+  // renders), so `data-testid="admin-save"` stays unique. The `manual` and
+  // `state-machine` sections do NOT render it: `manual` owns two separate POSTs,
+  // and `state-machine` is a read-only launcher (its save lives on the designer).
+  // The PUT is a FULL save — every section sends the whole draft — so the
+  // button is disabled unless the WHOLE form is valid, regardless of which
+  // section it sits on.
   const saveButton = (
     <button
       type="button"
@@ -664,12 +669,15 @@ export function AdminPanel() {
                     accessible, bookmarkable, and testable. The shared draft persists
                     across the navigation (ConfigDraftProvider is the route element).
 
-                    Secondary (not primary): the section's single commit action is
-                    `Simpan` (`admin-config__section-save`, `btn--primary`) — every
-                    other config section reserves `btn--primary` for save. A
-                    navigation link is subordinate, so `btn--secondary` (surface-2)
-                    gives it a distinct, non-colliding visual rather than a second
-                    accent bar stacked against the save button. */}
+                    This section is read-only — a summary + a live-ticket warning +
+                    this launcher. The state-machine EDITOR (and its `Simpan` action)
+                    lives on the designer page, which edits the SAME shared draft and
+                    owns the full-payload save. So this section renders NO save button:
+                    a `Simpan` here would fire a full PUT with nothing in this section
+                    to edit — it visibly "did nothing" (manager feedback), so it was
+                    removed. The `btn--secondary` surface (not `btn--primary`, which
+                    every other config section reserves for save) keeps this as a
+                    navigation link, not a commit. */}
                 <Link
                   to="alur-status"
                   className="btn btn--secondary admin-panel__card-action"
@@ -678,7 +686,6 @@ export function AdminPanel() {
                   Lihat Diagram
                 </Link>
               </section>
-              {saveButton}
             </>
           )}
 

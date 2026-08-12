@@ -899,6 +899,27 @@ describe('AdminPanel (post-wizard safety rails)', () => {
     ).toBeTruthy();
   });
 
+  it('the Alur Status Tiket section renders no save button (read-only launcher)', async () => {
+    // The state-machine EDITOR + its `Simpan` action live on the dedicated
+    // `/config/alur-status` designer; this /config section is a read-only
+    // summary + warning + "Lihat Diagram" launcher. A save button here fired a
+    // full PUT with nothing in the section to edit — it visibly "did nothing"
+    // (manager feedback) — so it was removed. The launcher is the only action;
+    // the manager edits + saves on the designer. Asserting absence locks the
+    // fix in (a future re-add would re-introduce the dead button).
+    const { api, save } = makeApi();
+    renderPanel(api);
+    await screen.findByText('Apotek Sehat');
+    await goToSection('Alur Status Tiket');
+
+    expect(screen.queryByTestId('admin-save')).not.toBeInTheDocument();
+    // The summary + launcher the manager DOES need are still present.
+    expect(screen.getByTestId('sm-summary')).toBeInTheDocument();
+    expect(screen.getByTestId('sm-open-designer')).toBeInTheDocument();
+    // No accidental save fires while the section is the active surface.
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it('shows a nav error badge on an invalid section and clears it once fixed', async () => {
     // The nav surfaces cross-section invalidity: a manager on profile can see
     // that routing is broken via the badge on its tab. Never color alone — the
