@@ -172,8 +172,14 @@ function alertRegion() {
   return within(toastViewport().getByRole('alert'));
 }
 
-/** Opens the range calendar by clicking the grouped textbox trigger. */
+/** Opens the range calendar by clicking the grouped textbox trigger. The
+ *  `DateRangeField` is reveal-on-custom (manager feedback: the rentang tanggal
+ *  only appears when "Kustom" is pressed), so press "Kustom" first when the
+ *  trigger is not yet mounted. */
 function openRangeCalendar() {
+  if (!screen.queryByTestId('analytics-range')) {
+    fireEvent.click(screen.getByTestId('relative-range-custom'));
+  }
   fireEvent.click(screen.getByTestId('analytics-range'));
 }
 
@@ -351,23 +357,22 @@ describe('AnalyticsPage — export feedback', () => {
 });
 
 describe('AnalyticsPage — relative-range presets + unified range calendar', () => {
-  it('the default render (last 7 days) has the "7 hari" preset pressed and the range trigger visible with the 7-day window', async () => {
+  it('the default render (last 7 days) has the "7 hari" preset pressed, "Kustom" not pressed, and the range trigger HIDDEN (reveal-on-custom)', async () => {
     const { api } = makeApi();
     renderPage(api);
-    // The picker + trigger render in the header even while the report loads,
-    // so no need to await the ready state.
+    // The picker renders in the header even while the report loads, so no need
+    // to await the ready state.
     expect(screen.getByTestId('relative-range-7')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('relative-range-14')).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByTestId('relative-range-30')).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByTestId('relative-range-90')).toHaveAttribute('aria-pressed', 'false');
-    // The "Kustom" toggle is gone; the unified range trigger is ALWAYS visible
-    // and shows the current 7-day window (no separate from/to text inputs).
-    expect(screen.queryByTestId('relative-range-custom')).not.toBeInTheDocument();
+    // Manager feedback: the rentang tanggal was too wide and should only appear
+    // on custom. "Kustom" is present but not pressed, and the manual range
+    // trigger is NOT mounted in preset mode (no separate from/to text inputs).
+    expect(screen.getByTestId('relative-range-custom')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByTestId('analytics-range')).not.toBeInTheDocument();
     expect(screen.queryByTestId('analytics-from')).not.toBeInTheDocument();
     expect(screen.queryByTestId('analytics-to')).not.toBeInTheDocument();
-    const trigger = screen.getByTestId('analytics-range');
-    expect(trigger).toHaveTextContent(daysAgoLocalKey(6));
-    expect(trigger).toHaveTextContent(todayLocalKey());
   });
 
   it('clicking the 30-hari preset reloads with daysAgoLocalKey(29) + todayLocalKey()', async () => {
@@ -380,13 +385,12 @@ describe('AnalyticsPage — relative-range presets + unified range calendar', ()
     const expectedFrom = daysAgoLocalKey(29);
     const expectedTo = todayLocalKey();
     await waitFor(() => expect(stubs.getRangeReport).toHaveBeenLastCalledWith(expectedFrom, expectedTo));
-    // The 30-hari preset is now pressed; 7-hari is not; the trigger still shows
-    // the active window (the calendar is the single source of truth for the
-    // visible range, presets just jump it).
+    // The 30-hari preset is now pressed; 7-hari is not; "Kustom" is not pressed
+    // and the manual range trigger stays hidden (presets leave preset mode).
     expect(screen.getByTestId('relative-range-30')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('relative-range-7')).toHaveAttribute('aria-pressed', 'false');
-    expect(screen.getByTestId('analytics-range')).toHaveTextContent(expectedFrom);
-    expect(screen.getByTestId('analytics-range')).toHaveTextContent(expectedTo);
+    expect(screen.getByTestId('relative-range-custom')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByTestId('analytics-range')).not.toBeInTheDocument();
   });
 
   it('clicking the 90-hari preset reloads with the 90-day window (the MAX_RANGE_DAYS cap)', async () => {
@@ -399,6 +403,8 @@ describe('AnalyticsPage — relative-range presets + unified range calendar', ()
       expect(stubs.getRangeReport).toHaveBeenLastCalledWith(daysAgoLocalKey(89), todayLocalKey()),
     );
     expect(screen.getByTestId('relative-range-90')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('relative-range-custom')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByTestId('analytics-range')).not.toBeInTheDocument();
   });
 
   it('picking a custom range via the calendar reloads with the hand-picked window', async () => {
@@ -412,34 +418,58 @@ describe('AnalyticsPage — relative-range presets + unified range calendar', ()
     fireEvent.click(screen.getByRole('button', { name: /, 7 Juli 2026/ }));
 
     await waitFor(() => expect(stubs.getRangeReport).toHaveBeenLastCalledWith('2026-07-01', '2026-07-07'));
-    // The trigger now shows the hand-picked window; no preset matches, so none
-    // is pressed (the calendar is the source of truth, not a "custom mode").
+    // Manager feedback: the manual range is reveal-on-custom. "Kustom" is
+    // pressed, the trigger is mounted and shows the hand-picked window, and no
+    // preset is pressed (the page suppresses the match to `null` while custom
+    // is active, even though 1–7 Juli 2026 is not a preset window anyway).
+    expect(screen.getByTestId('relative-range-custom')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('analytics-range')).toHaveTextContent('2026-07-01');
     expect(screen.getByTestId('analytics-range')).toHaveTextContent('2026-07-07');
     expect(screen.getByTestId('relative-range-7')).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByTestId('relative-range-30')).toHaveAttribute('aria-pressed', 'false');
   });
 
-  it('clicking a preset from a hand-picked range updates the trigger to the preset window', async () => {
+  it('clicking a preset from a hand-picked range leaves preset mode (hides the trigger) and loads the preset window', async () => {
     const { api, stubs } = makeApi();
     renderPage(api);
     await screen.findByTestId('metric-total');
 
-    // First pick a custom range via the calendar.
+    // First pick a custom range via the calendar (reveals the manual range).
     openRangeCalendar();
     fireEvent.click(screen.getByRole('button', { name: /, 1 Juli 2026/ }));
     fireEvent.click(screen.getByRole('button', { name: /, 7 Juli 2026/ }));
     await waitFor(() => expect(stubs.getRangeReport).toHaveBeenLastCalledWith('2026-07-01', '2026-07-07'));
+    expect(screen.getByTestId('relative-range-custom')).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('analytics-range')).toHaveTextContent('2026-07-01');
 
-    // Tap a preset → the trigger updates to the preset window, that preset is
-    // pressed, and the load fires with the preset range.
+    // Tap a preset → the page leaves custom mode (the manual range hides, the
+    // "Kustom" toggle releases), that preset is pressed, and the load fires
+    // with the preset range.
     fireEvent.click(screen.getByTestId('relative-range-30'));
     await waitFor(() =>
       expect(stubs.getRangeReport).toHaveBeenLastCalledWith(daysAgoLocalKey(29), todayLocalKey()),
     );
     expect(screen.getByTestId('relative-range-30')).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByTestId('analytics-range')).toHaveTextContent(daysAgoLocalKey(29));
-    expect(screen.getByTestId('analytics-range')).toHaveTextContent(todayLocalKey());
+    expect(screen.getByTestId('relative-range-custom')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByTestId('analytics-range')).not.toBeInTheDocument();
+  });
+
+  it('re-clicking "Kustom" toggles it off (hides the manual range and returns to preset mode)', async () => {
+    const { api } = makeApi();
+    renderPage(api);
+    await screen.findByTestId('metric-total');
+
+    // Reveal the manual range.
+    fireEvent.click(screen.getByTestId('relative-range-custom'));
+    expect(screen.getByTestId('relative-range-custom')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('analytics-range')).toBeInTheDocument();
+
+    // Re-click "Kustom" → a real toggle, not a one-way reveal: it releases,
+    // the manual range hides, and preset mode resumes. The current range (last
+    // 7 days) matches the 7-hari preset, so it honestly shows pressed again.
+    fireEvent.click(screen.getByTestId('relative-range-custom'));
+    expect(screen.getByTestId('relative-range-custom')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByTestId('analytics-range')).not.toBeInTheDocument();
+    expect(screen.getByTestId('relative-range-7')).toHaveAttribute('aria-pressed', 'true');
   });
 });

@@ -29,12 +29,25 @@ import type { DailyPointDto } from '../api/types';
  * page-level guard short-circuits first; this is the defensive backstop).
  */
 
-// SVG geometry (viewBox user units). The svg scales to its container via
-// `width:100%`; bars sit on a common baseline with date labels beneath.
-// QUE-51 — widened so per-bar value labels never collide with the bar tops or
-// each other; rounded bar tops + subtle gridlines for a cleaner modern feel.
-const SLOT = 46; // per-day column width (bar + gap)
-const BAR_W = 30; // bar mark width (roomier than the prior 22)
+// SVG geometry (viewBox user units). The SVG scales to its container via
+// `width:100%` + a FIXED CSS height (styles.css); bars sit on a common baseline
+// with date labels beneath.
+//
+// Manager feedback (Tren Pengunjung height "terlalu dinamis"): the prior
+// geometry used a FIXED per-day column (SLOT=46) so the viewBox WIDTH grew with
+// the day count, and `height:auto` made the RENDERED height swing from ~tall
+// (7 days) to ~short (90 days) — the dashboard layout jumped whenever the range
+// (or mode) changed. The fix is a FIXED viewBox width: the per-day column is
+// derived from the day count, and the CSS height is fixed (styles.css), so the
+// box the chart lives in is a stable unit and the card below never shifts when
+// the range or mode changes. The aspect ratio is now constant across ranges;
+// `preserveAspectRatio="xMidYMid meet"` letterboxes the content within that
+// fixed-height box (it fills the card width on the analytics page with minimal
+// vertical centering) — the box, not the content, is the stable unit. Bars thin
+// out for long ranges (a dense trend overview) and widen for short ranges,
+// within one stable height.
+// QUE-51 — rounded bar tops + subtle gridlines for a cleaner modern feel.
+const VIEW_W = 760; // fixed viewBox width → stable rendered height across ranges
 const PAD_LEFT = 8;
 const PAD_RIGHT = 8;
 const PAD_TOP = 24; // room for the max value label above the tallest bar
@@ -42,6 +55,8 @@ const PAD_BOTTOM = 24; // room for the date labels
 const PLOT_H = 150; // bar plot height
 const CHART_H = PAD_TOP + PLOT_H + PAD_BOTTOM;
 const BASELINE = PAD_TOP + PLOT_H;
+const PLOT_W = VIEW_W - PAD_LEFT - PAD_RIGHT;
+const MAX_BAR_W = 30; // cap so short ranges don't draw oversized bars
 
 type ChartMode = 'bar' | 'line';
 
@@ -61,7 +76,12 @@ export function RangeTrendChart({ perDay }: { perDay: readonly DailyPointDto[] }
 
   const values = perDay.map((p) => p.totalTickets);
   const max = Math.max(1, ...values);
-  const chartW = PAD_LEFT + perDay.length * SLOT + PAD_RIGHT;
+  // Fixed viewBox width — the per-day column scales to fit it (see header
+  // comment). `chartW` is constant so the rendered height never depends on the
+  // day count (manager feedback: no sudden dashboard-layout change).
+  const chartW = VIEW_W;
+  const slot = PLOT_W / perDay.length;
+  const barW = Math.min(slot * 0.62, MAX_BAR_W);
   // Render a value label above each bar only when there are few enough days that
   // they won't collide; for long ranges the per-bar <title> carries the value.
   const showValueLabels = perDay.length <= 10;
@@ -92,12 +112,12 @@ export function RangeTrendChart({ perDay }: { perDay: readonly DailyPointDto[] }
   // the line dips to the axis rather than skipping the day, keeping the axis
   // continuous (mirrors the bar-mode baseline tick).
   const points = perDay.map((p, i) => {
-    const slotX = PAD_LEFT + i * SLOT;
-    const x = slotX + SLOT / 2;
+    const slotX = PAD_LEFT + i * slot;
+    const x = slotX + slot / 2;
     const h = (p.totalTickets / max) * PLOT_H;
     const barY = BASELINE - h;
     const valueLabelY = barY - 6;
-    return { x, barX: slotX + (SLOT - BAR_W) / 2, barY, valueLabelY, p, i };
+    return { x, barX: slotX + (slot - barW) / 2, barY, valueLabelY, p, i };
   });
 
   return (
@@ -160,7 +180,7 @@ export function RangeTrendChart({ perDay }: { perDay: readonly DailyPointDto[] }
                 data-testid={`range-trend-bar-${i}`}
                 x={barX}
                 y={barY}
-                width={BAR_W}
+                width={barW}
                 height={Math.max((p.totalTickets / max) * PLOT_H, p.totalTickets > 0 ? 2 : 1)}
                 rx={5}
               >
