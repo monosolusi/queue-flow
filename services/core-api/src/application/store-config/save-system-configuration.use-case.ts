@@ -10,7 +10,7 @@ import { StateTransitionRule } from '../../domain/store-config';
 import { DailyResetPolicy, DailyResetMode } from '../../domain/store-config';
 import { BrandColor } from '../../domain/store-config';
 import { ServiceThemes, type ServiceThemesMap } from '../../domain/store-config';
-import { TvPanelLayout, type TvPanelLayoutMap } from '../../domain/store-config';
+import { TvPanelLayout, type TvGridLayout } from '../../domain/store-config';
 import { type IDailyResetSchedulerPort } from '../../domain/store-config';
 import {
   Identifier,
@@ -82,11 +82,12 @@ export interface SaveSystemConfigurationCommand {
    *  defaults any missing surface to `'light'` and rejects a present-but-invalid
    *  value. Not change-gated (like `brandColor`). */
   readonly serviceThemes: ServiceThemesMap;
-  /** Per-panel TV layout (visibility + order + size). Required on the wire; the
-   *  VO defaults any missing key to its per-key default and rejects a
-   *  present-but-invalid value. Not change-gated (like
+  /** Per-widget TV grid layout (an ordered array of placed widgets). Required
+   *  on the wire; the VO recovers a null/undefined to the default and rejects a
+   *  present-but-invalid widget (bad id/component, out-of-range x/y/w/h,
+   *  duplicate id, overlapping rectangles). Not change-gated (like
    *  `brandColor`/`serviceThemes`). */
-  readonly tvPanelLayout: TvPanelLayoutMap;
+  readonly tvPanelLayout: TvGridLayout;
   readonly actor: string;
 }
 
@@ -95,7 +96,7 @@ export interface SaveSystemConfigurationResult {
   readonly storeName: string;
   readonly brandColor: string;
   readonly serviceThemes: ServiceThemesMap;
-  readonly tvPanelLayout: TvPanelLayoutMap;
+  readonly tvPanelLayout: TvGridLayout;
 }
 
 /** Minimal projection used only for audit before/after snapshots. */
@@ -192,9 +193,10 @@ export class SaveSystemConfigurationUseCase {
     // Per-service themes — same shape: pure appearance, not change-gated, no
     // post-commit side-effect. Validated pre-tx so a malformed map fails fast.
     const serviceThemes = ServiceThemes.of(command.serviceThemes);
-    // Per-panel TV layout — same shape: pure appearance, not change-gated, no
-    // post-commit side-effect. Validated pre-tx so a malformed layout fails
-    // fast.
+    // Per-widget TV grid layout — same shape: pure appearance, not
+    // change-gated, no post-commit side-effect. Validated pre-tx so a
+    // malformed layout (bad widget, duplicate id, overlapping rectangles)
+    // fails fast.
     const tvPanelLayout = TvPanelLayout.of(command.tvPanelLayout);
     const newCategories = this.buildCategories(command.categories);
     const codeToId = new Map(newCategories.map((c) => [c.code, c.id.value]));

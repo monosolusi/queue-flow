@@ -12,13 +12,13 @@ import {
   DEFAULT_STATE_MACHINE,
   DEFAULT_BRAND_COLOR,
   DEFAULT_SERVICE_THEMES,
-  DEFAULT_TV_PANEL_LAYOUT,
+  DEFAULT_TV_GRID_LAYOUT,
   type CleanupTransactionLogResultDto,
   type ManualResetResultDto,
   type SaveSystemConfigurationPayload,
   type ServiceThemesMap,
   type SystemConfigurationDto,
-  type TvPanelLayoutMap,
+  type TvGridLayout,
 } from '../api/types';
 
 /**
@@ -47,7 +47,7 @@ function configuredStore(): SystemConfigurationDto {
     ],
     brandColor: DEFAULT_BRAND_COLOR,
     serviceThemes: { ...DEFAULT_SERVICE_THEMES },
-    tvPanelLayout: { ...DEFAULT_TV_PANEL_LAYOUT },
+    tvPanelLayout: DEFAULT_TV_GRID_LAYOUT,
   };
 }
 
@@ -63,7 +63,7 @@ function unassignedRoutingStore(): SystemConfigurationDto {
 
 function makeApi(
   config: SystemConfigurationDto = configuredStore(),
-  saveImpl?: (payload: SaveSystemConfigurationPayload) => Promise<{ isInitialSetupCompleted: boolean; storeName: string; brandColor: string; serviceThemes: ServiceThemesMap; tvPanelLayout: TvPanelLayoutMap }>,
+  saveImpl?: (payload: SaveSystemConfigurationPayload) => Promise<{ isInitialSetupCompleted: boolean; storeName: string; brandColor: string; serviceThemes: ServiceThemesMap; tvPanelLayout: TvGridLayout }>,
   overrides?: {
     manualReset?: () => Promise<ManualResetResultDto>;
     cleanup?: (retentionDays: number) => Promise<CleanupTransactionLogResultDto>;

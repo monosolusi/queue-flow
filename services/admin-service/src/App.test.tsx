@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { App } from './App';
 import type { IAdminAppApi } from './api/admin-api';
 import type { AuthUserDto, SystemConfigurationDto } from './api/types';
-import { DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES, DEFAULT_STATE_MACHINE, DEFAULT_TV_PANEL_LAYOUT } from './api/types';
+import { DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES, DEFAULT_STATE_MACHINE, DEFAULT_TV_GRID_LAYOUT } from './api/types';
 import { clearToken, writeToken } from './auth/token-store';
 
 const ADMIN: AuthUserDto = { id: 'u-1', username: 'manajer', role: 'admin' };
@@ -26,7 +26,7 @@ function makeConfig(brandColor = '#2563eb'): SystemConfigurationDto {
     routingRules: [],
     brandColor,
     serviceThemes: { ...DEFAULT_SERVICE_THEMES },
-    tvPanelLayout: { ...DEFAULT_TV_PANEL_LAYOUT },
+    tvPanelLayout: DEFAULT_TV_GRID_LAYOUT,
   };
 }
 

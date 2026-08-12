@@ -9,7 +9,7 @@
  * it. See `ConfigSectionNav.tsx`.
  *
  * The TV-display settings no longer live here — they moved to the dedicated
- * `/tv-layout` page (drag-and-drop reorder + per-panel resize). The
+ * `/tv-layout` page (a 12-column grid editor with a component palette). The
  * `tvPanelLayout` field is carried as a payload-only passthrough on the full
  * PUT so the config save never drops it.
  *

@@ -3,7 +3,6 @@ import type {
   PriorityPolicy,
   ServiceSurface,
   ThemeMode,
-  TvPanelKey,
   UserRole,
 } from '../api/types';
 
@@ -70,22 +69,6 @@ export const SERVICE_SURFACE_LABELS: Record<ServiceSurface, string> = {
   tv: 'TV Display',
   caller: 'Panel Loket (Caller)',
   admin: 'Panel Admin',
-};
-
-/**
- * Friendly Bahasa Indonesia labels for the TV-display panels. The panel key
- * stays as the wire identifier (`nowServing`/`waitingQueue`/…); this map is
- * the display name shown as the row label in the `/tv-layout` editor. Never
- * sent to the backend (display only). Mirrors the QUE-34 rule: no
- * internal/technical terms in user-visible copy — the labels name the panel
- * as the manager sees it on the TV board.
- */
-export const TV_PANEL_LABELS: Record<TvPanelKey, string> = {
-  nowServing: 'Sedang Dilayani',
-  waitingQueue: 'Antrian Berikutnya',
-  callHistory: 'Riwayat Panggilan',
-  countersServing: 'Sedang Melayani (per counter)',
-  runningText: 'Teks Berjalan',
 };
 
 /**

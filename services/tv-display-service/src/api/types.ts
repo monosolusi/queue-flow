@@ -51,66 +51,62 @@ export interface TvBoardStateDto {
 export type ThemeMode = 'light' | 'dark';
 
 /**
- * The five TV-display panels a manager can arrange independently. The keys
- * mirror core-api's `TvPanelKey` wire identifiers exactly (the wire contract
- * is duplicated here intentionally — no shared package, per the standalone-
- * service ethos; friendly panel names live elsewhere — `labels`-style helpers
- * are an admin-service concern, not a TV concern).
- *
- * Per-panel `{ visible, order, size }`:
- * - `visible` gates rendering (the TV renders only visible panels).
- * - `order` is the vertical position among the visible content panels
- *   (`runningText` is a fixed footer; its `order` is stored for map
- *   uniformity but **ignored by the TV**).
- * - `size` is the proportional height share (`flex: <size> 1 0`); 1..4.
+ * TV grid layout contract (2D 12-column grid, TradingView-style). The wire
+ * identifiers mirror core-api's `TvComponentType` exactly — the contract is
+ * duplicated here intentionally (no shared package, per the standalone-
+ * service ethos; friendly component names are an admin-service concern, not a
+ * TV concern). A layout is an ordered list of placed widgets; an empty array
+ * is an idle board (the empty-state status renders).
  */
-export type TvPanelKey =
+/** Component types a manager can place on the TV grid. Stable wire identifier. */
+export type TvComponentType =
   | 'nowServing'
   | 'waitingQueue'
   | 'callHistory'
   | 'countersServing'
   | 'runningText';
 
-export interface TvPanelConfig {
-  readonly visible: boolean;
-  readonly order: number;
-  readonly size: number;
+/** One placed widget on the 12-column TV grid. */
+export interface TvWidget {
+  readonly id: string;
+  readonly component: TvComponentType;
+  readonly x: number; // column start, 0-based
+  readonly y: number; // row start, 0-based
+  readonly w: number; // column span
+  readonly h: number; // row span
 }
 
-/** Per-panel layout map, returned by `GET /api/system/config`. */
-export type TvPanelLayoutMap = Record<TvPanelKey, TvPanelConfig>;
+/** Persisted TV layout: an ordered list of placed widgets (empty = idle board). */
+export type TvGridLayout = readonly TvWidget[];
 
-export const TV_PANEL_SIZE_MIN = 1;
-export const TV_PANEL_SIZE_MAX = 4;
+export const GRID_COLS = 12;
+export const GRID_MAX_ROWS = 20;
+export const GRID_MIN_W = 1;
+export const GRID_MIN_H = 1;
 
-/** The canonical key order: nowServing → waitingQueue → callHistory →
- * countersServing → runningText. Used for iteration + default `order` values. */
-export const TV_PANEL_KEYS: readonly TvPanelKey[] = [
-  'nowServing',
-  'waitingQueue',
-  'callHistory',
-  'countersServing',
-  'runningText',
+export const TV_COMPONENT_TYPES: readonly TvComponentType[] = [
+  'nowServing', 'waitingQueue', 'callHistory', 'countersServing', 'runningText',
 ];
 
-/** All-visible, default sizes — `nowServing` is the hero (size 4, order 0);
- * the side panels share size 2; `runningText` is the fixed footer
- * (order 4). Mirrors core-api's `DEFAULT_TV_PANEL_LAYOUT` so a store that
- * never configures this keeps the existing TV layout (zero visual regression
- * — the hero is the biggest, the side panels share equal height). */
-export const DEFAULT_TV_PANEL_LAYOUT: TvPanelLayoutMap = {
-  nowServing: { visible: true, order: 0, size: 4 },
-  waitingQueue: { visible: true, order: 1, size: 2 },
-  callHistory: { visible: true, order: 2, size: 2 },
-  countersServing: { visible: true, order: 3, size: 2 },
-  runningText: { visible: true, order: 4, size: 2 },
-};
+/** All-five-widgets default layout — `nowServing` is the hero (full-width,
+ * 4 rows); `waitingQueue` + `callHistory` share the middle band (6 cols each,
+ * 3 rows); `countersServing` is a full-width band (3 rows); `runningText` is
+ * a full-width 1-row strip. Mirrors core-api's `DEFAULT_TV_GRID_LAYOUT` so a
+ * store that never configures this keeps the existing TV layout (zero visual
+ * regression — the hero is the biggest, the side panels share equal height). */
+export const DEFAULT_TV_GRID_LAYOUT: TvGridLayout = [
+  { id: 'nowServing',      component: 'nowServing',      x: 0, y: 0,  w: 12, h: 4 },
+  { id: 'waitingQueue',    component: 'waitingQueue',    x: 0, y: 4,  w: 6,  h: 3 },
+  { id: 'callHistory',     component: 'callHistory',     x: 6, y: 4,  w: 6,  h: 3 },
+  { id: 'countersServing', component: 'countersServing', x: 0, y: 7,  w: 12, h: 3 },
+  { id: 'runningText',     component: 'runningText',     x: 0, y: 10, w: 12, h: 1 },
+];
 
 /** Store profile, returned by `GET /api/system/config`. The TV needs the store
  * name (running text) + the manager-configured brand color (QUE-36) applied to
  * the runtime `--accent` (QUE-37 AC6) + this service's theme (the tv surface
- * key from `serviceThemes`, QUE-47) + the per-panel TV layout
- * (`tvPanelLayout` — visible/order/size for each of the five panels) + the
+ * key from `serviceThemes`, QUE-47) + the TV grid layout
+ * (`tvPanelLayout` — an ordered list of placed widgets on a 12-col grid) + the
  * routing rules (for the counter id→name map used by the counters-serving
  * list — a client-side name join mirroring the categories name-lookup
  * precedent: a counter name is from an entity the board read model does not
@@ -121,7 +117,7 @@ export interface SystemConfigurationDto {
   readonly storeName: string;
   readonly brandColor: string;
   readonly serviceThemes: { readonly tv: ThemeMode };
-  readonly tvPanelLayout: TvPanelLayoutMap;
+  readonly tvPanelLayout: TvGridLayout;
   /** Slim slice — the TV reads only `counterId` + `counterName` for the
    * counters-serving client-side name join; the other routing fields are
    * ignored. */

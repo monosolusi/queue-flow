@@ -90,17 +90,17 @@ export function prdWizardPayload() {
     // All-light matches ServiceThemes.DEFAULT and the CSS `:root` light default,
     // so the standard wizard payload keeps the existing light look.
     serviceThemes: { kiosk: 'light', tv: 'light', caller: 'light', admin: 'light' },
-    // tvPanelLayout: per-panel TV layout (visibility + order + size), a
-    // required wire field. The default map matches TvPanelLayout.DEFAULT and
-    // the existing TV layout, so the standard wizard payload keeps every panel
-    // visible in the PRD-default order/sizes.
-    tvPanelLayout: {
-      nowServing: { visible: true, order: 0, size: 4 },
-      waitingQueue: { visible: true, order: 1, size: 2 },
-      callHistory: { visible: true, order: 2, size: 2 },
-      countersServing: { visible: true, order: 3, size: 2 },
-      runningText: { visible: true, order: 4, size: 2 },
-    },
+    // tvPanelLayout: per-widget TV grid layout (12-column grid widget array),
+    // a required wire field. The default array matches TvPanelLayout.DEFAULT
+    // and the existing TV layout, so the standard wizard payload keeps every
+    // widget at its PRD-default grid position.
+    tvPanelLayout: [
+      { id: 'nowServing', component: 'nowServing', x: 0, y: 0, w: 12, h: 4 },
+      { id: 'waitingQueue', component: 'waitingQueue', x: 0, y: 4, w: 6, h: 3 },
+      { id: 'callHistory', component: 'callHistory', x: 6, y: 4, w: 6, h: 3 },
+      { id: 'countersServing', component: 'countersServing', x: 0, y: 7, w: 12, h: 3 },
+      { id: 'runningText', component: 'runningText', x: 0, y: 10, w: 12, h: 1 },
+    ],
     // QUE-43: `actor` is no longer a wire field — the server derives the audit
     // actor from the authenticated principal (or the 'system' sentinel on the
     // pre-setup wizard path). The wizard client stopped sending it; this fixture

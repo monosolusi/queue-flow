@@ -118,8 +118,8 @@ describe('styles.css AC guards', () => {
     // The panel is a size container so children can scale to its height via cqh
     // units — all VISIBLE_LIMIT items always fit the panel regardless of its
     // height (responsive). The panel height is determinate because the
-    // .tv-board__panel wrapper resolves its flex share (proportional to the
-    // manager-configured size) and is itself a flex column.
+    // .tv-board__widget wrapper resolves its grid row span (proportional to
+    // the manager-configured h) and is itself a flex column.
     const panel = rule('.waiting-queue');
     expect(panel).toContain('container-type: size');
     expect(panel).toContain('display: flex');
@@ -135,23 +135,33 @@ describe('styles.css AC guards', () => {
     expect(rule('.waiting-queue__item')).toMatch(/cqh/);
   });
 
-  it('tv-board__panels is a flex column of visible content panels (replaces the 2fr/1fr grid)', () => {
-    const panels = rule('.tv-board__panels');
-    expect(panels).toContain('display: flex');
-    expect(panels).toContain('flex-direction: column');
-    expect(panels).toContain('flex: 1');
-    expect(panels).toContain('min-height: 0');
-    // The old fixed 2fr/1fr grid + side column are gone.
+  it('tv-board__grid is a 12-column CSS grid (replaces the old 1D flex-column of panels)', () => {
+    const grid = rule('.tv-board__grid');
+    expect(grid).toContain('display: grid');
+    expect(grid).toContain('grid-template-columns: repeat(12, 1fr)');
+    expect(grid).toContain('grid-auto-rows: 1fr');
+    expect(grid).toContain('flex: 1');
+    expect(grid).toContain('min-height: 0');
+    expect(grid).toContain('min-width: 0');
+    // The old flex-column panels + panel wrapper rules are gone. Anchor on
+    // the selector followed by `{` so `.tv-board__panels-empty` (kept) is not
+    // a false positive for `.tv-board__panels`.
+    expect(css).not.toMatch(/\.tv-board__panels\s*\{/);
+    expect(css).not.toMatch(/\.tv-board__panel\s*\{/);
     expect(css).not.toContain('.tv-board__active-grid');
     expect(css).not.toContain('.tv-board__active-side');
   });
 
-  it('tv-board__panel wrapper is a flex column with containment (min-height: 0, min-width: 0)', () => {
-    const panel = rule('.tv-board__panel');
-    expect(panel).toContain('display: flex');
-    expect(panel).toContain('flex-direction: column');
-    expect(panel).toContain('min-height: 0');
-    expect(panel).toContain('min-width: 0');
+  it('tv-board__widget wrapper is a flex column with containment (min-height: 0, min-width: 0) + fills its child', () => {
+    const widget = rule('.tv-board__widget');
+    expect(widget).toContain('display: flex');
+    expect(widget).toContain('flex-direction: column');
+    expect(widget).toContain('min-height: 0');
+    expect(widget).toContain('min-width: 0');
+    // The direct-child fill rule stretches the component card to the grid area.
+    const fill = rule('.tv-board__widget > *');
+    expect(fill).toContain('flex: 1 1 auto');
+    expect(fill).toContain('min-height: 0');
   });
 
   it('AC6: the active board is the single always-visible layer (no standby/crossfade)', () => {
@@ -173,13 +183,15 @@ describe('styles.css AC guards', () => {
     expect(active).toContain('min-height: 0');
   });
 
-  it('RunningText disclaimer marquee: fixed, always-visible, reduced-motion guarded', () => {
+  it('RunningText disclaimer marquee: grid widget, reduced-motion guarded', () => {
     // The disclaimer marquee (manager feedback) is intentional and distinct
     // from the removed promo standby overlay. Positive guards for its presence
     // + the a11y/interaction baseline (reduced-motion pause). The TV does NOT
     // import _interactions.css, so the reduced-motion guard is inlined in
     // styles.css (anchor `reduce\)\s*\{` — the `)` sits between the keyword
-    // and the block brace, so `reduce\s*\{` would silently never match).
+    // and the block brace, so `reduce\s*\{` would silently never match). The
+    // marquee is now a grid widget (no fixed `.tv-board__footer` rule) — it
+    // fills its grid cell via the `.tv-board__widget > *` flex-fill rule.
     expect(css).toContain('@keyframes marquee');
     expect(css).toMatch(
       /prefers-reduced-motion:\s*reduce\)\s*\{[^}]*\.running-text__track/,
@@ -187,12 +199,12 @@ describe('styles.css AC guards', () => {
     const viewport = rule('.running-text');
     expect(viewport).toContain('overflow: hidden');
     expect(viewport).toContain('white-space: nowrap');
+    expect(viewport).toContain('display: flex');
+    expect(viewport).toContain('align-items: center');
     const track = rule('.running-text__track');
     expect(track).toContain('animation: marquee');
-    // The footer is a fixed bottom strip (flex: 0 0 auto) — the board layout
-    // stays fixed regardless of ticket count (the marquee is NOT a
-    // conditionally-shown overlay).
-    expect(rule('.tv-board__footer')).toContain('flex: 0 0 auto');
+    // The old fixed-footer rule is gone (runningText is a grid widget now).
+    expect(css).not.toContain('.tv-board__footer');
   });
 
   it('AC8: now-serving eyebrow letter-spacing ≤ 0.08em', () => {

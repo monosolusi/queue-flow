@@ -12,7 +12,7 @@ import {
   DEFAULT_STATE_MACHINE,
   DEFAULT_BRAND_COLOR,
   DEFAULT_SERVICE_THEMES,
-  DEFAULT_TV_PANEL_LAYOUT,
+  DEFAULT_TV_GRID_LAYOUT,
   type SaveSystemConfigurationPayload,
   type SystemConfigurationDto,
 } from '../api/types';
@@ -44,7 +44,7 @@ function configuredStore(): SystemConfigurationDto {
     ],
     brandColor: DEFAULT_BRAND_COLOR,
     serviceThemes: { ...DEFAULT_SERVICE_THEMES },
-    tvPanelLayout: { ...DEFAULT_TV_PANEL_LAYOUT },
+    tvPanelLayout: DEFAULT_TV_GRID_LAYOUT.map((w) => ({ ...w })),
   };
 }
 

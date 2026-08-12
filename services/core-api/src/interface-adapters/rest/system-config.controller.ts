@@ -7,7 +7,6 @@ import {
   type SaveSystemConfigurationCommand,
 } from '../../application/store-config';
 import { Role, type AuthenticatedPrincipal } from '../../domain/identity';
-import { TV_PANEL_KEYS } from '../../domain/store-config';
 import { AuthGuard } from '../auth/auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -62,7 +61,7 @@ const CONFIG_FIELD_SHAPES: ReadonlyArray<{
   { field: 'categories', kind: 'array' },
   { field: 'routingRules', kind: 'array' },
   { field: 'serviceThemes', kind: 'object' },
-  { field: 'tvPanelLayout', kind: 'object' },
+  { field: 'tvPanelLayout', kind: 'array' },
 ];
 
 /** True when `value` does not match the expected `kind` (object = plain object, not array). */
@@ -161,31 +160,43 @@ function configNestedShapeErrors(body: Partial<SaveSystemConfigurationCommand>):
     });
   }
   // tvPanelLayout: the VO throws `InvalidValueObjectException` (→ 400) on a
-  // present-but-invalid entry (non-object, bad visible/order/size, out-of-range
-  // size). This boundary guard catches the crash class (a non-object entry
-  // would TypeError before the VO's own guard) and gives consistent,
-  // field-named error messages. Range/integer enforcement stays in the VO.
-  // Unknown extra keys are ignored — the VO only reads the 5 canonical keys.
+  // present-but-invalid widget (bad id/component, out-of-range x/y/w/h,
+  // duplicate id, overlapping rectangles). This boundary guard catches the
+  // crash class (a non-object element or a non-number coordinate would
+  // TypeError before the VO's own guard) and gives consistent, field-named
+  // error messages. Enum membership / range / integer / overlap / duplicate-id
+  // enforcement stays in the VO. Unknown extra properties on a widget are
+  // ignored.
   const tvLayout = body.tvPanelLayout;
-  if (tvLayout != null && typeof tvLayout === 'object' && !Array.isArray(tvLayout)) {
-    for (const key of TV_PANEL_KEYS) {
-      const entry = (tvLayout as Record<string, unknown>)[key];
-      if (entry == null) continue;
-      if (typeof entry !== 'object' || Array.isArray(entry)) {
-        errs.push(`tvPanelLayout.${key} must be a plain object`);
-        continue;
+  if (Array.isArray(tvLayout)) {
+    (tvLayout as readonly unknown[]).forEach((w, i) => {
+      if (w == null || typeof w !== 'object' || Array.isArray(w)) {
+        errs.push(`tvPanelLayout[${i}] must be a plain object`);
+        return;
       }
-      const e = entry as Record<string, unknown>;
-      if (e.visible != null && typeof e.visible !== 'boolean') {
-        errs.push(`tvPanelLayout.${key}.visible must be a boolean`);
+      const e = w as Record<string, unknown>;
+      if (e.id != null && typeof e.id !== 'string') {
+        errs.push(`tvPanelLayout[${i}].id must be a string`);
       }
-      if (e.order != null && typeof e.order !== 'number') {
-        errs.push(`tvPanelLayout.${key}.order must be a number`);
+      // A non-string `component` would TypeError in the VO's
+      // `TV_COMPONENT_TYPES.includes` check on a non-string before it can
+      // throw a clean `InvalidValueObjectException`; guard the crash class here.
+      if (e.component != null && typeof e.component !== 'string') {
+        errs.push(`tvPanelLayout[${i}].component must be a string`);
       }
-      if (e.size != null && typeof e.size !== 'number') {
-        errs.push(`tvPanelLayout.${key}.size must be a number`);
+      if (e.x != null && typeof e.x !== 'number') {
+        errs.push(`tvPanelLayout[${i}].x must be a number`);
       }
-    }
+      if (e.y != null && typeof e.y !== 'number') {
+        errs.push(`tvPanelLayout[${i}].y must be a number`);
+      }
+      if (e.w != null && typeof e.w !== 'number') {
+        errs.push(`tvPanelLayout[${i}].w must be a number`);
+      }
+      if (e.h != null && typeof e.h !== 'number') {
+        errs.push(`tvPanelLayout[${i}].h must be a number`);
+      }
+    });
   }
   return errs;
 }

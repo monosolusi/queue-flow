@@ -11,10 +11,10 @@ import type {
   CategoryDto,
   CounterServing,
   QueueLifecycleWireEvent,
-  TvPanelLayoutMap,
+  TvGridLayout,
   TvTicketDto,
 } from '../api/types';
-import { DEFAULT_TV_PANEL_LAYOUT } from '../api/types';
+import { DEFAULT_TV_GRID_LAYOUT } from '../api/types';
 import type { ITvApi } from '../api/tv-api';
 import { type AudioProvider } from '../audio/audio-provider';
 import { buildCallFragments } from '../audio/audio-provider';
@@ -58,11 +58,11 @@ export interface TvState {
    * does NOT project this from events (SRP — the server owns the read model).
    */
   readonly countersServing: readonly CounterServing[];
-  /** Per-panel layout from `SystemConfiguration.tvPanelLayout` (visible/order/
-   * size for each of the five panels). Applied at boot; drives the page's
-   * ordered flex-column rendering. Config (not queue state) — preserved
-   * across `SYSTEM_RESET`. */
-  readonly panelLayout: TvPanelLayoutMap;
+  /** TV grid layout from `SystemConfiguration.tvPanelLayout` (an ordered list
+   * of placed widgets on a 12-col grid). Applied at boot; drives the page's
+   * CSS-grid rendering. Config (not queue state) — preserved across
+   * `SYSTEM_RESET`. */
+  readonly panelLayout: TvGridLayout;
   /** Boot-built counter id→name map from `routingRules`. Kept in state so the
    * BOOT_LOADED reducer can re-derive `countersServing` once this map is
    * populated, without a second board fetch (the first board fetch races the
@@ -87,7 +87,7 @@ export type TvAction =
       type: 'BOOT_LOADED';
       storeName: string;
       categories: CategoryDto[];
-      panelLayout: TvPanelLayoutMap;
+      panelLayout: TvGridLayout;
       counterNameById: ReadonlyMap<number, string>;
     }
   | { type: 'BOOT_ERROR'; message: string }
@@ -111,7 +111,7 @@ const initialState: TvState = {
   history: [],
   waiting: [],
   countersServing: [],
-  panelLayout: DEFAULT_TV_PANEL_LAYOUT,
+  panelLayout: DEFAULT_TV_GRID_LAYOUT,
   counterNameById: new Map<number, string>(),
   lastActive: [],
   connection: 'closed',

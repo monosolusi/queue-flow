@@ -2,33 +2,41 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { IAdminApi } from '../api/admin-api';
 import { useSystemConfigContext } from '../config/system-config-context';
 import {
-  type TvPanelKey,
-  type TvPanelLayoutMap,
-  DEFAULT_TV_PANEL_LAYOUT,
+  GRID_COLS,
+  GRID_MAX_ROWS,
+  GRID_MIN_H,
+  GRID_MIN_W,
+  TV_COMPONENT_TYPES,
+  type TvComponentType,
+  type TvGridLayout,
+  type TvWidget,
 } from '../api/types';
 import {
-  CONTENT_PANEL_KEYS,
-  TV_PANEL_SIZE_LABELS,
-  coerceTvPanelLayout,
-  isValidTvPanelLayout,
-  reorderPanels,
-  setPanelSize,
-  setPanelVisible,
-} from '../lib/tv-panel-layout';
-import { TV_PANEL_LABELS } from '../lib/labels';
-import { useDragReorder } from '../lib/use-drag-reorder';
+  TV_COMPONENT_LABELS,
+  addWidget,
+  coerceTvGridLayout,
+  defaultTvGridLayout,
+  isValidTvGridLayout,
+  moveWidget,
+  removeWidget,
+  resizeWidget,
+} from '../lib/tv-grid-layout';
+import { useGridDnd } from '../lib/use-grid-dnd';
+import { usePalettePlace } from '../lib/use-palette-place';
 import { PageHeader } from '../components/PageHeader';
 import { useToast } from '../toast/useToast';
 import { toForm } from './admin-config/form';
 import { toStateMachineDto } from '../lib/state-machine';
 
 /**
- * The TV-display panel layout editor (FR — user feedback: "/admin/config pada
- * bagian tampilan tv hanya berupa checkbox tidak bisa drag and drop dan set
- * ukuran"). A dedicated `/tv-layout` page with drag-and-drop reorder + a
- * per-panel segmented size control (Kecil/Sedang/Besar/Penuh → 1..4) + a
- * visibility toggle, replacing the old checkbox section that lived in
- * `/admin/config`.
+ * The TV-display grid layout editor — a TradingView-style 12-column canvas
+ * with a component palette. The manager drags components from the palette
+ * onto the grid (or clicks a chip to add at the first free spot), drags placed
+ * widgets to move them, drags the bottom-right resize handle to resize, and
+ * removes widgets with a `×` button. Per-widget stepper controls (Kolom /
+ * Baris / Lebar / Tinggi) are the precise, keyboard/AT-accessible path — the
+ * jsdom-tested backbone (pointer DnD is browser-only, mirroring the
+ * `use-drag-reorder` precedent).
  *
  * The page is a thin editor over the existing config save surface: it reads
  * the full config (`GET /api/system/config` via the shared
@@ -42,19 +50,17 @@ import { toStateMachineDto } from '../lib/state-machine';
  *
  * SRP split: {@link TvLayoutEditor} is presentational (fed by `layout` +
  * `onChange`); this page owns the config read, the local draft, and the save.
- * The pure `lib/tv-panel-layout` helpers own validation/reorder/size (the
- * tested core); the {@link useDragReorder} hook is the pointer-event UI layer.
+ * The pure `lib/tv-grid-layout` helpers own validation/move/resize/add/remove
+ * (the tested core); the pointer hooks are the browser-only UI layer.
  *
- * `runningText` is a fixed marquee footer — its `order`/`size` are stored for
- * map uniformity but ignored by the TV, so the editor exposes only a
- * visibility toggle for it (no drag handle, no size control). The 4 content
- * panels (`nowServing`/`waitingQueue`/`callHistory`/`countersServing`) are the
- * draggable + resizable set.
+ * `runningText` is no longer special-cased — it is a first-class widget placed
+ * on the grid like the other four (the TV renders it wherever its rect lands,
+ * not always pinned as a footer).
  */
 export function TvLayoutPage({ api }: { api: IAdminApi }) {
   const toast = useToast();
   const { config, refresh } = useSystemConfigContext();
-  const [panelLayout, setPanelLayout] = useState<TvPanelLayoutMap | null>(null);
+  const [layout, setLayout] = useState<TvGridLayout | null>(null);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
 
@@ -65,24 +71,22 @@ export function TvLayoutPage({ api }: { api: IAdminApi }) {
   // save resolves a new object), so the editor reflects the persisted state.
   useEffect(() => {
     if (config === null) return;
-    setPanelLayout(coerceTvPanelLayout(config.tvPanelLayout ?? DEFAULT_TV_PANEL_LAYOUT));
+    setLayout(coerceTvGridLayout(config.tvPanelLayout));
   }, [config]);
 
   // The full editable form is rebuilt from the config so the passthrough fields
   // (categories with ids, routing codes, state-machine strip) map exactly as
   // AdminPanel does — no duplicated mapping logic. Memoized on the config
-  // identity so it re-derives only when the resolved config changes (not on
-  // every re-render of an unrelated state like `saving`), and never written
-  // during render (the ref-during-render anti-pattern).
+  // identity so it re-derives only when the resolved config changes.
   const form = useMemo(() => (config !== null ? toForm(config) : null), [config]);
 
-  const valid = panelLayout !== null && isValidTvPanelLayout(panelLayout);
+  const valid = layout !== null && isValidTvGridLayout(layout);
 
   async function save() {
     // Synchronous in-flight guard — `disabled` only takes effect after a
     // re-render, so two clicks in the same tick both pass a state guard.
     if (savingRef.current) return;
-    if (panelLayout === null || !valid || form === null) return;
+    if (layout === null || !valid || form === null) return;
     savingRef.current = true;
     setSaving(true);
     try {
@@ -95,7 +99,7 @@ export function TvLayoutPage({ api }: { api: IAdminApi }) {
           brandColor: form.brandColor,
           serviceThemes: form.serviceThemes,
           // The one field this page edits.
-          tvPanelLayout: panelLayout,
+          tvPanelLayout: layout,
           dailyReset: {
             mode: form.dailyReset.mode,
             cronExpression:
@@ -126,7 +130,11 @@ export function TvLayoutPage({ api }: { api: IAdminApi }) {
     }
   }
 
-  if (panelLayout === null) {
+  function resetToDefault() {
+    setLayout(defaultTvGridLayout());
+  }
+
+  if (layout === null) {
     return (
       <div className="page tv-layout-page tv-layout-page--loading">
         <p className="tv-layout-page__loading">Memuat konfigurasi TV…</p>
@@ -138,9 +146,19 @@ export function TvLayoutPage({ api }: { api: IAdminApi }) {
     <div className="page tv-layout-page">
       <PageHeader
         title="Tampilan TV"
-        subtitle="Atur urutan dan ukuran panel yang tampil di TV Display. Perubahan diterapkan saat TV Display dimuat ulang."
+        subtitle="Susun komponen TV Display pada kisi 12 kolom. Perubahan diterapkan saat TV Display dimuat ulang."
+        actions={
+          <button
+            type="button"
+            className="btn btn--ghost"
+            onClick={resetToDefault}
+            data-testid="tv-layout-reset"
+          >
+            Kembalikan ke Default
+          </button>
+        }
       />
-      <TvLayoutEditor layout={panelLayout} onChange={setPanelLayout} />
+      <TvLayoutEditor layout={layout} onChange={setLayout} />
       <div className="tv-layout-page__save">
         <button
           type="button"
@@ -159,236 +177,318 @@ export function TvLayoutPage({ api }: { api: IAdminApi }) {
 // --- presentational editor ---
 
 interface TvLayoutEditorProps {
-  layout: TvPanelLayoutMap;
-  onChange: (next: TvPanelLayoutMap) => void;
+  layout: TvGridLayout;
+  onChange: (next: TvGridLayout) => void;
 }
 
+/** The editor's fixed CSS row height in px (matches `grid-auto-rows` in CSS). */
+const ROW_HEIGHT_PX = 56;
+
 /**
- * The presentational editor: a vertical list of the 4 content panels in
- * `order`, each with a drag handle, name, size segmented control, visibility
- * checkbox, and up/down buttons; a `runningText` footer row with visibility
- * only; and a live preview mirroring the configured order + sizes. Fed by
- * `layout` + `onChange` — no state, no context (SRP).
+ * The presentational editor: a palette of draggable component chips + a
+ * 12-column grid canvas of placed widgets. Fed by `layout` + `onChange` — no
+ * config context, no save (SRP). The pointer DnD (move/resize/palette-place)
+ * is the fast path; the per-widget steppers are the precise + a11y path.
  */
 function TvLayoutEditor({ layout, onChange }: TvLayoutEditorProps) {
-  const contentRows = useMemo(
-    () =>
-      [...CONTENT_PANEL_KEYS].sort((a, b) => layout[a].order - layout[b].order),
-    [layout],
-  );
+  const canvasRef = useRef<HTMLDivElement | null>(null);
 
-  const drag = useDragReorder((from, to) => {
-    onChange(reorderPanels(layout, from, to));
+  const dnd = useGridDnd({
+    canvasRef,
+    rowHeight: ROW_HEIGHT_PX,
+    layout,
+    onMove: (id, x, y) => onChange(moveWidget(layout, id, x, y)),
+    onResize: (id, w, h) => onChange(resizeWidget(layout, id, w, h)),
   });
 
-  // Row element refs for the pointer-move hit-test. Indexed by render position.
-  const rowRefs = useRef<(HTMLLIElement | null)[]>([]);
+  const palette = usePalettePlace({
+    canvasRef,
+    rowHeight: ROW_HEIGHT_PX,
+    layout,
+    onPlace: (component, x, y) => {
+      const result = addWidget(layout, component, { x, y });
+      if (result === null) {
+        // The preview was valid, but a concurrent edit could still leave no
+        // room — fall back to free-spot. If still none, the editor toasts.
+        const fallback = addWidget(layout, component);
+        if (fallback === null) return;
+        onChange(fallback.layout);
+        return;
+      }
+      onChange(result.layout);
+    },
+  });
 
-  function moveBy(index: number, delta: -1 | 1) {
-    const to = index + delta;
-    if (to < 0 || to >= contentRows.length) return;
-    onChange(reorderPanels(layout, index, to));
+  // A tiny local toast channel for the palette's "no room" message — the page-
+  // level toast is owned by `TvLayoutPage` (SRP); the editor reports a no-room
+  // add via a callback prop instead. For now the editor holds a ref to a
+  // micro-queue that the next render flushes through a status region.
+  const toastQueue = useEditorStatus();
+
+  function handleChipClick(component: TvComponentType) {
+    const result = addWidget(layout, component);
+    if (result === null) {
+      // No free spot — surface via the canvas status region.
+      toastQueue.push('Tidak ada ruang kosong untuk komponen baru.');
+      return;
+    }
+    onChange(result.layout);
   }
 
-  function handleRowPointerMove(e: React.PointerEvent) {
-    if (drag.draggingIndex === null) return;
-    const els = rowRefs.current.filter((el): el is HTMLLIElement => el !== null);
-    drag.onRowPointerMove(e, els);
+  // Merge pointer handlers from both hooks onto the canvas.
+  function handleCanvasPointerMove(e: React.PointerEvent) {
+    dnd.onPointerMove(e);
+    palette.onPointerMove(e);
+  }
+  function handleCanvasPointerUp() {
+    dnd.onPointerUp();
+    palette.onPointerUp();
   }
 
   return (
     <div className="tv-layout-editor">
-      <ul
-        className="tv-layout-list"
-        onPointerMove={handleRowPointerMove}
-        onPointerUp={drag.onPointerUp}
-        onPointerCancel={drag.onPointerUp}
-      >
-        {contentRows.map((key, index) => {
-          const cfg = layout[key];
-          const isDragging = drag.draggingIndex === index;
-          const showDropBefore = drag.dropIndex === index && drag.draggingIndex !== null && drag.draggingIndex !== index;
-          const isLast = index === contentRows.length - 1;
-          const showDropAfter =
-            isLast && drag.dropIndex === contentRows.length && drag.draggingIndex !== null;
-          return (
-            <li
-              key={key}
-              ref={(el) => {
-                rowRefs.current[index] = el;
-              }}
-              className={`tv-layout-row${isDragging ? ' tv-layout-row--dragging' : ''}`}
-              data-testid={`tv-layout-row-${key}`}
+      <div className="tv-layout__page">
+        <div className="tv-layout__palette" role="group" aria-label="Komponen TV" data-testid="tv-layout__palette">
+          {TV_COMPONENT_TYPES.map((type) => (
+            <button
+              key={type}
+              type="button"
+              className={`tv-layout__chip${palette.placing === type ? ' tv-layout__chip--placing' : ''}`}
+              onClick={() => handleChipClick(type)}
+              onPointerDown={(e) => palette.onChipPointerDown(e, type)}
+              aria-label={`Tambah ${TV_COMPONENT_LABELS[type]}`}
+              data-testid={`tv-layout__chip--${type}`}
             >
-              {showDropBefore && <div className="tv-layout__drop-indicator" aria-hidden="true" />}
-              <div className="tv-layout-row__main">
-                <button
-                  type="button"
-                  className="tv-layout-row__handle"
-                  aria-label={`Seret ${TV_PANEL_LABELS[key]} untuk mengatur urutan`}
-                  aria-grabbed={isDragging}
-                  onPointerDown={(e) => drag.onHandlePointerDown(e, index)}
-                  data-testid={`tv-layout-handle-${key}`}
+              <span className="tv-layout__chip-label">{TV_COMPONENT_LABELS[type]}</span>
+              <span className="tv-layout__chip-plus" aria-hidden="true">+</span>
+            </button>
+          ))}
+        </div>
+
+        <div
+          className="tv-layout__canvas"
+          ref={canvasRef}
+          onPointerMove={handleCanvasPointerMove}
+          onPointerUp={handleCanvasPointerUp}
+          onPointerCancel={handleCanvasPointerUp}
+          data-testid="tv-layout__canvas"
+        >
+          <div
+            className="tv-layout__grid"
+            style={{
+              gridTemplateColumns: `repeat(${GRID_COLS}, 1fr)`,
+              gridAutoRows: `${ROW_HEIGHT_PX}px`,
+            }}
+            aria-label="Kisi tata letak TV"
+          >
+            {layout.map((widget) => {
+              const isDragging = dnd.activeId === widget.id;
+              const preview = dnd.preview?.id === widget.id ? dnd.preview : null;
+              const invalid = preview !== null && !preview.valid;
+              // When dragging, render the widget at its preview rect so the
+              // manager sees the live move; otherwise at its committed rect.
+              const x = preview?.x ?? widget.x;
+              const y = preview?.y ?? widget.y;
+              const w = preview?.w ?? widget.w;
+              const h = preview?.h ?? widget.h;
+              return (
+                <div
+                  key={widget.id}
+                  className={
+                    `tv-layout__widget` +
+                    (isDragging ? ' tv-layout__widget--dragging' : '') +
+                    (invalid ? ' tv-layout__widget--invalid' : '')
+                  }
+                  style={{
+                    gridColumn: `${x + 1} / span ${w}`,
+                    gridRow: `${y + 1} / span ${h}`,
+                  }}
+                  onPointerDown={(e) => dnd.onWidgetPointerDown(e, widget)}
+                  data-testid={`tv-layout__widget--${widget.id}`}
                 >
-                  <svg
-                    viewBox="0 0 24 24"
-                    aria-hidden="true"
-                    focusable="false"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={1.8}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <circle cx={9} cy={6} r={1} />
-                    <circle cx={15} cy={6} r={1} />
-                    <circle cx={9} cy={12} r={1} />
-                    <circle cx={15} cy={12} r={1} />
-                    <circle cx={9} cy={18} r={1} />
-                    <circle cx={15} cy={18} r={1} />
-                  </svg>
-                </button>
-                <span className="tv-layout-row__name">{TV_PANEL_LABELS[key]}</span>
-                <SizeSegmentedControl
-                  panelKey={key}
-                  size={cfg.size}
-                  onChange={(next) => onChange(setPanelSize(layout, key, next))}
-                />
-                <label className="tv-layout-row__vis">
-                  <input
-                    type="checkbox"
-                    checked={cfg.visible}
-                    onChange={(e) => onChange(setPanelVisible(layout, key, e.target.checked))}
-                    data-testid={`tv-layout-vis-${key}`}
+                  <div className="tv-layout__widget-header">
+                    <span className="tv-layout__widget-name">{TV_COMPONENT_LABELS[widget.component]}</span>
+                    <button
+                      type="button"
+                      className="tv-layout__widget-remove"
+                      aria-label="Hapus Komponen"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onChange(removeWidget(layout, widget.id));
+                      }}
+                      data-testid={`tv-layout__remove--${widget.id}`}
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <div className="tv-layout__widget-body" aria-hidden="true">
+                    {TV_COMPONENT_LABELS[widget.component]}
+                  </div>
+                  <WidgetSteppers
+                    widget={widget}
+                    layout={layout}
+                    onChange={onChange}
                   />
-                  <span>Tampilkan</span>
-                </label>
-                <div className="tv-layout-row__move">
-                  <button
-                    type="button"
-                    className="tv-layout-row__move-btn"
-                    aria-label={`Naikkan ${TV_PANEL_LABELS[key]}`}
-                    disabled={index === 0}
-                    onClick={() => moveBy(index, -1)}
-                    data-testid={`tv-layout-up-${key}`}
-                  >
-                    Naik
-                  </button>
-                  <button
-                    type="button"
-                    className="tv-layout-row__move-btn"
-                    aria-label={`Turunkan ${TV_PANEL_LABELS[key]}`}
-                    disabled={isLast}
-                    onClick={() => moveBy(index, 1)}
-                    data-testid={`tv-layout-down-${key}`}
-                  >
-                    Turun
-                  </button>
+                  <div
+                    className="tv-layout__resize-handle"
+                    role="slider"
+                    aria-label="Ubah Ukuran"
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      dnd.onResizeHandlePointerDown(e, widget);
+                    }}
+                    data-testid={`tv-layout__resize--${widget.id}`}
+                  />
                 </div>
-              </div>
-              {showDropAfter && <div className="tv-layout__drop-indicator" aria-hidden="true" />}
-            </li>
-          );
-        })}
-      </ul>
-
-      <div className="tv-layout__running-text-row">
-        <label className="tv-layout-row__vis">
-          <input
-            type="checkbox"
-            checked={layout.runningText.visible}
-            onChange={(e) => onChange(setPanelVisible(layout, 'runningText', e.target.checked))}
-            data-testid="tv-layout-vis-runningText"
-          />
-          <span>{TV_PANEL_LABELS.runningText}</span>
-        </label>
-        <p className="tv-layout__running-text-hint">Teks berjalan selalu di bagian bawah.</p>
+              );
+            })}
+            {palette.preview !== null && (
+              <div
+                className={`tv-layout__ghost${palette.preview.valid ? '' : ' tv-layout__ghost--invalid'}`}
+                style={{
+                  gridColumn: `${palette.preview.x + 1} / span ${palette.preview.w}`,
+                  gridRow: `${palette.preview.y + 1} / span ${palette.preview.h}`,
+                }}
+                aria-hidden="true"
+              />
+            )}
+          </div>
+          <p className="tv-layout__canvas-hint">
+            Seret komponen dari panel kiri, atau klik untuk menambah. Seret kartu untuk memindahkan, seret gagang sudut untuk mengubah ukuran.
+          </p>
+          <p className="tv-layout__status" role="status" aria-live="polite">
+            {toastQueue.message}
+          </p>
+        </div>
       </div>
-
-      <TvLayoutPreview layout={layout} contentRows={contentRows} />
     </div>
   );
 }
 
-// --- size segmented control ---
+// --- per-widget steppers (a11y / jsdom-tested backbone) ---
 
-interface SizeSegmentedControlProps {
-  panelKey: TvPanelKey;
-  size: number;
+interface WidgetSteppersProps {
+  widget: TvWidget;
+  layout: TvGridLayout;
+  onChange: (next: TvGridLayout) => void;
+}
+
+function WidgetSteppers({ widget, layout, onChange }: WidgetSteppersProps) {
+  return (
+    <div className="tv-layout__steppers" role="group" aria-label={`Posisi dan ukuran ${TV_COMPONENT_LABELS[widget.component]}`}>
+      <Stepper
+        label="Kolom"
+        value={widget.x}
+        min={0}
+        max={GRID_COLS - widget.w}
+        testId={`tv-layout__stepper-x--${widget.id}`}
+        onChange={(nx) => onChange(moveWidget(layout, widget.id, nx, widget.y))}
+      />
+      <Stepper
+        label="Baris"
+        value={widget.y}
+        min={0}
+        max={GRID_MAX_ROWS - widget.h}
+        testId={`tv-layout__stepper-y--${widget.id}`}
+        onChange={(ny) => onChange(moveWidget(layout, widget.id, widget.x, ny))}
+      />
+      <Stepper
+        label="Lebar"
+        value={widget.w}
+        min={GRID_MIN_W}
+        max={GRID_COLS - widget.x}
+        testId={`tv-layout__stepper-w--${widget.id}`}
+        onChange={(nw) => onChange(resizeWidget(layout, widget.id, nw, widget.h))}
+      />
+      <Stepper
+        label="Tinggi"
+        value={widget.h}
+        min={GRID_MIN_H}
+        max={GRID_MAX_ROWS - widget.y}
+        testId={`tv-layout__stepper-h--${widget.id}`}
+        onChange={(nh) => onChange(resizeWidget(layout, widget.id, widget.w, nh))}
+      />
+    </div>
+  );
+}
+
+interface StepperProps {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  testId: string;
   onChange: (next: number) => void;
 }
 
-function SizeSegmentedControl({ panelKey, size, onChange }: SizeSegmentedControlProps) {
-  const sizes = [1, 2, 3, 4];
+function Stepper({ label, value, min, max, testId, onChange }: StepperProps) {
+  const atMin = value <= min;
+  const atMax = value >= max;
   return (
-    <div
-      className="tv-layout-row__size"
-      role="radiogroup"
-      aria-label={`Ukuran panel ${TV_PANEL_LABELS[panelKey]}`}
-      data-testid={`tv-layout-size-${panelKey}`}
-    >
-      {sizes.map((s) => {
-        const checked = size === s;
-        return (
-          <label
-            key={s}
-            className={`tv-layout-row__size-option${checked ? ' tv-layout-row__size-option--selected' : ''}`}
-          >
-            <input
-              type="radio"
-              name={`tv-layout-size-${panelKey}`}
-              value={s}
-              checked={checked}
-              onChange={() => onChange(s)}
-              data-testid={`tv-layout-size-${panelKey}-${s}`}
-            />
-            <span>{TV_PANEL_SIZE_LABELS[s]}</span>
-          </label>
-        );
-      })}
+    <div className="tv-layout__stepper" data-testid={testId}>
+      <span className="tv-layout__stepper-label">{label}</span>
+      <div className="tv-layout__stepper-controls">
+        <button
+          type="button"
+          className="tv-layout__stepper-btn"
+          aria-label={`${label} kurang`}
+          disabled={atMin}
+          onClick={() => onChange(clampInt(value - 1, min, max))}
+        >−</button>
+        <input
+          type="number"
+          className="tv-layout__stepper-input"
+          value={value}
+          min={min}
+          max={max}
+          onChange={(e) => {
+            const raw = e.target.value === '' ? value : Number(e.target.value);
+            if (!Number.isFinite(raw)) return;
+            onChange(clampInt(Math.trunc(raw), min, max));
+          }}
+          aria-label={label}
+        />
+        <button
+          type="button"
+          className="tv-layout__stepper-btn"
+          aria-label={`${label} tambah`}
+          disabled={atMax}
+          onClick={() => onChange(clampInt(value + 1, min, max))}
+        >+</button>
+      </div>
     </div>
   );
 }
 
-// --- live preview ---
+// --- editor-local status channel (no-room add message) ---
 
-interface TvLayoutPreviewProps {
-  layout: TvPanelLayoutMap;
-  contentRows: readonly TvPanelKey[];
+/**
+ * A tiny status channel for the editor to surface a "no room" palette-add
+ * message through the canvas `role="status"` region. Kept local to the editor
+ * (SRP) — the page-level success/error toast is owned by `TvLayoutPage`. The
+ * `push` method writes into a ref + schedules a state flush so a same-tick
+ * second push overwrites the first (last-write-wins, no queue drift).
+ */
+function useEditorStatus(): { message: string; push: (msg: string) => void } {
+  const [message, setMessage] = useState('');
+  const pendingRef = useRef<string | null>(null);
+  function push(msg: string) {
+    pendingRef.current = msg;
+    // Schedule a microtask flush so multiple synchronous pushes collapse to
+    // the last (a no-room add followed by a successful add would otherwise
+    // leave a stale "no room" message).
+    Promise.resolve().then(() => {
+      if (pendingRef.current !== null) {
+        setMessage(pendingRef.current);
+        pendingRef.current = null;
+      }
+    });
+  }
+  return { message, push };
 }
 
-function TvLayoutPreview({ layout, contentRows }: TvLayoutPreviewProps) {
-  const visiblePanels = contentRows
-    .filter((key) => layout[key].visible)
-    .map((key) => ({ key, size: layout[key].size }));
-  const runningTextVisible = layout.runningText.visible;
-  return (
-    <div
-      className="tv-layout-preview"
-      role="img"
-      aria-label="Pratinjau tata letak TV"
-      data-testid="tv-layout-preview"
-    >
-      {visiblePanels.length === 0 && runningTextVisible === false ? (
-        <div className="tv-layout-preview__empty">Tidak ada panel yang ditampilkan.</div>
-      ) : (
-        visiblePanels.map(({ key, size }) => (
-          <div
-            key={key}
-            className="tv-layout-preview__bar"
-            style={{ flex: `${size} 1 0` }}
-            data-testid={`tv-layout-preview-bar-${key}`}
-          >
-            <span className="tv-layout-preview__label">{TV_PANEL_LABELS[key]}</span>
-            <span className="tv-layout-preview__size">{TV_PANEL_SIZE_LABELS[size]}</span>
-          </div>
-        ))
-      )}
-      {runningTextVisible && (
-        <div className="tv-layout-preview__footer" data-testid="tv-layout-preview-footer">
-          <span className="tv-layout-preview__label">{TV_PANEL_LABELS.runningText}</span>
-        </div>
-      )}
-    </div>
-  );
+function clampInt(n: number, min: number, max: number): number {
+  if (n < min) return min;
+  if (n > max) return max;
+  return Math.trunc(n);
 }
