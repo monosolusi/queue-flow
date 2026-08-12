@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { StateMachineWorkflow } from './StateMachineWorkflow';
-import { type Transition, defaultStateMachineForm, validateCustomStateMachine } from '../lib/state-machine';
+import { type StateMachineForm, type Transition, defaultStateMachineForm, validateCustomStateMachine } from '../lib/state-machine';
 import { DEFAULT_STATE_MACHINE } from '../api/types';
 
 function renderWorkflow(
@@ -11,6 +11,27 @@ function renderWorkflow(
   onChange: (next: ReturnType<typeof defaultStateMachineForm>) => void = vi.fn(),
 ) {
   return render(<StateMachineWorkflow value={value} onChange={onChange} errors={errors} />);
+}
+
+/**
+ * Select a state node on the canvas by clicking its SVG card. Drives the real
+ * React Flow selection path: the NodeWrapper's onClick fires the parent's
+ * `onNodeClick` prop (always fires, regardless of `selectNodesOnDrag`), which
+ * marks the node selected in local state; the store syncs via `StoreUpdater`;
+ * `onSelectionChange` fires; `selectedNodeId` is set; the panel renders.
+ */
+function selectStateNode(name: string): void {
+  fireEvent.click(screen.getByTestId(`sm-node-card-${name}`));
+}
+
+/**
+ * Select a transition edge on the canvas by clicking its React Flow wrapper.
+ * The edge's `data-testid` is `rf__edge-${id}` (React Flow stamps it). For a
+ * seed edge the id is `${from}->${to}#${i}`; for a manager-added edge it is
+ * `sm-edge-N`. Drives the real React Flow selection path.
+ */
+function selectEdge(edgeId: string): void {
+  fireEvent.click(screen.getByTestId(`rf__edge-${edgeId}`));
 }
 
 describe('StateMachineWorkflow (visual React Flow builder)', () => {
@@ -22,6 +43,8 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     // No palette / add buttons in default mode.
     expect(screen.queryByTestId('sm-palette')).not.toBeInTheDocument();
     expect(screen.queryByTestId('sm-add-state')).not.toBeInTheDocument();
+    // No properties panel in default mode (canvas is read-only).
+    expect(screen.queryByTestId('sm-properties')).not.toBeInTheDocument();
     // No dropped-status warning in default mode (the standard graph is intact).
     expect(screen.queryByTestId('sm-standard-warning')).not.toBeInTheDocument();
   });
@@ -65,13 +88,17 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     expect(added.actionLabel).toBe('');
   });
 
-  it('edits a transition label via the edge input', () => {
+  it('edits a transition label via the properties panel (select edge → edit action label)', () => {
     const onChange = vi.fn();
     const customForm = { ...defaultStateMachineForm(), mode: 'custom' as const };
     renderWorkflow(customForm, [], onChange);
-    const labelInputs = screen.getAllByLabelText('Label aksi');
-    expect(labelInputs.length).toBeGreaterThan(0);
-    fireEvent.change(labelInputs[0], { target: { value: 'Panggil Cepat' } });
+    // Select the first edge (WAITING->CALLING#0) on the canvas — drives the
+    // real React Flow selection path (onEdgeClick → onSelectionChange → panel).
+    selectEdge('WAITING->CALLING#0');
+    // The properties panel renders the edge editor.
+    const panel = screen.getByTestId('sm-properties');
+    const actionLabelInput = within(panel).getByTestId('panel-action-label');
+    fireEvent.change(actionLabelInput, { target: { value: 'Panggil Cepat' } });
     expect(onChange).toHaveBeenCalledTimes(1);
     const next = onChange.mock.calls[0][0];
     expect(next.transitions[0].actionLabel).toBe('Panggil Cepat');
@@ -126,7 +153,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     expect(next.transitions).toHaveLength(DEFAULT_STATE_MACHINE.transitions.length);
   });
 
-  it('uppercases a state name on rename', () => {
+  it('uppercases a state name on rename via the properties panel', () => {
     const onChange = vi.fn();
     const customForm = {
       mode: 'custom' as const,
@@ -134,28 +161,28 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
     };
     renderWorkflow(customForm, [], onChange);
-    // The EXTRA node's name input — rename it to lowercase, expect uppercased lift.
-    const extraInput = screen.getAllByLabelText(/^Status /).find(
-      (el): el is HTMLInputElement => (el as HTMLInputElement).value === 'EXTRA',
-    );
-    expect(extraInput).toBeDefined();
-    fireEvent.change(extraInput!, { target: { value: 'onhold' } });
+    // Select the EXTRA node on the canvas → panel renders the node editor.
+    selectStateNode('EXTRA');
+    const panel = screen.getByTestId('sm-properties');
+    const nameInput = within(panel).getByTestId('panel-state-name') as HTMLInputElement;
+    expect(nameInput.value).toBe('EXTRA');
+    fireEvent.change(nameInput, { target: { value: 'onhold' } });
     expect(onChange).toHaveBeenCalledTimes(1);
     const next = onChange.mock.calls[0][0];
     expect(next.states).toContain('ONHOLD');
     // The rename propagates to no referencing transition (EXTRA was unreferenced).
   });
 
-  it('cascades transition removal when a state node is deleted', () => {
+  it('cascades transition removal when a state node is deleted from the panel', () => {
     const onChange = vi.fn();
     // CALLING is referenced by several transitions — deleting it must cascade.
     const customForm = { ...defaultStateMachineForm(), mode: 'custom' as const };
     renderWorkflow(customForm, [], onChange);
-    const callingDelete = screen.getAllByLabelText(/^Hapus status /).find((b) =>
-      (b as HTMLButtonElement).getAttribute('aria-label') === 'Hapus status CALLING',
-    );
-    expect(callingDelete).toBeDefined();
-    fireEvent.click(callingDelete!);
+    // Select the CALLING node on the canvas → panel renders the node editor.
+    selectStateNode('CALLING');
+    const panel = screen.getByTestId('sm-properties');
+    const deleteBtn = within(panel).getByTestId('panel-delete-state');
+    fireEvent.click(deleteBtn);
     expect(onChange).toHaveBeenCalledTimes(1);
     const next = onChange.mock.calls[0][0];
     expect(next.states).not.toContain('CALLING');
@@ -214,11 +241,11 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
     };
     renderWorkflow(customForm, [], onChange);
-    const extraInput = screen.getAllByLabelText(/^Status /).find(
-      (el): el is HTMLInputElement => (el as HTMLInputElement).value === 'EXTRA',
-    );
-    expect(extraInput).toBeDefined();
-    fireEvent.change(extraInput!, { target: { value: 'WAITING' } });
+    // Select the EXTRA node on the canvas → panel renders the node editor.
+    selectStateNode('EXTRA');
+    const panel = screen.getByTestId('sm-properties');
+    const nameInput = within(panel).getByTestId('panel-state-name');
+    fireEvent.change(nameInput, { target: { value: 'WAITING' } });
     expect(onChange).not.toHaveBeenCalled();
   });
 
@@ -228,7 +255,8 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     // left-right pair. Pin their presence + per-node count so a regression to
     // the two-handle (left/right only) node is caught. React Flow stamps each
     // handle with `data-handlepos` (top/right/bottom/left); one source + one
-    // target per side ⇒ 2 per side per node.
+    // target per side ⇒ 2 per side per node. The handles are CSS-hidden until
+    // hover/selection but stay in the DOM (regression test queries the DOM).
     renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
     const stateCount = DEFAULT_STATE_MACHINE.states.length;
     const top = document.querySelectorAll('.react-flow__handle[data-handlepos="top"]');
@@ -279,5 +307,111 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       /^sm-edge-\d+$/.test(e.getAttribute('data-id') ?? ''),
     );
     expect(newEdge).toBeDefined();
+  });
+
+  // --- Panel selection tests (redesign: select on canvas → edit in panel) ---
+
+  it('shows the empty hint in the properties panel when nothing is selected', () => {
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
+    const panel = screen.getByTestId('sm-properties');
+    expect(panel).toHaveTextContent('Pilih status atau transisi untuk mengedit.');
+    // No node/edge editor inputs in the empty-hint state.
+    expect(screen.queryByTestId('panel-state-name')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('panel-action-label')).not.toBeInTheDocument();
+  });
+
+  it('selecting a node shows its panel (name input + description + delete button)', () => {
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
+    selectStateNode('CALLING');
+    const panel = screen.getByTestId('sm-properties');
+    expect(within(panel).getByTestId('panel-state-name')).toBeInTheDocument();
+    // The derived description for a canonical state is the canonical copy.
+    expect(panel).toHaveTextContent('Sedang dipanggil ke counter');
+    expect(within(panel).getByTestId('panel-delete-state')).toBeInTheDocument();
+  });
+
+  it('selecting an edge shows its panel (action label input + delete button)', () => {
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
+    selectEdge('WAITING->CALLING#0');
+    const panel = screen.getByTestId('sm-properties');
+    expect(within(panel).getByTestId('panel-action-label')).toBeInTheDocument();
+    expect(within(panel).getByTestId('panel-delete-transition')).toBeInTheDocument();
+    // The from→to route is shown.
+    expect(panel).toHaveTextContent('WAITING');
+    expect(panel).toHaveTextContent('CALLING');
+  });
+
+  it('disables the panel delete-transition button when only one transition remains', () => {
+    // The ≥1-transition invariant: the button is disabled (the handler also
+    // guards, but the disabled state is the visible affordance).
+    renderWorkflow({
+      mode: 'custom',
+      states: ['WAITING', 'CALLING'],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' }],
+    });
+    selectEdge('WAITING->CALLING#0');
+    const panel = screen.getByTestId('sm-properties');
+    expect(within(panel).getByTestId('panel-delete-transition')).toBeDisabled();
+  });
+
+  it('clears the panel when the mode flips to default', () => {
+    // Use a stateful parent so the mode flip feeds back into the component
+    // (a vi.fn() parent never updates `value`, so `isCustom` would stay true
+    // and the panel would never unmount). The panel only renders in custom
+    // mode; switching to default hides it (read-only canvas only).
+    let form: StateMachineForm = { ...defaultStateMachineForm(), mode: 'custom' };
+    const { rerender } = render(
+      <StateMachineWorkflow
+        value={form}
+        onChange={(next) => {
+          form = next;
+        }}
+        errors={[]}
+      />,
+    );
+    selectStateNode('CALLING');
+    expect(screen.getByTestId('panel-state-name')).toBeInTheDocument();
+    // Switch to default mode — the parent feeds back, the panel unmounts.
+    fireEvent.click(screen.getByLabelText(/Gunakan alur status standar/));
+    rerender(
+      <StateMachineWorkflow
+        value={form}
+        onChange={(next) => {
+          form = next;
+        }}
+        errors={[]}
+      />,
+    );
+    expect(screen.queryByTestId('sm-properties')).not.toBeInTheDocument();
+  });
+
+  it('refreshes a node card description after a mutation changes its outgoing-transition count', () => {
+    // The description lives on `data.description` (computed by `formToFlow`/
+    // `withDescriptions`), NOT derived from the form prop at render. So a
+    // mutation that changes a state's outgoing count (here: adding a self-edge
+    // on the first state via "+ Tambah Transisi") must refresh the node card's
+    // description via `commit`'s `withDescriptions` call — even though the
+    // vi.fn() parent never feeds the new form back.
+    const onChange = vi.fn();
+    // ONHOLD is a custom state with 0 outgoing → "Status kustom" initially.
+    // After a self-edge is added, it has 1 outgoing → "1 transisi keluar".
+    renderWorkflow(
+      {
+        mode: 'custom',
+        states: ['ONHOLD', 'CALLING'],
+        transitions: [{ from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut' }],
+      },
+      [],
+      onChange,
+    );
+    // ONHOLD already has 1 outgoing (to CALLING) → "1 transisi keluar".
+    const card = screen.getByTestId('sm-node-card-ONHOLD');
+    expect(card).toHaveTextContent('1 transisi keluar');
+    // Add a self-edge on ONHOLD (the first state) via the button → 2 outgoing.
+    fireEvent.click(screen.getByTestId('sm-add-transition'));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    // The node card description refreshes via `withDescriptions` in `commit`.
+    const refreshedCard = screen.getByTestId('sm-node-card-ONHOLD');
+    expect(refreshedCard).toHaveTextContent('2 transisi keluar');
   });
 });
