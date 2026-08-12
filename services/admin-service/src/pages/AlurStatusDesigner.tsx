@@ -232,7 +232,12 @@ export function AlurStatusDesigner(): JSX.Element {
           errors={smErrors}
         />
       ) : (
-        <StateMachineSource sourceText={sourceText} onSourceChange={handleSourceChange} error={sourceError} />
+        <StateMachineSource
+          sourceText={sourceText}
+          onSourceChange={handleSourceChange}
+          error={sourceError}
+          connectors={form.stateMachine.transitions}
+        />
       )}
     </div>
   );

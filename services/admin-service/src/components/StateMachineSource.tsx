@@ -17,13 +17,30 @@
  * validate on Source→Diagram), and the draft lift; this component owns only the
  * textarea affordance + its a11y wiring. Mirrors the `StateMachineWorkflow`
  * split (visual editor is presentational over the same `StateMachineForm`).
+ *
+ * **Connector legend (`connectors`).** Manager feedback: the raw JSON source
+ * did not explain which point connects to which (`tidak dijelaskan ini konek
+ * pada titik yang mana ke titik yang mana, jadinya ruwet`). The `from`/`to`
+ * keys encode a directed connector (panah) but that direction is invisible in a
+ * flat JSON list. So this view renders a read-only legend of the connectors —
+ * one chip per transition, `from → to · actionLabel` — between the hint and the
+ * textarea. The legend is a VIEW over the SAME last-valid draft the diagram
+ * shows (passed in as `connectors`); it never parses `sourceText` itself, so a
+ * broken textarea can never show a broken graph here — while the manager types
+ * invalid JSON the legend stays at the last-valid connectors and the inline
+ * `error` region explains the divergence. The arrow glyph carries the direction
+ * the JSON keys encode; `.sr-only` bridge words keep that direction + the label
+ * AT-readable (a screen reader announces "WAITING ke CALLING aksi: Panggil
+ * Berikutnya", not "rightwards arrow" run together with the label).
  */
+import type { Transition } from '../lib/state-machine';
 import './state-machine-workflow.css';
 
 export function StateMachineSource({
   sourceText,
   onSourceChange,
   error,
+  connectors,
 }: {
   /** The current JSON source text (controlled). */
   sourceText: string;
@@ -31,6 +48,14 @@ export function StateMachineSource({
   onSourceChange: (next: string) => void;
   /** A single manager-facing (Indonesian) error string, or `null` when valid. */
   error: string | null;
+  /**
+   * The last-valid graph's transitions, rendered as a read-only connector
+   * legend (`from → to · actionLabel`). Mirrors the draft the diagram view
+   * shows; stays at the last-valid graph while the textarea holds an invalid
+   * parse (the `error` region explains the divergence). Owned by the designer
+   * — this component never derives it from `sourceText`.
+   */
+  connectors: readonly Transition[];
 }): JSX.Element {
   return (
     <div className="sm-source-wrap">
@@ -38,9 +63,38 @@ export function StateMachineSource({
         Sumber JSON alur status
       </label>
       <p className="sm-source__hint">
-        Format: <code>{'{"states": ["…"], "transitions": [{"from","to","actionLabel"}]}'}</code>.
-        Mengubah sumber ini menyusun alur kustom sendiri.
+        Tiap transisi adalah <strong>konektor (panah)</strong> dari satu titik
+        status ke titik status lain: <code>from</code> = titik asal,{' '}
+        <code>to</code> = titik tujuan, <code>actionLabel</code> = label tombol
+        aksi. Mengubah sumber ini menyusun alur kustom sendiri.
       </p>
+
+      {/* Connector legend — the "indikator konektor" (from → to) the manager
+          asked for. A read-only map of which point connects to which, derived
+          from the last-valid draft (passed as `connectors`), NOT re-parsed from
+          the textarea. The arrow is decorative (aria-hidden); the `.sr-only`
+          "ke" word keeps the direction AT-readable. */}
+      <ul
+        className="sm-source-connectors"
+        data-testid="sm-source-connectors"
+        aria-label="Daftar konektor transisi (dari titik asal ke titik tujuan)"
+      >
+        {connectors.map((c, i) => (
+          <li
+            key={`${c.from}->${c.to}#${i}`}
+            className="sm-source-connector"
+            data-testid="sm-source-connector"
+          >
+            <span className="sm-source-connector__from">{c.from}</span>
+            <span className="sr-only"> ke </span>
+            <span className="sm-source-connector__arrow" aria-hidden="true">→</span>
+            <span className="sm-source-connector__to">{c.to}</span>
+            <span className="sr-only"> aksi: </span>
+            <span className="sm-source-connector__label">{c.actionLabel}</span>
+          </li>
+        ))}
+      </ul>
+
       <textarea
         id="sm-source"
         className="sm-source"

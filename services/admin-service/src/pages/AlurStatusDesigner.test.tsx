@@ -131,6 +131,49 @@ describe('AlurStatusDesigner (dedicated /config/alur-status page)', () => {
     expect(screen.queryByTestId('sm-canvas')).not.toBeInTheDocument();
   });
 
+  it('shows a connector legend (from → to · actionLabel) in the Source view', async () => {
+    // Manager feedback: the raw JSON source did not explain which point
+    // connects to which (ruwet). The Source view now renders a read-only
+    // connector legend derived from the last-valid draft — one chip per
+    // transition, `from → to · actionLabel` — so the connector direction is
+    // visible, not buried in the flat JSON list.
+    const { api } = makeApi();
+    renderDesignerRoute(api);
+    await screen.findByTestId('sm-mode');
+    await userEvent.click(screen.getByTestId('sm-view-source'));
+
+    const legend = screen.getByTestId('sm-source-connectors');
+    expect(legend).toBeInTheDocument();
+    // The default PRD §7 graph has 5 transitions → 5 connector chips.
+    const chips = within(legend).getAllByTestId('sm-source-connector');
+    expect(chips).toHaveLength(5);
+    // The first connector reads WAITING → CALLING · Panggil Berikutnya.
+    expect(chips[0]).toHaveTextContent('WAITING');
+    expect(chips[0]).toHaveTextContent('CALLING');
+    expect(chips[0]).toHaveTextContent('Panggil Berikutnya');
+    // The SKIPPED → CALLING back-connector is present too (the cycle edge the
+    // manager specifically found confusing without an arrow indicator).
+    const recallChip = chips.find((c) => c.textContent?.includes('SKIPPED') && c.textContent?.includes('Panggil Ulang'));
+    expect(recallChip).toBeDefined();
+  });
+
+  it('keeps the connector legend at the last-valid graph while the source holds invalid JSON', async () => {
+    // The legend mirrors the draft (last-valid), NOT the live textarea — so a
+    // broken parse does NOT blank the indicator; the error region explains the
+    // divergence instead. Mirrors the Diagram view's last-valid behavior.
+    const { api } = makeApi();
+    renderDesignerRoute(api);
+    await screen.findByTestId('sm-mode');
+    await userEvent.click(screen.getByTestId('sm-view-source'));
+
+    fireEvent.change(screen.getByTestId('sm-source'), { target: { value: '{ not valid json' } });
+    expect(await screen.findByTestId('sm-source-error')).toBeInTheDocument();
+    // The legend still shows the last-valid default graph's connectors.
+    const chips = screen.getAllByTestId('sm-source-connector');
+    expect(chips).toHaveLength(5);
+    expect(chips[0]).toHaveTextContent('Panggil Berikutnya');
+  });
+
   it('a valid source edit lifts into the shared draft (round-trips into the diagram)', async () => {
     const { api, save } = makeApi();
     renderDesignerRoute(api);
