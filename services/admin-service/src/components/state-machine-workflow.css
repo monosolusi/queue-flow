@@ -1,10 +1,20 @@
 /* Visual workflow builder styles for the "Alur Status Tiket" editor
    (StateMachineWorkflow). Component-specific only — does NOT touch the
    generated _tokens.css / _interactions.css. Uses design tokens (--accent,
-   --text, --text-muted, --surface, --radius) so light/dark + brand-color
-   overrides apply. React Flow's own base stylesheet
+   --text, --text-muted, --surface, --accent-on-surface) so light/dark + brand-
+   color overrides apply. React Flow's own base stylesheet
    (@xyflow/react/dist/style.css) is imported by the component; the rules below
-   override its defaults to match the QMS design language. */
+   override its defaults to match the QMS design language.
+
+   Redesign (manager feedback): less loud, less rounded, clearer node vs edge.
+   - Diagram chrome (nodes, palette, canvas, edge chip, panel) uses a 4–6px
+     literal radius (NOT var(--radius) = 14px) so the diagram reads precise /
+     operational, not soft / consumer.
+   - The 8 connection handles per node are CSS-hidden until the node is hovered
+     or selected — 40 visible dots for the 5-state default graph was too loud.
+   - The state node is an SVG card (icon + title + description); the transition
+     edge is a clean bezier + a small read-only label chip. Editing lives in
+     the right-side properties panel, not on the canvas. */
 
 .sm-workflow-layout {
   display: flex;
@@ -33,7 +43,7 @@
   align-items: center;
   justify-content: center;
   padding: 0.6rem 0.8rem;
-  border-radius: var(--radius);
+  border-radius: 6px;
   border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
   background: color-mix(in srgb, var(--accent) 10%, var(--surface));
   color: var(--text);
@@ -56,7 +66,7 @@
   min-width: 0;
   height: 60vh;
   min-height: 360px;
-  border-radius: var(--radius);
+  border-radius: 6px;
   border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
   background: var(--surface);
   overflow: hidden;
@@ -67,104 +77,206 @@
   background: var(--surface);
 }
 
-/* Custom state node. */
+/* --- Properties panel (right-side editor for the selected node / edge) -------
+   Pure presentational panel (see StateMachineWorkflowProperties). Renders the
+   node editor (name + derived description + Hapus status), the edge editor
+   (from→to + action label + Hapus transisi), or an empty hint. ~16rem wide on
+   wide screens; stacks below the canvas on narrow ones. 44px touch targets
+   on the inputs/buttons; sibling <label> elements (ARIA: sibling label, not a
+   wrapping aria-label). */
+.sm-properties {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  width: 16rem;
+  flex: 0 0 16rem;
+  padding: 0.75rem;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+  background: var(--surface);
+}
+.sm-properties--empty {
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+}
+.sm-properties__heading {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.sm-properties__route {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.sm-properties__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.sm-properties__label {
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.sm-properties__input {
+  min-height: 44px;
+  padding: 0.5rem 0.7rem;
+  border-radius: 5px;
+  border: 1px solid color-mix(in srgb, var(--text) 25%, transparent);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.95rem;
+  outline: none;
+}
+.sm-properties__input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.sm-properties__input::placeholder {
+  color: var(--text-muted);
+}
+.sm-properties__hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+.sm-properties__hint--center {
+  font-size: 0.85rem;
+}
+.sm-properties__delete {
+  min-height: 44px;
+  margin-top: 0.25rem;
+  border-radius: 5px;
+  border: 1px solid color-mix(in srgb, var(--danger, currentColor) 35%, transparent);
+  color: var(--danger-on-surface);
+  justify-content: center;
+}
+.sm-properties__delete:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* --- Custom state node (SVG card) -------------------------------------------
+   Layout: icon on the left, then a column with the title (state name,
+   uppercase, bold) on top and a short muted description on the bottom. Visual
+   only — no inline <input>, no Hapus button (those live in the panel). The 8
+   connection handles stay in the DOM (regression tests query them) but are
+   CSS-hidden until the node is hovered or selected. */
 .state-node {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  padding: 0.4rem 0.5rem;
-  min-width: 8rem;
-  border-radius: var(--radius);
+  gap: 0.55rem;
+  padding: 0.55rem 0.7rem;
+  min-width: 10rem;
+  border-radius: 5px;
   border: 1px solid color-mix(in srgb, var(--text) 25%, transparent);
   background: var(--surface);
   color: var(--text);
   font-size: 0.9rem;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+}
+.state-node__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: var(--accent-on-surface);
+}
+.state-node__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+.state-node__title {
+  font-weight: 700;
+  font-size: 0.92rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.state-node__desc {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* Connection handles — eight per node (source + target on every side) so a
-   transition edge can be drawn in any direction (down/up/left/right), not just
-   left-to-right. Themed to the accent with a surface ring so each dot reads
-   against the node; sized up from React Flow's 6px default so it is an easy
-   drag target. Non-connectable handles (default/read-only mode) are hidden by
-   React Flow so the read-only board stays clean. */
+/* Canonical (PRD §7 default) states get a subtle accent tint so the standard
+   flow is recognizable at a glance. The selected node gets a 2px accent border
+   (overrides the canonical tint's border width via specificity). */
+.state-node--canonical {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+}
+.sm-canvas .react-flow__node.selected .state-node {
+  border: 2px solid var(--accent);
+}
+
+/* --- Connection handles -----------------------------------------------------
+   Eight per node (source + target on every side) so a transition edge can be
+   drawn in any direction. CSS-hidden until the node is hovered or selected —
+   40 visible dots for the 5-state default graph was too loud. Shrunk to 7px
+   with a neutral fill + accent ring; the dot reads against the node and the
+   ring ties it to the brand. Non-connectable handles (default/read-only mode)
+   are hidden by React Flow so the read-only board stays clean. */
 .sm-canvas .react-flow__handle {
-  width: 10px;
-  height: 10px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: var(--accent);
-  border: 2px solid var(--surface);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+  background: var(--text-muted);
+  border: 1px solid var(--surface);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+  opacity: 0;
+  transition: opacity 0.15s ease;
 }
 .sm-canvas .react-flow__handle.connectable {
   cursor: crosshair;
+}
+.sm-canvas .react-flow__node:hover .react-flow__handle,
+.sm-canvas .react-flow__node.selected .react-flow__handle {
+  opacity: 1;
 }
 /* Keep the connection-line + selected-edge accents on-brand too. */
 .sm-canvas .react-flow__connectionline .react-flow__edge-path,
 .sm-canvas .react-flow__edge.selected .react-flow__edge-path {
   stroke: var(--accent);
 }
-/* Canonical (PRD §7 default) states get an accent border so the standard flow
-   is recognizable at a glance. */
-.state-node--canonical {
-  border-color: var(--accent);
-  border-width: 2px;
-}
-.state-node__input {
-  flex: 1 1 auto;
-  min-width: 0;
-  border: none;
-  background: transparent;
-  color: var(--text);
-  font-weight: 600;
-  font-size: inherit;
-  text-transform: uppercase;
-  outline: none;
-}
-.state-node__input:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-  border-radius: calc(var(--radius) * 0.5);
-}
-.state-node__delete {
-  flex: 0 0 auto;
-  padding: 0.15rem 0.4rem;
-  font-size: 0.75rem;
-}
 
-/* Custom transition edge label (rendered via EdgeLabelRenderer). */
+/* --- Custom transition edge label (read-only chip) --------------------------
+   A small muted chip showing the action label — presentational only; editing
+   lives in the properties panel. 4px radius to match the diagram chrome. The
+   chip is pointer-events: none so it never intercepts the edge's click-to-select
+   (the parent wires onEdgeClick on the ReactFlow edge wrapper). */
 .transition-edge__label {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
-  padding: 0.15rem 0.3rem;
-  border-radius: var(--radius);
+  justify-content: center;
+}
+.transition-edge__chip {
+  display: inline-block;
+  max-width: 12rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
   background: var(--surface);
   border: 1px solid color-mix(in srgb, var(--text) 20%, transparent);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
-}
-.transition-edge__input {
-  width: 9rem;
-  border: none;
-  background: transparent;
-  color: var(--text);
-  font-size: 0.8rem;
-  outline: none;
-}
-.transition-edge__input:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-  border-radius: calc(var(--radius) * 0.5);
-}
-.transition-edge__input::placeholder {
   color: var(--text-muted);
-}
-.transition-edge__delete {
-  padding: 0.1rem 0.35rem;
-  font-size: 0.7rem;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
-/* Stack the palette above the canvas on narrow screens. */
+/* Stack the palette + panel above/below the canvas on narrow screens. */
 @media (max-width: 48rem) {
   .sm-palette {
     flex: 1 1 100%;
@@ -178,6 +290,10 @@
   }
   .sm-palette .btn {
     width: auto;
+  }
+  .sm-properties {
+    flex: 1 1 100%;
+    width: 100%;
   }
 }
 
@@ -198,14 +314,14 @@
   display: inline-flex;
   gap: 0.25rem;
   padding: 0.25rem;
-  border-radius: var(--radius);
+  border-radius: 6px;
   border: 1px solid color-mix(in srgb, var(--text) 15%, transparent);
   background: var(--surface);
 }
 .sm-view-toggle__btn {
   padding: 0.4rem 0.9rem;
   border: none;
-  border-radius: calc(var(--radius) * 0.6);
+  border-radius: 4px;
   background: transparent;
   color: var(--text);
   font-weight: 600;
@@ -249,7 +365,7 @@
   flex: 1 1 auto;
   min-height: 24rem;
   padding: 0.75rem;
-  border-radius: var(--radius);
+  border-radius: 6px;
   border: 1px solid color-mix(in srgb, var(--text) 20%, transparent);
   background: var(--surface);
   color: var(--text);

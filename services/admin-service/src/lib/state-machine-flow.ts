@@ -26,12 +26,17 @@ export interface FlowNodeData {
   [key: string]: unknown;
 }
 
-/** A React Flow node, structurally compatible with `@xyflow/react`'s `Node`. */
+/** A React Flow node, structurally compatible with `@xyflow/react`'s `Node`.
+ *  `selected` mirrors React Flow's `Node.selected` flag — set by the parent's
+ *  click-to-select handler (see `StateMachineWorkflow`) so the `.selected` class
+ *  applies and `onSelectionChange` fires. Optional because the wire-relevant
+ *  fields are `id`/`data`/`position`; `selected` is canvas-only. */
 export interface FlowNode {
   id: string;
   type: string;
   position: { x: number; y: number };
   data: FlowNodeData;
+  selected?: boolean;
 }
 
 /** Edge payload: the transition's action label (the Caller UI button text).
@@ -47,7 +52,9 @@ export interface FlowEdgeData {
  *  source/target nodes (see {@link HANDLE_IDS}). They are CANVAS-ONLY — never
  *  serialized to the wire {@link Transition} (`flowToGraph` drops them) — and
  *  exist so a node with multiple handles per side routes each edge through the
- *  exact handle the manager dragged, not an ambiguous default. */
+ *  exact handle the manager dragged, not an ambiguous default. `selected`
+ *  mirrors `Edge.selected` — set by the parent's click-to-select handler so the
+ *  `.selected` class applies and `onSelectionChange` fires. */
 export interface FlowEdge {
   id: string;
   source: string;
@@ -56,6 +63,7 @@ export interface FlowEdge {
   data: FlowEdgeData;
   sourceHandle?: string;
   targetHandle?: string;
+  selected?: boolean;
 }
 
 /**

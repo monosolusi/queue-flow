@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_STATE_MACHINE } from '../api/types';
 import {
+  CANONICAL_STATE_DESCRIPTIONS,
   defaultStateMachineForm,
+  describeState,
   missingCanonicalStates,
   toStateMachineDto,
   validateCustomStateMachine,
@@ -140,5 +142,61 @@ describe('missingCanonicalStates (non-blocking dropped-standard-status warning)'
       transitions: [{ from: 'CALLING', to: 'SERVING', actionLabel: 'Mulai Melayani' }],
     });
     expect(padded).toEqual([]);
+  });
+});
+
+describe('describeState (client-side description derivation)', () => {
+  it('returns the canonical description for each of the 5 PRD §7 default states', () => {
+    const form = defaultStateMachineForm();
+    expect(describeState(form, 'WAITING')).toBe(CANONICAL_STATE_DESCRIPTIONS.WAITING);
+    expect(describeState(form, 'CALLING')).toBe(CANONICAL_STATE_DESCRIPTIONS.CALLING);
+    expect(describeState(form, 'SERVING')).toBe(CANONICAL_STATE_DESCRIPTIONS.SERVING);
+    expect(describeState(form, 'SKIPPED')).toBe(CANONICAL_STATE_DESCRIPTIONS.SKIPPED);
+    expect(describeState(form, 'COMPLETED')).toBe(CANONICAL_STATE_DESCRIPTIONS.COMPLETED);
+  });
+
+  it('derives a `${n} transisi keluar` summary for a custom state with outgoing transitions', () => {
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['WAITING', 'ONHOLD', 'CALLING'],
+      transitions: [
+        { from: 'ONHOLD', to: 'WAITING', actionLabel: 'Kembali' },
+        { from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut' },
+      ],
+    };
+    expect(describeState(form, 'ONHOLD')).toBe('2 transisi keluar');
+  });
+
+  it('derives "Status kustom" for a custom state with 0 outgoing transitions', () => {
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['WAITING', 'ONHOLD'],
+      transitions: [{ from: 'WAITING', to: 'ONHOLD', actionLabel: 'Tahan' }],
+    };
+    // ONHOLD has no outgoing transition (only incoming) — the 0-outgoing branch.
+    expect(describeState(form, 'ONHOLD')).toBe('Status kustom');
+  });
+
+  it('the canonical description wins even when the canonical state also has outgoing transitions', () => {
+    // WAITING has 1 outgoing transition in the default graph, but the canonical
+    // description takes precedence over the derived `${n} transisi keluar` form.
+    const form = defaultStateMachineForm();
+    expect(describeState(form, 'WAITING')).toBe('Tiket menunggu dipanggil');
+    expect(describeState(form, 'CALLING')).toBe('Sedang dipanggil ke counter');
+  });
+
+  it('the description is never serialized (wire contract unchanged)', () => {
+    // `describeState` is a pure client-side helper; it adds NO field to the
+    // wire form. `toStateMachineDto` strips `mode` and emits `{ states,
+    // transitions }` — no `description` key.
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['WAITING', 'ONHOLD'],
+      transitions: [{ from: 'WAITING', to: 'ONHOLD', actionLabel: 'Tahan' }],
+    };
+    describeState(form, 'ONHOLD'); // derive (no-op on the wire shape)
+    const dto = toStateMachineDto(form);
+    expect((dto as unknown as Record<string, unknown>).description).toBeUndefined();
+    expect(Object.keys(dto).sort()).toEqual(['states', 'transitions']);
   });
 });

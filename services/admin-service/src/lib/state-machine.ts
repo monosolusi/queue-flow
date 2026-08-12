@@ -158,6 +158,39 @@ export function referencedStates(form: StateMachineForm): Set<string> {
   return refs;
 }
 
+/**
+ * Friendly Indonesian short descriptions for the 5 PRD §7 default states — the
+ * canonical copy shown on the SVG state card and in the properties panel. Used
+ * by {@link describeState} as the canonical lookup; custom states derive a
+ * summary from their outgoing transitions instead (the wire contract carries
+ * no description field, so this map is a CLIENT-SIDE derivation — never
+ * serialized).
+ */
+export const CANONICAL_STATE_DESCRIPTIONS: Record<string, string> = {
+  WAITING: 'Tiket menunggu dipanggil',
+  CALLING: 'Sedang dipanggil ke counter',
+  SERVING: 'Sedang dilayani',
+  SKIPPED: 'Dilewati / absen',
+  COMPLETED: 'Layanan selesai',
+};
+
+/**
+ * Pure helper: derive a short manager-facing description for a state. Returns
+ * the canonical description when the state is one of the 5 PRD §7 defaults;
+ * otherwise derives a summary from the number of outgoing transitions
+ * (`${n} transisi keluar` when n > 0, else `Status kustom`). The description is
+ * a CLIENT-SIDE derivation only — it is never part of the wire form
+ * ({@link StateMachineForm} carries only `mode`/`states`/`transitions`), so
+ * adding it here changes no wire contract.
+ */
+export function describeState(form: StateMachineForm, name: string): string {
+  const canonical = CANONICAL_STATE_DESCRIPTIONS[name];
+  if (canonical) return canonical;
+  const outgoing = form.transitions.filter((t) => t.from === name).length;
+  if (outgoing > 0) return `${outgoing} transisi keluar`;
+  return 'Status kustom';
+}
+
 // --- form mutation helpers (pure over the StateMachineForm slice) ------------
 
 export function updateTransition(

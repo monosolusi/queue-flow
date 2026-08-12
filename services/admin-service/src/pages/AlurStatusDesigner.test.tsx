@@ -223,7 +223,11 @@ describe('AlurStatusDesigner (dedicated /config/alur-status page)', () => {
     await userEvent.click(screen.getByTestId('sm-open-designer'));
     await screen.findByTestId('sm-mode');
     await userEvent.click(screen.getByLabelText(/Susun alur status sendiri/));
-    fireEvent.change(screen.getAllByLabelText('Label aksi')[0], { target: { value: 'Panggil Cepat' } });
+    // The inline edge input moved to the right-side properties panel (redesign):
+    // select the first edge on the canvas, then edit the action label in the
+    // panel. Drives the real React Flow selection path.
+    fireEvent.click(screen.getByTestId('rf__edge-WAITING->CALLING#0'));
+    fireEvent.change(screen.getByTestId('panel-action-label'), { target: { value: 'Panggil Cepat' } });
 
     await userEvent.click(screen.getByTestId('admin-save'));
     await screen.findByText('Konfigurasi tersimpan.');
