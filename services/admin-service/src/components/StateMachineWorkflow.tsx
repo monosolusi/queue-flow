@@ -40,8 +40,10 @@ import {
   type Connection,
   type Edge,
   type EdgeChange,
+  type FinalConnectionState,
   type Node,
   type NodeChange,
+  type OnConnectEnd,
   type OnSelectionChangeParams,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -58,6 +60,9 @@ import {
   withDescriptions,
   DEFAULT_SOURCE_HANDLE,
   DEFAULT_TARGET_HANDLE,
+  EDGE_ARROW_MARKER,
+  isDuplicateTransition,
+  rejectionMessageForConnection,
   type FlowEdge,
   type FlowNode,
 } from '../lib/state-machine-flow';
@@ -69,6 +74,7 @@ import {
   type WorkflowHandlers,
 } from './StateMachineWorkflowNodes';
 import { StateMachineWorkflowProperties } from './StateMachineWorkflowProperties';
+import { useToast } from '../toast/useToast';
 import './state-machine-workflow.css';
 
 /**
@@ -120,6 +126,12 @@ export function StateMachineWorkflow({
   // the parent has then re-rendered with our emitted change, so a queued
   // second tap re-evaluates against fresh state.
   const addPendingRef = useRef(false);
+  // Toast channel for the connection-rejection feedback (the manager's "tidak
+  // ada error, tidak tahu kenapa" report: a duplicate edge draw was a silent
+  // no-op). `useToast()` is a NO-OP when no `ToastProvider` is mounted (verified),
+  // so existing component tests that render without a provider keep working —
+  // the `onConnectEnd` call is a safe no-op in every existing test.
+  const toast = useToast();
 
   // Selection state for the right-side properties panel. Single-select: when
   // the manager clicks a node/edge, we mark that one selected in local node/edge
@@ -242,7 +254,12 @@ export function StateMachineWorkflow({
       const from = connection.source;
       const to = connection.target;
       if (!from || !to) return;
-      if (edges.some((e) => e.source === from && e.target === to)) return;
+      // Defensive duplicate guard: the live `isValidConnection` below already
+      // rejects a duplicate during the drag, but keep the check so a real
+      // connection that somehow bypassed the live guard (e.g. a future RF
+      // internals change) never seeds a duplicate edge. Centralized in
+      // `isDuplicateTransition` so all three reject sites stay identical.
+      if (isDuplicateTransition(edges, from, to)) return;
       const newEdge: FlowEdge = {
         id: mintEdgeId(),
         source: from,
@@ -255,10 +272,57 @@ export function StateMachineWorkflow({
         // the connection; fall back to the canonical L→R default if absent.
         sourceHandle: connection.sourceHandle ?? DEFAULT_SOURCE_HANDLE,
         targetHandle: connection.targetHandle ?? DEFAULT_TARGET_HANDLE,
+        // Closed arrow at the target end so the edge reads "from → to"
+        // (manager feedback: no arrow = confusing direction).
+        markerEnd: EDGE_ARROW_MARKER,
       };
       commit(nodes, [...edges, newEdge]);
     },
     [edges, nodes, commit, mintEdgeId],
+  );
+
+  // Live connection validation (during the drag): reject a duplicate edge so
+  // React Flow marks the in-progress connection invalid (the target handle
+  // drops its "valid" affordance) and — critically — sets `connectionState.
+  // isValid === false` on connect-end, which `onConnectEnd` turns into a toast.
+  // This is the fix for "tidak bisa tarik garis dari bottom ke up, tidak ada
+  // error": a re-drawn back-edge (e.g. the default graph's SKIPPED → CALLING)
+  // was a silent no-op before. `connection.source`/`target` are `string | null`
+  // on a `Connection` (null only in a degenerate no-endpoint case that React
+  // Flow never raises for a real drag) — treat a missing endpoint as allowed so
+  // the guard never false-negatives a half-formed connection.
+  const isValidConnection = useCallback(
+    (connection: Connection | Edge) => {
+      const from = connection.source;
+      const to = connection.target;
+      if (!from || !to) return true;
+      return !isDuplicateTransition(edges, from, to);
+    },
+    [edges],
+  );
+
+  // Surface WHY a draw failed: when the manager drops a connection that
+  // `isValidConnection` rejected (a duplicate), show an info toast naming the
+  // pair — "Transisi dari X ke Y sudah ada." The toast auto-dismisses (info
+  // variant, 6s) so it notices without nagging. `isValid === false` ⟹ duplicate
+  // (our only rejection reason); the no-target (dropped in empty space) and
+  // no-connection cases return null (no toast — nothing was attempted). The
+  // decision is the pure `rejectionMessageForConnection` (unit-tested); this is
+  // the thin side-effect wrapper, kept out of the lib because `onConnectEnd`
+  // itself can't be exercised in jsdom.
+  const onConnectEnd = useCallback<OnConnectEnd>(
+    (_event: MouseEvent | TouchEvent, connectionState: FinalConnectionState) => {
+      const message = rejectionMessageForConnection(
+        {
+          isValid: connectionState.isValid,
+          fromId: connectionState.fromNode?.id ?? null,
+          toId: connectionState.toNode?.id ?? null,
+        },
+        edges,
+      );
+      if (message) toast.show(message, { variant: 'info', durationMs: 6000 });
+    },
+    [edges, toast],
   );
 
   // Add a new state node (drag-drop + button share this). The name is generated
@@ -298,7 +362,7 @@ export function StateMachineWorkflow({
     if (addPendingRef.current) return;
     if (value.states.length === 0) return;
     const firstState = value.states[0];
-    if (edges.some((e) => e.source === firstState && e.target === firstState)) return;
+    if (isDuplicateTransition(edges, firstState, firstState)) return;
     addPendingRef.current = true;
     const newEdge: FlowEdge = {
       id: mintEdgeId(),
@@ -308,6 +372,7 @@ export function StateMachineWorkflow({
       data: { actionLabel: '' },
       sourceHandle: DEFAULT_SOURCE_HANDLE,
       targetHandle: DEFAULT_TARGET_HANDLE,
+      markerEnd: EDGE_ARROW_MARKER,
     };
     commit(nodes, [...edges, newEdge]);
   }, [nodes, edges, value.states, commit, mintEdgeId]);
@@ -455,6 +520,8 @@ export function StateMachineWorkflow({
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
+            isValidConnection={isValidConnection}
+            onConnectEnd={onConnectEnd}
             onNodeClick={onNodeClick}
             onEdgeClick={onEdgeClick}
             onSelectionChange={onSelectionChange}
@@ -558,6 +625,8 @@ function FlowCanvas({
   onNodesChange,
   onEdgesChange,
   onConnect,
+  isValidConnection,
+  onConnectEnd,
   onNodeClick,
   onEdgeClick,
   onSelectionChange,
@@ -570,6 +639,8 @@ function FlowCanvas({
   onNodesChange: (changes: NodeChange[]) => void;
   onEdgesChange: (changes: EdgeChange[]) => void;
   onConnect: (connection: Connection) => void;
+  isValidConnection: (connection: Connection | Edge) => boolean;
+  onConnectEnd: OnConnectEnd;
   onNodeClick: (event: unknown, node: Node) => void;
   onEdgeClick: (event: unknown, edge: Edge) => void;
   onSelectionChange: (params: OnSelectionChangeParams) => void;
@@ -602,6 +673,8 @@ function FlowCanvas({
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          isValidConnection={isValidConnection}
+          onConnectEnd={onConnectEnd}
           onNodeClick={onNodeClick}
           onEdgeClick={onEdgeClick}
           onSelectionChange={onSelectionChange}

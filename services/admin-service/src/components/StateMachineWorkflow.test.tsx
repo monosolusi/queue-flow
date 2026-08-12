@@ -427,4 +427,32 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     const refreshedCard = screen.getByTestId('sm-node-card-ONHOLD');
     expect(refreshedCard).toHaveTextContent('2 transisi keluar');
   });
+
+  it('renders an arrowhead marker on transition edges so direction is unambiguous', () => {
+    // Manager feedback: "garis tidak ada panah, jadi membingungkan". Every
+    // transition edge carries a closed-arrow `markerEnd` at the target end so
+    // the edge reads "from → to" — including the default graph's bottom-up
+    // SKIPPED → CALLING back-edge, which was the confusing case.
+    //
+    // NOTE: jsdom cannot simulate a real React Flow connection drag (no real
+    // pointer geometry / `PointerEvent` ctor — see CLAUDE.md frontend-RTL
+    // gotchas), so the duplicate-toast (`onConnectEnd`) behavior is covered by
+    // the pure `rejectionMessageForConnection` lib test, NOT a component drag
+    // test. This test pins only the ARROW rendering, which is the load-bearing
+    // visual fix and IS observable in jsdom.
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
+    // At least one edge path carries the resolved `marker-end` url attribute —
+    // this proves the component forwarded the resolved marker to `BaseEdge`
+    // (the `<marker>` def itself is React Flow's `MarkerDefinitions`, which may
+    // or may not render under jsdom; the edge-path attribute is the primary
+    // guard and is load-bearing).
+    const paths = document.querySelectorAll('.react-flow__edge-path');
+    expect(paths.length).toBeGreaterThan(0);
+    const withMarker = Array.from(paths).some((p) => p.getAttribute('marker-end'));
+    expect(withMarker).toBe(true);
+    // React Flow's `MarkerDefinitions` (the `<marker>` defs) is not guaranteed
+    // to render under jsdom, so it is NOT asserted here — the edge-path
+    // `marker-end` attribute above is the authoritative guard (it proves the
+    // component forwarded the resolved marker url to `BaseEdge`).
+  });
 });

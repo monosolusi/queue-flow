@@ -53,6 +53,30 @@ export interface FlowEdgeData {
   [key: string]: unknown;
 }
 
+/**
+ * The arrowhead config stamped on every transition edge's `markerEnd`. A closed
+ * arrow (`MarkerType.ArrowClosed`) at the TARGET end so the edge reads as
+ * "from → to" — the manager's "garis tidak ada panah, jadi membingungkan"
+ * feedback: direction was ambiguous on back-edges (e.g. the default graph's
+ * bottom-up `SKIPPED → CALLING`) and on parallel edges. The `type` literal
+ * `'arrowclosed'` is assignable to React Flow's `EdgeMarker.type`
+ * (`MarkerType | `${MarkerType}``) via the template-literal form, so this stays
+ * framework-free — NO `@xyflow/react` import (the lib must remain pure + unit-
+ * testable in isolation, like every other type here). `color` is intentionally
+ * OMITTED: React Flow then uses `defaultMarkerColor = '#b1b1b7'`, the SAME gray
+ * as the default light-mode edge stroke, so the arrow matches the edge in both
+ * QMS themes (light default / dark opt-in — `colorMode` is light-pinned). Like
+ * `sourceHandle`/`targetHandle`, `markerEnd` is CANVAS-ONLY: `flowToGraph`
+ * drops it (never reaches the wire {@link Transition}).
+ */
+export interface FlowEdgeMarker {
+  type: 'arrowclosed';
+  width?: number;
+  height?: number;
+}
+
+export const EDGE_ARROW_MARKER: FlowEdgeMarker = { type: 'arrowclosed', width: 16, height: 16 };
+
 /** A React Flow edge, structurally compatible with `@xyflow/react`'s `Edge`.
  *  `sourceHandle`/`targetHandle` reference the connection-point ids on the
  *  source/target nodes (see {@link HANDLE_IDS}). They are CANVAS-ONLY — never
@@ -69,6 +93,12 @@ export interface FlowEdge {
   data: FlowEdgeData;
   sourceHandle?: string;
   targetHandle?: string;
+  /** Closed-arrow marker at the target end so an edge reads "from → to" (manager
+   *  feedback: no arrow = confusing direction). CANVAS-ONLY — `flowToGraph` drops
+   *  it; it never reaches the wire {@link Transition}. A subtype of React Flow's
+   *  `EdgeMarker` (literal `'arrowclosed'` via `${MarkerType}`), so `FlowEdge`
+   *  stays structurally assignable to `Edge` with no cast + no framework import. */
+  markerEnd?: FlowEdgeMarker;
   selected?: boolean;
 }
 
@@ -262,6 +292,7 @@ export function formToFlow(
       // carries no handle info (canvas-only).
       sourceHandle: prev?.sourceHandle ?? DEFAULT_SOURCE_HANDLE,
       targetHandle: prev?.targetHandle ?? DEFAULT_TARGET_HANDLE,
+      markerEnd: EDGE_ARROW_MARKER,
     };
   });
   return { nodes, edges };
@@ -311,4 +342,65 @@ export function nextStateName(existing: readonly string[]): string {
   let i = 1;
   while (used.has(`STATUS_${i}`)) i++;
   return `STATUS_${i}`;
+}
+
+/**
+ * True when an edge `source → target` already exists in `edges`. The single
+ * source of truth for the duplicate-transition check shared by three sites that
+ * each must reject a re-drawn edge identically: `isValidConnection` (live,
+ * during the drag), `onConnect` (defensive — a real connection that somehow
+ * bypassed the live check), and `addTransitionButton`. The default graph's
+ * bottom-up `SKIPPED → CALLING` back-edge is a genuine duplicate when re-drawn,
+ * which is the manager's "tidak bisa tarik garis dari bottom ke up, tidak ada
+ * error" feedback: the silent guard made a no-op draw look broken. Centralizing
+ * the predicate here (framework-free, pure) keeps the decision testable in
+ * isolation — the component path (`onConnectEnd` toast) is not exercisable in
+ * jsdom (React Flow drags need real pointer geometry), so the logic it consults
+ * MUST be unit-testable on its own.
+ */
+export function isDuplicateTransition(
+  edges: readonly FlowEdge[],
+  source: string,
+  target: string,
+): boolean {
+  return edges.some((e) => e.source === source && e.target === target);
+}
+
+/**
+ * The minimal structural slice of React Flow's `FinalConnectionState` the
+ * rejection message needs. Defined locally (NOT a `@xyflow/react` type) so the
+ * lib stays framework-free; the component maps the real `connectionState` into
+ * this shape. `isValid` is `false` only when `isValidConnection` rejected the
+ * connection (React Flow's own invalid-handle case surfaces as `null`, not
+ * `false`); since our `isValidConnection` rejects ONLY duplicates, `isValid
+ * === false` ⟹ duplicate — but the predicate is re-checked so the message stays
+ * accurate even if a future rejection reason is added.
+ */
+export interface ConnectionOutcome {
+  isValid: boolean | null;
+  fromId: string | null;
+  toId: string | null;
+}
+
+/**
+ * The manager-facing message for a connection that could not be drawn, or
+ * `null` when no feedback is warranted (the connection succeeded, or was
+ * dropped in empty space with no target node, or no connection was started).
+ * Pure + framework-free so the toast decision is unit-testable in isolation
+ * (the `onConnectEnd` side effect itself is not exercisable in jsdom). Extracted
+ * from the component per SRP: the DECISION (which message, or none) is pure and
+ * tested here; the SIDE EFFECT (calling `toast.show`) stays a thin wrapper in
+ * the component.
+ */
+export function rejectionMessageForConnection(
+  outcome: ConnectionOutcome,
+  edges: readonly FlowEdge[],
+): string | null {
+  if (outcome.isValid !== false || !outcome.toId) return null;
+  const from = outcome.fromId;
+  const to = outcome.toId;
+  if (from && isDuplicateTransition(edges, from, to)) {
+    return `Transisi dari ${from} ke ${to} sudah ada.`;
+  }
+  return 'Transisi tidak dapat dibuat.';
 }
