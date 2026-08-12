@@ -37,20 +37,24 @@ describe('styles.css AC guards', () => {
     expect(rule('.connection-status--closed')).toContain('color: var(--danger-on-surface)');
   });
 
-  it('AC3: now-serving number is a one-line container-query clamp (cqw) + nowrap + a 4K media tier', () => {
-    // The card is an inline-size container so the number sizes to its panel
-    // wrapper (full-width in the flex-column model), not the viewport — the
-    // one-line guarantee.
-    expect(rule('.now-serving')).toContain('container-type: inline-size');
+  it('AC3: now-serving number is a width+height container-query clamp (cqw + cqh) + nowrap + a 4K media tier', () => {
+    // The card is a size container so the number scales to BOTH its widget
+    // wrapper width (cqw, the one-line guarantee) and its height (cqh, fits
+    // short cells such as a 1-row grid span), not the viewport.
+    expect(rule('.now-serving')).toContain('container-type: size');
     const number = rule('.now-serving__number');
-    expect(number).toContain('clamp(5rem, 18cqw, 22rem)');
+    // cqw stays the width one-line driver; the cqh cap (inside min()) also
+    // shrinks the number for short (h=1) cells so it never overflows/clips.
+    expect(number).toContain('min(18cqw, 24cqh)');
+    expect(number).toContain('cqh');
+    expect(number).toContain('18cqw');
     expect(number).toContain('white-space: nowrap');
     expect(css).toMatch(/@media\s*\(min-width:\s*2560px\)/);
     // The 4K tier also sizes to the (now wider) column and stays one line.
     const tierMatch = css.match(
       /@media\s*\(min-width:\s*2560px\)\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}/,
     );
-    expect(tierMatch?.[1]).toContain('clamp(10rem, 18cqw, 40rem)');
+    expect(tierMatch?.[1]).toContain('clamp(5rem, min(18cqw, 24cqh), 40rem)');
   });
 
   it('AC3: panel containment — now-serving + call-history allow shrinking (min-width: 0)', () => {
@@ -133,6 +137,42 @@ describe('styles.css AC guards', () => {
     expect(rule('.waiting-queue__number')).toContain('clamp(');
     expect(rule('.waiting-queue__number')).toMatch(/cqh/);
     expect(rule('.waiting-queue__item')).toMatch(/cqh/);
+  });
+
+  it('call-history scales rows to the panel height (cqh) + scrollable list (no clip)', () => {
+    // Mirrors .waiting-queue: a size container so rows scale to the panel
+    // height via cqh units — fits a short (h=1) cell without clipping.
+    const panel = rule('.call-history');
+    expect(panel).toContain('container-type: size');
+    expect(panel).toContain('display: flex');
+    expect(panel).toContain('flex-direction: column');
+    // The list is scrollable (safety-net) — never clipped/invisible.
+    const list = rule('.call-history__list');
+    expect(list).toContain('overflow-y: auto');
+    expect(list).toContain('flex: 1 1 auto');
+    expect(list).toContain('min-height: 0');
+    // Item font/padding scale to the panel height via cqh clamps.
+    expect(rule('.call-history__number')).toContain('clamp(');
+    expect(rule('.call-history__number')).toMatch(/cqh/);
+    expect(rule('.call-history__item')).toMatch(/cqh/);
+  });
+
+  it('counters-serving scales rows to the panel height (cqh) + scrollable list (no clip)', () => {
+    // Mirrors .waiting-queue/.call-history: a size container so rows scale to
+    // the panel height via cqh units — fits a short (h=1) cell without clipping.
+    const panel = rule('.counters-serving');
+    expect(panel).toContain('container-type: size');
+    expect(panel).toContain('display: flex');
+    expect(panel).toContain('flex-direction: column');
+    // The list is scrollable (safety-net) — never clipped/invisible.
+    const list = rule('.counters-serving__list');
+    expect(list).toContain('overflow-y: auto');
+    expect(list).toContain('flex: 1 1 auto');
+    expect(list).toContain('min-height: 0');
+    // Item font/padding scale to the panel height via cqh clamps.
+    expect(rule('.counters-serving__number')).toContain('clamp(');
+    expect(rule('.counters-serving__number')).toMatch(/cqh/);
+    expect(rule('.counters-serving__item')).toMatch(/cqh/);
   });
 
   it('tv-board__grid is a 12-column CSS grid (replaces the old 1D flex-column of panels)', () => {
