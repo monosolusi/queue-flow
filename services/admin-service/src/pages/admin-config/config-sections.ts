@@ -4,9 +4,11 @@
  * scrolls a single long form. Each section with a save button calls the same
  * full-payload `PUT /api/system/config` save (unchanged sections pass through);
  * the `manual` section has no save button (its two operations are separate
- * POSTs). `SectionId` doubles as the nav-item key and the `role="tab"` id
- * suffix; the nav component derives `aria-controls`/`aria-labelledby` pairs from
- * it. See `ConfigSectionNav.tsx`.
+ * POSTs), and the `state-machine` section has no save button either — it is a
+ * read-only summary + launcher whose edit+save lives on the dedicated
+ * `/config/alur-status` designer. `SectionId` doubles as the nav-item key and
+ * the `role="tab"` id suffix; the nav component derives
+ * `aria-controls`/`aria-labelledby` pairs from it. See `ConfigSectionNav.tsx`.
  *
  * The TV-display settings no longer live here — they moved to the dedicated
  * `/tv-layout` page (a 12-column grid editor with a component palette). The
