@@ -966,14 +966,20 @@ fieldset {
   gap: 0.4rem;
   flex-wrap: wrap;
 }
+/* Geometry (padding, font-size, font-weight, border-radius) is INHERITED from
+   the shared `.btn` baseline so the presets sit at the SAME height as the
+   "Ekspor .xlsx" (`.btn--primary`) and "Lihat log audit" (`.btn--secondary`)
+   action buttons in the same actions row — one `.btn` family, no hand-rolled
+   compact box (manager feedback: the preset bar looked like a different
+   component from the action buttons). `min-height` stays as the AC5 44px floor
+   (the `.btn` base padding already exceeds it). Only the outlined-toggle
+   treatment (border + transparent fill) is local — a variant, like
+   `.btn--ghost`, not a parallel button box. */
 .relative-range__btn {
   min-height: 2.75rem;
-  padding: 0.5rem 0.85rem;
   border: 1px solid var(--surface-2);
-  border-radius: var(--radius);
   background: transparent;
   color: var(--text);
-  font-size: 0.9rem;
 }
 .relative-range__btn:hover {
   background: var(--surface-2);
@@ -1476,6 +1482,16 @@ fieldset {
   overflow: hidden;
   text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
+}
+/* Center the "–" between the two dates (manager feedback: the dash looked
+   cramped against the "to" date — "mepet"). Both sides are `flex: 1 1 0`
+   (equal width); with the default left alignment the from-date hugged the
+   trigger's left edge and the dash pooled all the trailing space on one side,
+   gluing it to the to-date. Right-aligning the from-date makes it hug the
+   dash from the left; the to-date stays left-aligned (default), hugging from
+   the right — so the dash sits in the middle with balanced spacing. */
+.date-range-field__from {
+  text-align: right;
 }
 /* Empty sides show their placeholder ("Dari" / "Sampai") as muted. */
 .date-range-field__from--placeholder,
