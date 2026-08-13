@@ -291,11 +291,53 @@
 
 /* --- Connection handles -----------------------------------------------------
    Eight per node (source + target on every side) so a transition edge can be
-   drawn in any direction. CSS-hidden until the node is hovered or selected —
-   40 visible dots for the 5-state default graph was too loud. Shrunk to 7px
-   with a neutral fill + accent ring; the dot reads against the node and the
-   ring ties it to the brand. Non-connectable handles (default/read-only mode)
-   are hidden by React Flow so the read-only board stays clean. */
+   drawn in any direction. Shrunk to 7px with a neutral fill + accent ring; the
+   dot reads against the node and the ring ties it to the brand.
+
+   Discoverability + touch (manager feedback: "selalu tidak bisa menghubungkan
+   dari status kustom / status yang sudah ada ke yang lain"). The handles used to
+   be fully hidden until the node was hovered or selected — a reaction to "40
+   visible dots for the 5-state default graph was too loud". But that hid the
+   drag-from points at rest AND, critically, the drop-target points WHILE a
+   connection was being dragged: React Flow stamps `connectionindicator` on every
+   valid end handle during a drag, yet the CSS kept them at `opacity: 0`, so the
+   manager dragged blind and could not see where to drop. On a touch screen the
+   7px dot was on top of that un-hittable. The canvas drag looked permanently
+   broken — "tidak ada error, tidak tahu kenapa".
+
+   The fix is a three-tier visibility keyed on React Flow's own handle classes:
+     - `connectable` (custom mode only — default/read-only mode has no
+       `connectable` class, so the read-only board stays clean).
+     - `connectablestart` — the SOURCE handles (the drag-from points). React
+       Flow stamps it from `isConnectableStart`; present on the four source
+       handles whether or not a connection is in progress.
+     - `connectionindicator` — React Flow stamps it on the SOURCE handles at
+       rest AND on every valid drop-TARGET handle while a drag is in progress
+       (see `connectionindicator: isConnectable && (!connectionInProcess ||
+       isPossibleEndHandle) && (… ? isConnectableEnd : isConnectableStart)` in
+       @xyflow/react). So `.connectionindicator:not(.connectablestart)` is exactly
+       "a drop-target handle lit up during an active connection".
+
+   Tiers (specificity rises with intent, so the active state always wins):
+     - base `.react-flow__handle` (0-2-0): hidden — default mode has no
+       `connectable` class so its handles stay hidden here too.
+     - `.react-flow__handle.connectable.connectablestart` (0-4-0): at rest, the
+       SOURCE handles (drag-from points) are subtly visible (opacity 0.5) so the
+       manager can find where to START a transition. TARGET handles have no
+       `connectablestart` and stay hidden at rest — they are drop points, only
+       relevant while a connection is in progress.
+     - `.node:hover`/`.node.selected` of a `.connectable` handle (0-5-0 —
+       `.react-flow__node` is a class and `:hover`/`.selected` are class-level),
+       `.connectable.connectingfrom` (0-4-0), and
+       `.connectable.connectionindicator:not(.connectablestart)` (0-5-0 — `:not()`
+       contributes its argument): full opacity. The dragged source handle + every
+       valid drop-target handle light up so the manager SEES where to drop.
+       hover/selected and the drop-target reveal BEAT the at-rest rule by higher
+       specificity (0-5-0 > 0-4-0); only `.connectingfrom` TIES it (0-4-0) and so
+       relies on coming textually AFTER the at-rest rule (source order). The
+       `.connectable` gate on hover/selected is NOT for the specificity tie — it
+       keeps hover/selected out of default/read-only mode, which has no
+       `connectable` class (so its handles stay hidden at base 0-2-0). */
 .sm-canvas .react-flow__handle {
   width: 7px;
   height: 7px;
@@ -306,11 +348,48 @@
   opacity: 0;
   transition: opacity 0.15s ease;
 }
+/* Enlarged transparent hit area so a 7px dot is grabbable on a touch screen.
+   The pseudo-element inherits the handle's `pointer-events` (React Flow sets
+   `pointer-events: all` via `.connectionindicator`/`.connectingfrom`, `none`
+   otherwise), so it is interactive ONLY when the handle is connectable — a
+   non-connectable / default-mode handle stays non-interactive. A pseudo-element
+   cannot be an event target itself; pointer events over it dispatch to the
+   originating handle, so React Flow's drag listeners fire across the whole
+   enlarged area. */
+.sm-canvas .react-flow__handle::before {
+  content: '';
+  position: absolute;
+  inset: -14px;
+  border-radius: 50%;
+}
 .sm-canvas .react-flow__handle.connectable {
   cursor: crosshair;
 }
-.sm-canvas .react-flow__node:hover .react-flow__handle,
-.sm-canvas .react-flow__node.selected .react-flow__handle {
+/* At rest, the connectable SOURCE handles (drag-from points) are subtly visible
+   so the manager can find where to start a transition. TARGET handles stay
+   hidden (no `connectablestart`) — they are drop points, lit up below only while
+   a connection is in progress. */
+.sm-canvas .react-flow__handle.connectable.connectablestart {
+  opacity: 0.5;
+}
+/* Full opacity on hover/selected (precise desktop dragging) and during an active
+   connection: the dragged source handle (`.connectingfrom`) + every valid
+   drop-target handle (`.connectionindicator` without `connectablestart`). The
+   drop targets lighting up is the core fix — the manager can finally SEE where
+   to drop, on mouse OR touch.
+
+   Specificity: the at-rest `.connectable.connectablestart` rule is (0,4,0).
+   hover/selected (`.node` class + `:hover`/`.selected` + `.handle` + `.connectable`)
+   and the drop-target reveal (`:not()` contributes its argument) are both (0,5,0) —
+   they BEAT the at-rest rule by higher specificity, so their textual order vs. the
+   at-rest rule does not matter. `.connectingfrom` is (0,4,0) — it TIES the at-rest
+   rule, so it relies on this rule coming textually AFTER it (source order) to win.
+   The `.connectable` gate on hover/selected is NOT for the specificity tie; it
+   excludes default/read-only-mode handles (no `connectable` class → base 0-2-0). */
+.sm-canvas .react-flow__node:hover .react-flow__handle.connectable,
+.sm-canvas .react-flow__node.selected .react-flow__handle.connectable,
+.sm-canvas .react-flow__handle.connectable.connectingfrom,
+.sm-canvas .react-flow__handle.connectable.connectionindicator:not(.connectablestart) {
   opacity: 1;
 }
 /* Keep the connection-line + selected-edge accents on-brand too. */
