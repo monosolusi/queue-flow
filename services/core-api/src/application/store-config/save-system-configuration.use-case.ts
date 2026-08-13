@@ -13,6 +13,7 @@ import { ServiceThemes, type ServiceThemesMap } from '../../domain/store-config'
 import { TvPanelLayout, type TvGridLayout } from '../../domain/store-config';
 import { EdgeRoutingLayout, type EdgeRoutingLayoutDto } from '../../domain/store-config';
 import { NodePositions, type NodePositionsDto } from '../../domain/store-config';
+import { NodeActions, type NodeActionsDto } from '../../domain/store-config';
 import { PrinterConfiguration, type PrinterConfigurationDto } from '../../domain/store-config';
 import { type IDailyResetSchedulerPort } from '../../domain/store-config';
 import {
@@ -106,6 +107,16 @@ export interface SaveSystemConfigurationCommand {
    *  present-but-invalid entry (non-finite x/y). Not change-gated (like
    *  `edgeRoutingLayout`/`brandColor`/`serviceThemes`/`tvPanelLayout`). */
   readonly nodePositions: NodePositionsDto;
+  /** Per-state Kaleo-style node-level actions for the admin state-machine
+   *  editor (keyed map "stateName" -> NodeActionProps[]). Decoupled from
+   *  transitions (Kaleo parity): an action is a node-level
+   *  `{ executionType, type, value }` triple, NOT a per-edge `{label, target}`.
+   *  Required on the wire; the VO recovers a null/undefined to the empty default
+   *  (no node-level actions) and rejects a present-but-invalid entry (non-array
+   *  value, bad `executionType`/`type` enum, non-string/empty `value`). Not
+   *  change-gated (like `nodePositions`/`edgeRoutingLayout`/`brandColor`).
+   *  Not audited (admin-only config, not in the NFR-SEC-02 list). */
+  readonly nodeActions: NodeActionsDto;
   /** Printer configuration (which printer the kiosk uses — Chrome's default
    *  dialog, or a network ESC/POS printer proxied through core-api over raw
    *  TCP). Required on the wire; the VO recovers a null/undefined to the chrome
@@ -125,6 +136,7 @@ export interface SaveSystemConfigurationResult {
   readonly tvPanelLayout: TvGridLayout;
   readonly edgeRoutingLayout: EdgeRoutingLayoutDto;
   readonly nodePositions: NodePositionsDto;
+  readonly nodeActions: NodeActionsDto;
   readonly printerConfiguration: PrinterConfigurationDto;
 }
 
@@ -257,6 +269,10 @@ export class SaveSystemConfigurationUseCase {
     // no post-commit side-effect. Validated pre-tx so a malformed map (non-object
     // value, non-finite x/y) fails fast.
     const nodePositions = NodePositions.of(command.nodePositions);
+    // Per-state node actions — same shape: pure admin config, not change-gated,
+    // no post-commit side-effect. Validated pre-tx so a malformed map (non-array
+    // value, bad executionType/type enum, non-string/empty value) fails fast.
+    const nodeActions = NodeActions.of(command.nodeActions);
     // Printer configuration — same shape: pure operational config, not
     // change-gated, no post-commit side-effect. Validated pre-tx so a malformed
     // printer config (bad mode/paperWidth/cutMode enum, non-integer port,
@@ -292,6 +308,28 @@ export class SaveSystemConfigurationUseCase {
         throw new InvalidValueObjectException(
           `node positions key '${key}' is not a state in the active state machine`,
         );
+      }
+    }
+    // State-membership + value-membership cross-check (anti-corruption): the VO
+    // stays free of a `StateMachine` dependency (DIP), so it cannot validate that
+    // an action-map key (or an `UPDATE_STATUS` action's `value`) corresponds to a
+    // real state. That check belongs here, in the use case, which already built
+    // the state machine. Keys are state names, and a `UPDATE_STATUS` action's
+    // `value` is also a state name, so both must be ⊆ the active state-schema
+    // STATES. Done pre-tx so an illegal action map fails fast (NFR-REL-02 — no
+    // illegal action map burns a write). Mirrors the `nodePositions` cross-check.
+    for (const key of nodeActions.keys()) {
+      if (!stateNames.has(key)) {
+        throw new InvalidValueObjectException(
+          `node actions key '${key}' is not a state in the active state machine`,
+        );
+      }
+      for (const action of nodeActions.actionsFor(key)) {
+        if (action.type === 'UPDATE_STATUS' && !stateNames.has(action.value)) {
+          throw new InvalidValueObjectException(
+            `node actions['${key}'].value '${action.value}' is not a state in the active state machine`,
+          );
+        }
       }
     }
 
@@ -339,6 +377,7 @@ export class SaveSystemConfigurationUseCase {
         tvPanelLayout,
         edgeRoutingLayout,
         nodePositions,
+        nodeActions,
         printerConfiguration,
       });
       system.completeInitialSetup(); // idempotent — validates store name, flips the flag
@@ -392,6 +431,7 @@ export class SaveSystemConfigurationUseCase {
         tvPanelLayout: system.tvPanelLayout.toDto(),
         edgeRoutingLayout: system.edgeRoutingLayout.toDto(),
         nodePositions: system.nodePositions.toDto(),
+        nodeActions: system.nodeActions.toDto(),
         printerConfiguration: system.printerConfiguration.toDto(),
       };
     });

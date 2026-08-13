@@ -161,6 +161,39 @@ export interface NodePosition {
  */
 export type NodePositionsDto = Record<string, NodePosition>;
 
+/**
+ * When a node-level action executes (Kaleo execution-type, closed enum).
+ * `ON_ENTRY` fires on entering the status; `ON_EXIT` fires on leaving it.
+ * Mirrors core-api's `NodeActionExecutionType` VO.
+ */
+export type NodeActionExecutionType = 'ON_ENTRY' | 'ON_EXIT';
+/**
+ * What a node-level action does (closed enum — the only QMS action semantic
+ * today; widening is a future PR). Mirrors core-api's `NodeActionType` VO.
+ */
+export type NodeActionType = 'UPDATE_STATUS';
+/**
+ * One Kaleo-style node-level action, NOT linked to any transition edge. An
+ * `UPDATE_STATUS` action sets the ticket status to `value` (a state name).
+ * Mirrors core-api's `NodeActionProps` VO.
+ */
+export interface NodeActionDto {
+  readonly executionType: NodeActionExecutionType;
+  readonly type: NodeActionType;
+  readonly value: string;
+}
+/**
+ * Persisted node-level actions keyed by state name (Kaleo parity). An admin-
+ * only config concern — NOT consumed by caller/tv/kiosk (ISP). Mirrors core-
+ * api's `NodeActions` VO + the `nodePositions` field-for-field precedent:
+ * keyed by state name so a rename moves the key (the form helpers
+ * `updateState`/`removeState` keep the map consistent). `{}` means "no node-
+ * level actions" (the default — the manager adds them on the properties
+ * panel). Not change-gated for audit (an appearance/config concern, like
+ * {@link NodePositionsDto} / {@link EdgeRoutingLayoutDto} / `brandColor`).
+ */
+export type NodeActionsDto = Record<string, NodeActionDto[]>;
+
 /** How the kiosk produces a thermal-printer receipt. `chrome` prints via the
  *  browser's print dialog (the default — zero setup, uses the manager's
  *  Chrome print settings); `network-escpos` streams raw ESC/POS bytes over TCP
@@ -259,6 +292,11 @@ export interface SystemConfigurationDto {
    *  the deterministic autoLayout); `toForm` keeps a defensive `?? {}`
    *  coercion (belt-and-suspenders, same as `edgeRoutingLayout`). */
   readonly nodePositions: NodePositionsDto;
+  /** Node-level actions keyed by state name (Kaleo parity, admin-only config).
+   *  Always present — the backend defaults to `{}` (no node-level actions);
+   *  `toForm` keeps a defensive `?? {}` coercion (belt-and-suspenders, same as
+   *  `nodePositions`). */
+  readonly nodeActions: NodeActionsDto;
   /** Printer configuration for the kiosk receipt printer. Always present — the
    *  backend defaults to {@link DEFAULT_PRINTER_CONFIGURATION} so a store that
    *  never configures the printer keeps the chrome default (zero behavior
@@ -313,6 +351,10 @@ export interface SaveSystemConfigurationPayload {
    *  source of truth for positions now and always sends the map, built by
    *  `toNodePositionsDto`; `{}` when the canvas was never customized). */
   readonly nodePositions: NodePositionsDto;
+  /** Node-level actions keyed by state name (REQUIRED on the PUT — the client
+   *  is the source of truth for node actions now and always sends the map,
+   *  built by `toNodeActionsDto`; `{}` when no node-level actions were added). */
+  readonly nodeActions: NodeActionsDto;
   /** Printer configuration — REQUIRED on the PUT (the client is the source of
    *  truth for the printer mode + settings); the dedicated `/printer-config`
    *  page edits it, every other full-save site passes it through unchanged. */
@@ -334,6 +376,10 @@ export interface SaveSystemConfigurationResult {
    *  ignores the result body and re-GETs, so this is not load-bearing; kept
    *  for contract completeness (mirrors `edgeRoutingLayout`). */
   readonly nodePositions: NodePositionsDto;
+  /** Always echoed by the backend (mirrors the persisted map). The save path
+   *  ignores the result body and re-GETs, so this is not load-bearing; kept
+   *  for contract completeness (mirrors `nodePositions`). */
+  readonly nodeActions: NodeActionsDto;
   /** Always echoed by the backend (the save result mirrors the persisted config).
    *  The save path ignores the result body and re-GETs, so this is not
    *  load-bearing; kept for contract completeness (mirrors `nodePositions`). */
@@ -388,6 +434,14 @@ export const DEFAULT_EDGE_ROUTING_LAYOUT: EdgeRoutingLayoutDto = {};
  * mirroring {@link DEFAULT_EDGE_ROUTING_LAYOUT}).
  */
 export const DEFAULT_NODE_POSITIONS: NodePositionsDto = {};
+
+/**
+ * Empty node-actions map — "no node-level actions". Matches the backend
+ * `NodeActions.DEFAULT` so a store that never adds node actions keeps the
+ * empty default (zero behavior change, mirroring
+ * {@link DEFAULT_NODE_POSITIONS}).
+ */
+export const DEFAULT_NODE_ACTIONS: NodeActionsDto = {};
 
 /**
  * The default printer configuration — chrome (browser print dialog), 80mm

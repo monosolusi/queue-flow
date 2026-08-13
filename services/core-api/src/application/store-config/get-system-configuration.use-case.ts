@@ -8,6 +8,7 @@ import { ServiceThemes, type ServiceThemesMap } from '../../domain/store-config'
 import { TvPanelLayout, type TvGridLayout } from '../../domain/store-config';
 import { EdgeRoutingLayout, type EdgeRoutingLayoutDto } from '../../domain/store-config';
 import { NodePositions, type NodePositionsDto } from '../../domain/store-config';
+import { NodeActions, type NodeActionsDto } from '../../domain/store-config';
 import { PrinterConfiguration, type PrinterConfigurationDto } from '../../domain/store-config';
 import type { PriorityPolicy } from '../../domain/shared';
 
@@ -73,6 +74,9 @@ export interface SystemConfigurationDto {
   /** Per-state node x/y positions for the admin state-machine visual editor
    *  (keyed map "stateName" -> { x, y }). */
   readonly nodePositions: NodePositionsDto;
+  /** Per-state Kaleo-style node-level actions for the admin state-machine editor
+   *  (keyed map "stateName" -> NodeActionProps[]). Decoupled from transitions. */
+  readonly nodeActions: NodeActionsDto;
   /** Printer configuration (which printer the kiosk uses — Chrome's default
    *  dialog, or a network ESC/POS printer proxied through core-api over raw
    *  TCP). */
@@ -158,6 +162,10 @@ export class GetSystemConfigurationUseCase {
         // so a clean store prefills the admin state-machine editor with the
         // auto-laid-out canvas (no saved positions).
         nodePositions: NodePositions.DEFAULT.toDto(),
+        // Default node actions — empty map = no node-level actions, so a clean
+        // store prefills the admin state-machine editor with action-less nodes
+        // (Kaleo-style actions are admin-only config, decoupled from transitions).
+        nodeActions: NodeActions.DEFAULT.toDto(),
         // Default printer configuration — chrome mode = zero behavior change
         // (the kiosk keeps using Chrome's print dialog), so a clean store
         // prefills the admin printer section with the existing chrome behavior.
@@ -181,6 +189,7 @@ export class GetSystemConfigurationUseCase {
       tvPanelLayout: system.tvPanelLayout.toDto(),
       edgeRoutingLayout: system.edgeRoutingLayout.toDto(),
       nodePositions: system.nodePositions.toDto(),
+      nodeActions: system.nodeActions.toDto(),
       printerConfiguration: system.printerConfiguration.toDto(),
       categories: allCategories
         .slice()

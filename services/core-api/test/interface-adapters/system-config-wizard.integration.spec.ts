@@ -66,6 +66,7 @@ function wizardPayload() {
     ],
     edgeRoutingLayout: {},
     nodePositions: {},
+    nodeActions: {},
     printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
   };
 }
@@ -409,5 +410,86 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
     // None of the rejected payloads silently completed setup.
     const cfg = await request(app.getHttpServer()).get('/api/system/config');
     expect(cfg.body.isInitialSetupCompleted).toBe(false);
+  });
+
+  it('PUT with a missing nodeActions field is 400, not 500 (boundary presence guard)', async () => {
+    // nodeActions is now a required top-level field — a missing one must 400
+    // (not 500 when the use case dereferences `undefined`).
+    const { nodeActions: _omit, ...bad } = wizardPayload();
+    const res = await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad);
+    expect(res.status).toBe(400);
+    const cfg = await request(app.getHttpServer()).get('/api/system/config');
+    expect(cfg.body.isInitialSetupCompleted).toBe(false);
+  });
+
+  it('PUT with a malformed nodeActions (non-object / non-array entry / non-string field) is 400 (boundary nested-shape guard)', async () => {
+    // nodeActions present but a string → top-level shape guard (object).
+    const bad1 = wizardPayload() as unknown as Record<string, unknown>;
+    bad1.nodeActions = 'not-an-object';
+    expect(
+      (await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad1)).status,
+    ).toBe(400);
+
+    // nodeActions entry value not an array → nested-shape guard (would
+    // TypeError in the VO's `Array.isArray`/iteration before a clean throw).
+    const bad2 = wizardPayload() as unknown as Record<string, unknown>;
+    bad2.nodeActions = { WAITING: 'not-an-array' };
+    expect(
+      (await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad2)).status,
+    ).toBe(400);
+
+    // nodeActions action element non-object → nested-shape guard.
+    const bad3 = wizardPayload() as unknown as Record<string, unknown>;
+    bad3.nodeActions = { WAITING: ['not-an-object'] };
+    expect(
+      (await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad3)).status,
+    ).toBe(400);
+
+    // nodeActions action field non-string (executionType) → nested-shape guard
+    // (a non-string enum would TypeError in the VO's `includes` check before
+    // it can throw a clean InvalidValueObjectException).
+    const bad4 = wizardPayload() as unknown as Record<string, unknown>;
+    bad4.nodeActions = { WAITING: [{ executionType: 5, type: 'UPDATE_STATUS', value: 'CALLING' }] };
+    expect(
+      (await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad4)).status,
+    ).toBe(400);
+
+    // nodeActions action field non-string (value) → nested-shape guard.
+    const bad5 = wizardPayload() as unknown as Record<string, unknown>;
+    bad5.nodeActions = { WAITING: [{ executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 5 }] };
+    expect(
+      (await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad5)).status,
+    ).toBe(400);
+
+    // None of the rejected payloads silently completed setup.
+    const cfg = await request(app.getHttpServer()).get('/api/system/config');
+    expect(cfg.body.isInitialSetupCompleted).toBe(false);
+  });
+
+  it('PUT with a nodeActions value that is not a state is 400 (cross-check, INVALID_VALUE_OBJECT)', async () => {
+    // WAITING is a real state, but the action target NOPE is not — the use-case
+    // value-membership cross-check throws InvalidValueObjectException → 400.
+    const bad = wizardPayload() as unknown as Record<string, unknown>;
+    bad.nodeActions = { WAITING: [{ executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'NOPE' }] };
+    const res = await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad);
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_VALUE_OBJECT');
+    const cfg = await request(app.getHttpServer()).get('/api/system/config');
+    expect(cfg.body.isInitialSetupCompleted).toBe(false);
+  });
+
+  it('PUT saves nodeActions and a re-GET returns them (round-trip, Kaleo parity)', async () => {
+    const actions = {
+      WAITING: [{ executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'CALLING' }],
+      CALLING: [{ executionType: 'ON_EXIT', type: 'UPDATE_STATUS', value: 'COMPLETED' }],
+    };
+    const payload = wizardPayload() as unknown as Record<string, unknown>;
+    payload.nodeActions = actions;
+    const res = await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(payload);
+    expect(res.status).toBe(200);
+    expect(res.body.nodeActions).toEqual(actions);
+
+    const cfg = await request(app.getHttpServer()).get('/api/system/config');
+    expect(cfg.body.nodeActions).toEqual(actions);
   });
 });

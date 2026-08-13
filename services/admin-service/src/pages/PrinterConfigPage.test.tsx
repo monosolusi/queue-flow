@@ -47,7 +47,7 @@ function configuredStore(
     serviceThemes: { ...DEFAULT_SERVICE_THEMES },
     tvPanelLayout: DEFAULT_TV_GRID_LAYOUT.map((w) => ({ ...w })),
     edgeRoutingLayout: {},
-    nodePositions: {},
+    nodePositions: {}, nodeActions: {},
     printerConfiguration: { ...DEFAULT_PRINTER_CONFIGURATION },
     ...overrides,
   };
@@ -67,7 +67,7 @@ function makeApi(
           serviceThemes: payload.serviceThemes,
           tvPanelLayout: payload.tvPanelLayout,
           edgeRoutingLayout: {},
-          nodePositions: {},
+          nodePositions: {}, nodeActions: {},
           printerConfiguration: payload.printerConfiguration,
         })),
   );

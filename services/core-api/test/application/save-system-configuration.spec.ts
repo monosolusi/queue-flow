@@ -8,6 +8,7 @@ import {
   DailyResetMode,
   SystemConfigurationChangedEvent,
   EdgeRoutingLayout,
+  NodeActions,
   NodePositions,
   PrinterConfiguration,
 } from '../../src/domain/store-config';
@@ -74,6 +75,7 @@ describe('SaveSystemConfigurationUseCase — category id preservation (QUE-24)',
       ],
       edgeRoutingLayout: {},
       nodePositions: {},
+      nodeActions: {},
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
       actor: 'admin',
     };
@@ -196,6 +198,7 @@ describe('SaveSystemConfigurationUseCase — brandColor (QUE-36)', () => {
       ],
       edgeRoutingLayout: {},
       nodePositions: {},
+      nodeActions: {},
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
       actor: 'admin',
     };
@@ -319,6 +322,7 @@ describe('SaveSystemConfigurationUseCase — SYSTEM_CONFIG_CHANGED broadcast (FR
       ],
       edgeRoutingLayout: {},
       nodePositions: {},
+      nodeActions: {},
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
       actor: 'admin',
     };
@@ -431,6 +435,7 @@ describe('SaveSystemConfigurationUseCase — edgeRoutingLayout', () => {
       ],
       edgeRoutingLayout: edgeRoutingLayout as SaveSystemConfigurationCommand['edgeRoutingLayout'],
       nodePositions: {},
+      nodeActions: {},
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
       actor: 'admin',
     };
@@ -578,6 +583,7 @@ describe('SaveSystemConfigurationUseCase — nodePositions', () => {
       ],
       edgeRoutingLayout: {},
       nodePositions: nodePositions as SaveSystemConfigurationCommand['nodePositions'],
+      nodeActions: {},
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
       actor: 'admin',
     };
@@ -718,6 +724,7 @@ describe('SaveSystemConfigurationUseCase — printerConfiguration', () => {
       ],
       edgeRoutingLayout: {},
       nodePositions: {},
+      nodeActions: {},
       printerConfiguration: printer as unknown as SaveSystemConfigurationCommand['printerConfiguration'],
       actor: 'admin',
     };
@@ -781,5 +788,179 @@ describe('SaveSystemConfigurationUseCase — printerConfiguration', () => {
     ).rejects.toThrow(InvalidValueObjectException);
     // Nothing persisted — fail-fast happened before the tx opened.
     expect(await repos.config.get()).toBeNull();
+  });
+});
+
+/**
+ * Node actions persistence (per-state Kaleo-style node-level action map for the
+ * admin state-machine editor). `nodeActions` is a required field on the save
+ * command; the use case validates it pre-tx (fail-fast — a malformed map never
+ * acquires a transaction), performs the state-membership + value-membership
+ * cross-check (anti-corruption: the VO stays free of a StateMachine
+ * dependency), and the persisted aggregate carries it through. The result
+ * echoes the stored map back to the caller. The cross-check is against the
+ * state-schema STATES (both the action-map key AND an `UPDATE_STATUS` action's
+ * `value` must be a state — the latter is the Kaleo "Update Status → X" target).
+ */
+describe('SaveSystemConfigurationUseCase — nodeActions', () => {
+  function buildUseCase() {
+    return {
+      config: new InMemorySystemConfigurationRepository(),
+      categories: new InMemoryCategoryRepository(),
+      routingRules: new InMemoryCounterRoutingRuleRepository(),
+    };
+  }
+
+  function command(nodeActions: Record<string, unknown>): SaveSystemConfigurationCommand {
+    return {
+      storeName: 'Toko Brand',
+      stateMachine: projectStateMachine(StateMachine.DEFAULT),
+      dailyReset: {
+        mode: DailyResetMode.MANUAL,
+        cronExpression: null,
+        resetTicketNumberTo: 1,
+        archivePreviousDayData: true,
+      },
+      categories: [{ code: 'A', name: 'Customer Service' }],
+      routingRules: [
+        {
+          counterId: 1,
+          counterName: 'Loket 1',
+          assignedCategoryCodes: ['A'],
+          priorityPolicy: PriorityPolicy.FIFO_GLOBAL,
+        },
+      ],
+      brandColor: '#2563eb',
+      serviceThemes: { kiosk: 'light', tv: 'light', caller: 'light', admin: 'light' },
+      tvPanelLayout: [
+        { id: 'nowServing', component: 'nowServing', x: 0, y: 0, w: 12, h: 4 },
+        { id: 'waitingQueue', component: 'waitingQueue', x: 0, y: 4, w: 6, h: 3 },
+        { id: 'callHistory', component: 'callHistory', x: 6, y: 4, w: 6, h: 3 },
+        { id: 'countersServing', component: 'countersServing', x: 0, y: 7, w: 12, h: 3 },
+        { id: 'runningText', component: 'runningText', x: 0, y: 10, w: 12, h: 1 },
+      ],
+      edgeRoutingLayout: {},
+      nodePositions: {},
+      nodeActions: nodeActions as SaveSystemConfigurationCommand['nodeActions'],
+      printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
+      actor: 'admin',
+    };
+  }
+
+  it('persists a non-empty nodeActions and echoes it in the result', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    const actions = {
+      WAITING: [{ executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'CALLING' }],
+      CALLING: [{ executionType: 'ON_EXIT', type: 'UPDATE_STATUS', value: 'COMPLETED' }],
+    };
+    const result = await useCase.execute(command(actions));
+
+    expect(result.nodeActions).toEqual(actions);
+    const saved = await repos.config.get();
+    expect(saved!.nodeActions.toDto()).toEqual(actions);
+  });
+
+  it('round-trips a re-GET via the aggregate (actions preserved)', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    const actions = {
+      WAITING: [
+        { executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'CALLING' },
+        { executionType: 'ON_EXIT', type: 'UPDATE_STATUS', value: 'SERVING' },
+      ],
+    };
+    await useCase.execute(command(actions));
+
+    const saved = await repos.config.get();
+    expect(saved!.nodeActions.toDto()).toEqual(actions);
+  });
+
+  it('rejects a nodeActions key that is not a state in the active state machine (cross-check, NFR-REL-02)', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    // NOPE is not a state in the default state machine — the cross-check must
+    // throw InvalidValueObjectException pre-tx.
+    await expect(
+      useCase.execute(
+        command({ NOPE: [{ executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'CALLING' }] }),
+      ),
+    ).rejects.toThrow(InvalidValueObjectException);
+    // Nothing persisted — fail-fast happened before the tx opened.
+    expect(await repos.config.get()).toBeNull();
+  });
+
+  it('rejects an UPDATE_STATUS value that is not a state in the active state machine (cross-check, NFR-REL-02)', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    // WAITING is a real state, but the action target ALSO_NOPE is not — the
+    // value-membership cross-check must throw InvalidValueObjectException pre-tx.
+    await expect(
+      useCase.execute(
+        command({ WAITING: [{ executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'ALSO_NOPE' }] }),
+      ),
+    ).rejects.toThrow(InvalidValueObjectException);
+    expect(await repos.config.get()).toBeNull();
+  });
+
+  it('rejects a non-array entry value pre-tx with InvalidValueObjectException (VO of())', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    await expect(
+      useCase.execute(command({ WAITING: 'not-an-array' })),
+    ).rejects.toThrow(InvalidValueObjectException);
+    expect(await repos.config.get()).toBeNull();
+  });
+
+  it('accepts an empty nodeActions (no node-level actions)', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    const result = await useCase.execute(command({}));
+    expect(result.nodeActions).toEqual({});
+    const saved = await repos.config.get();
+    expect(saved!.nodeActions.toDto()).toEqual({});
+    expect(saved!.nodeActions.equals(NodeActions.DEFAULT)).toBe(true);
   });
 });

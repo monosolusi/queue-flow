@@ -9,6 +9,7 @@ import {
   ServiceThemes,
   TvPanelLayout,
   EdgeRoutingLayout,
+  NodeActions,
   NodePositions,
   PrinterConfiguration,
   StateMachine,
@@ -99,6 +100,7 @@ describe('StateTransitionValidator (active-policy resolver — QUE-10 AC#1)', ()
       tvPanelLayout: TvPanelLayout.DEFAULT,
       edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
       nodePositions: NodePositions.DEFAULT,
+      nodeActions: NodeActions.DEFAULT,
       printerConfiguration: PrinterConfiguration.DEFAULT,
     });
     await config.save(system);

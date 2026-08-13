@@ -38,6 +38,7 @@ import {
   isDefaultGraph,
   mergeEdgeSides,
   toEdgeRoutingLayoutDto,
+  toNodeActionsDto,
   toNodePositionsDto,
   toStateMachineDto,
   validateCustomStateMachine,
@@ -379,6 +380,10 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
         // positions. The wizard uses the form-based StateMachineEditor (no
         // canvas), so positions stay `{}` for a first-run store.
         const smPositions = config.nodePositions ?? {};
+        // Node actions are payload-only passthrough on the wizard (the wizard
+        // uses the form-based StateMachineEditor with no Aksi UI), exactly like
+        // `tvPanelLayout`/`printerConfiguration`. Coerce defensively.
+        const smNodeActions = config.nodeActions ?? {};
         setForm({
           storeName: config.storeName,
           brandColor: config.brandColor || DEFAULT_BRAND_COLOR,
@@ -408,6 +413,7 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
             states: [...config.stateMachine.states],
             transitions: smMergedTransitions,
             positions: smPositions,
+            nodeActions: smNodeActions,
           },
           dailyReset: {
             mode: config.dailyResetPolicy.mode,
@@ -591,6 +597,9 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
         // canvas positions).
         edgeRoutingLayout: toEdgeRoutingLayoutDto(form.stateMachine),
         nodePositions: toNodePositionsDto(form.stateMachine),
+        // Node actions — payload-only passthrough on the wizard (no Aksi UI);
+        // `{}` for a first-run store (mirrors `nodePositions`).
+        nodeActions: toNodeActionsDto(form.stateMachine),
         dailyReset: {
           mode: form.dailyReset.mode,
           cronExpression: form.dailyReset.mode === 'AUTOMATIC_CRON' ? form.dailyReset.cronExpression : null,

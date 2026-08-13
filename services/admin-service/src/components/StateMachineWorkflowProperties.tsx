@@ -121,33 +121,38 @@ export function StateMachineWorkflowProperties({
     }
     const name = selectedNode.data.name;
     const description = describeState(form, name);
-    // The node's OUTGOING transitions — reframed Kaleo-style as "Aksi" (the
-    // action type) + "Nilai" (the value = the target status). In the QMS domain
-    // a transition's only effect is updating the ticket status to the target,
-    // so the action TYPE is fixed to "Update Status" (surfaced read-only as
-    // "Actionnya apa") and the editable VALUE is the target status (the
-    // "Nilai"). The source (the selected node) is implicit, so "Dari" is gone.
-    // The label (Caller button text) is no longer edited inline here — it stays
-    // editable via the standalone edge editor (select an edge on the canvas),
-    // the kept full-edit path. The `actionLabel` STAYS per-Transition on the
-    // wire (unchanged) — this is a client-side presentation reframing only,
-    // not a wire/domain change. Each row renders a read-only "Aksi" chip
-    // ("Update Status"), a "Nilai" <select> (re-point the TARGET via
-    // onRerouteTransition, source stays this node), and a "Hapus" button
-    // (onDeleteTransition, disabled when only one transition remains — the
+    // The node's OUTGOING transitions — now reframed as the independent
+    // "Transisi keluar" surface (the Caller-button LABELS), decoupled from the
+    // Kaleo-style node-level "Aksi" (below). A transition's only domain effect
+    // is updating the ticket status to the target, so the action TYPE is fixed
+    // "Update Status" — but that is now surfaced in the separate "Aksi" section
+    // (node-level, NOT linked to any edge); here the transition is the
+    // button-label + target surface. Each row renders an editable "Label aksi"
+    // input (the Caller button text — `onEditTransitionLabel`, the same input
+    // the standalone edge editor carries) + a "Ke" select (re-point the TARGET
+    // via `onRerouteTransition`, source stays this node) + a "Hapus" button
+    // (`onDeleteTransition`, disabled when only one transition remains — the
     // ≥1-transition invariant). The edges are read directly from the canvas
     // because the inline editor needs the edge `id` to call the handlers — the
     // outgoing edges are exactly `edges.filter(e => e.source === name)`.
     // Terminal edges (sink→End) are excluded so a sink state with no real
-    // outgoing transitions shows the empty hint, not a spurious row.
+    // outgoing transitions shows the empty hint, not a spurious row. The
+    // `actionLabel` STAYS per-Transition on the wire (unchanged) — this is a
+    // presentation reframing, not a wire/domain change (the new node-level
+    // "Aksi" travel the separate `nodeActions` wire map).
     const outgoing = edges.filter((e) => e.source === name && e.type !== 'terminal');
-    // The "Tambah aksi" button is disabled when every status on the canvas is
-    // already a TARGET of an outgoing edge from this node (no non-duplicate
-    // target left — adding would produce a duplicate edge, which the graph
-    // invariant rejects). `isDuplicateTransition` is the single source of
-    // truth for the duplicate check, shared with onConnect /
+    // The "+ Tambah transisi" button is disabled when every status on the
+    // canvas is already a TARGET of an outgoing edge from this node (no
+    // non-duplicate target left — adding would produce a duplicate edge, which
+    // the graph invariant rejects). `isDuplicateTransition` is the single
+    // source of truth for the duplicate check, shared with onConnect /
     // onRerouteTransition / onAddTransitionFrom.
-    const canAddAction = !form.states.every((s) => isDuplicateTransition(edges, name, s));
+    const canAddTransition = !form.states.every((s) => isDuplicateTransition(edges, name, s));
+    // The node's Kaleo-style node-level actions, NOT linked to any edge. Read
+    // from `form.nodeActions[name]` (a persisted, independent list keyed by
+    // state name). Panel-only: a node-action edit lifts as a form-only change
+    // (no canvas node/edge change — `graphSignature` excludes `nodeActions`).
+    const nodeActions = form.nodeActions[name] ?? [];
     return (
       <aside className="sm-properties" data-testid="sm-properties" aria-label="Properti status">
         {backButton}
@@ -175,58 +180,65 @@ export function StateMachineWorkflowProperties({
             so this is a client-side derivation only. Manager feedback: replace
             the read-only "Status" badge + sub-description + consequence block
             with a single labeled "Deskripsi" field. The description is a
-            SEPARATE facet from the outgoing "Aksi" panel — it stays "N transisi
-            keluar" (unchanged) so the calibrated manager feedback holds. */}
+            SEPARATE facet from the outgoing "Transisi keluar" panel — it stays
+            "N transisi keluar" (unchanged) so the calibrated manager feedback
+            holds. */}
         <div className="sm-properties__field">
           <p className="sm-properties__label">Deskripsi</p>
           <p className="sm-properties__hint" data-testid="panel-state-description">
             {description}
           </p>
         </div>
-        {/* Inline-editable "Aksi" list — the node's OUTGOING transitions,
-            Kaleo-style: each row is "Aksi" (the action type, read-only
-            "Update Status") + "Nilai" (the value = the target status, an
-            editable <select> re-pointing the TARGET via onRerouteTransition —
-            the source stays this node) + a "Hapus" button. The label (Caller
-            button text) is NOT edited here — it stays editable via the
-            standalone edge editor (select an edge on the canvas). The hint
-            under the label clarifies the outgoing framing: each action updates
-            the status to the target status. */}
+        {/* "Transisi keluar" — the node's OUTGOING transitions, the independent
+            Caller-button LABEL surface. Each row is an editable "Label aksi"
+            input (the Caller button text) + a "Ke" select (re-point the TARGET
+            via onRerouteTransition, source stays this node) + a "Hapus" button
+            (onDeleteTransition, disabled when only one transition remains).
+            "+ Tambah transisi" adds a new outgoing edge (onAddTransitionFrom).
+            The label is ALSO editable via the standalone edge editor (select
+            an edge on the canvas) — the kept full-edit path. */}
         <div className="sm-properties__field">
-          <p className="sm-properties__label" id="panel-state-actions-label">
-            Aksi
+          <p className="sm-properties__label" id="panel-transitions-label">
+            Transisi keluar
           </p>
           <p className="sm-properties__hint">
-            Aksi yang bisa dilakukan dari status ini. Setiap aksi memperbarui status ke status tujuan.
+            Tombol di panel caller untuk transisi keluar dari status ini.
           </p>
           {outgoing.length === 0 ? (
-            <p className="sm-properties__hint" data-testid="panel-state-actions-empty">
-              Belum ada aksi. Tambah aksi untuk membuat transisi dari status ini ke status lain.
+            <p className="sm-properties__hint" data-testid="panel-transitions-empty">
+              Belum ada transisi keluar. Tambah transisi untuk membuat tombol dari status ini ke status lain.
             </p>
           ) : (
             <ul
               className="sm-properties__actions"
-              aria-labelledby="panel-state-actions-label"
-              data-testid="panel-state-actions"
+              aria-labelledby="panel-transitions-label"
+              data-testid="panel-transitions"
             >
               {outgoing.map((edge) => {
-                const toId = `panel-action-to-${edge.id}`;
+                const labelId = `panel-transition-label-${edge.id}`;
+                const toId = `panel-transition-to-${edge.id}`;
                 return (
                   <li key={edge.id} className="sm-properties__action">
-                    <p className="sm-properties__action-label">Aksi</p>
-                    <span
-                      className="sm-properties__action-type"
-                      data-testid={`panel-action-type-${edge.id}`}
-                    >
-                      Update Status
-                    </span>
+                    <label className="sm-properties__action-label" htmlFor={labelId}>
+                      Label aksi
+                    </label>
+                    <input
+                      id={labelId}
+                      type="text"
+                      className="sm-properties__input"
+                      data-testid={`panel-transition-label-${edge.id}`}
+                      placeholder="Label aksi"
+                      value={edge.data.actionLabel}
+                      aria-describedby="panel-transition-label-hint"
+                      onChange={(e) => handlers.onEditTransitionLabel(edge.id, e.target.value)}
+                    />
                     <label className="sm-properties__action-label" htmlFor={toId}>
-                      Nilai
+                      Ke
                     </label>
                     <select
                       id={toId}
                       className="sm-properties__input"
-                      data-testid={`panel-action-to-${edge.id}`}
+                      data-testid={`panel-transition-to-${edge.id}`}
                       value={edge.target}
                       onChange={(e) => handlers.onRerouteTransition(edge.id, name, e.target.value)}
                     >
@@ -239,10 +251,107 @@ export function StateMachineWorkflowProperties({
                     <button
                       type="button"
                       className="sm-properties__action-delete"
-                      data-testid={`panel-action-delete-${edge.id}`}
-                      aria-label="Hapus aksi"
+                      data-testid={`panel-transition-delete-${edge.id}`}
+                      aria-label="Hapus transisi"
                       disabled={handlers.transitionsCount <= 1}
                       onClick={() => handlers.onDeleteTransition(edge.id)}
+                    >
+                      Hapus
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <p id="panel-transition-label-hint" className="sm-properties__hint">
+            Teks tombol di panel caller.
+          </p>
+          <button
+            type="button"
+            className="btn btn--secondary sm-properties__add-action"
+            data-testid="panel-add-transition"
+            onClick={() => handlers.onAddTransitionFrom(name)}
+            disabled={!canAddTransition}
+          >
+            + Tambah transisi
+          </button>
+        </div>
+        {/* "Aksi" — Kaleo-style node-level actions, NOT linked to any edge.
+            Each row is "Saat" (ON_ENTRY/ON_EXIT, when the action fires) + a
+            read-only "Update Status" chip (the fixed action type — the only
+            QMS action semantic today) + "Nilai" (the target status, an editable
+            <select> of all states) + a "Hapus" button. "+ Tambah aksi" adds a
+            new node-level action (onAddNodeAction). Panel-only: the canvas
+            never reflects these (they are not transitions); a node-action edit
+            lifts as a form-only change (no re-seed). */}
+        <div className="sm-properties__field">
+          <p className="sm-properties__label" id="panel-node-actions-label">
+            Aksi
+          </p>
+          <p className="sm-properties__hint">
+            Aksi node-level (Kaleo) — berjalan otomatis saat masuk/keluar status, tidak terkait transisi.
+          </p>
+          {nodeActions.length === 0 ? (
+            <p className="sm-properties__hint" data-testid="panel-node-actions-empty">
+              Belum ada aksi node-level. Tambah aksi untuk menjalankan sesuatu saat masuk/keluar status ini.
+            </p>
+          ) : (
+            <ul
+              className="sm-properties__actions"
+              aria-labelledby="panel-node-actions-label"
+              data-testid="panel-node-actions"
+            >
+              {nodeActions.map((action, i) => {
+                const saatId = `panel-node-action-saat-${i}`;
+                const toId = `panel-node-action-to-${i}`;
+                return (
+                  <li key={i} className="sm-properties__action">
+                    <label className="sm-properties__action-label" htmlFor={saatId}>
+                      Saat
+                    </label>
+                    <select
+                      id={saatId}
+                      className="sm-properties__input"
+                      data-testid={`panel-node-action-saat-${i}`}
+                      value={action.executionType}
+                      onChange={(e) =>
+                        handlers.onEditNodeAction(name, i, {
+                          executionType: e.target.value as 'ON_ENTRY' | 'ON_EXIT',
+                        })
+                      }
+                    >
+                      <option value="ON_ENTRY">Saat masuk (ON_ENTRY)</option>
+                      <option value="ON_EXIT">Saat keluar (ON_EXIT)</option>
+                    </select>
+                    <p className="sm-properties__action-label">Aksi</p>
+                    <span
+                      className="sm-properties__action-type"
+                      data-testid={`panel-node-action-type-${i}`}
+                    >
+                      Update Status
+                    </span>
+                    <label className="sm-properties__action-label" htmlFor={toId}>
+                      Nilai
+                    </label>
+                    <select
+                      id={toId}
+                      className="sm-properties__input"
+                      data-testid={`panel-node-action-to-${i}`}
+                      value={action.value}
+                      onChange={(e) => handlers.onEditNodeAction(name, i, { value: e.target.value })}
+                    >
+                      {form.states.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="sm-properties__action-delete"
+                      data-testid={`panel-node-action-delete-${i}`}
+                      aria-label="Hapus aksi"
+                      onClick={() => handlers.onDeleteNodeAction(name, i)}
                     >
                       Hapus
                     </button>
@@ -254,9 +363,8 @@ export function StateMachineWorkflowProperties({
           <button
             type="button"
             className="btn btn--secondary sm-properties__add-action"
-            data-testid="panel-add-action"
-            onClick={() => handlers.onAddTransitionFrom(name)}
-            disabled={!canAddAction}
+            data-testid="panel-add-node-action"
+            onClick={() => handlers.onAddNodeAction(name)}
           >
             + Tambah aksi
           </button>

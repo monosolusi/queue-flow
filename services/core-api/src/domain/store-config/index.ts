@@ -10,6 +10,7 @@ export * from './value-objects/brand-color';
 export * from './value-objects/daily-reset-policy';
 export * from './value-objects/edge-routing-layout';
 export * from './value-objects/node-positions';
+export * from './value-objects/node-actions';
 export * from './value-objects/printer-configuration';
 export * from './value-objects/priority-policy';
 export * from './value-objects/service-themes';

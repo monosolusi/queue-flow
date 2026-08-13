@@ -236,14 +236,34 @@ export function StateMachineWorkflow({
   const commit = useCallback(
     (nextNodes: FlowNode[], nextEdges: FlowEdge[]) => {
       const { states, transitions, positions } = flowToGraph(nextNodes, nextEdges);
-      const form: StateMachineForm = { mode: value.mode, states, transitions, positions };
+      // `nodeActions` is panel-only (not canvas-rendered), so `flowToGraph`
+      // ignores it (like `mode`). Carry it from `value.nodeActions` so a canvas
+      // commit preserves node actions across the `flowToGraph` round-trip —
+      // mirrors how `mode` is preserved from `value.mode` below.
+      const form: StateMachineForm = { mode: value.mode, states, transitions, positions, nodeActions: value.nodeActions };
       const refreshed = withDescriptions(nextNodes, form);
       setNodes(refreshed);
       setEdges(nextEdges);
       lastEmitted.current = graphSignature(form);
       onChange(form);
     },
-    [value.mode, onChange],
+    [value.mode, value.nodeActions, onChange],
+  );
+
+  // Lift a FORM-ONLY edit (a node-action add/delete/edit touches no nodes/edges,
+  // so it cannot go through `commit(nextNodes, nextEdges)`). Stamp
+  // `lastEmitted.current = graphSignature(nextForm)` BEFORE `onChange`: because
+  // `graphSignature` excludes `nodeActions` (panel-only), a node-action edit
+  // stamps a signature equal to the pre-edit one → the sync effect compares it
+  // against the incoming `value` signature (also unchanged by nodeActions) →
+  // EQUAL → skips the re-seed → no spurious canvas snap. The panel reads the
+  // new `form.nodeActions` directly on re-render. Mirrors the `commit` stamp.
+  const lift = useCallback(
+    (nextForm: StateMachineForm) => {
+      lastEmitted.current = graphSignature(nextForm);
+      onChange(nextForm);
+    },
+    [onChange],
   );
 
   // Apply React Flow's internal change stream (drag position, selection) to the
@@ -516,8 +536,32 @@ export function StateMachineWorkflow({
         };
         commit(nodes, [...edges, newEdge]);
       },
+      // Node-level actions (Kaleo parity) — NOT linked to any edge. Each builds
+      // a fresh `nodeActions` map, mutates `nodeActions[state]`, then `lift`s
+      // (form-only: no canvas node/edge change → `graphSignature` excludes
+      // `nodeActions` → the sync effect skips the re-seed → no canvas snap).
+      // The add default-value picks the first state !== `state` (so the
+      // default isn't the tautological self-loop); if only one state exists,
+      // default to that state (the manager adjusts). `type` stays fixed
+      // `UPDATE_STATUS` (the only QMS action semantic today).
+      onAddNodeAction: (state) => {
+        const nodeActions = { ...value.nodeActions };
+        const defaultValue = value.states.find((s) => s !== state) ?? value.states[0] ?? state;
+        nodeActions[state] = [...(nodeActions[state] ?? []), { executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: defaultValue }];
+        lift({ ...value, nodeActions });
+      },
+      onDeleteNodeAction: (state, index) => {
+        const nodeActions = { ...value.nodeActions };
+        nodeActions[state] = (nodeActions[state] ?? []).filter((_, idx) => idx !== index);
+        lift({ ...value, nodeActions });
+      },
+      onEditNodeAction: (state, index, patch) => {
+        const nodeActions = { ...value.nodeActions };
+        nodeActions[state] = (nodeActions[state] ?? []).map((a, idx) => (idx === index ? { ...a, ...patch } : a));
+        lift({ ...value, nodeActions });
+      },
     }),
-    [value, nodes, edges, commit, selectedNodeId, selectedEdgeId, toast, mintEdgeId],
+    [value, nodes, edges, commit, lift, selectedNodeId, selectedEdgeId, toast, mintEdgeId],
   );
 
   // Click-to-select: mark the clicked node as the sole selected node (clear any

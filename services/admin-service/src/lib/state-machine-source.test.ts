@@ -15,8 +15,7 @@ function defaultForm(): StateMachineForm {
     mode: 'default',
     states: [...DEFAULT_STATE_MACHINE.states],
     transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
-    positions: {},
-  };
+    positions: {}, nodeActions: {},  };
 }
 
 describe('formToXml', () => {
@@ -45,8 +44,7 @@ describe('formToXml', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
-      positions: { A: { x: 10, y: 20 }, B: { x: 240, y: 0 } },
-    };
+      positions: { A: { x: 10, y: 20 }, B: { x: 240, y: 0 } }, nodeActions: {},    };
     const xml = formToXml(form);
     expect(xml).toContain('<state name="A" x="10" y="20"/>');
     expect(xml).toContain('<state name="B" x="240" y="0"/>');
@@ -57,8 +55,7 @@ describe('formToXml', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
-      positions: {},
-    };
+      positions: {}, nodeActions: {},    };
     const xml = formToXml(form);
     // A is the sole source → rank 0 → x=0; B follows A → rank 1 → x=240; both
     // index 0 in their rank → y=0.
@@ -104,8 +101,7 @@ describe('formToXml', () => {
       transitions: [
         { from: 'A', to: 'B', actionLabel: 'go', sourceSide: 'bottom', targetSide: 'top' },
       ],
-      positions: {},
-    };
+      positions: {}, nodeActions: {},    };
     const xml = formToXml(form);
     expect(xml).toContain('sourceSide="bottom"');
     expect(xml).toContain('targetSide="top"');
@@ -116,8 +112,7 @@ describe('formToXml', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go', sourceSide: 'bottom' }],
-      positions: {},
-    };
+      positions: {}, nodeActions: {},    };
     const xml = formToXml(form);
     expect(xml).toContain('sourceSide="bottom"');
     // targetSide materialized to the default ('left').
@@ -129,8 +124,7 @@ describe('formToXml', () => {
       mode: 'custom',
       states: ['A&B'],
       transitions: [{ from: 'A&B', to: 'A&B', actionLabel: 'go "there" <now>' }],
-      positions: {},
-    };
+      positions: {}, nodeActions: {},    };
     const xml = formToXml(form);
     expect(xml).toContain('name="A&amp;B"');
     expect(xml).toContain('from="A&amp;B"');
@@ -144,8 +138,7 @@ describe('formToXml', () => {
       mode: 'custom',
       states: ['A'],
       transitions: [],
-      positions: { A: { x: 10.123456, y: 20.999 } },
-    };
+      positions: { A: { x: 10.123456, y: 20.999 } }, nodeActions: {},    };
     const xml = formToXml(form);
     expect(xml).toContain('x="10.12"');
     expect(xml).toContain('y="21"');
@@ -283,8 +276,7 @@ describe('xmlToForm', () => {
         { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' },
         { from: 'CALLING', to: 'SERVING', actionLabel: 'Mulai Melayani' },
       ],
-      positions: {},
-    };
+      positions: {}, nodeActions: {},    };
     const result = xmlToForm(formToXml(form));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -304,8 +296,7 @@ describe('xmlToForm', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
-      positions: { A: { x: 10, y: 20 }, B: { x: 240, y: 80 } },
-    };
+      positions: { A: { x: 10, y: 20 }, B: { x: 240, y: 80 } }, nodeActions: {},    };
     const result = xmlToForm(formToXml(form));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -318,8 +309,7 @@ describe('xmlToForm', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'up', sourceSide: 'bottom', targetSide: 'top' }],
-      positions: {},
-    };
+      positions: {}, nodeActions: {},    };
     const result = xmlToForm(formToXml(form));
     expect(result.ok).toBe(true);
     if (!result.ok) return;

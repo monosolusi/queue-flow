@@ -57,14 +57,15 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     expect(next.states).toEqual([...DEFAULT_STATE_MACHINE.states]);
   });
 
-  it('adds a transition via the inline "Tambah aksi" button in the node panel', () => {
+  it('adds a transition via the inline "Tambah transisi" button in the node panel', () => {
     const onChange = vi.fn();
     const customForm = { ...defaultStateMachineForm(), mode: 'custom' as const };
     renderWorkflow(customForm, [], onChange);
-    // Select the WAITING node → the panel renders the inline Aksi editor
-    // (outgoing transitions, Kaleo-style).
+    // Select the WAITING node → the panel renders the inline "Transisi keluar"
+    // editor (the node's outgoing transitions — the independent button-label
+    // surface, decoupled from the node-level "Aksi" section).
     selectStateNode('WAITING');
-    fireEvent.click(screen.getByTestId('panel-add-action'));
+    fireEvent.click(screen.getByTestId('panel-add-transition'));
     expect(onChange).toHaveBeenCalledTimes(1);
     const next = onChange.mock.calls[0][0];
     expect(next.transitions).toHaveLength(DEFAULT_STATE_MACHINE.transitions.length + 1);
@@ -130,8 +131,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING', 'EXTRA'],
       transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
-      positions: {},
-    };
+      positions: {}, nodeActions: {},    };
     renderWorkflow(customForm, [], onChange);
     // Select the EXTRA node on the canvas → panel renders the node editor.
     selectStateNode('EXTRA');
@@ -174,8 +174,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING', 'EXTRA'],
       transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
-      positions: {},
-    };
+      positions: {}, nodeActions: {},    };
     renderWorkflow(customForm, [], onChange);
     // Select the EXTRA node on the canvas → panel renders the node editor.
     selectStateNode('EXTRA');
@@ -196,8 +195,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING', 'EXTRA'],
       transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
-      positions: {},
-    };
+      positions: {}, nodeActions: {},    };
     renderWorkflow(customForm, [], onChange);
     selectStateNode('EXTRA');
     const panel = screen.getByTestId('sm-properties');
@@ -282,7 +280,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
   });
 
   it('mints opaque `sm-edge-N` ids for newly added edges (M1: disjoint id space)', () => {
-    // Newly minted edges (onConnect / inline "Tambah aksi") use an opaque
+    // Newly minted edges (onConnect / inline "Tambah transisi") use an opaque
     // `sm-edge-N` id from a per-instance monotonic counter — a DISTINCT prefix
     // from `formToFlow`'s index-based `${from}->${to}#${i}` ids — so a delete
     // (which leaves gaps in the index space) can never collide with a re-add.
@@ -292,11 +290,10 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     const onChange = vi.fn();
     const customForm = { ...defaultStateMachineForm(), mode: 'custom' as const };
     renderWorkflow(customForm, [], onChange);
-    // Select the WAITING node → panel renders the inline Aksi editor → add an
-    // outgoing edge via the "Tambah aksi" button (replaces the old palette
-    // "Tambah Transisi" button which was removed in the palette de-dup).
+    // Select the WAITING node → panel renders the inline "Transisi keluar"
+    // editor → add an outgoing edge via the "Tambah transisi" button.
     selectStateNode('WAITING');
-    fireEvent.click(screen.getByTestId('panel-add-action'));
+    fireEvent.click(screen.getByTestId('panel-add-transition'));
     const renderedEdges = document.querySelectorAll('.react-flow__edge');
     expect(renderedEdges.length).toBeGreaterThan(0);
     const newEdge = Array.from(renderedEdges).find((e) =>
@@ -359,8 +356,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom',
       states: ['WAITING', 'CALLING'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' }],
-      positions: {},
-    });
+      positions: {}, nodeActions: {},    });
     selectEdge('WAITING->CALLING#0');
     const panel = screen.getByTestId('sm-properties');
     expect(within(panel).getByTestId('panel-delete-transition')).toBeDisabled();
@@ -412,19 +408,19 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
         mode: 'custom',
         states: ['ONHOLD', 'CALLING'],
         transitions: [{ from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut' }],
-        positions: {},
-      },
+        positions: {}, nodeActions: {},      },
       [],
       onChange,
     );
     // ONHOLD already has 1 outgoing (to CALLING) → "1 transisi keluar".
     const card = screen.getByTestId('sm-node-card-ONHOLD');
     expect(card).toHaveTextContent('1 transisi keluar');
-    // Select ONHOLD → panel renders the inline Aksi editor → add a self-edge
-    // (ONHOLD→ONHOLD is the first non-duplicate target since ONHOLD→CALLING
-    // already exists). The node now has 2 outgoing → "2 transisi keluar".
+    // Select ONHOLD → panel renders the inline "Transisi keluar" editor → add
+    // a self-edge (ONHOLD→ONHOLD is the first non-duplicate target since
+    // ONHOLD→CALLING already exists). The node now has 2 outgoing → "2
+    // transisi keluar".
     selectStateNode('ONHOLD');
-    fireEvent.click(screen.getByTestId('panel-add-action'));
+    fireEvent.click(screen.getByTestId('panel-add-transition'));
     expect(onChange).toHaveBeenCalledTimes(1);
     // The node card description refreshes via `withDescriptions` in `commit`.
     const refreshedCard = screen.getByTestId('sm-node-card-ONHOLD');
@@ -478,8 +474,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
           ? { ...t, sourceSide: 'bottom' as const, targetSide: 'top' as const }
           : { ...t },
       ),
-      positions: {},
-    };
+      positions: {}, nodeActions: {},    };
     renderWorkflow(form, [], onChange);
     // Select the vertical edge and edit its label — `commit` lifts the
     // `flowToGraph`-captured form (with the sides) to the parent.
@@ -508,8 +503,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
         { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', sourceSide: 'bottom', targetSide: 'top' },
         ...DEFAULT_STATE_MACHINE.transitions.slice(1).map((t) => ({ ...t })),
       ],
-      positions: {},
-    };
+      positions: {}, nodeActions: {},    };
     renderWorkflow(customForm, [], onChange);
     // Select the WAITING node and rename it to PENDING.
     selectStateNode('WAITING');
@@ -536,23 +530,22 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
   // editor (Dari / Ke / Label aksi / Hapus transisi) is kept unchanged — two
   // edit paths (inline node actions + click-an-edge).
 
-  it('the state panel shows the inline Aksi editor with outgoing transitions only', () => {
+  it('the state panel shows the inline "Transisi keluar" editor with outgoing transitions only', () => {
     renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
     selectStateNode('SERVING');
     const panel = screen.getByTestId('sm-properties');
     // SERVING has one OUTGOING: SERVING → COMPLETED (index 4 in the default
-    // graph). The inline editor renders a read-only "Aksi" chip ("Update
-    // Status") and a "Nilai" select showing COMPLETED.
-    const toSelect = within(panel).getByTestId('panel-action-to-SERVING->COMPLETED#4') as HTMLSelectElement;
+    // graph). The "Transisi keluar" editor renders an editable "Label aksi"
+    // input and a "Ke" select showing COMPLETED.
+    const labelInput = within(panel).getByTestId('panel-transition-label-SERVING->COMPLETED#4') as HTMLInputElement;
+    expect(labelInput).toBeInTheDocument();
+    const toSelect = within(panel).getByTestId('panel-transition-to-SERVING->COMPLETED#4') as HTMLSelectElement;
     expect(toSelect).toBeInTheDocument();
     expect(toSelect.value).toBe('COMPLETED');
-    const actionType = within(panel).getByTestId('panel-action-type-SERVING->COMPLETED#4');
-    expect(actionType).toHaveTextContent('Update Status');
     // The incoming edge (CALLING → SERVING, index 1) is NOT listed (outgoing
-    // only — the panel is reframed as Kaleo-style outgoing actions).
-    expect(within(panel).queryByTestId('panel-action-to-CALLING->SERVING#1')).not.toBeInTheDocument();
-    // The inline label input is gone (label editing moved to the edge editor).
-    expect(within(panel).queryByTestId('panel-action-label-CALLING->SERVING#1')).not.toBeInTheDocument();
+    // only — the "Transisi keluar" panel shows the node's outgoing edges).
+    expect(within(panel).queryByTestId('panel-transition-to-CALLING->SERVING#1')).not.toBeInTheDocument();
+    expect(within(panel).queryByTestId('panel-transition-label-CALLING->SERVING#1')).not.toBeInTheDocument();
   });
 
   it('the state panel shows the read-only Deskripsi field (derived description)', () => {
@@ -576,8 +569,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
         { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' },
         { from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut' },
       ],
-      positions: {},
-    };
+      positions: {}, nodeActions: {},    };
     renderWorkflow(customForm);
     selectStateNode('ONHOLD');
     const panel = screen.getByTestId('sm-properties');
@@ -587,22 +579,21 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     expect(within(panel).queryByTestId('panel-state-badge')).not.toBeInTheDocument();
   });
 
-  it('the inline "Tambah aksi" button adds a new outgoing edge from the selected node', () => {
+  it('the inline "Tambah transisi" button adds a new outgoing edge from the selected node', () => {
     const onChange = vi.fn();
     const customForm: StateMachineForm = {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
-      positions: {},
-    };
+      positions: {}, nodeActions: {},    };
     renderWorkflow(customForm, [], onChange);
     selectStateNode('WAITING');
-    fireEvent.click(screen.getByTestId('panel-add-action'));
+    fireEvent.click(screen.getByTestId('panel-add-transition'));
     expect(onChange).toHaveBeenCalledTimes(1);
     const next = onChange.mock.calls[0][0];
     // The new edge is an OUTGOING self-edge from WAITING: the first non-duplicate
     // TARGET from WAITING is WAITING itself (WAITING→CALLING already exists;
-    // WAITING→WAITING does not). The Kaleo-style "Aksi" framing anchors the
+    // WAITING→WAITING does not). The "Transisi keluar" framing anchors the
     // source to the selected node.
     expect(next.transitions).toHaveLength(2);
     const added = next.transitions[next.transitions.length - 1];
@@ -611,13 +602,12 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     expect(added.actionLabel).toBe('');
   });
 
-  it('the inline "Tambah aksi" button is disabled when every status is already a target of an outgoing edge from this node', () => {
-    // Kaleo-style outgoing framing: the button is disabled when every status
-    // is already a TARGET of an outgoing edge from the selected node (no
-    // non-duplicate target left). Construct: select CALLING with transitions
-    // CALLING→CALLING (self — target CALLING) and CALLING→WAITING (target
-    // WAITING) → both states are targets of outgoing edges from CALLING →
-    // button disabled.
+  it('the inline "Tambah transisi" button is disabled when every status is already a target of an outgoing edge from this node', () => {
+    // Outgoing framing: the button is disabled when every status is already a
+    // TARGET of an outgoing edge from the selected node (no non-duplicate
+    // target left). Construct: select CALLING with transitions CALLING→CALLING
+    // (self — target CALLING) and CALLING→WAITING (target WAITING) → both
+    // states are targets of outgoing edges from CALLING → button disabled.
     const customForm: StateMachineForm = {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING'],
@@ -625,22 +615,21 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
         { from: 'CALLING', to: 'CALLING', actionLabel: 'ulang' },
         { from: 'CALLING', to: 'WAITING', actionLabel: 'kembali' },
       ],
-      positions: {},
-    };
+      positions: {}, nodeActions: {},    };
     renderWorkflow(customForm);
     selectStateNode('CALLING');
-    expect(screen.getByTestId('panel-add-action')).toBeDisabled();
+    expect(screen.getByTestId('panel-add-transition')).toBeDisabled();
   });
 
-  it('the inline "Nilai" select re-routes the edge target (source stays the selected node)', () => {
+  it('the inline "Ke" select re-routes the edge target (source stays the selected node)', () => {
     const onChange = vi.fn();
     renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const }, [], onChange);
     selectStateNode('SERVING');
-    // SERVING's outgoing edge is SERVING → COMPLETED (index 4). Change "Nilai"
+    // SERVING's outgoing edge is SERVING → COMPLETED (index 4). Change "Ke"
     // to SKIPPED (a status that is not already the target of an outgoing edge
     // from SERVING, so the reroute is non-duplicate). The source stays SERVING;
     // the target is re-routed from COMPLETED to SKIPPED.
-    const toSelect = screen.getByTestId('panel-action-to-SERVING->COMPLETED#4') as HTMLSelectElement;
+    const toSelect = screen.getByTestId('panel-transition-to-SERVING->COMPLETED#4') as HTMLSelectElement;
     fireEvent.change(toSelect, { target: { value: 'SKIPPED' } });
     expect(onChange).toHaveBeenCalledTimes(1);
     const next = onChange.mock.calls[0][0];
@@ -656,19 +645,18 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
-      positions: {},
-    };
+      positions: {}, nodeActions: {},    };
     renderWorkflow(oneTransitionForm);
     selectStateNode('WAITING');
-    const deleteBtn = screen.getByTestId('panel-action-delete-WAITING->CALLING#0');
+    const deleteBtn = screen.getByTestId('panel-transition-delete-WAITING->CALLING#0');
     expect(deleteBtn).toBeDisabled();
   });
 
-  it('the inline "Hapus" button deletes the outgoing action when more than one transition exists', () => {
+  it('the inline "Hapus" button deletes the outgoing transition when more than one transition exists', () => {
     const onChange = vi.fn();
     renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const }, [], onChange);
     selectStateNode('SERVING');
-    const deleteBtn = screen.getByTestId('panel-action-delete-SERVING->COMPLETED#4');
+    const deleteBtn = screen.getByTestId('panel-transition-delete-SERVING->COMPLETED#4');
     expect(deleteBtn).not.toBeDisabled();
     fireEvent.click(deleteBtn);
     expect(onChange).toHaveBeenCalledTimes(1);
@@ -685,14 +673,107 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING', 'LONELY'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
-      positions: {},
-    };
+      positions: {}, nodeActions: {},    };
     renderWorkflow(customForm);
     selectStateNode('LONELY');
     const panel = screen.getByTestId('sm-properties');
-    expect(within(panel).getByTestId('panel-state-actions-empty')).toHaveTextContent(
-      'Belum ada aksi. Tambah aksi untuk membuat transisi dari status ini ke status lain.',
+    expect(within(panel).getByTestId('panel-transitions-empty')).toHaveTextContent(
+      'Belum ada transisi keluar. Tambah transisi untuk membuat tombol dari status ini ke status lain.',
     );
+  });
+
+  // --- Node-level "Aksi" (Kaleo parity) — independent of edges ----------------
+  // The node-level Aksi section is NOT linked to any transition: adding /
+  // editing / deleting a node action must NOT create / remove / reroute any
+  // edge on the canvas (the core acceptance of the decoupling).
+
+  it('the state panel renders BOTH the "Transisi keluar" and "Aksi" sections', () => {
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
+    selectStateNode('SERVING');
+    const panel = screen.getByTestId('sm-properties');
+    // "Transisi keluar" — SERVING has 1 outgoing edge → the <ul> renders.
+    expect(within(panel).getByTestId('panel-transitions')).toBeInTheDocument();
+    // "Aksi" — the node-level Aksi section renders (empty by default: the
+    // empty hint + "Tambah aksi" button, NOT the <ul>).
+    expect(within(panel).getByTestId('panel-node-actions-empty')).toBeInTheDocument();
+    expect(within(panel).getByTestId('panel-add-node-action')).toBeInTheDocument();
+  });
+
+  it('adding a node action does NOT create an edge on the canvas (independence)', () => {
+    const onChange = vi.fn();
+    const customForm: StateMachineForm = {
+      mode: 'custom' as const,
+      states: ['WAITING', 'CALLING'],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
+      positions: {}, nodeActions: {},
+    };
+    renderWorkflow(customForm, [], onChange);
+    selectStateNode('WAITING');
+    const edgeCountBefore = document.querySelectorAll('.react-flow__edge').length;
+    fireEvent.click(screen.getByTestId('panel-add-node-action'));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next = onChange.mock.calls[0][0];
+    // The transitions are UNCHANGED — no new edge.
+    expect(next.transitions).toEqual(customForm.transitions);
+    // A node action was added to WAITING's nodeActions list.
+    expect(next.nodeActions.WAITING).toHaveLength(1);
+    expect(next.nodeActions.WAITING[0]).toEqual({
+      executionType: 'ON_ENTRY',
+      type: 'UPDATE_STATUS',
+      value: 'CALLING', // first non-self state
+    });
+    // The canvas edge count is unchanged (no re-seed, no new edge).
+    const edgeCountAfter = document.querySelectorAll('.react-flow__edge').length;
+    expect(edgeCountAfter).toBe(edgeCountBefore);
+  });
+
+  it('editing a node action (Saat / Nilai) does NOT change any edge', () => {
+    const onChange = vi.fn();
+    const customForm: StateMachineForm = {
+      mode: 'custom' as const,
+      states: ['WAITING', 'CALLING', 'SKIPPED'],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
+      positions: {},
+      nodeActions: {
+        WAITING: [{ executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'CALLING' }],
+      },
+    };
+    renderWorkflow(customForm, [], onChange);
+    selectStateNode('WAITING');
+    // Edit "Saat" → ON_EXIT.
+    fireEvent.change(screen.getByTestId('panel-node-action-saat-0'), { target: { value: 'ON_EXIT' } });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next1 = onChange.mock.calls[0][0];
+    expect(next1.transitions).toEqual(customForm.transitions);
+    expect(next1.nodeActions.WAITING[0].executionType).toBe('ON_EXIT');
+    // Edit "Nilai" → SKIPPED.
+    fireEvent.change(screen.getByTestId('panel-node-action-to-0'), { target: { value: 'SKIPPED' } });
+    expect(onChange).toHaveBeenCalledTimes(2);
+    const next2 = onChange.mock.calls[1][0];
+    expect(next2.transitions).toEqual(customForm.transitions);
+    expect(next2.nodeActions.WAITING[0].value).toBe('SKIPPED');
+  });
+
+  it('deleting a node action does NOT remove any edge', () => {
+    const onChange = vi.fn();
+    const customForm: StateMachineForm = {
+      mode: 'custom' as const,
+      states: ['WAITING', 'CALLING'],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
+      positions: {},
+      nodeActions: {
+        WAITING: [{ executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'CALLING' }],
+      },
+    };
+    renderWorkflow(customForm, [], onChange);
+    selectStateNode('WAITING');
+    fireEvent.click(screen.getByTestId('panel-node-action-delete-0'));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next = onChange.mock.calls[0][0];
+    // The transition is untouched.
+    expect(next.transitions).toEqual(customForm.transitions);
+    // The node action is gone.
+    expect(next.nodeActions.WAITING).toEqual([]);
   });
 
   // --- Edge editor (unchanged): reroute + duplicate revert via the standalone
@@ -728,8 +809,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
         { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' },
         { from: 'WAITING', to: 'COMPLETED', actionLabel: 'Skip' },
       ],
-      positions: {},
-    };
+      positions: {}, nodeActions: {},    };
     renderWorkflow(form, [], onChange);
     selectEdge('WAITING->CALLING#0');
     const toSelect = screen.getByTestId('panel-transition-to') as HTMLSelectElement;

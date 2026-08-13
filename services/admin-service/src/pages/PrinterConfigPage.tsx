@@ -14,7 +14,7 @@ import { useSystemConfigContext } from '../config/system-config-context';
 import { PageHeader } from '../components/PageHeader';
 import { useToast } from '../toast/useToast';
 import { toForm } from './admin-config/form';
-import { toEdgeRoutingLayoutDto, toNodePositionsDto, toStateMachineDto } from '../lib/state-machine';
+import { toEdgeRoutingLayoutDto, toNodeActionsDto, toNodePositionsDto, toStateMachineDto } from '../lib/state-machine';
 
 /**
  * AC6 — wire a field error message to its input via `aria-describedby` +
@@ -121,6 +121,9 @@ export function PrinterConfigPage({ api }: { api: IAdminApi }) {
           stateMachine: toStateMachineDto(form.stateMachine),
           edgeRoutingLayout: toEdgeRoutingLayoutDto(form.stateMachine),
           nodePositions: toNodePositionsDto(form.stateMachine),
+          // Node actions — payload-only passthrough (this page edits neither node
+          // actions nor the graph); mirrors `nodePositions`.
+          nodeActions: toNodeActionsDto(form.stateMachine),
           brandColor: form.brandColor,
           serviceThemes: form.serviceThemes,
           // Passthrough — the TV-layout editor lives on `/tv-layout`; the full

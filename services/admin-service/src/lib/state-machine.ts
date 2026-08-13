@@ -1,7 +1,9 @@
 import {
+  DEFAULT_NODE_ACTIONS,
   DEFAULT_STATE_MACHINE,
   type EdgeRoutingLayoutDto,
   type EdgeSide,
+  type NodeActionsDto,
   type NodePositionsDto,
   type StateMachineDto,
   type StateTransitionDto,
@@ -82,6 +84,14 @@ export interface StateMachineForm {
    * includes them so a position change is detectable as an external change.
    */
   positions: Record<string, { x: number; y: number }>;
+  /**
+   * Node-level actions keyed by state name (Kaleo parity). Panel-only — NOT
+   * canvas-rendered (`flowToGraph`/`formToFlow` ignore it, like `mode`), so a
+   * node-action edit never re-seeds the canvas (`graphSignature` excludes
+   * it). The properties panel reads `form.nodeActions` directly. Travels the
+   * wire in the separate `nodeActions` map (built by `toNodeActionsDto`).
+   */
+  nodeActions: NodeActionsDto;
 }
 
 /** The PRD §7 default graph prefilled into the editor's default mode. */
@@ -91,6 +101,7 @@ export function defaultStateMachineForm(): StateMachineForm {
     states: [...DEFAULT_STATE_MACHINE.states],
     transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
     positions: {},
+    nodeActions: { ...DEFAULT_NODE_ACTIONS },
   };
 }
 
@@ -217,6 +228,19 @@ export function toEdgeRoutingLayoutDto(form: StateMachineForm): EdgeRoutingLayou
  */
 export function toNodePositionsDto(form: StateMachineForm): NodePositionsDto {
   return { ...form.positions };
+}
+
+/**
+ * Builds the node-actions wire map from the form. A shallow copy of
+ * `form.nodeActions` (the form is the source of truth — built by the
+ * properties panel's "Aksi" editor). `{}` means "no node-level actions".
+ * Mirrors `toNodePositionsDto`'s doc style: read `form.nodeActions` directly,
+ * do not special-case mode (default mode force-resets the graph in
+ * `toStateMachineDto` and the default canvas carries no node actions, so the
+ * map is `{}` regardless).
+ */
+export function toNodeActionsDto(form: StateMachineForm): NodeActionsDto {
+  return { ...form.nodeActions };
 }
 
 /** Horizontal gap between ranks (left-to-right flow). */
@@ -545,7 +569,15 @@ export function updateState(form: StateMachineForm, i: number, value: string): S
     positions[value] = positions[oldName];
     delete positions[oldName];
   }
-  return { ...form, states, transitions, positions };
+  // The node-actions map is keyed by state name (mirrors `positions`), so a
+  // rename moves the entry to the new key (the manager's node-level actions
+  // follow the renamed status, not the old name).
+  const nodeActions = { ...form.nodeActions };
+  if (oldName !== value && nodeActions[oldName] !== undefined) {
+    nodeActions[value] = nodeActions[oldName];
+    delete nodeActions[oldName];
+  }
+  return { ...form, states, transitions, positions, nodeActions };
 }
 
 export function addState(form: StateMachineForm): StateMachineForm {
@@ -561,7 +593,12 @@ export function removeState(form: StateMachineForm, i: number): StateMachineForm
   // slice used by the form-based editor in the wizard).
   const positions = { ...form.positions };
   delete positions[removedName];
-  return { ...form, states: form.states.filter((_, idx) => idx !== i), positions };
+  // Drop the node-actions entry too (the map is keyed by state name, mirrors
+  // `positions`), or the stale actions would survive a re-add and silently
+  // re-attach to a re-created status under the same name.
+  const nodeActions = { ...form.nodeActions };
+  delete nodeActions[removedName];
+  return { ...form, states: form.states.filter((_, idx) => idx !== i), positions, nodeActions };
 }
 
 // --- graph signature (change detection for the re-seed / source-sync guards) ---
@@ -590,6 +627,11 @@ export function removeState(form: StateMachineForm, i: number): StateMachineForm
  * pre-save signature → no spurious re-seed and the manager-chosen handles
  * survive in-session. The same holds for positions: the post-save round-trip
  * persists them exactly (non-sparse, order-insensitive signature).
+ *
+ * Excludes `nodeActions` (panel-only, NOT canvas-rendered — like `mode`): a
+ * node-action edit must not re-seed the canvas, and an external nodeActions-
+ * only change needs no re-seed (the panel reads `form.nodeActions` directly on
+ * re-render).
  */
 export function graphSignature(form: StateMachineForm): string {
   return JSON.stringify({
