@@ -77,6 +77,7 @@ describe('SaveSystemConfigurationUseCase — category id preservation (QUE-24)',
       edgeRoutingLayout: {},
       nodePositions: {},
       nodeActions: {},
+      terminalNodes: { start: 'auto', end: 'auto' },
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
       actor: 'admin',
     };
@@ -200,6 +201,7 @@ describe('SaveSystemConfigurationUseCase — brandColor (QUE-36)', () => {
       edgeRoutingLayout: {},
       nodePositions: {},
       nodeActions: {},
+      terminalNodes: { start: 'auto', end: 'auto' },
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
       actor: 'admin',
     };
@@ -324,6 +326,7 @@ describe('SaveSystemConfigurationUseCase — SYSTEM_CONFIG_CHANGED broadcast (FR
       edgeRoutingLayout: {},
       nodePositions: {},
       nodeActions: {},
+      terminalNodes: { start: 'auto', end: 'auto' },
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
       actor: 'admin',
     };
@@ -437,6 +440,7 @@ describe('SaveSystemConfigurationUseCase — edgeRoutingLayout', () => {
       edgeRoutingLayout: edgeRoutingLayout as SaveSystemConfigurationCommand['edgeRoutingLayout'],
       nodePositions: {},
       nodeActions: {},
+      terminalNodes: { start: 'auto', end: 'auto' },
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
       actor: 'admin',
     };
@@ -585,6 +589,7 @@ describe('SaveSystemConfigurationUseCase — nodePositions', () => {
       edgeRoutingLayout: {},
       nodePositions: nodePositions as SaveSystemConfigurationCommand['nodePositions'],
       nodeActions: {},
+      terminalNodes: { start: 'auto', end: 'auto' },
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
       actor: 'admin',
     };
@@ -726,6 +731,7 @@ describe('SaveSystemConfigurationUseCase — printerConfiguration', () => {
       edgeRoutingLayout: {},
       nodePositions: {},
       nodeActions: {},
+      terminalNodes: { start: 'auto', end: 'auto' },
       printerConfiguration: printer as unknown as SaveSystemConfigurationCommand['printerConfiguration'],
       actor: 'admin',
     };
@@ -843,6 +849,7 @@ describe('SaveSystemConfigurationUseCase — nodeActions', () => {
       edgeRoutingLayout: {},
       nodePositions: {},
       nodeActions: nodeActions as SaveSystemConfigurationCommand['nodeActions'],
+      terminalNodes: { start: 'auto', end: 'auto' },
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
       actor: 'admin',
     };
@@ -1017,6 +1024,7 @@ describe('SaveSystemConfigurationUseCase — stateMachine.descriptions', () => {
       edgeRoutingLayout: {},
       nodePositions: {},
       nodeActions: {},
+      terminalNodes: { start: 'auto', end: 'auto' },
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
       actor: 'admin',
     };
@@ -1136,5 +1144,129 @@ describe('SaveSystemConfigurationUseCase — stateMachine.descriptions', () => {
     await useCase.execute(cmd);
     const saved = await repos.config.get();
     expect(saved!.stateMachine.stateDescriptions.toDto()).toEqual({});
+  });
+});
+
+/**
+ * Terminal nodes persistence (Start/End marker presence + position for the
+ * admin state-machine editor). `terminalNodes` is a required field on the save
+ * command; the use case validates it pre-tx (fail-fast — a malformed map never
+ * acquires a transaction). NO state-membership cross-check is performed —
+ * terminal ids `__start`/`__end` are not state names (the whole reason this is
+ * a dedicated field, unlike `nodePositions`/`nodeActions`). The result echoes
+ * the stored map back to the caller.
+ */
+describe('SaveSystemConfigurationUseCase — terminalNodes', () => {
+  function buildUseCase() {
+    return {
+      config: new InMemorySystemConfigurationRepository(),
+      categories: new InMemoryCategoryRepository(),
+      routingRules: new InMemoryCounterRoutingRuleRepository(),
+    };
+  }
+
+  function command(terminalNodes: unknown): SaveSystemConfigurationCommand {
+    return {
+      storeName: 'Toko Terminal',
+      stateMachine: projectStateMachine(StateMachine.DEFAULT),
+      dailyReset: {
+        mode: DailyResetMode.MANUAL,
+        cronExpression: null,
+        resetTicketNumberTo: 1,
+        archivePreviousDayData: true,
+      },
+      categories: [{ code: 'A', name: 'Customer Service' }],
+      routingRules: [
+        {
+          counterId: 1,
+          counterName: 'Loket 1',
+          assignedCategoryCodes: ['A'],
+          priorityPolicy: PriorityPolicy.FIFO_GLOBAL,
+        },
+      ],
+      brandColor: '#2563eb',
+      serviceThemes: { kiosk: 'light', tv: 'light', caller: 'light', admin: 'light' },
+      tvPanelLayout: [
+        { id: 'nowServing', component: 'nowServing', x: 0, y: 0, w: 12, h: 4 },
+        { id: 'waitingQueue', component: 'waitingQueue', x: 0, y: 4, w: 6, h: 3 },
+        { id: 'callHistory', component: 'callHistory', x: 6, y: 4, w: 6, h: 3 },
+        { id: 'countersServing', component: 'countersServing', x: 0, y: 7, w: 12, h: 3 },
+        { id: 'runningText', component: 'runningText', x: 0, y: 10, w: 12, h: 1 },
+      ],
+      edgeRoutingLayout: {},
+      nodePositions: {},
+      nodeActions: {},
+      terminalNodes: terminalNodes as SaveSystemConfigurationCommand['terminalNodes'],
+      printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
+      actor: 'admin',
+    };
+  }
+
+  it('round-trips a hidden start + pinned end through save and re-GET via the aggregate', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    const tn = { start: 'hidden', end: { x: 320, y: 240 } };
+    const result = await useCase.execute(command(tn));
+    expect(result.terminalNodes).toEqual(tn);
+
+    const saved = await repos.config.get();
+    expect(saved!.terminalNodes.toDto()).toEqual(tn);
+    expect(saved!.terminalNodes.start).toBe('hidden');
+    expect(saved!.terminalNodes.end).toEqual({ x: 320, y: 240 });
+  });
+
+  it('accepts an auto/auto terminalNodes (default markers)', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    const result = await useCase.execute(command({ start: 'auto', end: 'auto' }));
+    expect(result.terminalNodes).toEqual({ start: 'auto', end: 'auto' });
+    const saved = await repos.config.get();
+    expect(saved!.terminalNodes.toDto()).toEqual({ start: 'auto', end: 'auto' });
+  });
+
+  it('rejects a non-object terminalNodes pre-tx with InvalidValueObjectException', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    await expect(useCase.execute(command('not-an-object'))).rejects.toThrow(
+      InvalidValueObjectException,
+    );
+    expect(await repos.config.get()).toBeNull();
+  });
+
+  it('rejects a non-finite x in a pinned terminal pre-tx with InvalidValueObjectException', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    await expect(
+      useCase.execute(command({ start: { x: 'bad', y: 0 }, end: 'auto' })),
+    ).rejects.toThrow(InvalidValueObjectException);
+    expect(await repos.config.get()).toBeNull();
   });
 });

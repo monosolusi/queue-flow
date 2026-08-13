@@ -115,6 +115,12 @@ export function prdWizardPayload() {
     // ({ executionType, type, value }), '{}' = no node-level actions (decoupled
     // from transitions — Kaleo parity).
     nodeActions: {},
+    // terminalNodes: persisted Start/End terminal-node presence + position
+    // for the admin state-machine editor; fixed-shape `{ start, end }` each
+    // 'auto' | 'hidden' | { x, y }. `{ start: 'auto', end: 'auto' }` = markers
+    // render at derived positions (zero visual regression for the standard
+    // wizard payload).
+    terminalNodes: { start: 'auto', end: 'auto' },
     // printerConfiguration: which printer the kiosk uses — chrome mode = zero
     // behavior change (the kiosk keeps using Chrome's print dialog). The
     // standard wizard payload keeps the existing chrome behavior.

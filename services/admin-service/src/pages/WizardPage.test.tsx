@@ -23,7 +23,7 @@ function cleanStore(): SystemConfigurationDto {
     serviceThemes: { ...DEFAULT_SERVICE_THEMES },
     tvPanelLayout: DEFAULT_TV_GRID_LAYOUT,
     edgeRoutingLayout: {},
-    nodePositions: {}, nodeActions: {},
+    nodePositions: {}, nodeActions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,
     printerConfiguration: { ...DEFAULT_PRINTER_CONFIGURATION },
   };
 }
@@ -43,7 +43,7 @@ function makeApi(
   const save = vi.fn(
     saveImpl ??
       ((payload: SaveSystemConfigurationPayload) =>
-        Promise.resolve({ isInitialSetupCompleted: true, storeName: payload.storeName, brandColor: payload.brandColor, serviceThemes: payload.serviceThemes, tvPanelLayout: payload.tvPanelLayout, edgeRoutingLayout: {}, nodePositions: {}, nodeActions: {}, printerConfiguration: payload.printerConfiguration })),
+        Promise.resolve({ isInitialSetupCompleted: true, storeName: payload.storeName, brandColor: payload.brandColor, serviceThemes: payload.serviceThemes, tvPanelLayout: payload.tvPanelLayout, edgeRoutingLayout: {}, nodePositions: {}, nodeActions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const, printerConfiguration: payload.printerConfiguration })),
   );
   // Auth spies (QUE-43). First-run finalize calls setupInitialAdmin then login;
   // re-edit finalize calls neither. Defaults resolve so the happy-path walk

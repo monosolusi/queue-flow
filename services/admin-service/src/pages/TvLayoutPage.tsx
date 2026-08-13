@@ -25,7 +25,7 @@ import { useGridDnd } from '../lib/use-grid-dnd';
 import { PageHeader } from '../components/PageHeader';
 import { useToast } from '../toast/useToast';
 import { toForm } from './admin-config/form';
-import { toEdgeRoutingLayoutDto, toNodeActionsDto, toNodePositionsDto, toStateMachineDto } from '../lib/state-machine';
+import { toEdgeRoutingLayoutDto, toNodeActionsDto, toNodePositionsDto, toStateMachineDto, toTerminalNodesDto } from '../lib/state-machine';
 
 /**
  * The TV-display grid layout page — a two-mode WYSIWYG flow.
@@ -131,6 +131,9 @@ export function TvLayoutPage({ api }: { api: IAdminApi }) {
           // Node actions — payload-only passthrough (this page edits neither
           // node actions nor the graph); mirrors `nodePositions`.
           nodeActions: toNodeActionsDto(form.stateMachine),
+          // Terminal markers — payload-only passthrough (this page edits
+          // neither terminal markers nor the graph); mirrors `nodeActions`.
+          terminalNodes: toTerminalNodesDto(form.stateMachine),
           brandColor: form.brandColor,
           serviceThemes: form.serviceThemes,
           // The one field this page edits.

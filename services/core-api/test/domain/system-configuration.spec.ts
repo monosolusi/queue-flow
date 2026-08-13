@@ -9,6 +9,7 @@ import {
   NodePositions,
   PrinterConfiguration,
   ServiceThemes,
+  TerminalNodes,
   StateMachine,
   StateSchema,
   SystemConfiguration,
@@ -254,6 +255,7 @@ describe('SystemConfiguration aggregate', () => {
       edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
       nodePositions: NodePositions.DEFAULT,
       nodeActions: NodeActions.DEFAULT,
+      terminalNodes: TerminalNodes.DEFAULT,
       printerConfiguration: PrinterConfiguration.DEFAULT,
     });
     expect(config.brandColor.value).toBe('#aabbcc');
@@ -272,6 +274,7 @@ describe('SystemConfiguration aggregate', () => {
       edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
       nodePositions: NodePositions.DEFAULT,
       nodeActions: NodeActions.DEFAULT,
+      terminalNodes: TerminalNodes.DEFAULT,
       printerConfiguration: PrinterConfiguration.DEFAULT,
     });
     expect(config.serviceThemes.toDto()).toEqual({
@@ -298,6 +301,7 @@ describe('SystemConfiguration aggregate', () => {
       edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
       nodePositions: NodePositions.DEFAULT,
       nodeActions: NodeActions.DEFAULT,
+      terminalNodes: TerminalNodes.DEFAULT,
       printerConfiguration: PrinterConfiguration.DEFAULT,
     });
     expect(config.tvPanelLayout.toDto()).toEqual([
@@ -321,6 +325,7 @@ describe('SystemConfiguration aggregate', () => {
       }),
       nodePositions: NodePositions.DEFAULT,
       nodeActions: NodeActions.DEFAULT,
+      terminalNodes: TerminalNodes.DEFAULT,
       printerConfiguration: PrinterConfiguration.DEFAULT,
     });
     expect(config.edgeRoutingLayout.toDto()).toEqual({
@@ -344,6 +349,7 @@ describe('SystemConfiguration aggregate', () => {
         CALLING: { x: 240, y: 0 },
       }),
       nodeActions: NodeActions.DEFAULT,
+      terminalNodes: TerminalNodes.DEFAULT,
       printerConfiguration: PrinterConfiguration.DEFAULT,
     });
     expect(config.nodePositions.toDto()).toEqual({
@@ -365,6 +371,7 @@ describe('SystemConfiguration aggregate', () => {
       edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
       nodePositions: NodePositions.DEFAULT,
       nodeActions: NodeActions.DEFAULT,
+      terminalNodes: TerminalNodes.DEFAULT,
       printerConfiguration: PrinterConfiguration.of({
         mode: 'network-escpos',
         paperWidth: 58,

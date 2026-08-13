@@ -29,6 +29,7 @@ import {
   NodeActions,
   NodePositions,
   PrinterConfiguration,
+  TerminalNodes,
   DailyResetPolicy,
   StateMachine,
   StateSchema,
@@ -260,6 +261,7 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
         edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
         nodePositions: NodePositions.DEFAULT,
         nodeActions: NodeActions.DEFAULT,
+        terminalNodes: TerminalNodes.DEFAULT,
         printerConfiguration: PrinterConfiguration.DEFAULT,
       }),
     );
@@ -358,6 +360,7 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
         edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
         nodePositions: NodePositions.DEFAULT,
         nodeActions: NodeActions.DEFAULT,
+        terminalNodes: TerminalNodes.DEFAULT,
         printerConfiguration: PrinterConfiguration.DEFAULT,
       }),
     );

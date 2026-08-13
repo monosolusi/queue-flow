@@ -67,6 +67,7 @@ function wizardPayload() {
     edgeRoutingLayout: {},
     nodePositions: {},
     nodeActions: {},
+    terminalNodes: { start: 'auto', end: 'auto' },
     printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
   };
 }
@@ -563,5 +564,78 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
     expect(res.body.code).toBe('INVALID_VALUE_OBJECT');
     const cfg = await request(app.getHttpServer()).get('/api/system/config');
     expect(cfg.body.isInitialSetupCompleted).toBe(false);
+  });
+
+  it('PUT with a missing terminalNodes field is 400, not 500 (boundary presence guard)', async () => {
+    // terminalNodes is now a required top-level field — a missing one must 400
+    // (not 500 when the use case dereferences `undefined`).
+    const { terminalNodes: _omit, ...bad } = wizardPayload();
+    const res = await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad);
+    expect(res.status).toBe(400);
+    const cfg = await request(app.getHttpServer()).get('/api/system/config');
+    expect(cfg.body.isInitialSetupCompleted).toBe(false);
+  });
+
+  it('PUT with a malformed terminalNodes (non-object / array / bad terminal value) is 400 (boundary nested-shape guard)', async () => {
+    // terminalNodes present but a string → top-level shape guard (object).
+    const bad1 = wizardPayload() as unknown as Record<string, unknown>;
+    bad1.terminalNodes = 'not-an-object';
+    expect(
+      (await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad1)).status,
+    ).toBe(400);
+
+    // terminalNodes present but an array → top-level shape guard (object).
+    const bad2 = wizardPayload() as unknown as Record<string, unknown>;
+    bad2.terminalNodes = ['auto'];
+    expect(
+      (await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad2)).status,
+    ).toBe(400);
+
+    // terminalNodes.start a number (not 'auto'/'hidden'/a plain {x,y}) →
+    // nested-shape guard (would TypeError in the VO before a clean throw).
+    const bad3 = wizardPayload() as unknown as Record<string, unknown>;
+    bad3.terminalNodes = { start: 5, end: 'auto' };
+    expect(
+      (await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad3)).status,
+    ).toBe(400);
+
+    // terminalNodes.end.x a non-number → nested-shape guard.
+    const bad4 = wizardPayload() as unknown as Record<string, unknown>;
+    bad4.terminalNodes = { start: 'auto', end: { x: 'five', y: 0 } };
+    expect(
+      (await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad4)).status,
+    ).toBe(400);
+
+    // None of the rejected payloads silently completed setup.
+    const cfg = await request(app.getHttpServer()).get('/api/system/config');
+    expect(cfg.body.isInitialSetupCompleted).toBe(false);
+  });
+
+  it('PUT with a bad terminal string (not "auto"/"hidden") is 400 (VO of())', async () => {
+    const bad = wizardPayload() as unknown as Record<string, unknown>;
+    bad.terminalNodes = { start: 'bad', end: 'auto' };
+    const res = await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad);
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_VALUE_OBJECT');
+    const cfg = await request(app.getHttpServer()).get('/api/system/config');
+    expect(cfg.body.isInitialSetupCompleted).toBe(false);
+  });
+
+  it('PUT saves terminalNodes (hidden start + pinned end) and a re-GET returns them (round-trip)', async () => {
+    const tn = { start: 'hidden', end: { x: 320, y: 240 } };
+    const payload = wizardPayload() as unknown as Record<string, unknown>;
+    payload.terminalNodes = tn;
+    const res = await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(payload);
+    expect(res.status).toBe(200);
+    expect(res.body.terminalNodes).toEqual(tn);
+
+    const cfg = await request(app.getHttpServer()).get('/api/system/config');
+    expect(cfg.body.terminalNodes).toEqual(tn);
+  });
+
+  it('a clean store prefills terminalNodes with { start: "auto", end: "auto" } (derived markers)', async () => {
+    const res = await request(app.getHttpServer()).get('/api/system/config');
+    expect(res.status).toBe(200);
+    expect(res.body.terminalNodes).toEqual({ start: 'auto', end: 'auto' });
   });
 });

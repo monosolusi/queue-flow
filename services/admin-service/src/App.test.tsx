@@ -28,7 +28,7 @@ function makeConfig(brandColor = '#2563eb'): SystemConfigurationDto {
     serviceThemes: { ...DEFAULT_SERVICE_THEMES },
     tvPanelLayout: DEFAULT_TV_GRID_LAYOUT,
     edgeRoutingLayout: {},
-    nodePositions: {}, nodeActions: {},
+    nodePositions: {}, nodeActions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,
     printerConfiguration: { ...DEFAULT_PRINTER_CONFIGURATION },
   };
 }
@@ -61,7 +61,7 @@ function makeApi(
   return {
     getSystemConfig: reject ? vi.fn(() => Promise.reject(reject)) : vi.fn(() => Promise.resolve(config)),
     saveSystemConfig: vi.fn(() =>
-      Promise.resolve({ isInitialSetupCompleted: true, storeName: config.storeName, brandColor: config.brandColor, serviceThemes: config.serviceThemes, tvPanelLayout: config.tvPanelLayout, edgeRoutingLayout: {}, nodePositions: {}, nodeActions: {}, printerConfiguration: config.printerConfiguration }),
+      Promise.resolve({ isInitialSetupCompleted: true, storeName: config.storeName, brandColor: config.brandColor, serviceThemes: config.serviceThemes, tvPanelLayout: config.tvPanelLayout, edgeRoutingLayout: {}, nodePositions: {}, nodeActions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const, printerConfiguration: config.printerConfiguration }),
     ),
     getActiveStateMachine: vi.fn(() => Promise.resolve(config.stateMachine)),
     getDailyReport: vi.fn(),
@@ -223,7 +223,7 @@ describe('App (admin — first-run guard matrix)', () => {
           serviceThemes: completed.serviceThemes,
           tvPanelLayout: completed.tvPanelLayout,
           edgeRoutingLayout: {},
-          nodePositions: {}, nodeActions: {},
+          nodePositions: {}, nodeActions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,
           printerConfiguration: completed.printerConfiguration,
         });
       }),
@@ -273,7 +273,7 @@ describe('App (admin — first-run guard matrix)', () => {
           serviceThemes: current.serviceThemes,
           tvPanelLayout: current.tvPanelLayout,
           edgeRoutingLayout: {},
-          nodePositions: {}, nodeActions: {},
+          nodePositions: {}, nodeActions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,
           printerConfiguration: current.printerConfiguration,
         });
       }),

@@ -52,7 +52,7 @@ function configuredStore(): SystemConfigurationDto {
     serviceThemes: { ...DEFAULT_SERVICE_THEMES },
     tvPanelLayout: DEFAULT_TV_GRID_LAYOUT,
     edgeRoutingLayout: {},
-    nodePositions: {}, nodeActions: {},
+    nodePositions: {}, nodeActions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,
     printerConfiguration: { ...DEFAULT_PRINTER_CONFIGURATION },
   };
 }

@@ -64,7 +64,7 @@ function configuredStore(): SystemConfigurationDto {
     serviceThemes: { ...DEFAULT_SERVICE_THEMES },
     tvPanelLayout: DEFAULT_TV_GRID_LAYOUT,
     edgeRoutingLayout: {},
-    nodePositions: {}, nodeActions: {},
+    nodePositions: {}, nodeActions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,
     printerConfiguration: { ...DEFAULT_PRINTER_CONFIGURATION },
   };
 }
@@ -90,7 +90,7 @@ function makeApi(
   const save = vi.fn(
     saveImpl ??
       ((payload: SaveSystemConfigurationPayload) =>
-        Promise.resolve({ isInitialSetupCompleted: true, storeName: payload.storeName, brandColor: payload.brandColor, serviceThemes: payload.serviceThemes, tvPanelLayout: payload.tvPanelLayout, edgeRoutingLayout: {}, nodePositions: {}, nodeActions: {}, printerConfiguration: payload.printerConfiguration })),
+        Promise.resolve({ isInitialSetupCompleted: true, storeName: payload.storeName, brandColor: payload.brandColor, serviceThemes: payload.serviceThemes, tvPanelLayout: payload.tvPanelLayout, edgeRoutingLayout: {}, nodePositions: {}, nodeActions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const, printerConfiguration: payload.printerConfiguration })),
   );
   // The panel reloads the config after a successful save; default to returning
   // the same config (with ids preserved) so the post-save repopulate succeeds.
@@ -990,7 +990,7 @@ describe('AdminPanel shared-config coherence', () => {
           serviceThemes: payload.serviceThemes,
           tvPanelLayout: payload.tvPanelLayout,
           edgeRoutingLayout: {},
-          nodePositions: {}, nodeActions: {},
+          nodePositions: {}, nodeActions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,
           printerConfiguration: payload.printerConfiguration,
         });
       },

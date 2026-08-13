@@ -134,7 +134,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING', 'EXTRA'],
       transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
-      positions: {}, nodeActions: {}, descriptions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderWorkflow(customForm, [], onChange);
     // Select the EXTRA node on the canvas → panel renders the node editor.
     selectStateNode('EXTRA');
@@ -177,7 +177,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING', 'EXTRA'],
       transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
-      positions: {}, nodeActions: {}, descriptions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderWorkflow(customForm, [], onChange);
     // Select the EXTRA node on the canvas → panel renders the node editor.
     selectStateNode('EXTRA');
@@ -198,7 +198,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING', 'EXTRA'],
       transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
-      positions: {}, nodeActions: {}, descriptions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderWorkflow(customForm, [], onChange);
     selectStateNode('EXTRA');
     const panel = screen.getByTestId('sm-properties');
@@ -481,7 +481,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom',
       states: ['WAITING', 'CALLING'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' }],
-      positions: {}, nodeActions: {}, descriptions: {},    });
+      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    });
     selectEdge('WAITING->CALLING#0');
     const panel = screen.getByTestId('sm-properties');
     expect(within(panel).getByTestId('panel-delete-transition')).toBeDisabled();
@@ -533,7 +533,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
         mode: 'custom',
         states: ['ONHOLD', 'CALLING'],
         transitions: [{ from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut' }],
-        positions: {}, nodeActions: {}, descriptions: {},      },
+        positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,      },
       [],
       onChange,
     );
@@ -601,7 +601,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
           ? { ...t, sourceSide: 'bottom' as const, targetSide: 'top' as const }
           : { ...t },
       ),
-      positions: {}, nodeActions: {}, descriptions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderWorkflow(form, [], onChange);
     // Select the vertical edge and edit its label — `commit` lifts the
     // `flowToGraph`-captured form (with the sides) to the parent.
@@ -630,7 +630,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
         { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', sourceSide: 'bottom', targetSide: 'top' },
         ...DEFAULT_STATE_MACHINE.transitions.slice(1).map((t) => ({ ...t })),
       ],
-      positions: {}, nodeActions: {}, descriptions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderWorkflow(customForm, [], onChange);
     // Select the WAITING node and rename it to PENDING.
     selectStateNode('WAITING');
@@ -702,7 +702,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
         { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' },
         { from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut' },
       ],
-      positions: {}, nodeActions: {}, descriptions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderWorkflow(customForm);
     selectStateNode('ONHOLD');
     const panel = screen.getByTestId('sm-properties');
@@ -721,7 +721,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
-      positions: {}, nodeActions: {}, descriptions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderWorkflow(customForm, [], onChange);
     selectStateNode('WAITING');
     // Navigate to the "Transisi keluar" sub-view (panel redesign).
@@ -753,7 +753,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
         { from: 'CALLING', to: 'CALLING', actionLabel: 'ulang' },
         { from: 'CALLING', to: 'WAITING', actionLabel: 'kembali' },
       ],
-      positions: {}, nodeActions: {}, descriptions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderWorkflow(customForm);
     selectStateNode('CALLING');
     // Navigate to the "Transisi keluar" sub-view (panel redesign).
@@ -787,7 +787,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
-      positions: {}, nodeActions: {}, descriptions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderWorkflow(oneTransitionForm);
     selectStateNode('WAITING');
     // Navigate to the "Transisi keluar" sub-view (panel redesign).
@@ -819,7 +819,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING', 'LONELY'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
-      positions: {}, nodeActions: {}, descriptions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderWorkflow(customForm);
     selectStateNode('LONELY');
     const panel = screen.getByTestId('sm-properties');
@@ -863,7 +863,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
-      positions: {}, nodeActions: {}, descriptions: {},
+      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,
     };
     renderWorkflow(customForm, [], onChange);
     selectStateNode('WAITING');
@@ -899,6 +899,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
         WAITING: [{ executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'CALLING' }],
       },
       descriptions: {},
+      terminalNodes: { start: 'auto', end: 'auto' } as const,
     };
     renderWorkflow(customForm, [], onChange);
     selectStateNode('WAITING');
@@ -930,6 +931,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
         WAITING: [{ executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'CALLING' }],
       },
       descriptions: {},
+      terminalNodes: { start: 'auto', end: 'auto' } as const,
     };
     renderWorkflow(customForm, [], onChange);
     selectStateNode('WAITING');
@@ -978,7 +980,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
         { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' },
         { from: 'WAITING', to: 'COMPLETED', actionLabel: 'Skip' },
       ],
-      positions: {}, nodeActions: {}, descriptions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderWorkflow(form, [], onChange);
     selectEdge('WAITING->CALLING#0');
     const toSelect = screen.getByTestId('panel-transition-to') as HTMLSelectElement;
@@ -988,5 +990,89 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     // The controlled `<select>` reverts to the live edge value (CALLING) —
     // the DOM reflects the controlled value, not the rejected pick.
     expect(toSelect.value).toBe('CALLING');
+  });
+});
+
+describe('StateMachineWorkflow (Start/End terminal markers)', () => {
+  /** Select a canvas-only terminal marker by clicking its node card. Drives
+   *  the real React Flow selection path (onNodeClick → onSelectionChange →
+   *  selectedNodeId → panel marker branch). */
+  function selectMarker(key: 'start' | 'end'): void {
+    fireEvent.click(screen.getByTestId(`sm-node-${key}`));
+  }
+
+  it('the custom-mode palette offers Mulai + Selesai draggable cards', () => {
+    // Manager feedback: the Start/End markers are palette-draggable affordances
+    // (not just auto-derived). The palette lists them alongside "Status". Scope
+    // to the palette: the canvas Start marker also renders the "Mulai" label.
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
+    const palette = screen.getByTestId('sm-palette');
+    expect(within(palette).getByText('Mulai')).toBeInTheDocument();
+    expect(within(palette).getByText('Selesai')).toBeInTheDocument();
+  });
+
+  it('selecting the Start marker opens the marker panel (info + reset + delete)', () => {
+    // The default graph's auto/auto markers both render, so the Start marker is
+    // on the canvas and clickable. The panel branches to the read-only marker
+    // view (no state-name editor for __start).
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
+    selectMarker('start');
+    expect(screen.getByTestId('sm-properties')).toBeInTheDocument();
+    expect(screen.getByTestId('panel-terminal-info-start')).toBeInTheDocument();
+    expect(screen.getByTestId('panel-terminal-reset-start')).toBeInTheDocument();
+    expect(screen.getByTestId('panel-terminal-delete-start')).toBeInTheDocument();
+    // No state-name editor renders for a marker (it is not a real state).
+    expect(screen.queryByTestId('panel-state-name')).not.toBeInTheDocument();
+  });
+
+  it('the reset button is disabled while the marker is auto (no-op reset)', () => {
+    // An auto marker is already at the derived position → "Reset ke posisi
+    // otomatis" is a no-op, so the button is disabled.
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
+    selectMarker('start');
+    expect(screen.getByTestId('panel-terminal-reset-start')).toBeDisabled();
+  });
+
+  it('Hapus (delete) hides the marker — onChange sets terminalNodes.start to "hidden"', () => {
+    const onChange = vi.fn();
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const }, [], onChange);
+    selectMarker('start');
+    fireEvent.click(screen.getByTestId('panel-terminal-delete-start'));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next = onChange.mock.calls[0][0];
+    expect(next.terminalNodes.start).toBe('hidden');
+    // The End marker is untouched.
+    expect(next.terminalNodes.end).toBe('auto');
+  });
+
+  it('Reset ke posisi otomatis on a pinned marker sets terminalNodes.start back to "auto"', () => {
+    // A pinned marker ({x,y}) has the reset button ENABLED; clicking it lifts
+    // the pin → 'auto' so the marker re-derives its position from the topology.
+    const onChange = vi.fn();
+    const form: StateMachineForm = {
+      ...defaultStateMachineForm(),
+      mode: 'custom' as const,
+      terminalNodes: { start: { x: -500, y: 40 }, end: 'auto' },
+    };
+    renderWorkflow(form, [], onChange);
+    selectMarker('start');
+    expect(screen.getByTestId('panel-terminal-reset-start')).not.toBeDisabled();
+    fireEvent.click(screen.getByTestId('panel-terminal-reset-start'));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange.mock.calls[0][0].terminalNodes.start).toBe('auto');
+  });
+
+  it('the marker panel reports the pinned position for a pinned marker', () => {
+    // The info line surfaces the live pinned coordinates so the manager can see
+    // where the marker is willed (vs the auto-derived rank offset).
+    const form: StateMachineForm = {
+      ...defaultStateMachineForm(),
+      mode: 'custom' as const,
+      terminalNodes: { start: { x: -500, y: 40 }, end: 'auto' },
+    };
+    renderWorkflow(form);
+    selectMarker('start');
+    expect(screen.getByTestId('panel-terminal-info-start')).toHaveTextContent('x=-500');
+    expect(screen.getByTestId('panel-terminal-info-start')).toHaveTextContent('y=40');
   });
 });

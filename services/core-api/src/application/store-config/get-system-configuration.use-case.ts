@@ -9,6 +9,7 @@ import { TvPanelLayout, type TvGridLayout } from '../../domain/store-config';
 import { EdgeRoutingLayout, type EdgeRoutingLayoutDto } from '../../domain/store-config';
 import { NodePositions, type NodePositionsDto } from '../../domain/store-config';
 import { NodeActions, type NodeActionsDto } from '../../domain/store-config';
+import { TerminalNodes, type TerminalNodesDto } from '../../domain/store-config';
 import { PrinterConfiguration, type PrinterConfigurationDto } from '../../domain/store-config';
 import type { PriorityPolicy } from '../../domain/shared';
 
@@ -87,6 +88,10 @@ export interface SystemConfigurationDto {
   /** Per-state Kaleo-style node-level actions for the admin state-machine editor
    *  (keyed map "stateName" -> NodeActionProps[]). Decoupled from transitions. */
   readonly nodeActions: NodeActionsDto;
+  /** Persisted Start/End terminal-node presence + position for the admin
+   *  state-machine editor (fixed-shape `{ start, end }`; each terminal is
+   *  `'auto'` | `'hidden'` | `{ x, y }`). */
+  readonly terminalNodes: TerminalNodesDto;
   /** Printer configuration (which printer the kiosk uses — Chrome's default
    *  dialog, or a network ESC/POS printer proxied through core-api over raw
    *  TCP). */
@@ -180,6 +185,10 @@ export class GetSystemConfigurationUseCase {
         // store prefills the admin state-machine editor with action-less nodes
         // (Kaleo-style actions are admin-only config, decoupled from transitions).
         nodeActions: NodeActions.DEFAULT.toDto(),
+        // Default terminal nodes — auto/auto = markers render at derived
+        // positions (Start/End stay the pre-marker-persistence auto-derived
+        // canvas-only nodes on a clean store).
+        terminalNodes: TerminalNodes.DEFAULT.toDto(),
         // Default printer configuration — chrome mode = zero behavior change
         // (the kiosk keeps using Chrome's print dialog), so a clean store
         // prefills the admin printer section with the existing chrome behavior.
@@ -204,6 +213,7 @@ export class GetSystemConfigurationUseCase {
       edgeRoutingLayout: system.edgeRoutingLayout.toDto(),
       nodePositions: system.nodePositions.toDto(),
       nodeActions: system.nodeActions.toDto(),
+      terminalNodes: system.terminalNodes.toDto(),
       printerConfiguration: system.printerConfiguration.toDto(),
       categories: allCategories
         .slice()

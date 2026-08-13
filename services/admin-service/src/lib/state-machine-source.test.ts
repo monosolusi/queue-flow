@@ -15,7 +15,7 @@ function defaultForm(): StateMachineForm {
     mode: 'default',
     states: [...DEFAULT_STATE_MACHINE.states],
     transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
-    positions: {}, nodeActions: {}, descriptions: {},  };
+    positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,  };
 }
 
 describe('formToXml', () => {
@@ -44,10 +44,13 @@ describe('formToXml', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
-      positions: { A: { x: 10, y: 20 }, B: { x: 240, y: 0 } }, nodeActions: {}, descriptions: {},    };
+      positions: { A: { x: 10, y: 20 }, B: { x: 240, y: 0 } }, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const xml = formToXml(form);
-    expect(xml).toContain('<state name="A" x="10" y="20"/>');
-    expect(xml).toContain('<state name="B" x="240" y="0"/>');
+    // States carry a computed `description` attribute (derived from
+    // `describeState`), so the element is no longer a bare `x/y` self-closing
+    // tag — assert the name/x/y prefix instead.
+    expect(xml).toContain('<state name="A" x="10" y="20"');
+    expect(xml).toContain('<state name="B" x="240" y="0"');
   });
 
   it('defaults absent positions to the deterministic autoLayout (matching the diagram)', () => {
@@ -55,12 +58,12 @@ describe('formToXml', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
-      positions: {}, nodeActions: {}, descriptions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const xml = formToXml(form);
     // A is the sole source → rank 0 → x=0; B follows A → rank 1 → x=240; both
     // index 0 in their rank → y=0.
-    expect(xml).toContain('<state name="A" x="0" y="0"/>');
-    expect(xml).toContain('<state name="B" x="240" y="0"/>');
+    expect(xml).toContain('<state name="A" x="0" y="0"');
+    expect(xml).toContain('<state name="B" x="240" y="0"');
     // The serialized coordinates MUST equal the autoLayout derivation the
     // Diagram's `formToFlow` uses (XML == diagram derivation, single source
     // of truth).
@@ -74,11 +77,13 @@ describe('formToXml', () => {
     expect(form.positions).toEqual({}); // un-customized → autoLayout fallback
     const xml = formToXml(form);
     const auto = autoLayout(DEFAULT_STATE_MACHINE.states, DEFAULT_STATE_MACHINE.transitions);
-    // Parse each <state name="X" x=".." y=".."/> coordinate out of the XML and
-    // assert it equals autoLayout[...] for the same graph — the regression
-    // guard proving the XML and the Diagram cannot diverge.
+    // Parse each <state name="X" x=".." y=".." .../> coordinate out of the XML
+    // and assert it equals autoLayout[...] for the same graph — the regression
+    // guard proving the XML and the Diagram cannot diverge. States now carry a
+    // trailing `description` attribute, so the regex matches the x/y prefix
+    // without requiring a bare self-closing terminator.
     for (const s of DEFAULT_STATE_MACHINE.states) {
-      const re = new RegExp(`<state name="${s}" x="(-?[0-9.]+)" y="(-?[0-9.]+)"/>`);
+      const re = new RegExp(`<state name="${s}" x="(-?[0-9.]+)" y="(-?[0-9.]+)"`);
       const m = xml.match(re);
       expect(m).not.toBeNull();
       const [xStr, yStr] = [m![1], m![2]];
@@ -101,7 +106,7 @@ describe('formToXml', () => {
       transitions: [
         { from: 'A', to: 'B', actionLabel: 'go', sourceSide: 'bottom', targetSide: 'top' },
       ],
-      positions: {}, nodeActions: {}, descriptions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const xml = formToXml(form);
     expect(xml).toContain('sourceSide="bottom"');
     expect(xml).toContain('targetSide="top"');
@@ -112,7 +117,7 @@ describe('formToXml', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go', sourceSide: 'bottom' }],
-      positions: {}, nodeActions: {}, descriptions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const xml = formToXml(form);
     expect(xml).toContain('sourceSide="bottom"');
     // targetSide materialized to the default ('left').
@@ -124,7 +129,7 @@ describe('formToXml', () => {
       mode: 'custom',
       states: ['A&B'],
       transitions: [{ from: 'A&B', to: 'A&B', actionLabel: 'go "there" <now>' }],
-      positions: {}, nodeActions: {}, descriptions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const xml = formToXml(form);
     expect(xml).toContain('name="A&amp;B"');
     expect(xml).toContain('from="A&amp;B"');
@@ -138,7 +143,7 @@ describe('formToXml', () => {
       mode: 'custom',
       states: ['A'],
       transitions: [],
-      positions: { A: { x: 10.123456, y: 20.999 } }, nodeActions: {}, descriptions: {},    };
+      positions: { A: { x: 10.123456, y: 20.999 } }, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const xml = formToXml(form);
     expect(xml).toContain('x="10.12"');
     expect(xml).toContain('y="21"');
@@ -276,7 +281,7 @@ describe('xmlToForm', () => {
         { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' },
         { from: 'CALLING', to: 'SERVING', actionLabel: 'Mulai Melayani' },
       ],
-      positions: {}, nodeActions: {}, descriptions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const result = xmlToForm(formToXml(form));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -296,7 +301,7 @@ describe('xmlToForm', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
-      positions: { A: { x: 10, y: 20 }, B: { x: 240, y: 80 } }, nodeActions: {}, descriptions: {},    };
+      positions: { A: { x: 10, y: 20 }, B: { x: 240, y: 80 } }, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const result = xmlToForm(formToXml(form));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -309,7 +314,7 @@ describe('xmlToForm', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'up', sourceSide: 'bottom', targetSide: 'top' }],
-      positions: {}, nodeActions: {}, descriptions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const result = xmlToForm(formToXml(form));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -334,6 +339,7 @@ describe('xmlToForm', () => {
       positions: { A: { x: 10, y: 20 }, B: { x: 240, y: 80 } },
       nodeActions: {},
       descriptions: { A: 'Antrian dimulai di sini', B: '' },
+      terminalNodes: { start: 'auto', end: 'auto' } as const,
     };
     const xml = formToXml(form);
     // A's non-empty override is serialized as a `description` attribute.
@@ -353,6 +359,7 @@ describe('xmlToForm', () => {
       positions: { A: { x: 10, y: 20 }, B: { x: 240, y: 80 } },
       nodeActions: {},
       descriptions: { A: 'Antrian dimulai di sini' },
+      terminalNodes: { start: 'auto', end: 'auto' } as const,
     };
     const result = xmlToForm(formToXml(form));
     expect(result.ok).toBe(true);
@@ -370,6 +377,7 @@ describe('xmlToForm', () => {
       positions: { A: { x: 10, y: 20 }, B: { x: 240, y: 80 } },
       nodeActions: {},
       descriptions: {},
+      terminalNodes: { start: 'auto', end: 'auto' } as const,
     };
     const xml = formToXml(form);
     expect(xml).not.toContain('description=');
@@ -390,5 +398,132 @@ describe('xmlToForm', () => {
     // An empty description attribute is skipped (sparse — an empty/whitespace
     // override round-trips as an absent key so descriptionFor falls back).
     expect(result.form.descriptions.B).toBeUndefined();
+  });
+});
+
+describe('formToXml terminal markers + node actions', () => {
+  it('always emits <start>/<end> (auto="true" for the default auto/auto)', () => {
+    // The manager's "XML harus memuat semua informasi node" feedback: terminal
+    // state is explicit, never inferred from absence. The default graph's
+    // auto/auto markers serialize as auto="true" self-closing elements AFTER
+    // the <transition>s.
+    const xml = formToXml(defaultForm());
+    expect(xml).toContain('<start auto="true"/>');
+    expect(xml).toContain('<end auto="true"/>');
+    // Order: <start> before <end>, both after the transitions.
+    expect(xml.indexOf('<start ')).toBeGreaterThan(xml.indexOf('<transition '));
+    expect(xml.indexOf('<end ')).toBeGreaterThan(xml.indexOf('<start '));
+  });
+
+  it('serializes hidden as hidden="true" and a pinned {x,y} as x/y attrs', () => {
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+      positions: { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
+      nodeActions: {},
+      descriptions: {},
+      terminalNodes: { start: 'hidden', end: { x: 720, y: 30 } },
+    };
+    const xml = formToXml(form);
+    expect(xml).toContain('<start hidden="true"/>');
+    expect(xml).toContain('<end x="720" y="30"/>');
+  });
+
+  it('emits <action> children inside <state> (open/close for actions, self-closing otherwise)', () => {
+    // The Kaleo-style node-level actions serialize as <action> children; a
+    // state WITH actions opens `<state ...>` and closes `</state>`, while a
+    // state WITHOUT actions stays self-closing. Under sparse description
+    // semantics, no `description` attribute is emitted when the state has no
+    // non-empty override in its `descriptions` map.
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+      positions: { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
+      nodeActions: {
+        A: [{ executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'B' }],
+      },
+      descriptions: {},
+      terminalNodes: { start: 'auto', end: 'auto' },
+    };
+    const xml = formToXml(form);
+    // A has an action → open tag + child + close (no description override).
+    expect(xml).toContain('<state name="A" x="0" y="0">');
+    expect(xml).toContain('<action execution="ON_ENTRY" type="UPDATE_STATUS" value="B"/>');
+    expect(xml).toContain('</state>');
+    // B has no actions → self-closing, no description override.
+    expect(xml).toContain('<state name="B" x="240" y="0"/>');
+  });
+});
+
+describe('xmlToForm round-trips terminalNodes + nodeActions', () => {
+  it('round-trips auto/hidden/pinned terminal markers', () => {
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+      positions: { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
+      nodeActions: {},
+      descriptions: {},
+      terminalNodes: { start: 'hidden', end: { x: 720, y: 30 } },
+    };
+    const result = xmlToForm(formToXml(form));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.form.terminalNodes.start).toBe('hidden');
+    expect(result.form.terminalNodes.end).toEqual({ x: 720, y: 30 });
+  });
+
+  it('round-trips nodeActions (per-state <action> children)', () => {
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+      positions: { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
+      nodeActions: {
+        A: [
+          { executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'B' },
+          { executionType: 'ON_EXIT', type: 'UPDATE_STATUS', value: 'CALLING' },
+        ],
+      },
+      descriptions: {},
+      terminalNodes: { start: 'auto', end: 'auto' },
+    };
+    const result = xmlToForm(formToXml(form));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.form.nodeActions.A).toEqual(form.nodeActions.A);
+    // A state with no actions round-trips as an absent key (not an empty array).
+    expect(result.form.nodeActions.B).toBeUndefined();
+  });
+
+  it("defaults absent <start>/<end> to 'auto' (backward-compat with pre-marker XML)", () => {
+    // XML written before terminal markers were serialized has no <start>/<end>.
+    // The parser defaults both to 'auto' so a legacy source loads cleanly.
+    const xml =
+      '<?xml version="1.0"?><stateMachine><state name="A" x="0" y="0"/><state name="B" x="240" y="0"/><transition from="A" to="B" actionLabel="go"/></stateMachine>';
+    const result = xmlToForm(xml);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.form.terminalNodes).toEqual({ start: 'auto', end: 'auto' });
+  });
+
+  it('rejects a <start> missing x/y (and without auto/hidden) with a manager-facing error', () => {
+    const xml =
+      '<?xml version="1.0"?><stateMachine><state name="A" x="0" y="0"/><start/></stateMachine>';
+    const result = xmlToForm(xml);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatch(/"auto".*"hidden".*"x".*"y"/i);
+  });
+
+  it('rejects a non-numeric <end> x/y', () => {
+    const xml =
+      '<?xml version="1.0"?><stateMachine><state name="A" x="0" y="0"/><end x="abc" y="0"/></stateMachine>';
+    const result = xmlToForm(xml);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatch(/angka/i);
   });
 });

@@ -27,6 +27,7 @@ import {
   NodeActions,
   NodePositions,
   PrinterConfiguration,
+  TerminalNodes,
   DailyResetPolicy,
   DailyResetMode,
   SystemConfiguration,
@@ -192,6 +193,7 @@ describe('System daily-reset REST surface (integration — QUE-2)', () => {
         edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
         nodePositions: NodePositions.DEFAULT,
         nodeActions: NodeActions.DEFAULT,
+        terminalNodes: TerminalNodes.DEFAULT,
         printerConfiguration: PrinterConfiguration.DEFAULT,
       }),
     );

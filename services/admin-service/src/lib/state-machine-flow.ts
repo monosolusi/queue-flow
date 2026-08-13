@@ -22,7 +22,7 @@ import {
   type StateMachineForm,
   type Transition,
 } from './state-machine';
-import { DEFAULT_STATE_MACHINE, type EdgeSide } from '../api/types';
+import { DEFAULT_STATE_MACHINE, DEFAULT_TERMINAL_NODES, type EdgeSide, type TerminalNodesDto } from '../api/types';
 
 /** Node payload: the state name (the node id IS the state name — names are
  *  unique per `validateCustomStateMachine`, so they are valid unique node ids)
@@ -62,6 +62,15 @@ export interface FlowNode {
    *  `selectable: true` so clicking one opens the properties-panel marker
    *  branch. Optional — real state nodes leave it unset. */
   selectable?: boolean;
+  /**
+   * Canvas-only: true when the manager pinned a Start/End terminal marker at an
+   *  explicit position (a drag, or a palette drop). `flowToGraph` reads it to
+   *  distinguish a pinned `{x,y}` terminal from an auto-derived one (which
+   *  round-trips as `'auto'` so the marker re-derives its position from the live
+   *  topology on the next re-seed). Optional — auto markers + real state nodes
+   *  leave it unset (falsy).
+   */
+  pinned?: boolean;
 }
 
 /** Edge payload: the transition's action label (the Caller UI button text).
@@ -400,15 +409,27 @@ export function deriveTerminalMarkers(
 }
 
 /**
- * {@link formToFlow} + the canvas-only Start/End terminal markers from
- * {@link deriveTerminalMarkers} in one call. The markers are derived from the
- * REAL state node positions returned by {@link formToFlow} (so they sit at the
- * correct rank offset from the actual layout), NOT from the `positions` arg
- * (which is the `oldPositions` fallback for surviving names — markers are
- * auto-derived on every re-seed and carry no position memory). The returned
- * `nodes`/`edges` are the concatenation `[...stateNodes, ...markerNodes]` /
+ * {@link formToFlow} + the canvas-only Start/End terminal markers in one call.
+ * The marker EDGES stay auto-derived from topology (sources = in-degree 0,
+ * sinks = out-degree 0) via {@link deriveTerminalMarkers}; the marker NODE
+ * presence + position come from `value.terminalNodes` — the manager controls
+ * marker PRESENCE + POSITION only, not edges:
+ *  - `'hidden'` → omit the marker node (and its edges — an edge with no source
+ *    node cannot render).
+ *  - `'auto'` → derive the position from the real node bounds (the
+ *    {@link deriveTerminalMarkers} math), `pinned: false`; emit ONLY when the
+ *    topology has sources/sinks (a pure-cycle graph has none → no auto marker).
+ *  - `{x,y}` → explicit manager-pinned position, `pinned: true`; emit ALWAYS
+ *    (the manager willed the marker even if the topology has no sources/sinks).
+ *
+ * The markers are positioned from the REAL state node positions returned by
+ * {@link formToFlow} (so an auto marker sits at the correct rank offset from
+ * the actual layout), NOT from the `positions` arg (which is the `oldPositions`
+ * fallback for surviving names). The returned `nodes`/`edges` are the
+ * concatenation `[...stateNodes, ...markerNodes]` /
  * `[...transEdges, ...markerEdges]`; {@link flowToGraph} filters the markers
- * back out so the form/wire/XML never see them.
+ * back out so the form/wire/XML never see them (but it DOES capture
+ * `terminalNodes` back from the marker `pinned` flag + positions).
  */
 export function formToFlowWithMarkers(
   value: StateMachineForm,
@@ -417,11 +438,52 @@ export function formToFlowWithMarkers(
   const { nodes: stateNodes, edges: transEdges } = formToFlow(value, positions);
   const realPositions: Record<string, { x: number; y: number }> = {};
   for (const n of stateNodes) realPositions[n.data.name] = n.position;
-  const { nodes: markerNodes, edges: markerEdges } = deriveTerminalMarkers(
-    value.states,
-    value.transitions,
-    realPositions,
-  );
+  // Topology-derived markers: the edge + auto-position derivation engine. We
+  // reuse it for the terminal edges + the auto marker positions, then consult
+  // `value.terminalNodes` for marker presence + position override + pinned.
+  const topo = deriveTerminalMarkers(value.states, value.transitions, realPositions);
+  const autoStart = topo.nodes.find((n) => n.id === START_NODE_ID);
+  const autoEnd = topo.nodes.find((n) => n.id === END_NODE_ID);
+  const startEdges = topo.edges.filter((e) => e.source === START_NODE_ID);
+  const endEdges = topo.edges.filter((e) => e.target === END_NODE_ID);
+
+  const markerNodes: FlowNode[] = [];
+  const markerEdges: FlowEdge[] = [];
+  const { start, end } = value.terminalNodes;
+
+  // Start marker: hidden → omit; auto → emit only when topology has sources;
+  // {x,y} → emit always, pinned.
+  if (start !== 'hidden') {
+    const emitExplicit = typeof start === 'object';
+    const emitAuto = start === 'auto' && autoStart !== undefined;
+    if (emitExplicit || emitAuto) {
+      markerNodes.push({
+        id: START_NODE_ID,
+        type: START_NODE_TYPE,
+        position: emitExplicit ? { x: start.x, y: start.y } : autoStart!.position,
+        data: { name: START_NODE_ID, description: '' },
+        selectable: true,
+        pinned: emitExplicit,
+      });
+      markerEdges.push(...startEdges);
+    }
+  }
+  // End marker (mirrors start with sinks).
+  if (end !== 'hidden') {
+    const emitExplicit = typeof end === 'object';
+    const emitAuto = end === 'auto' && autoEnd !== undefined;
+    if (emitExplicit || emitAuto) {
+      markerNodes.push({
+        id: END_NODE_ID,
+        type: END_NODE_TYPE,
+        position: emitExplicit ? { x: end.x, y: end.y } : autoEnd!.position,
+        data: { name: END_NODE_ID, description: '' },
+        selectable: true,
+        pinned: emitExplicit,
+      });
+      markerEdges.push(...endEdges);
+    }
+  }
   return { nodes: [...stateNodes, ...markerNodes], edges: [...transEdges, ...markerEdges] };
 }
 
@@ -443,7 +505,13 @@ export function formToFlowWithMarkers(
 export function flowToGraph(
   nodes: readonly FlowNode[],
   edges: readonly FlowEdge[],
-): { states: string[]; transitions: Transition[]; positions: Record<string, { x: number; y: number }> } {
+  prevTerminalNodes: TerminalNodesDto = DEFAULT_TERMINAL_NODES,
+): {
+  states: string[];
+  transitions: Transition[];
+  positions: Record<string, { x: number; y: number }>;
+  terminalNodes: TerminalNodesDto;
+} {
   // Filter the canvas-only terminal markers (Start/End nodes + terminal edges)
   // so they NEVER reach the form/wire/XML. The markers are a visual affordance
   // auto-derived by {@link deriveTerminalMarkers} on each re-seed; round-tripping
@@ -463,7 +531,28 @@ export function flowToGraph(
       sourceSide: handleToSide(e.sourceHandle),
       targetSide: handleToSide(e.targetHandle),
     }));
-  return { states, transitions, positions };
+  // Capture the terminal-marker states back from the canvas. A present marker
+  // with `pinned` → `{x,y}` (manager-pinned); a present marker without `pinned`
+  // → `'auto'` (auto-derived position). An ABSENT marker preserves the prior
+  // `prevTerminalNodes[key]` — absence is ambiguous (it could mean `'hidden'`
+  // OR an auto marker dropped because the topology has no sources/sinks), so
+  // the caller passes the prior terminalNodes to disambiguate.
+  const startNode = nodes.find((n) => n.type === START_NODE_TYPE);
+  const endNode = nodes.find((n) => n.type === END_NODE_TYPE);
+  const capture = (
+    marker: FlowNode | undefined,
+    prev: TerminalNodesDto['start'],
+  ): TerminalNodesDto['start'] =>
+    marker
+      ? marker.pinned
+        ? { x: marker.position.x, y: marker.position.y }
+        : 'auto'
+      : prev;
+  const terminalNodes: TerminalNodesDto = {
+    start: capture(startNode, prevTerminalNodes.start),
+    end: capture(endNode, prevTerminalNodes.end),
+  };
+  return { states, transitions, positions, terminalNodes };
 }
 
 /**

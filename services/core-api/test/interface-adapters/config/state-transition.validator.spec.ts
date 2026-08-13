@@ -12,6 +12,7 @@ import {
   NodeActions,
   NodePositions,
   PrinterConfiguration,
+  TerminalNodes,
   StateMachine,
   StateSchema,
   StateTransitionRule,
@@ -101,6 +102,7 @@ describe('StateTransitionValidator (active-policy resolver — QUE-10 AC#1)', ()
       edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
       nodePositions: NodePositions.DEFAULT,
       nodeActions: NodeActions.DEFAULT,
+      terminalNodes: TerminalNodes.DEFAULT,
       printerConfiguration: PrinterConfiguration.DEFAULT,
     });
     await config.save(system);

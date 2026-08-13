@@ -115,6 +115,24 @@ export interface WorkflowHandlers {
    * are canvas-rendered, unlike `nodeActions` which are panel-only).
    */
   onEditStateDescription: (state: string, value: string) => void;
+  /**
+   * Reset a terminal marker (Start/End) to the auto-derived position. Non-
+   * stamping: the parent calls raw `onChange` so the sync effect re-seeds the
+   * canvas (the marker re-derives its position from the real node bounds).
+   * `key` is the fixed terminal key (`'start'` | `'end'`), NOT a state name.
+   */
+  onResetTerminalAuto: (key: 'start' | 'end') => void;
+  /**
+   * Delete (hide) a terminal marker. Non-stamping (re-seeds; the marker is
+   * omitted from the canvas). `key` is `'start'` | `'end'`.
+   */
+  onDeleteTerminal: (key: 'start' | 'end') => void;
+  /**
+   * Drop a terminal marker from the palette at a flow position. Non-stamping
+   * (re-seeds; the marker is placed at the drop position as a pinned `{x,y}`).
+   * `key` is `'start'` | `'end'`.
+   */
+  onDropTerminal: (key: 'start' | 'end', position: { x: number; y: number }) => void;
 }
 
 export const WorkflowContext = createContext<WorkflowHandlers | null>(null);

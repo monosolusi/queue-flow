@@ -172,6 +172,15 @@ export function StateMachineWorkflowProperties({
     // the topology, not a form entity); the back button returns to the palette.
     if (selectedNode.type === "start" || selectedNode.type === "end") {
       const isStart = selectedNode.type === "start";
+      const key = isStart ? "start" : "end";
+      const terminal = form.terminalNodes[key];
+      const isAuto = terminal === "auto";
+      const isHidden = terminal === "hidden";
+      const posInfo = isAuto
+        ? "Posisi otomatis — diturunkan dari status pada kanvas."
+        : isHidden
+          ? "Tersembunyi."
+          : `Posisi pinned: x=${(terminal as { x: number; y: number }).x}, y=${(terminal as { x: number; y: number }).y}`;
       return (
         <aside className="sm-properties" data-testid="sm-properties" aria-label="Properti titik alur">
           {backButton}
@@ -182,6 +191,28 @@ export function StateMachineWorkflowProperties({
                 ? "Status awal — status tanpa transisi masuk. Panah keluar dari titik ini ke status pertama."
                 : "Status akhir — status tanpa transisi keluar. Panah masuk ke titik ini dari status terakhir."}
             </p>
+            <p className="sm-properties__hint" data-testid={`panel-terminal-info-${key}`}>
+              {posInfo}
+            </p>
+          </div>
+          <div className="sm-properties__field">
+            <button
+              type="button"
+              className="btn btn--secondary sm-properties__add-action"
+              data-testid={`panel-terminal-reset-${key}`}
+              onClick={() => handlers.onResetTerminalAuto(key)}
+              disabled={isAuto}
+            >
+              Reset ke posisi otomatis
+            </button>
+            <button
+              type="button"
+              className="btn btn--ghost sm-properties__delete"
+              data-testid={`panel-terminal-delete-${key}`}
+              onClick={() => handlers.onDeleteTerminal(key)}
+            >
+              Hapus
+            </button>
           </div>
         </aside>
       );
