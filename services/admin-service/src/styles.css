@@ -1686,7 +1686,7 @@ fieldset {
   color: var(--text-muted);
 }
 
-/* --- Alur Status Tiket designer: canvas fills the viewport (no page scroll) ---
+/* --- Alur Status Tiket designer: canvas fills the viewport ---------------------
    Manager feedback: the editor canvas was smaller than the right properties
    panel AND the page scrolled. The canvas height was a hand-tuned
    `calc(100vh - 16rem)` (see state-machine-workflow.css) — an approximation
@@ -1699,11 +1699,35 @@ fieldset {
    The sticky topbar takes its measured height; `<main>` flexes to fill the rest;
    the designer + its workflow layout flex to fill `<main>`; the canvas stretches
    to the workflow row's height. The canvas then gets the EXACT remaining height
-   — no scroll, and as tall as possible (the biggest size the viewport allows
-   below the page chrome). Scoped to ≥48rem (desktop) — narrower viewports keep
-   the prior scrolling layout (the designer is a desktop tool; a stacked panel
-   would collapse a flex-stretched canvas). */
-@media (min-width: 48rem) {
+   — as tall as possible (the biggest size the viewport allows below the page
+   chrome).
+
+   INVARIANT: filling the viewport is an optimization; content REACHABILITY is
+   the invariant. The designer region is therefore the scroll container
+   (`overflow-y: auto`, not `hidden`): when the content floors below cannot fit
+   the locked viewport the region degrades to scrolling instead of hard-clipping
+   content the user can never reach (manager feedback: "kenapa jadi tidak bisa
+   scroll ya? UI jadi aneh?"). `overflow: hidden` stays on `.app-shell__main` —
+   it is what keeps the shell exactly one viewport tall, and the designer inside
+   it is the surface that scrolls. That is also what keeps the topbar in place:
+   `.app-shell__topbar` and `<main id="main-content">` are the two children of
+   `.app-shell__main` (see AppShell.tsx), so under the lock the topbar is simply
+   the first item of a flex column that cannot scroll — its `position: sticky` is
+   inert here, and scrolling happens one level deeper, inside the designer.
+
+   Breakpoint: ≥901px in PIXELS, deliberately NOT `48rem`. The viewport lock must
+   sit strictly ABOVE the app shell's own `@media (max-width: 900px)` sidebar
+   collapse (below it `.app-shell` drops to one grid column and the sidebar
+   becomes a static row ABOVE the main column, so `height: 100vh` on that column
+   makes the DOCUMENT taller than the viewport — the body scrolls while the
+   column's content is clipped at the same time). A rem-based query would overlap
+   that px breakpoint outright (48rem = 768px) and could drift further under a
+   changed root font-size. 768–900px keeps the natural-flow fallback: side-by-side
+   layout, `calc(100vh - 16rem)` canvas, page scrolls normally. The two
+   breakpoints are one relationship, not two constants: styles.test.ts DERIVES
+   this prelude from the collapse breakpoint, so moving either alone fails the
+   suite. */
+@media (min-width: 901px) {
   .app-shell:has(.alur-status-designer) .app-shell__main {
     height: 100vh;
     overflow: hidden;
@@ -1717,7 +1741,7 @@ fieldset {
   .alur-status-designer {
     flex: 1 1 0;
     min-height: 0;
-    overflow: hidden;
+    overflow-y: auto;
   }
 }
 

@@ -99,28 +99,42 @@ function atRuleBlock(prelude: string): string {
   throw new Error(`unbalanced braces in at-rule: ${prelude}`);
 }
 
-/** Every block sharing a prelude (a breakpoint may be declared more than once,
- *  each next to the section it adjusts). */
-function atRuleBlocks(prelude: string): string[] {
+/** Every block sharing a prelude, in ANY stylesheet source — the generic form
+ *  {@link atRuleBlocks} delegates to. Two differences from that wrapper: it takes
+ *  the source explicitly (so it also serves state-machine-workflow.css), and an
+ *  absent prelude yields an EMPTY array rather than throwing — which an "…and
+ *  this breakpoint no longer carries these rules" guard needs, since absent is
+ *  its passing case. */
+function atRuleBlocksIn(source: string, prelude: string): string[] {
   const escaped = prelude.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp(`${escaped}\\s*\\{`, 'g');
   const blocks: string[] = [];
-  for (let m = re.exec(css); m !== null; m = re.exec(css)) {
+  for (let m = re.exec(source); m !== null; m = re.exec(source)) {
     let depth = 0;
     let bodyStart = -1;
-    for (let i = m.index; i < css.length; i++) {
-      if (css[i] === '{') {
+    for (let i = m.index; i < source.length; i++) {
+      if (source[i] === '{') {
         if (depth === 0) bodyStart = i + 1;
         depth++;
-      } else if (css[i] === '}') {
+      } else if (source[i] === '}') {
         depth--;
         if (depth === 0) {
-          blocks.push(css.slice(bodyStart, i));
+          blocks.push(source.slice(bodyStart, i));
           break;
         }
       }
     }
   }
+  return blocks;
+}
+
+/** Every block in styles.css sharing a prelude (a breakpoint may be declared
+ *  more than once, each next to the section it adjusts). Throws when the prelude
+ *  is absent — callers use it to assert presence, so a vanished breakpoint must
+ *  fail loudly rather than yield an empty array that silently passes a `.some()`
+ *  / `.find()` chain. */
+function atRuleBlocks(prelude: string): string[] {
+  const blocks = atRuleBlocksIn(css, prelude);
   if (blocks.length === 0) throw new Error(`at-rule not found: ${prelude}`);
   return blocks;
 }
@@ -674,6 +688,14 @@ describe('relative-range presets + range-trend bar/line toggle', () => {
   });
 });
 
+/** The prelude of the designer's fixed-viewport lock, shared by styles.css (the
+ *  app-shell side) and state-machine-workflow.css (the canvas/panel side). Both
+ *  MUST use this exact prelude — the two halves are one layout, so a drift
+ *  between them re-opens the band where main is locked to 100vh but the canvas
+ *  is not flex-filling (or vice versa). 901px, not 48rem: see the dedicated
+ *  breakpoint guard below. */
+const DESIGNER_LOCK_MEDIA = '@media (min-width: 901px)';
+
 describe('Alur Status Tiket designer — warning relocation + dedicated full-page diagram', () => {
   it('the section warning sits before the action (not hoisted above the title — the `--top` modifier is gone)', () => {
     // Manager feedback moved this twice: the warning was first hoisted to the
@@ -705,17 +727,19 @@ describe('Alur Status Tiket designer — warning relocation + dedicated full-pag
     // 0-2-0) overrides it without changing the StateMachineWorkflow API. This
     // `calc(100vh - 16rem)` is the NARROW-viewport fallback (the page may scroll
     // when the stacked panel + chrome exceed the viewport — acceptable on a
-    // narrow stacked layout). At ≥48rem the desktop flex-fill block below takes
-    // over so there is NO page scroll (see the next test). Guard the fallback
-    // height + the larger min-height (36rem — raised so the diagram + right
-    // panel get a bigger default floor on short viewports, manager feedback:
-    // "make a min-height a bit longer so we have a bigger right and diagram").
+    // narrow stacked layout, and it also covers the 768–900px band where the app
+    // shell stacks its sidebar above <main>). At ≥901px the desktop flex-fill
+    // block below takes over (see the next test). Guard the fallback height +
+    // the larger min-height (36rem — a bigger default floor on short viewports,
+    // manager feedback: "make a min-height a bit longer so we have a bigger
+    // right and diagram"). This floor is safe here precisely BECAUSE the page
+    // scrolls in the fallback layout — nothing is clipped.
     const canvas = wfRule('.alur-status-designer .sm-canvas');
     expect(canvas).toContain('height: calc(100vh - 16rem)');
     expect(canvas).toContain('min-height: 36rem');
   });
 
-  it('on desktop the canvas flex-fills the viewport (no page scroll, biggest size, same height as the right panel)', () => {
+  it('on desktop the canvas flex-fills the viewport (biggest size, same height as the right panel) but never clips', () => {
     // Manager feedback: "the editor is smaller than its properties bar on the
     // right and sometimes needs scrolling — make it the biggest size, no
     // scrolling." The fragile `calc(100vh - 16rem)` approximation is replaced by
@@ -725,37 +749,47 @@ describe('Alur Status Tiket designer — warning relocation + dedicated full-pag
     // to fill <main>, the workflow layout flexes to fill the designer, and the
     // canvas stretches to the row (height: auto + align-items: stretch). The
     // canvas + the right panel then share the SAME row height (the "smaller than
-    // its properties bar" gap closes) and the page never scrolls.
+    // its properties bar" gap closes).
     //
-    // The flex-fill is scoped to `@media (min-width: 48rem)` so the narrow-
-    // viewport stacked layout keeps the prior scrolling behavior. Asserting
+    // INVARIANT (superseding the earlier absolute "the page never scrolls"):
+    // filling the viewport is the OPTIMIZATION; content reachability is the
+    // INVARIANT. The designer region is the scroll container (`overflow-y: auto`)
+    // so that when the content floors cannot fit the locked viewport the layout
+    // degrades to scrolling instead of hard-clipping unreachable content —
+    // manager feedback: "kenapa jadi tidak bisa scroll ya? UI jadi aneh?".
+    // `overflow: hidden` stays on `.app-shell__main`: that is what keeps the
+    // shell exactly one viewport tall, with the designer inside it scrolling and
+    // the sticky topbar (a sibling) pinned.
+    //
+    // The flex-fill is scoped to `@media (min-width: 901px)` so the narrow +
+    // stacked-sidebar layouts keep the prior scrolling behavior. Asserting
     // INSIDE the media block (via atRuleBlock / wfAtRuleBlock) — a flat
     // `toContain` would still pass if the flex-fill leaked outside the media
     // block (a regression that would break the narrow stacked layout).
-    const desktopShell = atRuleBlock('@media (min-width: 48rem)');
+    const desktopShell = atRuleBlock(DESIGNER_LOCK_MEDIA);
     expect(desktopShell).toContain('.app-shell:has(.alur-status-designer) .app-shell__main');
     expect(desktopShell).toMatch(/\.app-shell:has\(\.alur-status-designer\) \.app-shell__main\s*\{[^}]*height: 100vh/);
     expect(desktopShell).toMatch(/\.app-shell__main\s*\{[^}]*overflow: hidden/);
     expect(desktopShell).toContain('.app-shell:has(.alur-status-designer) #main-content');
     expect(desktopShell).toMatch(/#main-content\s*\{[^}]*flex: 1 1 0/);
     expect(desktopShell).toMatch(/#main-content\s*\{[^}]*min-height: 0/);
-    // The designer root flex-fills <main> (no scroll) — inside the same media
-    // block (NOT the base `.alur-status-designer` rule, which `rule()` would
-    // return instead).
+    // The designer root flex-fills <main> — inside the same media block (NOT the
+    // base `.alur-status-designer` rule, which `rule()` would return instead) —
+    // and scrolls rather than clips when the content does not fit.
     expect(desktopShell).toMatch(/\.alur-status-designer\s*\{[^}]*flex: 1 1 0/);
-    expect(desktopShell).toMatch(/\.alur-status-designer\s*\{[^}]*overflow: hidden/);
+    expect(desktopShell).toMatch(/\.alur-status-designer\s*\{[^}]*overflow-y: auto/);
 
-    const desktopWf = wfAtRuleBlock('@media (min-width: 48rem)');
+    const desktopWf = wfAtRuleBlock(DESIGNER_LOCK_MEDIA);
     expect(desktopWf).toMatch(/\.alur-status-designer \.sm-workflow-layout\s*\{[^}]*flex: 1 1 0/);
-    expect(desktopWf).toMatch(/\.alur-status-designer \.sm-workflow-layout\s*\{[^}]*min-height: 0/);
     expect(desktopWf).toMatch(/\.alur-status-designer \.sm-canvas\s*\{[^}]*height: auto/);
-    expect(desktopWf).toMatch(/\.alur-status-designer \.sm-canvas\s*\{[^}]*min-height: 28rem/);
+    // The row carries the content floor and the canvas carries none — see the
+    // dedicated floors guard below for why that placement is load-bearing.
     // The right panel scrolls internally when its content overflows the
-    // stretched row height (manager feedback: "scrolling is not do-able" —
-    // PR #100's overflow: hidden on the designer root clipped tall panel
-    // content). `min-height: 0` is load-bearing — it lets the flex column
-    // child shrink so overflow-y: auto engages (default min-height: auto
-    // would prevent scroll). Still no page-level scroll on desktop.
+    // stretched row height (manager feedback: "scrolling is not do-able" — the
+    // panel used to be clipped by the designer root). `min-height: 0` is
+    // load-bearing — it lets the flex column child shrink so overflow-y: auto
+    // engages (default min-height: auto would prevent scroll). This is what
+    // keeps tall PANEL content reachable without the whole region scrolling.
     expect(desktopWf).toMatch(/\.alur-status-designer \.sm-properties\s*\{[^}]*min-height: 0/);
     expect(desktopWf).toMatch(/\.alur-status-designer \.sm-properties\s*\{[^}]*overflow-y: auto/);
     // The narrow fallback (calc) must stay OUTSIDE the desktop media block — it
@@ -769,10 +803,10 @@ describe('Alur Status Tiket designer — warning relocation + dedicated full-pag
     // container so the user keeps context. Surface background so scrolling
     // content does not bleed through the title. Scoped to the desktop flex-fill
     // / fullscreen overlay — the ONLY place the panel scrolls internally — so
-    // the rule must live INSIDE the `@media (min-width: 48rem)` block. On
-    // narrow viewports the panel stacks and the page scrolls, so a sticky
-    // heading would slide under the app topbar; keep it desktop-only.
-    const desktopWf = wfAtRuleBlock('@media (min-width: 48rem)');
+    // the rule must live INSIDE the viewport-lock media block. On narrow
+    // viewports the panel stacks and the page scrolls, so a sticky heading would
+    // slide under the app topbar; keep it desktop-only.
+    const desktopWf = wfAtRuleBlock(DESIGNER_LOCK_MEDIA);
     expect(desktopWf).toMatch(/\.alur-status-designer \.sm-properties__heading\s*\{[^}]*position: sticky/);
     expect(desktopWf).toMatch(/\.alur-status-designer \.sm-properties__heading\s*\{[^}]*top: 0/);
     expect(desktopWf).toMatch(/\.alur-status-designer \.sm-properties__heading\s*\{[^}]*background: var\(--surface\)/);
@@ -795,8 +829,141 @@ describe('Alur Status Tiket designer — warning relocation + dedicated full-pag
     expect(overlay).toContain('height: 100vh');
     expect(overlay).toContain('background: var(--surface)');
     expect(overlay).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    // The overlay is viewport-height, so on a short viewport (or in the Sumber
+    // view, where the textarea + parse-error line stack below the connector
+    // legend) its content can exceed 100vh. It must scroll, never clip: there is
+    // no page behind a `position: fixed` overlay to scroll instead, so clipped
+    // content is unreachable.
+    expect(overlay).toContain('overflow-y: auto');
+    expect(overlay).not.toMatch(/overflow:\s*hidden/);
     const hiddenWarning = wfRule('.alur-status-designer--fullscreen .admin-panel__warning');
     expect(hiddenWarning).toContain('display: none');
+  });
+
+  it('the viewport lock engages exactly one px ABOVE the shell sidebar-collapse breakpoint (768–900px regression)', () => {
+    // Regression guard. The lock used to be `@media (min-width: 48rem)` (768px)
+    // while the app shell collapses its sidebar at `@media (max-width: 900px)`
+    // — where `.app-shell` drops to one grid column and `.app-shell__sidebar`
+    // turns into a `position: static` row ABOVE the main column. In the 768–900px
+    // overlap the document was therefore `sidebar row + 100vh`: the BODY
+    // scrolled while the main column's content was simultaneously clipped at
+    // 100vh. px, not rem: the shell breakpoint it must clear is px-based, and a
+    // rem-based query drifts with the root font-size — which is exactly how the
+    // two breakpoints came to overlap.
+    //
+    // DERIVE the relationship rather than asserting two independent literals: a
+    // `toContain('@media (max-width: 900px)')` would be satisfied by the PROSE in
+    // the comment above the lock, so the real rule could move to any other width
+    // and the overlap could return with this suite green. Read the collapse width
+    // out of the rule itself (pinned by `grid-template-columns: 1fr`, the
+    // mechanism that stacks the sidebar) and require the lock to start at
+    // collapse + 1 — moving either one alone now fails.
+    const collapse = css.match(
+      /@media \(max-width: (\d+)px\)\s*\{\s*\.app-shell\s*\{[^}]*grid-template-columns: 1fr/,
+    );
+    expect(collapse).not.toBeNull();
+    expect(DESIGNER_LOCK_MEDIA).toBe(`@media (min-width: ${Number(collapse![1]) + 1}px)`);
+    // Both halves of the lock use that one prelude (they are a single layout;
+    // a drift re-opens a band where main is locked to 100vh but the canvas is
+    // not flex-filling, or vice versa).
+    expect(css).toContain(DESIGNER_LOCK_MEDIA);
+    expect(wfCss).toContain(DESIGNER_LOCK_MEDIA);
+    // Neither half may still scope ANY rule to the old 768px breakpoint — the
+    // designer was its only user, so the block should be gone outright (a
+    // "…and if it exists it must not carry designer rules" loop over an empty
+    // array would be vacuously true, i.e. no guard at all).
+    expect(atRuleBlocksIn(css, '@media (min-width: 48rem)')).toHaveLength(0);
+    expect(atRuleBlocksIn(wfCss, '@media (min-width: 48rem)')).toHaveLength(0);
+    // The `@media (max-width: 48rem)` panel-stacking block is NOT part of the
+    // lock and stays as-is: between 768 and 900px the layout is side-by-side
+    // with the natural-flow `calc(100vh - 16rem)` canvas and a page that scrolls
+    // normally — the correct, intended fallback.
+    expect(wfCss).toContain('@media (max-width: 48rem)');
+  });
+
+  it('nothing on the designer route clips without a scroll fallback (manager: "kenapa jadi tidak bisa scroll ya? UI jadi aneh?")', () => {
+    // Regression guard for the defect that motivated this fix: `overflow: hidden`
+    // on the designer root AND on the fullscreen overlay meant content taller
+    // than the locked viewport was hard-clipped with NO escape hatch — no page
+    // scroll, no internal scroll, unreachable (worst in the Sumber view, where
+    // the textarea bottom and the parse-error line both disappeared).
+    // Filling the viewport is the optimization; reachability is the invariant.
+    const designerLocked = atRuleBlock(DESIGNER_LOCK_MEDIA).match(
+      /\.alur-status-designer\s*\{([^}]*)\}/,
+    );
+    expect(designerLocked).not.toBeNull();
+    expect(designerLocked?.[1]).toContain('overflow-y: auto');
+    expect(designerLocked?.[1]).not.toMatch(/overflow:\s*hidden/);
+    expect(wfRule('.alur-status-designer--fullscreen')).not.toMatch(/overflow:\s*hidden/);
+    // `.app-shell__main` keeps `overflow: hidden` deliberately — it is what holds
+    // the shell to exactly one viewport, with the designer INSIDE it as the
+    // scroll surface. The topbar then stays put simply by being the first item of
+    // a flex column that cannot scroll (AppShell.tsx: `.app-shell__topbar` and
+    // `<main id="main-content">` are the two children of `.app-shell__main`) —
+    // its `position: sticky` is inert under the lock, not the mechanism.
+    expect(atRuleBlock(DESIGNER_LOCK_MEDIA)).toMatch(
+      /\.app-shell__main\s*\{[^}]*overflow: hidden/,
+    );
+  });
+
+  it('the fullscreen overlay doubles its class so it can beat the designer root padding across sheets', () => {
+    // The overlay lives in this component sheet, which the bundler emits BEFORE
+    // styles.css. A single-class `.alur-status-designer--fullscreen` (0-1-0)
+    // therefore LOSES the tie against `.alur-status-designer { padding: 1.5rem
+    // 1rem 2rem }` (0-1-0, later in the bundle) — the overlay silently rendered
+    // with the page padding instead of its intended 1rem, spending ~56px of the
+    // vertical budget these very rules tune. Doubling the class (0-2-0) wins the
+    // cascade regardless of emit order, the same trick `.alur-status-designer
+    // .sm-canvas` already relies on. Emit order is not a guarantee this sheet may
+    // lean on, so guard the selector itself.
+    expect(wfCss).toContain('.alur-status-designer.alur-status-designer--fullscreen');
+    expect(wfRule('.alur-status-designer--fullscreen')).toContain('padding: 1rem');
+  });
+
+  it('the locked-viewport content floor sits on the workflow ROW (small enough for a short desktop viewport, and equal-height-safe)', () => {
+    // Under flex-fill the row and the source textarea GROW to the available
+    // height, so a floor only binds when space is scarce — a floor LARGER than
+    // the flex space is precisely what overflowed the locked viewport and got
+    // clipped. Chrome above the canvas is ~340px (topbar + designer padding +
+    // PageHeader + gaps + the live-ticket caution + the view toggle), so the old
+    // 28rem (448px) canvas floor and 24rem (384px) source floor both exceeded a
+    // ~700–760px usable laptop viewport. Raising these floors again re-opens the
+    // bug; "Layar Penuh" is the affordance for a maximum-size canvas.
+    //
+    // The floor must sit on `.sm-workflow-layout`, NOT on `.sm-canvas`. The row's
+    // height is definite (the flex-fill resolves it), so the flex line's cross
+    // size is the row's height: flooring the CANVAS makes it overflow the line
+    // while the panel keeps stretching to the shorter line — PR #100's
+    // equal-height invariant inverted (20rem canvas beside a ~18rem panel below
+    // ~650px of viewport height). Flooring the ROW lifts both children together.
+    // The canvas therefore carries `min-height: 0` to drop the base `.sm-canvas`
+    // 28rem floor — same 0-2-0 specificity as the narrow fallback above it, so
+    // (like `height: auto`) it depends on being declared later in the file.
+    const desktopWf = wfAtRuleBlock(DESIGNER_LOCK_MEDIA);
+    expect(desktopWf).toMatch(
+      /\.alur-status-designer \.sm-workflow-layout\s*\{[^}]*min-height: 20rem/,
+    );
+    expect(desktopWf).toMatch(/\.alur-status-designer \.sm-canvas\s*\{[^}]*min-height: 0/);
+    expect(desktopWf).not.toMatch(/\.alur-status-designer \.sm-canvas\s*\{[^}]*min-height: \d+rem/);
+    // …and the floored row must not WRAP (the base rule does). A second line in a
+    // definite-height row lets `align-content: stretch` split the 20rem across
+    // both lines — a ~10rem canvas, worse than the single line the floor exists
+    // to guarantee. Under the lock the layout is side-by-side by definition, so
+    // the canvas absorbs the squeeze by shrinking (`flex: 1 1 22rem` +
+    // `min-width: 0`) beside the non-shrinkable 16rem panel; at the narrowest
+    // locked viewport (901px) the row is ~614px, which still seats 256 + 12 + 346.
+    expect(desktopWf).toMatch(
+      /\.alur-status-designer \.sm-workflow-layout\s*\{[^}]*flex-wrap: nowrap/,
+    );
+    // The source-view floor is declared in a SECOND block of the same breakpoint,
+    // next to the `.sm-source` rule it overrides (repeated-breakpoint convention)
+    // — so search every block sharing the prelude, not just the first.
+    const lockedWf = atRuleBlocksIn(wfCss, DESIGNER_LOCK_MEDIA).join(' ');
+    expect(lockedWf).toMatch(/\.alur-status-designer \.sm-source\s*\{[^}]*min-height: 12rem/);
+    // The connector legend is a CAP (`max-height`), not a floor — it can only
+    // shrink the stack, so it is safe under the lock.
+    expect(wfRule('.sm-source-connectors')).toContain('max-height: 10rem');
+    expect(wfRule('.sm-source-connectors')).toContain('overflow-y: auto');
   });
 
   it('selects the active view off the ARIA state itself (no --active modifier to drift)', () => {

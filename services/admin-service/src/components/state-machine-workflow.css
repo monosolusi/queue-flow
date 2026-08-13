@@ -529,52 +529,85 @@
 
    The `calc(100vh - 16rem)` below is the NARROW-viewport fallback (a tall,
    viewport-relative height; the page may scroll when the stacked panel + chrome
-   exceed the viewport — acceptable on a narrow stacked layout). At ≥48rem
-   (desktop) the block AFTER this one switches the canvas to a flex-fill of the
-   viewport so there is NO page scroll and the canvas is the biggest size the
-   viewport allows below the page chrome (manager feedback: "editor is smaller
-   than its properties bar on the right and sometimes needs scrolling — make it
-   the biggest size, no scrolling"). */
+   exceed the viewport — acceptable on a narrow stacked layout, and it is also
+   the 768–900px band where the app shell stacks its sidebar above `<main>`).
+   At ≥901px the block AFTER this one switches the canvas to a flex-fill of the
+   viewport so the canvas is the biggest size the viewport allows below the page
+   chrome (manager feedback: "editor is smaller than its properties bar on the
+   right and sometimes needs scrolling — make it the biggest size, no
+   scrolling"). */
 .alur-status-designer .sm-canvas {
   height: calc(100vh - 16rem);
   min-height: 36rem;
 }
 
-/* Desktop flex-fill: the app-shell main column is a fixed-viewport flex column
-   on the designer route (see the `:has(.alur-status-designer)` rules in
-   styles.css), so `.sm-workflow-layout` can flex to fill the remaining height
-   and the canvas can stretch to the row (height: auto + the flex row's default
-   align-items: stretch). `min-height: 28rem` keeps a generous floor so the
-   diagram (and the right panel, which stretches to the same row height via
-   align-items: stretch) get a bigger default even when the viewport is short —
-   the flex-fill still grows them to fill the remaining space above the floor.
-   React Flow measures the container via a ResizeObserver, so a flex-stretched
-   (definite) height is fine. The right panel (`flex: 0 0 16rem`) stretches to
-   the same row height — so the canvas and the properties panel are the SAME
-   height, addressing "editor is smaller than its properties bar". The panel
-   scrolls internally when its content overflows that row height (see the
-   `.sm-properties` overflow rule below) — so tall panel content is reachable
-   without bringing back page-level scroll. */
-@media (min-width: 48rem) {
+/* Canvas/panel side of the designer's fixed-viewport lock. The shared rationale
+   (why the lock exists, why the breakpoint is 901px in pixels, and the
+   reachability invariant that forbids clipping) lives with the
+   `:has(.alur-status-designer)` block in styles.css — read that first; this
+   block only carries what is specific to the workflow row.
+
+   `.sm-workflow-layout` flexes to fill the height styles.css leaves below the
+   page chrome, and the canvas stretches to the row (height: auto + the flex
+   row's default align-items: stretch). React Flow measures the container via a
+   ResizeObserver, so a flex-stretched (definite) height is fine. The right panel
+   (`flex: 0 0 16rem`) stretches to that same row height — so the canvas and the
+   properties panel are the SAME height, addressing "editor is smaller than its
+   properties bar" — and scrolls internally when its content overflows it (see
+   the `.sm-properties` rule below).
+
+   The content floor belongs on the ROW, not on the canvas. The row's height is
+   definite (the flex-fill resolves it), so the line's cross size is the row's
+   height: a `min-height` on the canvas alone does NOT lift the line — it makes
+   the canvas overflow it while the panel keeps stretching to the shorter line,
+   inverting the equal-height invariant (a 20rem canvas beside a ~18rem panel
+   below ~650px of viewport height). Flooring the row lifts both children
+   together. Hence `min-height: 0` on the canvas: it drops the base `.sm-canvas`
+   28rem floor, and — like the `height: auto` beside it — relies on being
+   declared AFTER the equally-specific (0-2-0) narrow fallback above.
+
+   20rem, deliberately small: under flex-fill the row GROWS to the available
+   height, so a floor only ever binds when space is scarce — and a floor LARGER
+   than the flex space is exactly what overflowed the locked viewport and got
+   clipped (manager feedback: "kenapa jadi tidak bisa scroll ya? UI jadi aneh?").
+   28rem (448px) + the ~340px of chrome above the canvas already exceeds a
+   typical laptop viewport; "Layar Penuh" is the affordance for a maximum-size
+   canvas. The Sumber (source) view's floor gets the same treatment, in a second
+   block of this breakpoint declared next to the `.sm-source` rule it overrides.
+
+   `flex-wrap: nowrap` (the base rule wraps) because a floored row that WRAPS
+   defeats the floor: the row's height is definite, so a second line makes
+   `align-content: stretch` split those 20rem across both lines — a ~10rem canvas,
+   worse than the single-line result it was meant to guarantee. Under the lock the
+   layout is side-by-side by definition (`@media (max-width: 48rem)` still owns the
+   stacked layout), so the canvas should absorb the squeeze by shrinking instead:
+   it is `flex: 1 1 22rem` with `min-width: 0`, and `.sm-properties` is a
+   non-shrinkable `flex: 0 0 16rem`. Worst case inside the lock — a 901px viewport,
+   less the 15rem sidebar, the 1rem designer padding either side and a classic
+   scrollbar — leaves ~614px of row: 256px panel + 12px gap + a canvas shrunk from
+   its 352px basis to ~346px. Fits on one line; no horizontal overflow is possible
+   here, since the row can never be narrower than that. */
+@media (min-width: 901px) {
   .alur-status-designer .sm-workflow-layout {
     flex: 1 1 0;
-    min-height: 0;
+    min-height: 20rem;
+    flex-wrap: nowrap;
   }
   .alur-status-designer .sm-canvas {
     height: auto;
-    min-height: 28rem;
+    min-height: 0;
   }
   /* The right properties panel stretches to the row height via align-items:
      stretch. When its content (transitions / node actions lists) grows taller
      than that stretched height, it must scroll INTERNALLY instead of being
      clipped — `min-height: 0` lets the flex column child shrink within the row
      so `overflow-y: auto` actually engages (default `min-height: auto` would
-     prevent scroll and the panel would overflow the row, which PR #100's
-     `overflow: hidden` on the designer root then clipped — unreachable). This
-     keeps PR #100's "no page scroll on desktop" win while making tall panel
-     content reachable. Also applies inside the fullscreen overlay (the overlay
-     root carries `.alur-status-designer` + `--fullscreen`; the root's
-     `overflow: hidden` clips the overlay, the panel still scrolls internally). */
+     prevent scroll and the panel would overflow the row). Panel-internal scroll
+     is what keeps tall panel content reachable WITHOUT giving up the
+     "no page scroll on desktop" win — the designer root's own `overflow-y: auto`
+     is only the last-resort fallback for when the row itself does not fit. Also
+     applies inside the fullscreen overlay (the overlay root carries
+     `.alur-status-designer` + `--fullscreen`). */
   .alur-status-designer .sm-properties {
     min-height: 0;
     overflow-y: auto;
@@ -607,15 +640,32 @@
    Esc exits (handled in AlurStatusDesigner). Hides the long live-ticket caution
    to maximize canvas space; the caution stays visible in the normal (non-full-
    screen) view. Token background so light/dark + brandColor re-theme apply; no
-   hardcoded color literal (styles.test.ts static guard). */
-.alur-status-designer--fullscreen {
+   hardcoded color literal (styles.test.ts static guard).
+
+   `overflow-y: auto`, never `hidden`: the overlay is viewport-height, so on a
+   short viewport (or in the Sumber view, whose textarea + parse-error line stack
+   below the connector legend) its content can still exceed 100vh. Clipping it
+   would make that content unreachable — there is no page behind the overlay to
+   scroll. Filling the viewport is the optimization; reachability is the
+   invariant.
+
+   The selector doubles the class (`.alur-status-designer.alur-status-designer--
+   fullscreen`, 0-2-0) — the same trick `.alur-status-designer .sm-canvas` uses.
+   A single-class rule here CANNOT override the equally-specific
+   `.alur-status-designer { padding: 1.5rem 1rem 2rem }` in styles.css: this
+   component sheet is emitted FIRST in the bundle, so on a specificity tie the
+   later styles.css rule wins and the overlay silently rendered with the page
+   padding (1.5rem/2rem = ~56px of the very vertical budget these rules tune)
+   instead of the intended 1rem. Emit order is not something a rule in this file
+   can rely on — reach 0-2-0 whenever overriding a designer-root declaration. */
+.alur-status-designer.alur-status-designer--fullscreen {
   position: fixed;
   inset: 0;
   z-index: 40;
   height: 100vh;
   padding: 1rem;
   background: var(--surface);
-  overflow: hidden;
+  overflow-y: auto;
 }
 .alur-status-designer--fullscreen .admin-panel__warning {
   display: none;
@@ -757,6 +807,20 @@
   font-size: 0.875rem;
   line-height: 1.5;
   resize: vertical;
+}
+/* Under the designer's fixed-viewport lock the textarea must not carry a floor
+   taller than the space the lock can give it: it is `flex: 1 1 auto`, so it
+   still GROWS to fill whatever height is left below the hint + connector legend,
+   but the base `min-height: 24rem` (384px) plus ~340px of page chrome above it
+   overflowed a typical laptop viewport — pushing the textarea's bottom AND the
+   `.sm-source-error` line out of reach (the most visibly broken case of the
+   clipped layout). Declared as a second block of the lock's breakpoint, next to
+   the section it adjusts (the repeated-breakpoint convention used across these
+   stylesheets) rather than folded into the layout block above. */
+@media (min-width: 901px) {
+  .alur-status-designer .sm-source {
+    min-height: 12rem;
+  }
 }
 .sm-source:focus-visible {
   outline: 2px solid var(--accent);
