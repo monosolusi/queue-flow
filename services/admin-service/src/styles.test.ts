@@ -757,12 +757,14 @@ describe('Alur Status Tiket designer — warning relocation + dedicated full-pag
   });
 
   it('connection handles are discoverable + touch-grabbable + reveal drop targets during a drag (manager feedback: "selalu tidak bisa menghubungkan")', () => {
-    // Root cause of "always can't connect": the handles were fully hidden until
-    // hover/selection. React Flow stamps `connectionindicator` on every valid
-    // drop-target handle DURING a drag, but the CSS kept them at `opacity: 0`, so
-    // the manager dragged blind and could not see where to drop; on touch the 7px
-    // dot was additionally un-hittable. The fix is a three-tier opacity keyed on
-    // React Flow's own handle classes. Guarded statically (jsdom runs css:false).
+    // Historical context (prior discoverability fix): the handles were fully
+    // hidden until hover/selection. React Flow stamps `connectionindicator` on
+    // every valid drop-target handle DURING a drag, but the CSS kept them at
+    // `opacity: 0`, so the manager dragged blind and could not see where to drop;
+    // on touch the 7px dot was additionally un-hittable. The fix is a three-tier
+    // opacity keyed on React Flow's own handle classes, PLUS a
+    // `:has(.react-flow__connectionline)` gate that lights drop-target handles
+    // only during an active drag. Guarded statically (jsdom runs css:false).
     //
     // 1. An enlarged transparent hit area so a 7px dot is grabbable on touch. The
     //    pseudo-element inherits the handle's pointer-events, so it is interactive
@@ -771,22 +773,24 @@ describe('Alur Status Tiket designer — warning relocation + dedicated full-pag
     const hit = wfRule('.sm-canvas .react-flow__handle::before');
     expect(hit).toContain('inset: -14px');
     expect(hit).toContain('border-radius: 50%');
-    // 2. At rest, connectable SOURCE handles (drag-from points) are subtly visible
-    //    so the manager can find where to START a transition. Target handles stay
-    //    hidden (no `connectablestart`) — they are drop points, lit up at #3 only.
+    // 2. At rest, EVERY connectable handle (all four per node are `source`-typed
+    //    now, so all carry `connectablestart`) is subtly visible so the manager
+    //    can find where to START a transition — and, because every handle is also
+    //    a drop-to point, the drop targets are visible at rest too.
     const rest = wfRule('.sm-canvas .react-flow__handle.connectable.connectablestart');
     expect(rest).toContain('opacity: 0.5');
-    // 3. During an active connection the dragged handle + every valid drop-target
-    //    handle light up full so the manager SEES where to drop. The four selectors
-    //    share ONE declaration block (a comma list); the last sub-selector
-    //    (`connectionindicator:not(.connectablestart)`) directly precedes the `{`,
-    //    so its block is extractable. Assert the shared block carries `opacity: 1`
-    //    AND that every active selector — including the dragged-from
-    //    `.connectingfrom` — shares it (so none can be silently split off to a
+    // 3. Full opacity on hover/selected (precise desktop dragging) and on the
+    //    dragged-from handle (`.connectingfrom`). The three selectors share ONE
+    //    declaration block (a comma list); the last sub-selector
+    //    (`.connectable.connectingfrom`) directly precedes the `{`, so its block
+    //    is extractable. Assert the shared block carries `opacity: 1` AND that
+    //    every active selector shares it (so none can be silently split off to a
     //    lower-opacity rule). NB: match the RULE (regex requires `{` after), not
-    //    `indexOf` — the header comment also mentions the selector verbatim.
+    //    `indexOf` — the header comment also mentions the selector verbatim. The
+    //    drop-target reveal NO LONGER lives here (it moved to the `:has()` rule
+    //    below), so the selector list must NOT contain `connectionindicator`.
     const fullBlock = wfCss.match(
-      /\.connectionindicator:not\(\.connectablestart\)\s*\{([^}]*)\}/,
+      /\.connectable\.connectingfrom\s*\{([^}]*)\}/,
     );
     expect(fullBlock).not.toBeNull();
     expect(fullBlock![1]).toContain('opacity: 1');
@@ -797,15 +801,39 @@ describe('Alur Status Tiket designer — warning relocation + dedicated full-pag
     const thisOpen = wfCss.indexOf('{', fullIdx);
     const prevClose = wfCss.lastIndexOf('}', fullIdx);
     const selectorList = wfCss.slice(prevClose + 1, thisOpen);
-    expect(selectorList).toContain('.connectable.connectingfrom');
     expect(selectorList).toContain('.react-flow__node:hover');
     expect(selectorList).toContain('.react-flow__node.selected');
-    expect(selectorList).toContain('.react-flow__handle.connectable');
-    // 4. Source order is load-bearing: the at-rest 0.5 rule MUST textually precede
+    expect(selectorList).toContain('.connectable.connectingfrom');
+    expect(selectorList).not.toContain('connectionindicator');
+    // 4. Active-drag drop-target reveal: a `:has(.react-flow__connectionline)`
+    //    gate lights valid drop-target handles (`connectionindicator`, excluding
+    //    the dragged `.connectingfrom` handle) to opacity 1 — ONLY while a
+    //    connection is in progress (no connection line at rest, so the gate
+    //    keeps the at-rest handles at 0.5). Degrades gracefully without `:has()`.
+    // NB: anchor on the rule's selector tail `connectionindicator:not(.connectingfrom) {`
+    // — the header comment mentions `connectionindicator` and `:not(.connectingfrom)`
+    // separately but never as that literal selector, so the regex matches the
+    // actual rule, not the prose.
+    const dragBlock = wfCss.match(
+      /connectionindicator:not\(\.connectingfrom\)\s*\{([^}]*)\}/,
+    );
+    expect(dragBlock).not.toBeNull();
+    expect(dragBlock![1]).toContain('opacity: 1');
+    // Slice the drag rule's own selector span (from the previous rule's closing
+    // `}` to this rule's opening `{`) and assert it carries the `:has()` gate,
+    // the `connectionindicator` drop-target class, and the `:not(.connectingfrom)`
+    // exclusion of the dragged handle.
+    const dragOpen = wfCss.indexOf('{', dragBlock!.index!);
+    const dragPrevClose = wfCss.lastIndexOf('}', dragBlock!.index!);
+    const dragSelectorList = wfCss.slice(dragPrevClose + 1, dragOpen);
+    expect(dragSelectorList).toContain(':has(.react-flow__connectionline)');
+    expect(dragSelectorList).toContain('connectionindicator');
+    expect(dragSelectorList).toContain(':not(.connectingfrom)');
+    // 5. Source order is load-bearing: the at-rest 0.5 rule MUST textually precede
     //    the full-opacity rule, or an equal-specificity tie would silently revert
-    //    the dragged-from / selected / drop-target handles to 0.5. Match the RULE
-    //    (regex requires `{` + `opacity: 0.5`), not `indexOf` — the header comment
-    //    also mentions the selector verbatim, which would mask a real reorder.
+    //    the dragged-from / selected handles to 0.5. Match the RULE (regex
+    //    requires `{` + `opacity: 0.5`), not `indexOf` — the header comment also
+    //    mentions the selector verbatim, which would mask a real reorder.
     const restBlock = wfCss.match(
       /\.react-flow__handle\.connectable\.connectablestart\s*\{([^}]*)\}/,
     );

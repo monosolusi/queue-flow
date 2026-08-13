@@ -89,9 +89,9 @@ export const EDGE_ARROW_MARKER: FlowEdgeMarker = { type: 'arrowclosed', width: 1
  *  `sourceHandle`/`targetHandle` reference the connection-point ids on the
  *  source/target nodes (see {@link HANDLE_IDS}). They are CANVAS-ONLY — never
  *  serialized to the wire {@link Transition} (`flowToGraph` drops them) — and
- *  exist so a node with multiple handles per side routes each edge through the
- *  exact handle the manager dragged, not an ambiguous default. `selected`
- *  mirrors `Edge.selected` — set by the parent's click-to-select handler so the
+ *  record which side each edge was dragged from/to so the bezier routes through
+ *  the manager's chosen side, not an ambiguous default. `selected` mirrors
+ *  `Edge.selected` — set by the parent's click-to-select handler so the
  *  `.selected` class applies and `onSelectionChange` fires. */
 export interface FlowEdge {
   id: string;
@@ -112,29 +112,36 @@ export interface FlowEdge {
 
 /**
  * Connection-point (handle) ids for the custom {@link StateNode}. Each of the
- * four sides carries BOTH a source (outgoing) and a target (incoming) handle,
- * so the manager can draw a transition edge in ANY direction — out any side,
- * into any side (down, up, left, right) — not just left-to-right. The edge's
- * `sourceHandle`/`targetHandle` reference these ids; React Flow derives the
- * bezier's exit/entry direction from the handle's `Position`, so a vertical
- * edge (top/bottom handles) renders vertically with NO edge-component change
- * (`TransitionEdge` already forwards `sourcePosition`/`targetPosition`).
+ * four sides carries ONE TYPELESS connection point — a `source`-typed handle
+ * that, under the parent's `ConnectionMode.Loose`, both STARTS and RECEIVES a
+ * connection (the documented React Flow v12 "typeless handles" pattern). So
+ * the manager can draw a transition edge in ANY direction — out any side, into
+ * any side (down, up, left, right) — dragging from any point to any point
+ * (manager feedback "Buat Alur Status Tiket transisi bisa ditarik dari semua
+ * titik ke semua titik"). Because every drag starts at a `source`-typed
+ * handle, the START-handle-TYPE arrow-reversal can never fire — the arrow
+ * always points where the manager dropped (drag direction). The edge's
+ * `sourceHandle`/`targetHandle` reference these side ids; React Flow derives
+ * the bezier's exit/entry direction from the handle's `Position`, so a
+ * vertical edge (top/bottom handles) renders vertically with NO edge-component
+ * change (`TransitionEdge` already forwards `sourcePosition`/`targetPosition`).
+ *
+ * The ids are the BARE side strings (`'top'`, `'right'`, …) so the wire/XML
+ * `EdgeSide` (the SIDE, not the handle id) round-trips cleanly: `handleToSide`
+ * does `handle.split('-')[0]` and validates against the 4 sides, so a handle id
+ * of just `'top'` round-trips to side `'top'`. No migration, no wire/XML change.
  *
  * Defined here (the framework-free lib) rather than the node component so
  * {@link formToFlow} can seed the default-graph edges with the canonical
- * left-to-right routing (`rightSource` → `leftTarget`) from a single source of
- * truth — the ids MUST match the `id` props on the `Handle` elements in
+ * left-to-right routing (`right` → `left`) from a single source of truth — the
+ * ids MUST match the `id` props on the `Handle` elements in
  * `StateMachineWorkflowNodes.tsx` exactly.
  */
 export const HANDLE_IDS = {
-  topSource: 'top-source',
-  topTarget: 'top-target',
-  rightSource: 'right-source',
-  rightTarget: 'right-target',
-  bottomSource: 'bottom-source',
-  bottomTarget: 'bottom-target',
-  leftSource: 'left-source',
-  leftTarget: 'left-target',
+  top: 'top',
+  right: 'right',
+  bottom: 'bottom',
+  left: 'left',
 } as const;
 
 /**
@@ -144,30 +151,29 @@ export const HANDLE_IDS = {
  * actual dragged handle ids (see `onConnect`), so this default only applies to
  * edges rebuilt from a wire {@link Transition} (initial mount + external reset).
  */
-export const DEFAULT_SOURCE_HANDLE = HANDLE_IDS.rightSource;
-export const DEFAULT_TARGET_HANDLE = HANDLE_IDS.leftTarget;
+export const DEFAULT_SOURCE_HANDLE = HANDLE_IDS.right;
+export const DEFAULT_TARGET_HANDLE = HANDLE_IDS.left;
 
 /**
- * Maps a connection side to its source-handle id (e.g. `'bottom'` →
- * `'bottom-source'`). The form transition's `sourceSide` is the source of
- * truth; `formToFlow` seeds the React Flow `sourceHandle` from it.
+ * Maps a connection side to its typeless handle id (e.g. `'bottom'` →
+ * `'bottom'`). The form transition's `sourceSide`/`targetSide` is the source of
+ * truth; `formToFlow` seeds the React Flow `sourceHandle`/`targetHandle` from
+ * it. One function (not separate source/target mappers) because every handle
+ * is now a single typeless point per side — the side IS the handle id.
  */
-export function sideToSourceHandle(side: EdgeSide): string {
-  return HANDLE_IDS[`${side}Source` as keyof typeof HANDLE_IDS];
-}
-
-/** Maps a connection side to its target-handle id (see {@link sideToSourceHandle}). */
-export function sideToTargetHandle(side: EdgeSide): string {
-  return HANDLE_IDS[`${side}Target` as keyof typeof HANDLE_IDS];
+export function sideToHandle(side: EdgeSide): string {
+  return HANDLE_IDS[side];
 }
 
 /**
- * Inverse of {@link sideToSourceHandle}/{@link sideToTargetHandle}: extracts the
- * side from a handle id. Handles look like `'top-source'`/`'right-target'` →
- * `split('-')[0]` gives the side. Returns `undefined` for a missing/unknown
- * handle so a default edge (handle resolves to a valid side) and an absent
- * handle (undefined → form treats as default) both flow through the form's
- * `isDefaultSides`/`toEdgeRoutingLayoutDto` omit path cleanly.
+ * Inverse of {@link sideToHandle}: extracts the side from a handle id. Handles
+ * are the bare side strings (`'top'`, `'right'`, …) → `split('-')[0]` gives the
+ * side. Returns `undefined` for a missing/unknown handle so a default edge
+ * (handle resolves to a valid side) and an absent handle (undefined → form
+ * treats as default) both flow through the form's `isDefaultSides`/
+ * `toEdgeRoutingLayoutDto` omit path cleanly. Also backward-compatible with
+ * any legacy `'-source'`/`'-target'` ids since it takes the segment before the
+ * first dash.
  */
 const FLOW_SIDES: readonly EdgeSide[] = ['top', 'right', 'bottom', 'left'];
 export function handleToSide(handle: string | undefined): EdgeSide | undefined {
@@ -203,7 +209,8 @@ export function handleToSide(handle: string | undefined): EdgeSide | undefined {
  * {@link DEFAULT_TARGET_HANDLE}); a transition with `sourceSide: 'bottom'`
  * routes out the bottom. So a redraw always respects the source. `commit` →
  * {@link flowToGraph} captures the canvas handles + positions back into the
- * form, closing the loop.
+ * form, closing the loop. The handles are the typeless side ids (one per side);
+ * `sideToHandle` maps the form side to the handle id.
  */
 export function formToFlow(
   value: StateMachineForm,
@@ -224,8 +231,8 @@ export function formToFlow(
     data: { actionLabel: t.actionLabel },
     // Seed from the form sides (the source of truth); a transition with no
     // sides (absent) gets the canonical L→R default.
-    sourceHandle: t.sourceSide !== undefined ? sideToSourceHandle(t.sourceSide) : DEFAULT_SOURCE_HANDLE,
-    targetHandle: t.targetSide !== undefined ? sideToTargetHandle(t.targetSide) : DEFAULT_TARGET_HANDLE,
+    sourceHandle: t.sourceSide !== undefined ? sideToHandle(t.sourceSide) : DEFAULT_SOURCE_HANDLE,
+    targetHandle: t.targetSide !== undefined ? sideToHandle(t.targetSide) : DEFAULT_TARGET_HANDLE,
     markerEnd: EDGE_ARROW_MARKER,
   }));
   return { nodes, edges };

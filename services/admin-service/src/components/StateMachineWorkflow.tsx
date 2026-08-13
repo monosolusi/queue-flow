@@ -7,7 +7,7 @@
  * States become nodes; transitions become edges drawn between nodes. The manager
  * drags a "Status" card from the palette onto the canvas (or uses the
  * accessible "Tambah Status" button) to add a state, and drags between a node's
- * source/target handles to draw a transition edge (or uses "Tambah Transisi").
+ * connection handles to draw a transition edge (or uses "Tambah Transisi").
  *
  * **Wire contract unchanged.** The component is a different VIEW over the same
  * {@link StateMachineForm} + same `lib/state-machine` helpers: it lifts
@@ -765,28 +765,20 @@ function FlowCanvas({
           connectionMode={ConnectionMode.Loose}
           fitView
           deleteKeyCode={null}
-          // Loose connection mode so a drag started at a `source` handle may LAND
-          // on ANY handle of another node — including the other `source` handle on
-          // the same side (manager feedback: "ada 2 titik di atas dan 2 titik di
-          // tiap sisi, kenapa yang bisa dihubungkan hanya sisi tertentu meski sisi
-          // itu kosong?"). Root cause: each side carries one `source` + one
-          // `target` handle; React Flow picks the handle under the cursor as the
-          // drop target (XYHandle.isValidHandle), and in the Strict default a
-          // source-start drag may only END on a target-typed handle — so when the
-          // closest handle was a `source` the drop was rejected and the whole side
-          // read unconnectable. Loose mode relaxes that to "any handle but the one
-          // the drag started at" (XYHandle strict-vs-loose validity branch), so
-          // every side accepts a drop. CANVAS-ONLY — never reaches the wire
-          // Transition.
-          //
-          // Arrow direction = drag direction is preserved (manager feedback "panah
-          // sesuai arah tarikan"): React Flow keys the edge's source/target on the
-          // START handle's TYPE (XYHandle.getHandleParams: `isTarget = fromType ===
-          // 'target'`), NOT on connection mode — so starting from a `target` handle
-          // would reverse the arrow in ANY mode. `StateNode` keeps the four `target`
-          // handles DROP-ONLY via `isConnectableStart={false}`, so no drag ever
-          // starts from a target handle and the arrow always points where the
-          // manager dropped. See the `StateNode` JSDoc for the full mechanism.
+          // TYPELESS handles + Loose connection mode (manager feedback: "Buat
+          // Alur Status Tiket transisi bisa ditarik dari semua titik ke semua
+          // titik"). Every handle is `source`-typed (one per side), so a drag
+          // started at ANY handle may LAND on any handle of another node — Loose
+          // mode's validity is "any handle but the one the drag started at". AND
+          // because every drag starts at a `source`-typed handle, the START-
+          // handle-TYPE arrow-reversal can never fire (React Flow keys an edge's
+          // source/target on the START handle's TYPE: start at a `source` →
+          // source=startNode, target=dropNode; the reverse would only happen if
+          // a drag started at a `target`-typed handle, which no longer exists).
+          // So the arrow always points where the manager dropped (drag
+          // direction, manager feedback "panah sesuai arah tarikan") — no drop-
+          // only target handles are needed. CANVAS-ONLY — never reaches the wire
+          // Transition. See the `StateNode` JSDoc for the full typeless pattern.
           // Hide the React Flow attribution badge: the link points to
           // reactflow.dev (unreachable on the offline LAN, NFR-REL-01) and would
           // confuse a non-technical manager. The MIT license does not require

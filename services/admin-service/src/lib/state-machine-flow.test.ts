@@ -4,8 +4,7 @@ import {
   formToFlow,
   handleToSide,
   nextStateName,
-  sideToSourceHandle,
-  sideToTargetHandle,
+  sideToHandle,
   withDescriptions,
   isDuplicateTransition,
   rejectionMessageForConnection,
@@ -96,8 +95,8 @@ describe('formToFlow', () => {
       expect(e.sourceHandle).toBe(DEFAULT_SOURCE_HANDLE);
       expect(e.targetHandle).toBe(DEFAULT_TARGET_HANDLE);
     }
-    expect(DEFAULT_SOURCE_HANDLE).toBe(HANDLE_IDS.rightSource);
-    expect(DEFAULT_TARGET_HANDLE).toBe(HANDLE_IDS.leftTarget);
+    expect(DEFAULT_SOURCE_HANDLE).toBe(HANDLE_IDS.right);
+    expect(DEFAULT_TARGET_HANDLE).toBe(HANDLE_IDS.left);
   });
 
   it('seeds handle routing from the form transition sides (redraw respects the source)', () => {
@@ -118,8 +117,8 @@ describe('formToFlow', () => {
     };
     const { edges } = formToFlow(form, {});
     const waitingCalling = edges.find((e) => e.source === 'WAITING' && e.target === 'CALLING')!;
-    expect(waitingCalling.sourceHandle).toBe(HANDLE_IDS.bottomSource);
-    expect(waitingCalling.targetHandle).toBe(HANDLE_IDS.topTarget);
+    expect(waitingCalling.sourceHandle).toBe(HANDLE_IDS.bottom);
+    expect(waitingCalling.targetHandle).toBe(HANDLE_IDS.top);
     // An edge with no sides falls back to the L→R default.
     const callingServing = edges.find((e) => e.source === 'CALLING' && e.target === 'SERVING')!;
     expect(callingServing.sourceHandle).toBe(DEFAULT_SOURCE_HANDLE);
@@ -145,19 +144,20 @@ describe('formToFlow', () => {
       positions: {},
     };
     const { edges } = formToFlow(form, {});
-    expect(edges[0].sourceHandle).toBe(HANDLE_IDS.bottomSource);
+    expect(edges[0].sourceHandle).toBe(HANDLE_IDS.bottom);
     expect(edges[0].targetHandle).toBe(DEFAULT_TARGET_HANDLE);
   });
 
-  it('exposes eight handle ids — source + target on every side', () => {
-    // The manager can draw an edge in any direction (down/up/left/right) only
-    // if every side has both an outgoing (source) and incoming (target) handle.
-    // Pinning the full set guards against a regression that drops a side.
+  it('exposes four typeless handle ids — one per side', () => {
+    // The manager can draw an edge in any direction (down/up/left/right) with
+    // one TYPELESS handle per side — a `source`-typed handle that, under
+    // ConnectionMode.Loose, both STARTS and RECEIVES a connection. Pinning the
+    // full set guards against a regression that drops a side or re-introduces
+    // separate source/target handles.
     const ids = new Set(Object.values(HANDLE_IDS));
-    expect(ids.size).toBe(8);
+    expect(ids.size).toBe(4);
     for (const side of ['top', 'right', 'bottom', 'left'] as const) {
-      expect(HANDLE_IDS[`${side}Source` as keyof typeof HANDLE_IDS]).toBe(`${side}-source`);
-      expect(HANDLE_IDS[`${side}Target` as keyof typeof HANDLE_IDS]).toBe(`${side}-target`);
+      expect(HANDLE_IDS[side]).toBe(side);
     }
   });
 
@@ -266,8 +266,8 @@ describe('flowToGraph', () => {
         target: 'B',
         type: 'transition',
         data: { actionLabel: 'go' },
-        sourceHandle: HANDLE_IDS.bottomSource,
-        targetHandle: HANDLE_IDS.topTarget,
+        sourceHandle: HANDLE_IDS.bottom,
+        targetHandle: HANDLE_IDS.top,
       },
     ];
     const { transitions } = flowToGraph(nodes, edges);
@@ -320,8 +320,8 @@ describe('flowToGraph', () => {
         target: 'B',
         type: 'transition',
         data: { actionLabel: 'go' },
-        sourceHandle: HANDLE_IDS.bottomSource,
-        targetHandle: HANDLE_IDS.topTarget,
+        sourceHandle: HANDLE_IDS.bottom,
+        targetHandle: HANDLE_IDS.top,
         markerEnd: EDGE_ARROW_MARKER,
       },
     ];
@@ -521,18 +521,22 @@ const _markerTypeGuard: EdgeMarker = EDGE_ARROW_MARKER;
 void _markerTypeGuard;
 
 describe('side ↔ handle mappers', () => {
-  it('sideToSourceHandle/sideToTargetHandle round-trip all 4 sides', () => {
+  it('sideToHandle round-trips all 4 sides (one typeless handle per side)', () => {
     for (const side of ['top', 'right', 'bottom', 'left'] as const) {
-      expect(sideToSourceHandle(side)).toBe(`${side}-source`);
-      expect(sideToTargetHandle(side)).toBe(`${side}-target`);
+      expect(sideToHandle(side)).toBe(side);
     }
   });
 
   it('handleToSide extracts the side from a handle id', () => {
+    // The bare side strings round-trip cleanly.
+    expect(handleToSide('top')).toBe('top');
+    expect(handleToSide('bottom')).toBe('bottom');
+    expect(handleToSide('right')).toBe('right');
+    expect(handleToSide('left')).toBe('left');
+    // Also backward-compatible with legacy `'-source'`/`'-target'` ids: the
+    // mapper takes the segment before the first dash, so they still resolve.
     expect(handleToSide('top-source')).toBe('top');
     expect(handleToSide('bottom-target')).toBe('bottom');
-    expect(handleToSide('right-source')).toBe('right');
-    expect(handleToSide('left-target')).toBe('left');
   });
 
   it('handleToSide returns undefined for a missing/unknown handle', () => {

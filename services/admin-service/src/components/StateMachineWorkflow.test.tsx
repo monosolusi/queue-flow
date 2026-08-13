@@ -253,79 +253,65 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it('renders vertical (top + bottom) connection handles on every node', () => {
-    // Feedback fix: the manager can draw a transition edge down/up only if each
-    // node has top + bottom connection handles (source + target), not just the
-    // left-right pair. Pin their presence + per-node count so a regression to
-    // the two-handle (left/right only) node is caught. React Flow stamps each
-    // handle with `data-handlepos` (top/right/bottom/left); one source + one
-    // target per side ⇒ 2 per side per node. The handles are CSS-hidden until
-    // hover/selection but stay in the DOM (regression test queries the DOM).
+  it('renders one typeless connection handle on every side of every node', () => {
+    // Feedback fix: the manager can draw a transition edge from any point to any
+    // point only if each node has one TYPELESS handle per side — a single
+    // `source`-typed handle that, under ConnectionMode.Loose, both STARTS and
+    // RECEIVES a connection. Pin their presence + per-node count so a regression
+    // to the eight-handle (source + target per side) or two-handle (left/right
+    // only) node is caught. React Flow stamps each handle with `data-handlepos`
+    // (top/right/bottom/left); one typeless handle per side ⇒ 1 per side per
+    // node. The handles are CSS-hidden until hover/selection but stay in the DOM
+    // (regression test queries the DOM).
     renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
     const stateCount = DEFAULT_STATE_MACHINE.states.length;
     const top = document.querySelectorAll('.react-flow__handle[data-handlepos="top"]');
     const bottom = document.querySelectorAll('.react-flow__handle[data-handlepos="bottom"]');
     const left = document.querySelectorAll('.react-flow__handle[data-handlepos="left"]');
     const right = document.querySelectorAll('.react-flow__handle[data-handlepos="right"]');
-    expect(top.length).toBe(stateCount * 2);
-    expect(bottom.length).toBe(stateCount * 2);
-    expect(left.length).toBe(stateCount * 2);
-    expect(right.length).toBe(stateCount * 2);
+    expect(top.length).toBe(stateCount * 1);
+    expect(bottom.length).toBe(stateCount * 1);
+    expect(left.length).toBe(stateCount * 1);
+    expect(right.length).toBe(stateCount * 1);
   });
 
-  it('stamps the vertical handle ids matching HANDLE_IDS', () => {
+  it('stamps the four typeless side handle ids matching HANDLE_IDS', () => {
     // The edge's sourceHandle/targetHandle reference these ids; they MUST
     // match the ids `formToFlow` seeds (DEFAULT_SOURCE_HANDLE etc.) exactly, or
-    // a seed edge would attach to no handle and render at the node center.
+    // a seed edge would attach to no handle and render at the node center. The
+    // ids are now the bare side strings (one typeless handle per side).
     renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
     const handleIds = new Set(
       Array.from(document.querySelectorAll('.react-flow__handle')).map(
         (h) => h.getAttribute('data-handleid') ?? '',
       ),
     );
-    expect(handleIds.has('top-source')).toBe(true);
-    expect(handleIds.has('top-target')).toBe(true);
-    expect(handleIds.has('bottom-source')).toBe(true);
-    expect(handleIds.has('bottom-target')).toBe(true);
-    expect(handleIds.has('right-source')).toBe(true);
-    expect(handleIds.has('right-target')).toBe(true);
-    expect(handleIds.has('left-source')).toBe(true);
-    expect(handleIds.has('left-target')).toBe(true);
+    expect(handleIds.has('top')).toBe(true);
+    expect(handleIds.has('right')).toBe(true);
+    expect(handleIds.has('bottom')).toBe(true);
+    expect(handleIds.has('left')).toBe(true);
   });
 
-  it('makes target handles drop-only so the arrow follows the drag (connectablestart)', () => {
-    // Manager feedback: "narik dari calling ke skipped, panahnya malah dari
-    // skipped ke calling" — fix: "Benarkan arah panah sesuai dengan arah
-    // tarikan." React Flow assigns an edge's source from the handle the drag
-    // STARTS at and target from the handle it ENDS at, BUT keyed on the START
-    // handle's TYPE: start at a `source` handle → source=startNode, target=dropNode
-    // (arrow at the drop node); start at a `target` handle → the two are SWAPPED so
-    // the arrow points back at the start node. Because every node side carries a
-    // `target` handle, grabbing one reversed the arrow. The fix: the four `target`
-    // handles are made DROP-ONLY via `isConnectableStart={false}`, so every drag
-    // starts at a `source` handle and the arrow always points where the manager
-    // dropped. React Flow stamps `connectablestart: isConnectableStart` as a CSS
-    // class on each handle div (verified in @xyflow/react source) — the only
-    // jsdom-observable regression surface for this (jsdom cannot simulate a real
-    // pointer-geometry drag — see CLAUDE.md frontend-RTL gotchas). Pin it: target
-    // handles must NOT carry `connectablestart`; source handles MUST.
+  it('makes every handle a bidirectional typeless connection point (connectablestart + connectableend)', () => {
+    // Manager feedback: "tidak bisa ditarik dari semua titik" — only the source
+    // handles could start a drag (the target handles were drop-only via
+    // isConnectableStart={false}). Fix: every handle is now a TYPELESS point — a
+    // single `source`-typed handle per side that, under ConnectionMode.Loose,
+    // both STARTS and RECEIVES a connection. Because every drag starts at a
+    // `source`-typed handle, the START-handle-TYPE arrow-reversal can never fire
+    // (React Flow keys an edge's source/target on the START handle's TYPE), so
+    // the arrow always points where the manager dropped. React Flow stamps
+    // `connectablestart: isConnectableStart` and `connectableend: isConnectableEnd`
+    // as CSS classes (verified in @xyflow/react source) — the only jsdom-
+    // observable regression surface for this (jsdom cannot simulate a real
+    // pointer-geometry drag — see CLAUDE.md frontend-RTL gotchas). Pin it:
+    // every handle carries BOTH classes now (no drop-only handles remain).
     renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
-    const targetHandles = document.querySelectorAll(
-      '.react-flow__handle[data-handleid$="-target"]',
-    );
-    const sourceHandles = document.querySelectorAll(
-      '.react-flow__handle[data-handleid$="-source"]',
-    );
-    expect(targetHandles.length).toBeGreaterThan(0);
-    expect(sourceHandles.length).toBeGreaterThan(0);
-    for (const handle of targetHandles) {
-      expect(handle).not.toHaveClass('connectablestart');
-      // Receiving a dropped connection stays enabled (isConnectableEnd defaults
-      // true) so a source-start drag can still land on a target handle.
-      expect(handle).toHaveClass('connectableend');
-    }
-    for (const handle of sourceHandles) {
+    const handles = document.querySelectorAll('.react-flow__handle.connectable');
+    expect(handles.length).toBeGreaterThan(0);
+    for (const handle of handles) {
       expect(handle).toHaveClass('connectablestart');
+      expect(handle).toHaveClass('connectableend');
     }
   });
 
