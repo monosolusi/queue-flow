@@ -15,10 +15,11 @@
  * those moved to the right-side properties panel (see
  * {@link StateMachineWorkflowProperties}). The transition edge is a clean
  * bezier + a small READ-ONLY label chip showing the action label; editing the
- * label also lives in the panel. The node still renders all 8 `<Handle>`s (ids
- * match {@link HANDLE_IDS} exactly so the handle-id regression test passes);
- * the handles are CSS-hidden until the node is hovered or selected (the canvas
- * was too loud — 40 visible dots for the 5-state default graph).
+ * label also lives in the panel. The node renders one TYPELESS `<Handle>` per
+ * side (4 per node — ids match {@link HANDLE_IDS} exactly so the handle-id
+ * regression test passes); the handles are CSS-hidden until the node is
+ * hovered or selected (the canvas was too loud — 40 visible dots for the
+ * 5-state default graph).
  */
 import { createContext, useContext } from 'react';
 import {
@@ -78,16 +79,6 @@ export const WorkflowContext = createContext<WorkflowHandlers | null>(null);
 /** The 5 PRD §7 default status names — used to flag canonical nodes visually. */
 const CANONICAL_STATES = new Set<string>(DEFAULT_STATE_MACHINE.states);
 
-/* Handle offset styles — the source/target pair on a side is spread along the
- * side (30% / 70%) so both connection points are independently grabbable and
- * never overlap. Top/bottom sides offset along the node width (`left`); left/
- * right sides offset along the node height (`top`). React Flow centers a
- * handle on its side by default; these inline overrides win. */
-const H_TOPBOT_START = { left: '30%' };
-const H_TOPBOT_END = { left: '70%' };
-const H_LEFTRT_START = { top: '30%' };
-const H_LEFTRT_END = { top: '70%' };
-
 /**
  * Inline SVG icon — a SINGLE generic STATE glyph (two concentric circles) used
  * on EVERY state node and in the palette (node picker). Per-state glyphs
@@ -113,44 +104,29 @@ export function StateIcon({ size = 22 }: { size?: number }): JSX.Element {
  * inline `<input>` and no "Hapus" button (those moved to the properties panel).
  * The icon is the single generic {@link StateIcon} glyph (no per-state icon —
  * removed per manager feedback; the canonical-vs-custom distinction is carried
- * by the `--canonical` tint alone). Wrapped by EIGHT connection {@link Handle}s
- * — source + target on every side (top, right, bottom, left) — so the manager
- * can draw a transition edge in ANY direction (down, up, left, right), not just
- * left-to-right. The handles are CSS-hidden until the node is hovered or
- * selected (the canvas was too loud — 40 visible dots for the 5-state default
- * graph). In default mode the handles are non-connectable (no edge can be
- * drawn) and React Flow's own hidden-when-not-connectable rule keeps the
- * read-only board clean.
+ * by the `--canonical` tint alone). Wrapped by FOUR TYPELESS connection
+ * {@link Handle}s — one `source`-typed handle per side (top, right, bottom,
+ * left) — so the manager can draw a transition edge in ANY direction (down, up,
+ * left, right), not just left-to-right. Under the parent's
+ * `ConnectionMode.Loose` every handle BOTH STARTS and RECEIVES a connection
+ * (the documented React Flow v12 "typeless handles" pattern — a `source`-typed
+ * handle can both begin a drag and accept a drop), so the manager can drag from
+ * any point to any point (manager feedback "Buat Alur Status Tiket transisi
+ * bisa ditarik dari semua titik ke semua titik"). Because every drag starts at a
+ * `source`-typed handle, the START-handle-TYPE arrow-reversal can never fire —
+ * the arrow always points where the manager dropped (drag direction, manager
+ * feedback "panah sesuai arah tarikan"). The handles are CSS-hidden until the
+ * node is hovered or selected (the canvas was too loud — 40 visible dots for
+ * the 5-state default graph; 4-per-node at-rest keeps the count the same as
+ * the prior 4 visible source handles). In default mode the handles are
+ * non-connectable (no edge can be drawn) and React Flow's own hidden-when-not-
+ * connectable rule keeps the read-only board clean.
  *
- * **Every side accepts a drop (manager feedback "ada 2 titik di atas dan 2 titik
- * di tiap sisi, kenapa yang bisa dihubungkan hanya sisi tertentu meski sisi itu
- * kosong?").** The parent `<ReactFlow>` runs in `ConnectionMode.Loose`, so a
- * drag started at a `source` handle may land on ANY handle of another node —
- * including the `source` handle on the same side. In the Strict default the
- * closest handle to the cursor would reject the drop whenever it was a `source`
- * (React Flow's strict validity requires source→target by type), so a side read
- * unconnectable whenever its `source` handle was the nearer of the pair. Loose
- * mode relaxes that to "any handle but the start handle", so all four sides
- * always accept a drop. The edge's `sourceHandle`/`targetHandle` record the
- * exact pair, so the bezier still routes through the dragged side.
- *
- * **Arrow direction = drag direction (manager feedback "panah sesuai arah
- * tarikan").** React Flow assigns an edge's `source` from the handle the drag
- * STARTS at and `target` from the handle it ENDS at — but keyed on the START
- * handle's TYPE: start at a `source` handle → source=startNode, target=dropNode
- * (arrow at the drop node); start at a `target` handle → the two are swapped so
- * the arrow points back at the start node. This reversal is keyed on the START
- * handle's TYPE, NOT on `connectionMode` — it would reverse in any mode — so the
- * four `target` handles are made DROP-ONLY (`isConnectableStart={false}`): a
- * `target` handle may RECEIVE a dropped connection but may never START one, so
- * every drag begins at a `source` handle and the arrow always points where the
- * manager dropped. (Receiving stays gated by `isConnectableEnd`, which defaults
- * to `true`.)
- *
- * The handle `id`s match {@link HANDLE_IDS} exactly; an edge's
- * `sourceHandle`/`targetHandle` reference them, and React Flow derives the
- * bezier's exit/entry direction from the handle's `Position` — so a vertical
- * edge (top/bottom handle) renders vertically with no edge-component change.
+ * The handle `id`s match {@link HANDLE_IDS} exactly (the bare side strings);
+ * an edge's `sourceHandle`/`targetHandle` reference them, and React Flow
+ * derives the bezier's exit/entry direction from the handle's `Position` — so
+ * a vertical edge (top/bottom handle) renders vertically with no edge-component
+ * change.
  *
  * The card carries an `aria-label` so the state is announced by assistive
  * tech (the title is a `<span>`, not a heading — the card is a list-like item,
@@ -175,14 +151,10 @@ export function StateNode({ data }: NodeProps): JSX.Element {
       data-testid={`sm-node-card-${name}`}
       aria-label={`Status ${name}`}
     >
-      <Handle type="source" position={Position.Top} id={HANDLE_IDS.topSource} isConnectable={connectable} style={H_TOPBOT_START} />
-      <Handle type="target" position={Position.Top} id={HANDLE_IDS.topTarget} isConnectable={connectable} isConnectableStart={false} style={H_TOPBOT_END} />
-      <Handle type="source" position={Position.Right} id={HANDLE_IDS.rightSource} isConnectable={connectable} style={H_LEFTRT_START} />
-      <Handle type="target" position={Position.Right} id={HANDLE_IDS.rightTarget} isConnectable={connectable} isConnectableStart={false} style={H_LEFTRT_END} />
-      <Handle type="source" position={Position.Bottom} id={HANDLE_IDS.bottomSource} isConnectable={connectable} style={H_TOPBOT_START} />
-      <Handle type="target" position={Position.Bottom} id={HANDLE_IDS.bottomTarget} isConnectable={connectable} isConnectableStart={false} style={H_TOPBOT_END} />
-      <Handle type="target" position={Position.Left} id={HANDLE_IDS.leftTarget} isConnectable={connectable} isConnectableStart={false} style={H_LEFTRT_START} />
-      <Handle type="source" position={Position.Left} id={HANDLE_IDS.leftSource} isConnectable={connectable} style={H_LEFTRT_END} />
+      <Handle type="source" position={Position.Top} id={HANDLE_IDS.top} isConnectable={connectable} />
+      <Handle type="source" position={Position.Right} id={HANDLE_IDS.right} isConnectable={connectable} />
+      <Handle type="source" position={Position.Bottom} id={HANDLE_IDS.bottom} isConnectable={connectable} />
+      <Handle type="source" position={Position.Left} id={HANDLE_IDS.left} isConnectable={connectable} />
       <span className="state-node__icon" aria-hidden="true">
         <StateIcon />
       </span>
