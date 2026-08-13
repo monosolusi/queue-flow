@@ -7,7 +7,7 @@
  * Manager feedback: the inline diagram on `/admin/config` was too small and hard
  * to see (`.sm-canvas` was `60vh / min 360px` crammed inside a config card). This
  * page gives the canvas the full `<main>` width + a tall height, and adds a
- * Kaleo-Workflow-Designer-style **Diagram / Source toggle**: a visual editor
+ * A **Diagram / Source toggle**: a visual editor
  * (React Flow) and an editable XML source view of the same state-machine graph
  * (`<stateMachine>` with `<state>` x/y positions + `<transition>` connection
  * sides + from→to direction). The wire format to core-api stays JSON (via the
@@ -189,11 +189,11 @@ export function AlurStatusDesigner(): JSX.Element {
           — do not remove that CSS rule). */}
       <p className="admin-panel__warning" data-testid="state-machine-warning">
         Perhatian: mengubah atau menghapus status yang sedang dipakai tiket aktif membuat tiket
-        tersebut tidak bisa dilanjutkan — tombol aksinya hilang di panel caller. Ubah alur status
+        tersebut tidak bisa dilanjutkan — tombol aksinya hilang di layar petugas. Ubah alur status
         saat antrian kosong, misalnya setelah reset harian.
       </p>
 
-      {/* Diagram / Source segmented toggle (Kaleo-style view switch). */}
+      {/* Diagram / Source segmented toggle (view switch). */}
       <div className="sm-view-toggle" role="group" aria-label="Tampilan editor alur status">
         <button
           type="button"

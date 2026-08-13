@@ -85,7 +85,7 @@ export interface StateMachineForm {
    */
   positions: Record<string, { x: number; y: number }>;
   /**
-   * Node-level actions keyed by state name (Kaleo parity). Panel-only — NOT
+   * Node-level actions keyed by state name. Panel-only — NOT
    * canvas-rendered (`flowToGraph`/`formToFlow` ignore it, like `mode`), so a
    * node-action edit never re-seeds the canvas (`graphSignature` excludes
    * it). The properties panel reads `form.nodeActions` directly. Travels the
@@ -468,9 +468,9 @@ export interface CanonicalStatus {
 
 export const CANONICAL_STATUSES: readonly CanonicalStatus[] = [
   { name: 'WAITING', description: 'Tiket menunggu dipanggil', consequence: 'tiket baru dari kiosk selalu dibuat di status ini, jadi tanpa status ini tiket tidak pernah bisa dipanggil' },
-  { name: 'CALLING', description: 'Sedang dipanggil ke counter', consequence: 'tombol "Panggil Berikutnya" di panel caller berhenti berfungsi' },
-  { name: 'SERVING', description: 'Sedang dilayani', consequence: 'tombol "Mulai Melayani" di panel caller berhenti berfungsi' },
-  { name: 'SKIPPED', description: 'Dilewati / absen', consequence: 'tombol "Lewati / Absen" dan "Panggil Ulang" di panel caller berhenti berfungsi' },
+  { name: 'CALLING', description: 'Sedang dipanggil ke counter', consequence: 'tombol "Panggil Berikutnya" di layar petugas berhenti berfungsi' },
+  { name: 'SERVING', description: 'Sedang dilayani', consequence: 'tombol "Mulai Melayani" di layar petugas berhenti berfungsi' },
+  { name: 'SKIPPED', description: 'Dilewati / absen', consequence: 'tombol "Lewati / Absen" dan "Panggil Ulang" di layar petugas berhenti berfungsi' },
   { name: 'COMPLETED', description: 'Layanan selesai', consequence: 'tombol "Selesai Layan" berhenti berfungsi dan lama layanan tidak tercatat di laporan' },
 ];
 

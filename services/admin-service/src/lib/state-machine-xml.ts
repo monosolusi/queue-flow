@@ -1,7 +1,7 @@
 /**
- * The XML "Source" view codec for the Alur Status Tiket graph — a Kaleo-
- * Designer-style editable source pane alongside the visual
- * {@link StateMachineWorkflow} diagram.
+ * The XML "Source" view codec for the Alur Status Tiket graph — an
+ * editable XML source pane alongside the visual
+ * {@link StateMachineWorkflow} diagram (a designer-style visual/source toggle).
  *
  * Replaces the former JSON source view (`formToJson`/`jsonToForm`, deleted
  * from `state-machine.ts`). XML carries the state node x/y positions and the

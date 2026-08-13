@@ -152,7 +152,7 @@ describe('AlurStatusDesigner (dedicated /config/alur-status page)', () => {
     const warning = await screen.findByTestId('state-machine-warning');
     expect(warning).toHaveTextContent(/tiket aktif/);
     expect(warning).toHaveTextContent(/tidak bisa dilanjutkan/i);
-    expect(warning).toHaveTextContent(/panel caller/i);
+    expect(warning).toHaveTextContent(/layar petugas/i);
     expect(warning).toHaveClass('admin-panel__warning');
   });
 

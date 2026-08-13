@@ -189,7 +189,7 @@ export function StateMachineWorkflowProperties({
     const name = selectedNode.data.name;
     // The node's OUTGOING transitions — now reframed as the independent
     // "Transisi keluar" surface (the Caller-button LABELS), decoupled from the
-    // Kaleo-style node-level "Aksi" (below). A transition's only domain effect
+    // Node-level "Aksi" (below). A transition's only domain effect
     // is updating the ticket status to the target, so the action TYPE is fixed
     // "Update Status" — but that is now surfaced in the separate "Aksi" section
     // (node-level, NOT linked to any edge); here the transition is the
@@ -214,7 +214,7 @@ export function StateMachineWorkflowProperties({
     // source of truth for the duplicate check, shared with onConnect /
     // onRerouteTransition / onAddTransitionFrom.
     const canAddTransition = !form.states.every((s) => isDuplicateTransition(edges, name, s));
-    // The node's Kaleo-style node-level actions, NOT linked to any edge. Read
+    // The node's node-level actions, NOT linked to any edge. Read
     // from `form.nodeActions[name]` (a persisted, independent list keyed by
     // state name). Panel-only: a node-action edit lifts as a form-only change
     // (no canvas node/edge change — `graphSignature` excludes `nodeActions`).
@@ -243,7 +243,7 @@ export function StateMachineWorkflowProperties({
               Transisi keluar
             </p>
             <p className="sm-properties__hint">
-              Tombol di panel caller untuk transisi keluar dari status ini.
+              Tombol di layar petugas untuk memindahkan tiket dari status ini ke status lain.
             </p>
             {outgoing.length === 0 ? (
               <p className="sm-properties__hint" data-testid="panel-transitions-empty">
@@ -305,7 +305,7 @@ export function StateMachineWorkflowProperties({
               </ul>
             )}
             <p id="panel-transition-label-hint" className="sm-properties__hint">
-              Teks tombol di panel caller.
+              Teks tombol yang muncul di layar petugas.
             </p>
             <button
               type="button"
@@ -323,9 +323,9 @@ export function StateMachineWorkflowProperties({
 
     if (view === "actions") {
       return (
-        <aside className="sm-properties" data-testid="sm-properties" aria-label="Properti aksi node">
+        <aside className="sm-properties" data-testid="sm-properties" aria-label="Properti aksi otomatis">
           {subViewBackButton}
-          {/* "Aksi" — Kaleo-style node-level actions, NOT linked to any edge.
+          {/* "Aksi" — node-level actions, NOT linked to any edge.
               Each row is "Saat" (ON_ENTRY/ON_EXIT, when the action fires) + a
               read-only "Update Status" chip (the fixed action type — the only
               QMS action semantic today) + "Nilai" (the target status, an
@@ -338,11 +338,11 @@ export function StateMachineWorkflowProperties({
               Aksi
             </p>
             <p className="sm-properties__hint">
-              Aksi node-level (Kaleo) — berjalan otomatis saat masuk/keluar status, tidak terkait transisi.
+              Aksi otomatis — dijalankan saat tiket masuk atau keluar dari status ini, tanpa perlu tombol dari petugas.
             </p>
             {nodeActions.length === 0 ? (
               <p className="sm-properties__hint" data-testid="panel-node-actions-empty">
-                Belum ada aksi node-level. Tambah aksi untuk menjalankan sesuatu saat masuk/keluar status ini.
+                Belum ada aksi otomatis. Tambah aksi untuk menjalankan sesuatu saat tiket masuk atau keluar dari status ini.
               </p>
             ) : (
               <ul
@@ -369,8 +369,8 @@ export function StateMachineWorkflowProperties({
                           })
                         }
                       >
-                        <option value="ON_ENTRY">Saat masuk (ON_ENTRY)</option>
-                        <option value="ON_EXIT">Saat keluar (ON_EXIT)</option>
+                        <option value="ON_ENTRY">Saat masuk</option>
+                        <option value="ON_EXIT">Saat keluar</option>
                       </select>
                       <p className="sm-properties__action-label">Aksi</p>
                       <span
@@ -565,7 +565,7 @@ export function StateMachineWorkflowProperties({
             onChange={(e) => handlers.onEditTransitionLabel(selectedEdge.id, e.target.value)}
           />
           <p id="panel-action-label-hint" className="sm-properties__hint">
-            Teks tombol di panel caller.
+            Teks tombol yang muncul di layar petugas.
           </p>
         </div>
         <button
