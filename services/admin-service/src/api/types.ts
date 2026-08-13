@@ -211,8 +211,9 @@ export type NodeActionsDto = Record<string, NodeActionDto[]>;
  * marker position from the real node bounds (the default; current UX).
  * `{x,y}` — manager-pinned explicit position. `'hidden'` — manager deleted;
  * marker omitted. Mirrors core-api's `TerminalNodeState` VO. The terminal EDGES
- * stay auto-derived from topology (sources = in-degree 0, sinks = out-degree 0)
- * — the manager controls marker PRESENCE + POSITION only, not edges.
+ * stay auto-derived from topology (sources = in-degree 0 AND out-degree > 0,
+ * sinks = out-degree 0 AND in-degree > 0 — an isolated, not-yet-wired state is
+ * neither) — the manager controls marker PRESENCE + POSITION only, not edges.
  */
 export type TerminalNodeStateDto = 'auto' | 'hidden' | { readonly x: number; readonly y: number };
 

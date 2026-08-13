@@ -436,8 +436,9 @@
 }
 
 /* --- Canvas-only Start/End terminal markers ----------------------------------
-   Auto-derived visual affordances for the graph's entry (in-degree-0 sources)
-   and exit (out-degree-0 sinks). NOT state cards — they carry no name/
+   Auto-derived visual affordances for the graph's real entry (in-degree 0 with
+   out-degree > 0) and exit (out-degree 0 with in-degree > 0) states — an
+   isolated, not-yet-wired status is neither. NOT state cards — they carry no name/
    description on the form, so they render as compact pills: a small glyph +
    label, accent-tinted for Start (the entry cue), a bold muted ring for End
    (the exit cue). Token-driven (light/dark + brand re-theme for free); no

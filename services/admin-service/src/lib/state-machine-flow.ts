@@ -187,8 +187,9 @@ export function sideToHandle(side: EdgeSide): string {
 
 /**
  * Canvas-only terminal markers (Start/End) — auto-derived visual affordances
- * for the graph's entry (in-degree-0 sources) and exit (out-degree-0 sinks).
- * They are NOT in the form, NOT on the wire, NOT in the XML source view —
+ * for the graph's real entry (in-degree 0 AND out-degree > 0) and exit
+ * (out-degree 0 AND in-degree > 0) states; an isolated, not-yet-wired status is
+ * neither. They are NOT in the form, NOT on the wire, NOT in the XML source view —
  * `flowToGraph` filters them out (see {@link flowToGraph}'s `type === 'state'`
  * / `type === 'transition'` filters), and the XML codec `state-machine-xml.ts`
  * is untouched. They re-derive on every canvas re-seed so the markers always
@@ -304,21 +305,34 @@ const TERMINAL_SPACING = 240;
  * from the graph topology. Pure + framework-free (unit-testable in isolation,
  * like every other mapper here).
  *
- * - `sources` = states with in-degree 0 (counting only transitions whose
+ * - `sources` = states with in-degree 0 AND out-degree > 0 — a real entry point:
+ *   nothing flows in, something flows out. (Degrees count only transitions whose
  *   `from` AND `to` are both in `states` — a transition referencing an unknown
- *   state is ignored, mirroring {@link autoLayout}'s defensive guard).
- * - `sinks` = states with out-degree 0 (same counting rule).
+ *   state is ignored, mirroring {@link autoLayout}'s defensive guard.)
+ * - `sinks` = states with out-degree 0 AND in-degree > 0 — a real exit point:
+ *   something flows in, nothing flows out (same counting rule).
+ * - An ISOLATED state (degree 0 on BOTH sides) is NEITHER a source nor a sink.
+ *   Without that exclusion it satisfies both predicates at once and gets a
+ *   `__start → S` edge AND an `S → __end` edge — the manager's "a stray status
+ *   with no transisi is automatically linked to Start and End" feedback: a
+ *   just-added, not-yet-wired status is not the flow's entry AND exit, it has no
+ *   entry/exit semantics yet.
  * - A Start marker is emitted ONLY when `sources.length > 0`; an End marker
  *   ONLY when `sinks.length > 0`. A pure-cycle graph (every state has an
- *   incoming edge) → no markers. An empty graph → no markers.
+ *   incoming edge) → no markers. A graph of only isolated states → no markers.
+ *   An empty graph → no markers.
  *
  * Marker positions are derived from `realPositions` (a `Record<stateName,
  * {x,y}>` of the REAL state node positions, built by the caller from the
- * `formToFlow`-returned state nodes): Start sits at `minX - TERMINAL_SPACING`
- * (one rank left of the leftmost real node), End at `maxX +
- * TERMINAL_SPACING` (one rank right of the rightmost), both at the vertical
- * center `yCenter = (minY + maxY) / 2`. If `realPositions` is empty, the
- * bounds default to 0 so a lone Start/End never NaNs.
+ * `formToFlow`-returned state nodes). The X bounds cover only the states the
+ * marker CONNECTS to: Start sits at `minX - TERMINAL_SPACING`, one rank left of
+ * the leftmost SOURCE; End at `maxX + TERMINAL_SPACING`, one rank right of the
+ * rightmost SINK. (Not the leftmost/rightmost real node: an isolated status
+ * dropped to the right of the real sink would drag the End marker past a node it
+ * has no edge to.) The vertical center `yCenter = (minY + maxY) / 2` stays
+ * GRAPH-WIDE — the markers denote the whole diagram's entry/exit. A missing
+ * position is skipped and an empty bound list defaults to 0, so a marker never
+ * NaNs.
  *
  * Terminal edges: a Start marker emits one `START_NODE_ID → source` edge per
  * source; an End marker emits one `sink → END_NODE_ID` edge per sink. They
@@ -348,12 +362,35 @@ export function deriveTerminalMarkers(
     inDeg.set(t.to, (inDeg.get(t.to) ?? 0) + 1);
     outDeg.set(t.from, (outDeg.get(t.from) ?? 0) + 1);
   }
-  const sources = states.filter((s) => (inDeg.get(s) ?? 0) === 0);
-  const sinks = states.filter((s) => (outDeg.get(s) ?? 0) === 0);
+  // An ISOLATED state — degree 0 on BOTH sides — is not yet wired into the flow,
+  // so it is neither an entry nor an exit point (manager feedback: a stray,
+  // just-added status was auto-linked to Start AND End at once). It satisfies
+  // both the in-degree-0 and the out-degree-0 predicate, so it must be excluded
+  // from both lists explicitly.
+  const isIsolated = (s: string) => (inDeg.get(s) ?? 0) === 0 && (outDeg.get(s) ?? 0) === 0;
+  const sources = states.filter((s) => !isIsolated(s) && (inDeg.get(s) ?? 0) === 0);
+  const sinks = states.filter((s) => !isIsolated(s) && (outDeg.get(s) ?? 0) === 0);
 
+  // X coords of the given states that have a known position. A missing entry is
+  // skipped so a name with no position can never produce a NaN bound.
+  const xsOf = (names: readonly string[]): number[] =>
+    names.flatMap((s) => {
+      const p: { x: number; y: number } | undefined = realPositions[s];
+      return p ? [p.x] : [];
+    });
+  // The X bounds are taken over the states the marker actually CONNECTS to —
+  // sources for Start, sinks for End — not over every real node. With isolated
+  // states excluded above, a stray status dropped to the RIGHT of the real sink
+  // (managers drop into empty space) would otherwise push the End marker past a
+  // node it has no edge to, stretching the terminal edge across the canvas.
+  const sourceXs = xsOf(sources);
+  const sinkXs = xsOf(sinks);
+  const minX = sourceXs.length ? Math.min(...sourceXs) : 0;
+  const maxX = sinkXs.length ? Math.max(...sinkXs) : 0;
+  // The vertical center stays GRAPH-WIDE (every real node) — the markers read as
+  // the entry/exit of the whole diagram, so they sit at its vertical middle, not
+  // at the middle of the source/sink subset.
   const real = Object.values(realPositions);
-  const minX = real.length ? Math.min(...real.map((p) => p.x)) : 0;
-  const maxX = real.length ? Math.max(...real.map((p) => p.x)) : 0;
   const minY = real.length ? Math.min(...real.map((p) => p.y)) : 0;
   const maxY = real.length ? Math.max(...real.map((p) => p.y)) : 0;
   const yCenter = (minY + maxY) / 2;
@@ -410,15 +447,17 @@ export function deriveTerminalMarkers(
 
 /**
  * {@link formToFlow} + the canvas-only Start/End terminal markers in one call.
- * The marker EDGES stay auto-derived from topology (sources = in-degree 0,
- * sinks = out-degree 0) via {@link deriveTerminalMarkers}; the marker NODE
- * presence + position come from `value.terminalNodes` — the manager controls
- * marker PRESENCE + POSITION only, not edges:
+ * The marker EDGES stay auto-derived from topology (sources = in-degree 0 with
+ * out-degree > 0, sinks = out-degree 0 with in-degree > 0 — an isolated state is
+ * neither) via {@link deriveTerminalMarkers}; the marker NODE presence +
+ * position come from `value.terminalNodes` — the manager controls marker
+ * PRESENCE + POSITION only, not edges:
  *  - `'hidden'` → omit the marker node (and its edges — an edge with no source
  *    node cannot render).
  *  - `'auto'` → derive the position from the real node bounds (the
  *    {@link deriveTerminalMarkers} math), `pinned: false`; emit ONLY when the
- *    topology has sources/sinks (a pure-cycle graph has none → no auto marker).
+ *    topology has sources/sinks (a pure-cycle graph has none → no auto marker;
+ *    so does a graph of only isolated, not-yet-wired states).
  *  - `{x,y}` → explicit manager-pinned position, `pinned: true`; emit ALWAYS
  *    (the manager willed the marker even if the topology has no sources/sinks).
  *

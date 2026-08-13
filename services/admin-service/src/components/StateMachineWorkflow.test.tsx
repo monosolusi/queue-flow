@@ -1062,6 +1062,43 @@ describe('StateMachineWorkflow (Start/End terminal markers)', () => {
     expect(onChange.mock.calls[0][0].terminalNodes.start).toBe('auto');
   });
 
+  it('a status added from the palette gets NO terminal edge (a stray node is not an entry AND an exit)', () => {
+    // Manager feedback: "a stray node with no transisi is automatically linked to
+    // Start and End." A just-dropped status has in-degree 0 AND out-degree 0, so
+    // it used to satisfy BOTH the source and the sink predicate in
+    // `deriveTerminalMarkers` → it got a __start→S edge AND an S→__end edge,
+    // reading as the flow's entry AND its exit at once. It is not wired into the
+    // flow yet, so it gets neither; the default graph's real entry (WAITING) and
+    // exit (COMPLETED) keep theirs.
+    //
+    // Drives the COMMIT path (not a fresh re-seed): the palette card sets
+    // `application/reactflow: 'state'`, the canvas drop handler calls
+    // `addStateAt` → `commit`, which re-derives the marker edges through
+    // `formToFlowWithMarkers`. That is the manager's actual repro.
+    const onChange = vi.fn();
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const }, [], onChange);
+    // Baseline: the PRD §7 default graph's terminal edges are on WAITING (sole
+    // source) and COMPLETED (sole sink).
+    expect(screen.getByTestId('rf__edge-__start->WAITING')).toBeInTheDocument();
+    expect(screen.getByTestId('rf__edge-COMPLETED->__end')).toBeInTheDocument();
+
+    fireEvent.drop(screen.getByTestId('sm-canvas'), { dataTransfer: { getData: () => 'state' } });
+
+    // The new status is on the canvas (and in the lifted form) — `nextStateName`
+    // mints STATUS_1 (no collision with the 5 canonical names).
+    expect(screen.getByTestId('sm-node-card-STATUS_1')).toBeInTheDocument();
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange.mock.calls[0][0].states).toContain('STATUS_1');
+    // It carries NO terminal edge in either direction.
+    expect(screen.queryByTestId('rf__edge-__start->STATUS_1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('rf__edge-STATUS_1->__end')).not.toBeInTheDocument();
+    // Both markers still render, still wired to the real entry/exit states.
+    expect(screen.getByTestId('sm-node-start')).toBeInTheDocument();
+    expect(screen.getByTestId('sm-node-end')).toBeInTheDocument();
+    expect(screen.getByTestId('rf__edge-__start->WAITING')).toBeInTheDocument();
+    expect(screen.getByTestId('rf__edge-COMPLETED->__end')).toBeInTheDocument();
+  });
+
   it('the marker panel reports the pinned position for a pinned marker', () => {
     // The info line surfaces the live pinned coordinates so the manager can see
     // where the marker is willed (vs the auto-derived rank offset).

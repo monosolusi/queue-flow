@@ -188,8 +188,8 @@ export function StateMachineWorkflowProperties({
           <div className="sm-properties__field">
             <p className="sm-properties__hint" data-testid="panel-marker-description">
               {isStart
-                ? "Status awal — status tanpa transisi masuk. Panah keluar dari titik ini ke status pertama."
-                : "Status akhir — status tanpa transisi keluar. Panah masuk ke titik ini dari status terakhir."}
+                ? "Status awal — status yang punya transisi keluar tapi tidak punya transisi masuk. Panah keluar dari titik ini ke status pertama. Status yang belum punya transisi sama sekali tidak terhubung ke sini."
+                : "Status akhir — status yang punya transisi masuk tapi tidak punya transisi keluar. Panah masuk ke titik ini dari status terakhir. Status yang belum punya transisi sama sekali tidak terhubung ke sini."}
             </p>
             <p className="sm-properties__hint" data-testid={`panel-terminal-info-${key}`}>
               {posInfo}

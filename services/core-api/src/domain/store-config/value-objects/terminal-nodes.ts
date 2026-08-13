@@ -7,8 +7,8 @@ import { ValueObject } from '../../shared/value-object';
  *    preserves the pre-marker-persistence UX where Start/End were auto-derived
  *    canvas-only nodes).
  *  - `'hidden'` — the manager deleted the marker; it is omitted from the canvas
- *    entirely (terminal EDGES still auto-derive from topology — a hidden Start
- *    still connects to every in-degree-0 state, just no marker node is drawn).
+ *    entirely (no marker node is drawn — the canvas keeps deriving terminal
+ *    edges from the graph topology on its own, unaffected by this value).
  *  - `{ x, y }` — the manager pinned the marker to an explicit canvas position.
  */
 export type TerminalNodeState = 'auto' | 'hidden' | { readonly x: number; readonly y: number };
@@ -71,10 +71,10 @@ function normalizeTerminal(key: 'start' | 'end', raw: unknown): TerminalNodeStat
  * to `NodeActions` / `NodePositions` — persisted on its own JSONB column
  * (`terminal_nodes`), NOT inside `StateMachine` (keeps `ITransitionPolicy`
  * pure; SRP for `StateMachine`; OCP — a sibling VO added without touching the
- * transition-policy surface). The manager-facing concern is marker PRESENCE +
- * POSITION only; terminal EDGES stay auto-derived from topology (sources =
- * in-degree 0, sinks = out-degree 0), so a pinned or hidden Start still
- * connects to every source (or none if hidden).
+ * transition-policy surface). This VO persists marker PRESENCE + POSITION only;
+ * terminal EDGES are derived client-side by the admin canvas from the graph
+ * topology and are never persisted, so the derivation rule is not a domain
+ * concern and is deliberately not restated here.
  *
  * Keys are the fixed terminal ids `start` / `end` (NOT state names) — this is
  * the whole reason this is a dedicated field: the save use case's
