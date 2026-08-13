@@ -5,7 +5,27 @@ import { validateStoreName } from '../../lib/store-name';
 import { validateServiceThemes } from '../../lib/service-themes';
 import { validateCustomStateMachine } from '../../lib/state-machine';
 import type { AdminForm } from './form';
-import type { SectionValidity } from './ConfigSectionNav';
+
+/**
+ * Per-section validity for the saved sections of the config panel. Each flag
+ * is `true` when that section's inputs are valid. The `manual` section has no
+ * save button and so carries no validity flag here. The `stateMachine` flag
+ * stays even though the state-machine editor is now the dedicated
+ * `/config/alur-status` designer route (not an `AdminPanel` section): the full
+ * PUT includes the state machine, and `computeFormValidity` still gates the
+ * whole-form save on it, so the designer's save + the panel's save agree on the
+ * save-gate (the designer shares the same draft).
+ *
+ * Moved here from `ConfigSectionNav.tsx` (deleted with the tablist): validity
+ * is about validity, so it belongs with the computation that produces it.
+ */
+export interface SectionValidity {
+  readonly profile: boolean;
+  readonly categories: boolean;
+  readonly routing: boolean;
+  readonly dailyReset: boolean;
+  readonly stateMachine: boolean;
+}
 
 /**
  * The full per-section validity bag for an {@link AdminForm} — every error

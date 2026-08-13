@@ -191,6 +191,25 @@ export function AlurStatusDesigner(): JSX.Element {
         }
       />
 
+      {/* Live-ticket strand caution — the designer is now the decision point
+          where the manager edits the state machine (the old AdminPanel
+          state-machine section was removed when the tablist was consolidated
+          into the sidebar, so this warning moved here). Always visible in BOTH
+          Diagram + Source views: the active alur status is resolved per
+          operation, so a ticket sitting in a status this save removes or
+          renames has no legal next step — its caller action buttons vanish and
+          it can only be cleared by a daily reset. This is distinct from the
+          dropped-standard-status caution inside `StateMachineWorkflow`
+          (`.sm-standard-warning`), which warns about breaking FUTURE tickets'
+          caller actions + the analytics average. Uses the existing
+          `.admin-panel__warning` class (the warning-at-decision-point invariant
+          — do not remove that CSS rule). */}
+      <p className="admin-panel__warning" data-testid="state-machine-warning">
+        Perhatian: mengubah atau menghapus status yang sedang dipakai tiket aktif membuat tiket
+        tersebut tidak bisa dilanjutkan — tombol aksinya hilang di panel caller. Ubah alur status
+        saat antrian kosong, misalnya setelah reset harian.
+      </p>
+
       {/* Diagram / Source segmented toggle (Kaleo-style view switch). */}
       <div className="sm-view-toggle" role="group" aria-label="Tampilan editor alur status">
         <button

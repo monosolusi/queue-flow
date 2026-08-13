@@ -209,36 +209,39 @@ describe('styles.css AC guards', () => {
     expect(groupMatch![1]).toContain('flex-direction: row');
   });
 
-  it('admin-config: two-column grid layout (sticky left nav + right content)', () => {
-    expect(rule('.admin-config__layout')).toContain('display: grid');
-    expect(rule('.admin-config__layout')).toMatch(/grid-template-columns:\s*minmax\(11rem,\s*16rem\)\s+1fr/);
-    expect(rule('.admin-config__nav')).toContain('position: sticky');
-    expect(rule('.admin-config__nav')).toContain('flex-direction: column');
+  it('admin-config: the in-content tablist/layout rules are gone (consolidated into the sidebar)', () => {
+    // The in-content `ConfigSectionNav` tablist was consolidated into the
+    // two-level sidebar; the `.admin-config__layout`/`__nav`/`__nav-item`/
+    // `__nav-badge` rules must all be gone so the dead selectors do not drift.
+    expect(css).not.toMatch(/\.admin-config__layout\s*\{/);
+    expect(css).not.toMatch(/\.admin-config__nav\s*\{/);
+    expect(css).not.toMatch(/\.admin-config__nav-item\s*\{/);
+    expect(css).not.toMatch(/\.admin-config__nav-item--active\s*\{/);
+    expect(css).not.toMatch(/\.admin-config__nav-label\s*\{/);
+    expect(css).not.toMatch(/\.admin-config__nav-badge\s*\{/);
+    // The content wrapper stays (the per-section content still uses it).
+    expect(rule('.admin-config__content')).toContain('min-width: 0');
   });
 
-  it('admin-config: nav item is a ≥44px touch target with a left active indicator', () => {
-    expect(rule('.admin-config__nav-item')).toContain('min-height: 2.75rem');
-    expect(rule('.admin-config__nav-item')).toContain('border-left: 3px solid transparent');
-    const active = rule('.admin-config__nav-item--active');
-    expect(active).toContain('var(--accent)');
-    expect(active).toContain('var(--accent-on-surface)');
+  it('QUE-45 — two-level nav: .nav-subgroup + .nav-subgroup__label rules exist', () => {
+    // The Konfigurasi Sistem group is two-level (Tampilan/Antrean/Sistem). The
+    // sub-group label mirrors the big-group label but smaller + more muted.
+    expect(rule('.nav-subgroup')).toContain('flex-direction: column');
+    expect(rule('.nav-subgroup__label')).toContain('text-transform: uppercase');
+    expect(rule('.nav-subgroup__label')).toContain('color: var(--text-muted)');
+    expect(rule('.nav-subgroup__items')).toContain('display: flex');
+    // Token-only — no hardcoded color (dark mode flips for free).
+    expect(rule('.nav-subgroup__label')).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
   });
 
-  it('admin-config: error badge uses the danger token (never color alone — .sr-only carries AT text)', () => {
-    expect(rule('.admin-config__nav-badge')).toContain('var(--danger)');
-    // The badge is a small dot, not a text-colored element.
-    expect(rule('.admin-config__nav-badge')).not.toContain('color:');
-  });
-
-  it('admin-config: responsive ≤900px stacks the layout into a wrapping nav row', () => {
+  it('QUE-45 — responsive ≤900px flattens the sub-groups into the horizontal row', () => {
     const media = atRuleBlock('@media (max-width: 900px)');
-    const layoutMatch = media.match(/\.admin-config__layout\s*\{([^}]*)\}/);
-    expect(layoutMatch).not.toBeNull();
-    expect(layoutMatch![1]).toContain('grid-template-columns: 1fr');
-    const navMatch = media.match(/\.admin-config__nav\s*\{([^}]*)\}/);
-    expect(navMatch).not.toBeNull();
-    expect(navMatch![1]).toContain('flex-direction: row');
-    expect(navMatch![1]).toContain('position: static');
+    const labelMatch = media.match(/\.nav-subgroup__label\s*\{([^}]*)\}/);
+    expect(labelMatch).not.toBeNull();
+    expect(labelMatch![1]).toContain('display: none');
+    const itemsMatch = media.match(/\.nav-subgroup__items\s*\{([^}]*)\}/);
+    expect(itemsMatch).not.toBeNull();
+    expect(itemsMatch![1]).toContain('flex-direction: row');
   });
 });
 

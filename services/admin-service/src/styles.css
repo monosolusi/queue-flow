@@ -149,13 +149,6 @@ fieldset {
 .alur-status-designer--loading {
   color: var(--text-muted);
 }
-/* One-line graph summary on the config section (mode + counts). Muted so it
-   reads as a status line, not a heading. */
-.sm-summary {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 0.9rem;
-}
 .alur-status-designer__hint {
   margin: 0;
   color: var(--text-muted);
@@ -242,15 +235,6 @@ fieldset {
   color: var(--text);
   font-size: 0.9rem;
 }
-/* In-card action (e.g. the "Lihat Diagram" link in the state-machine section).
-   Mirrors the per-section save button's top spacing so a secondary action
-   following the warning has breathing room. The state-machine warning now sits
-   immediately before this action (the caution at the decision point), and the
-   base `.admin-panel__warning` margin gives the spacing above — this class only
-   adds the top gap the link needs. */
-.admin-panel__card-action {
-  margin-top: 1rem;
-}
 .sm-warning__intro,
 .sm-warning__outro {
   margin: 0;
@@ -271,58 +255,9 @@ fieldset {
   flex-wrap: wrap;
 }
 
-/* In-content section navigation for /admin/config — one section renders at a
-   time, each with its own save button (replaces the single long scroll +
-   global footer save). The left nav is a vertical ARIA tablist
-   (`ConfigSectionNav`); the right pane is the active `role="tabpanel"`.
-   Design tokens only (no hardcoded color literals); the active indicator is a
-   snap swap (no transition → no `prefers-reduced-motion` guard needed). */
-.admin-config__layout {
-  display: grid;
-  grid-template-columns: minmax(11rem, 16rem) 1fr;
-  gap: 1.5rem;
-  align-items: start;
-}
-.admin-config__nav {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  position: sticky;
-  top: 1rem;
-}
-.admin-config__nav-item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.6rem 0.75rem;
-  min-height: 2.75rem;
-  background: var(--surface);
-  color: var(--text);
-  border: none;
-  border-left: 3px solid transparent;
-  border-radius: var(--radius);
-  text-align: left;
-  cursor: pointer;
-  font: inherit;
-}
-.admin-config__nav-item--active {
-  border-left-color: var(--accent);
-  color: var(--accent-on-surface);
-  font-weight: 600;
-}
-.admin-config__nav-label {
-  flex: 1 1 auto;
-}
-/* Error indicator on an invalid saved section. Never color alone: the visible
-   dot is `aria-hidden` and an `.sr-only` "belum valid" label carries the
-   meaning for AT (CLAUDE.md a11y rule). */
-.admin-config__nav-badge {
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 50%;
-  background: var(--danger);
-  flex: 0 0 auto;
-}
+/* Operational config content — one section renders per `/config/*` route
+   (the in-content tablist was consolidated into the sidebar). Design tokens
+   only (no hardcoded color literals). */
 .admin-config__content {
   min-width: 0;
 }
@@ -1778,6 +1713,33 @@ fieldset {
   flex-direction: column;
   gap: 0.15rem;
 }
+/* Second-level cluster inside a two-level group (only Konfigurasi Sistem so
+   far: Tampilan / Antrean / Sistem). Indented under its big group; the sub-group
+   label mirrors the big-group label but smaller + more muted so the two levels
+   read as a hierarchy, not parallel headings. Design tokens only. */
+.nav-subgroup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.nav-subgroup + .nav-subgroup {
+  margin-top: 0.4rem;
+}
+.nav-subgroup__label {
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  opacity: 0.85;
+  padding: 0 0.75rem 0 1.1rem;
+  margin-bottom: 0.1rem;
+}
+.nav-subgroup__items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
 .nav-link {
   display: flex;
   align-items: center;
@@ -1815,6 +1777,13 @@ fieldset {
 .nav-link:focus-visible {
   outline: 2px solid var(--accent-on-surface);
   outline-offset: 2px;
+}
+/* Indent the sub-group's leaves under the big group (the big-group leaves sit
+   at 0.75rem; the sub-group leaves nudge in so the hierarchy is visible).
+   Declared AFTER the base `.nav-link` rule so a higher-specificity descendant
+   selector carries the indent without re-stating the base geometry. */
+.nav-subgroup__items .nav-link {
+  padding-left: 1.1rem;
 }
 
 /* Profile area — presentational dropdown (no identity/auth layer; see AppShell).
@@ -2113,26 +2082,25 @@ fieldset {
     border-left: none;
     border-bottom-color: var(--accent);
   }
-  /* The in-content section nav stacks into a wrapping row on narrow viewports.
-     `aria-orientation="vertical"` is kept (a wart — the nav is now visually
-     horizontal): follow-up to drive orientation via `data-orientation` +
-     matchMedia rather than a static attribute. Not blocking; flagged here. */
-  .admin-config__layout {
-    grid-template-columns: 1fr;
-  }
-  .admin-config__nav {
-    position: static;
+  /* Two-level nav: on narrow viewports the sub-groups flatten into the
+     horizontal row like the big groups — sub-group labels drop, sub-group
+     items flow inline. */
+  .nav-subgroup {
     flex-direction: row;
-    flex-wrap: wrap;
-    overflow-x: auto;
+    gap: 0.3rem;
   }
-  .admin-config__nav-item {
-    border-left: none;
-    border-bottom: 3px solid transparent;
+  .nav-subgroup + .nav-subgroup {
+    margin-top: 0;
   }
-  .admin-config__nav-item--active {
-    border-left: none;
-    border-bottom-color: var(--accent);
+  .nav-subgroup__label {
+    display: none;
+  }
+  .nav-subgroup__items {
+    flex-direction: row;
+    gap: 0.3rem;
+  }
+  .nav-subgroup__items .nav-link {
+    padding-left: 0.6rem;
   }
 }
 

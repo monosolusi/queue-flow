@@ -28,6 +28,7 @@ function pageTitleFor(pathname: string): string {
   if (pathname === '/' || pathname === '') return 'Status Antrian';
   if (pathname.startsWith('/config')) return 'Konfigurasi Operasional';
   if (pathname.startsWith('/tv-layout')) return 'Tampilan TV';
+  if (pathname.startsWith('/printer-config')) return 'Konfigurasi Printer';
   if (pathname.startsWith('/analytics')) return 'Analitik & Laporan';
   if (pathname.startsWith('/users')) return 'Pengguna';
   if (pathname.startsWith('/audit')) return 'Log Audit';
@@ -223,19 +224,39 @@ export function AppShell({
                   (aria-hidden) — the grouping semantic for SR users is carried by
                   the role="group" + aria-label on the items cluster below (the
                   CLAUDE.md ARIA rule: a labelled cluster is role="group" +
-                  aria-label, never a bare flat list). */}
+                  aria-label, never a bare flat list). The subgroup follows the
+                  SAME ARIA pattern: its label is a non-heading aria-hidden cue and
+                  its items cluster is a role="group" + aria-label. */}
               <div className="nav-group__label" aria-hidden="true">
                 {group.label}
               </div>
               <div className="nav-group__items" role="group" aria-label={group.label}>
-                {group.items.map((item) => (
-                  <NavLink key={item.label} to={item.to} end={item.end} className={navLinkClass}>
-                    <span className="nav-icon" aria-hidden="true">
-                      {item.icon}
-                    </span>
-                    <span>{item.label}</span>
-                  </NavLink>
-                ))}
+                {group.subgroups
+                  ? group.subgroups.map((sg) => (
+                      <div className="nav-subgroup" key={sg.label}>
+                        <div className="nav-subgroup__label" aria-hidden="true">
+                          {sg.label}
+                        </div>
+                        <div className="nav-subgroup__items" role="group" aria-label={sg.label}>
+                          {sg.items.map((item) => (
+                            <NavLink key={item.label} to={item.to} end={item.end} className={navLinkClass}>
+                              <span className="nav-icon" aria-hidden="true">
+                                {item.icon}
+                              </span>
+                              <span>{item.label}</span>
+                            </NavLink>
+                          ))}
+                        </div>
+                      </div>
+                    ))
+                  : group.items?.map((item) => (
+                      <NavLink key={item.label} to={item.to} end={item.end} className={navLinkClass}>
+                        <span className="nav-icon" aria-hidden="true">
+                          {item.icon}
+                        </span>
+                        <span>{item.label}</span>
+                      </NavLink>
+                    ))}
               </div>
             </div>
           ))}
