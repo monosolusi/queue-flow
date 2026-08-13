@@ -45,6 +45,14 @@ import { HANDLE_IDS, type FlowEdgeData, type FlowNodeData } from '../lib/state-m
  * status" back button is NOT part of this surface — it reaches the parent's
  * `clearSelection` via its own prop (ISP: the canvas node/edge never clear the
  * selection, so the context carries no selection-clearing callback).
+ *
+ * `onSelectEdge` and `onRerouteTransition` serve the panel's state-editor "Aksi"
+ * list (clicking a listed transition jumps the canvas selection to that edge)
+ * and the edge-editor "Dari"/"Ke" route selects (re-pointing an edge's
+ * endpoints from the panel — the manager's "can't connect SERVING to COMPLETED
+ * from the panel, only by dragging handles" feedback). The state node/edge
+ * components never call them (they are panel-only), but they live on this
+ * surface so the panel shares the same handler context the canvas does.
  */
 export interface WorkflowHandlers {
   mode: 'default' | 'custom';
@@ -53,6 +61,16 @@ export interface WorkflowHandlers {
   onDeleteState: (name: string) => void;
   onEditTransitionLabel: (edgeId: string, label: string) => void;
   onDeleteTransition: (edgeId: string) => void;
+  /** Select the given edge on the canvas (jump the panel to the edge editor). */
+  onSelectEdge: (edgeId: string) => void;
+  /**
+   * Re-point an edge's `from`/`to` endpoints from the properties panel. Guards
+   * a duplicate (a different edge already has that source/target pair) by
+   * no-op-ing so the controlled `<select>` reverts to the live edge value; the
+   * caller's `onChange` is NOT called on a rejected reroute. A no-op when the
+   * new pair equals the edge's current endpoints.
+   */
+  onRerouteTransition: (edgeId: string, from: string, to: string) => void;
 }
 
 export const WorkflowContext = createContext<WorkflowHandlers | null>(null);

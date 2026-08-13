@@ -21,7 +21,7 @@
  * (preserves the existing guard). The panel renders only in custom mode
  * (default mode is read-only canvas only).
  */
-import { describeState, type StateMachineForm } from '../lib/state-machine';
+import { describeState, stateActions, type StateMachineForm } from '../lib/state-machine';
 import type { FlowEdge, FlowNode } from '../lib/state-machine-flow';
 import type { WorkflowHandlers } from './StateMachineWorkflowNodes';
 
@@ -98,6 +98,14 @@ export function StateMachineWorkflowProperties({
   if (selectedNode) {
     const name = selectedNode.data.name;
     const description = describeState(form, name);
+    // The state's "actions" (manager feedback: a state is just a status label;
+    // the caller-panel buttons live on the transitions that enter/leave it).
+    // The panel lists both directions so the manager can SEE the state's
+    // interactions with the ticket without hunting the canvas. Clicking an
+    // action jumps the canvas selection to that edge (the edge editor opens).
+    const { incoming, outgoing } = stateActions(form, name);
+    const edgeIdFor = (from: string, to: string): string | undefined =>
+      edges.find((e) => e.source === from && e.target === to)?.id;
     return (
       <aside className="sm-properties" data-testid="sm-properties" aria-label="Properti status">
         {backButton}
@@ -118,6 +126,58 @@ export function StateMachineWorkflowProperties({
           <p id="panel-state-name-hint" className="sm-properties__hint">
             {description}
           </p>
+        </div>
+        <div className="sm-properties__field">
+          <p className="sm-properties__label" id="panel-state-actions-label">
+            Aksi
+          </p>
+          <p className="sm-properties__hint" id="panel-state-actions-hint">
+            Status hanya sebuah label. Aksi (tombol di panel petugas) diatur pada transisi yang masuk dan keluar.
+          </p>
+          {incoming.length === 0 && outgoing.length === 0 ? (
+            <p className="sm-properties__hint" data-testid="panel-state-actions-empty">
+              Belum ada transisi yang terhubung. Tarik garis dari titik status ini ke status lain di kanvas, atau tambah transisi.
+            </p>
+          ) : (
+            <ul className="sm-properties__actions" aria-labelledby="panel-state-actions-label" aria-describedby="panel-state-actions-hint" data-testid="panel-state-actions">
+              {outgoing.map((t) => {
+                const edgeId = edgeIdFor(t.from, t.to);
+                return (
+                  <li key={`out-${t.from}->${t.to}`}>
+                    <button
+                      type="button"
+                      className="sm-properties__action"
+                      data-testid={`panel-state-action-out-${t.from}->${t.to}`}
+                      aria-label={`Pilih transisi ${t.from} ke ${t.to}: ${t.actionLabel || 'Label aksi'}`}
+                      disabled={!edgeId}
+                      onClick={() => edgeId && handlers.onSelectEdge(edgeId)}
+                    >
+                      <span aria-hidden="true">→</span> {t.to}
+                      <span className="sm-properties__action-label">{t.actionLabel || 'Label aksi'}</span>
+                    </button>
+                  </li>
+                );
+              })}
+              {incoming.map((t) => {
+                const edgeId = edgeIdFor(t.from, t.to);
+                return (
+                  <li key={`in-${t.from}->${t.to}`}>
+                    <button
+                      type="button"
+                      className="sm-properties__action"
+                      data-testid={`panel-state-action-in-${t.from}->${t.to}`}
+                      aria-label={`Pilih transisi ${t.from} ke ${t.to}: ${t.actionLabel || 'Label aksi'}`}
+                      disabled={!edgeId}
+                      onClick={() => edgeId && handlers.onSelectEdge(edgeId)}
+                    >
+                      {t.from} <span aria-hidden="true">→</span>
+                      <span className="sm-properties__action-label">{t.actionLabel || 'Label aksi'}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
         <button
           type="button"
@@ -141,9 +201,41 @@ export function StateMachineWorkflowProperties({
       <aside className="sm-properties" data-testid="sm-properties" aria-label="Properti transisi">
         {backButton}
         <p className="sm-properties__heading">Transisi terpilih</p>
-        <p className="sm-properties__route" data-testid="panel-transition-route">
-          {from} <span aria-hidden="true">→</span> {to}
-        </p>
+        <div className="sm-properties__field" data-testid="panel-transition-route">
+          <label className="sm-properties__label" htmlFor="panel-transition-from">
+            Dari
+          </label>
+          <select
+            id="panel-transition-from"
+            className="sm-properties__input"
+            data-testid="panel-transition-from"
+            value={from}
+            onChange={(e) => handlers.onRerouteTransition(selectedEdge.id, e.target.value, to)}
+          >
+            {form.states.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+          <span aria-hidden="true" className="sm-properties__route-arrow">→</span>
+          <label className="sm-properties__label" htmlFor="panel-transition-to">
+            Ke
+          </label>
+          <select
+            id="panel-transition-to"
+            className="sm-properties__input"
+            data-testid="panel-transition-to"
+            value={to}
+            onChange={(e) => handlers.onRerouteTransition(selectedEdge.id, from, e.target.value)}
+          >
+            {form.states.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </div>
         <div className="sm-properties__field">
           <label className="sm-properties__label" htmlFor="panel-action-label">
             Label aksi

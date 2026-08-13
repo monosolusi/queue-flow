@@ -468,8 +468,49 @@ export function StateMachineWorkflow({
         if (selectedEdgeId === edgeId) setSelectedEdgeId(null);
         commit(nodes, nextEdges);
       },
+      // Select an edge on the canvas from the panel (the state-editor "Aksi"
+      // list calls this so clicking a listed transition jumps the panel to the
+      // edge editor). Mirrors `onEdgeClick`: mark the edge sole-selected in
+      // local edge state, clear node selection, and set the tracked id so the
+      // panel switches to the edge editor. `onSelectionChange` then fires from
+      // the store sync and reaffirms `selectedEdgeId`.
+      onSelectEdge: (edgeId) => {
+        setEdges((prev) => prev.map((e) => ({ ...e, selected: e.id === edgeId })));
+        setNodes((prev) => prev.map((n) => ({ ...n, selected: false })));
+        setSelectedEdgeId(edgeId);
+      },
+      // Re-point an edge's endpoints from the panel's "Dari"/"Ke" selects (the
+      // manager's "can't connect SERVING to COMPLETED from the panel, only by
+      // dragging handles" feedback). Controlled-component revert: a rejected
+      // reroute must NOT call `commit`/`onChange`, so the `<select>` reverts to
+      // the live edge value on the next re-render (no state change leaked).
+      onRerouteTransition: (edgeId, from, to) => {
+        const edge = edges.find((e) => e.id === edgeId);
+        if (!edge) return;
+        // No-op when the new pair equals the current endpoints (the `<select>`
+        // fires `onChange` even for a no-change re-pick in some browsers).
+        if (edge.source === from && edge.target === to) return;
+        // Duplicate guard: a DIFFERENT edge already claims this pair. No-op
+        // (return WITHOUT committing) so the controlled `<select>` reverts to
+        // the live edge value and the form never accepts the duplicate. The
+        // toast names the pair so the manager knows why nothing moved. Reuses
+        // the single source of truth {@link isDuplicateTransition} (the fourth
+        // reject site) — the `e.id !== edgeId` self-exclusion is unnecessary:
+        // the no-op guard above already guarantees this edge's live endpoints
+        // differ from `from`/`to`, so it cannot match its own pair here.
+        if (isDuplicateTransition(edges, from, to)) {
+          toast.show(`Transisi dari ${from} ke ${to} sudah ada.`, { variant: 'info', durationMs: 6000 });
+          return;
+        }
+        // Keep `sourceHandle`/`targetHandle`/`markerEnd` as-is — `commit` →
+        // `flowToGraph` rebuilds transitions and `withDescriptions` refreshes
+        // node descriptions (a re-routed edge changes the source/target
+        // states' outgoing/incoming counts).
+        const nextEdges = edges.map((e) => (e.id === edgeId ? { ...e, source: from, target: to } : e));
+        commit(nodes, nextEdges);
+      },
     }),
-    [value, nodes, edges, commit, selectedNodeId, selectedEdgeId],
+    [value, nodes, edges, commit, selectedNodeId, selectedEdgeId, toast],
   );
 
   // Click-to-select: mark the clicked node as the sole selected node (clear any

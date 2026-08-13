@@ -11,6 +11,7 @@ import {
   isDefaultGraph,
   mergeEdgeSides,
   missingCanonicalStates,
+  stateActions,
   toEdgeRoutingLayoutDto,
   toNodePositionsDto,
   toStateMachineDto,
@@ -218,6 +219,46 @@ describe('describeState (client-side description derivation)', () => {
     const dto = toStateMachineDto(form);
     expect((dto as unknown as Record<string, unknown>).description).toBeUndefined();
     expect(Object.keys(dto).sort()).toEqual(['states', 'transitions']);
+  });
+});
+
+describe('stateActions (a state\'s incoming/outgoing "actions")', () => {
+  it('splits the PRD §7 default graph SERVING into its incoming + outgoing transitions', () => {
+    // SERVING: outgoing = SERVING→COMPLETED ("Selesai Layan"), incoming =
+    // CALLING→SERVING ("Mulai Melayani"). The panel reads this derivation to
+    // surface the state's "actions" (the manager's "each state should have an
+    // action property" feedback: the actions live on the transitions, not the
+    // state, so the panel lists both directions).
+    const form = defaultStateMachineForm();
+    const serv = stateActions(form, 'SERVING');
+    expect(serv.outgoing.map((t) => `${t.from}->${t.to}`)).toEqual(['SERVING->COMPLETED']);
+    expect(serv.outgoing[0].actionLabel).toBe('Selesai Layan');
+    expect(serv.incoming.map((t) => `${t.from}->${t.to}`)).toEqual(['CALLING->SERVING']);
+    expect(serv.incoming[0].actionLabel).toBe('Mulai Melayani');
+  });
+
+  it('returns both lists empty for a custom state with no transitions', () => {
+    // A state nothing connects to yet has no "actions" — the panel shows the
+    // "tarik garis" hint instead. Both lists empty so the panel can detect that.
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['WAITING', 'CALLING', 'LONELY'],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
+      positions: {},
+    };
+    const lonely = stateActions(form, 'LONELY');
+    expect(lonely.incoming).toEqual([]);
+    expect(lonely.outgoing).toEqual([]);
+  });
+
+  it('returns outgoing only for WAITING in the default graph (no incoming)', () => {
+    // WAITING is the source of the default flow — it has an outgoing transition
+    // but no incoming one. The panel must distinguish the two empties so the
+    // hint copy reads correctly (an outgoing-only state is not "no actions").
+    const form = defaultStateMachineForm();
+    const waiting = stateActions(form, 'WAITING');
+    expect(waiting.outgoing.map((t) => `${t.from}->${t.to}`)).toEqual(['WAITING->CALLING']);
+    expect(waiting.incoming).toEqual([]);
   });
 });
 

@@ -469,6 +469,37 @@ export function describeState(form: StateMachineForm, name: string): string {
   return 'Status kustom';
 }
 
+/**
+ * The transitions connected to a state — its "actions". A state is an empty
+ * status label; the actions (caller-panel buttons) live on the TRANSITIONS
+ * (edges) that enter/leave it. This helper is the single derivation the
+ * properties panel reads to surface that model (manager feedback: adding a
+ * state was confusing because its interactions with the ticket were
+ * invisible — the panel only showed a name + a derived description + delete,
+ * never the state's incoming/outgoing transitions). Pure over the form slice;
+ * never serialized.
+ */
+export interface StateActions {
+  /** Transitions whose `to` is this state — actions that ENTER it. */
+  readonly incoming: readonly Transition[];
+  /** Transitions whose `from` is this state — actions that LEAVE it. */
+  readonly outgoing: readonly Transition[];
+}
+
+/**
+ * Derive the transitions connected to a state — its "actions" — split by
+ * direction. A state is just a status label; the actions (the buttons shown on
+ * the caller panel) are set on the transitions that enter/leave it, and this
+ * helper is the single derivation the properties panel reads to surface that
+ * model. Pure over the form slice; never serialized. Order follows the form's
+ * `transitions` array (stable across renders for an unchanged graph).
+ */
+export function stateActions(form: StateMachineForm, name: string): StateActions {
+  const incoming = form.transitions.filter((t) => t.to === name);
+  const outgoing = form.transitions.filter((t) => t.from === name);
+  return { incoming, outgoing };
+}
+
 // --- form mutation helpers (pure over the StateMachineForm slice) ------------
 
 export function updateTransition(

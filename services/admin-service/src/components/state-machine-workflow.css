@@ -130,6 +130,59 @@
   font-size: 0.85rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
+/* The edge editor's editable route — two labelled selects (Dari/Ke) with a
+   centered arrow between them. The arrow is decorative (aria-hidden); the
+   two selects carry the live edge endpoints and lift a reroute via
+   `onRerouteTransition` (a duplicate is rejected with a toast and the
+   controlled selects revert to the live edge value). */
+.sm-properties__route-arrow {
+  align-self: center;
+  color: var(--text-muted);
+  font-size: 1rem;
+  line-height: 1;
+}
+/* The state editor's "Aksi" list — a manager-facing enumeration of the state's
+   incoming + outgoing transitions (the actions / caller-panel buttons that
+   enter/leave this status). Each item is a button that jumps the canvas
+   selection to that edge so the manager can edit it from the panel without
+   hunting the canvas. */
+.sm-properties__actions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.sm-properties__action {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 44px;
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--text) 15%, transparent);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+}
+.sm-properties__action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.sm-properties__action:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.sm-properties__action-label {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-style: italic;
+}
 .sm-properties__field {
   display: flex;
   flex-direction: column;
