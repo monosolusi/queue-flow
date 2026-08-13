@@ -27,6 +27,7 @@ import {
   TvPanelLayout,
   EdgeRoutingLayout,
   NodePositions,
+  PrinterConfiguration,
   DailyResetPolicy,
   StateMachine,
   StateSchema,
@@ -257,6 +258,7 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
         tvPanelLayout: TvPanelLayout.DEFAULT,
         edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
         nodePositions: NodePositions.DEFAULT,
+        printerConfiguration: PrinterConfiguration.DEFAULT,
       }),
     );
 
@@ -353,6 +355,7 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
         tvPanelLayout: TvPanelLayout.DEFAULT,
         edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
         nodePositions: NodePositions.DEFAULT,
+        printerConfiguration: PrinterConfiguration.DEFAULT,
       }),
     );
 

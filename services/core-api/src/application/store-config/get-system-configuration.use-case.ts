@@ -8,6 +8,7 @@ import { ServiceThemes, type ServiceThemesMap } from '../../domain/store-config'
 import { TvPanelLayout, type TvGridLayout } from '../../domain/store-config';
 import { EdgeRoutingLayout, type EdgeRoutingLayoutDto } from '../../domain/store-config';
 import { NodePositions, type NodePositionsDto } from '../../domain/store-config';
+import { PrinterConfiguration, type PrinterConfigurationDto } from '../../domain/store-config';
 import type { PriorityPolicy } from '../../domain/shared';
 
 /**
@@ -72,6 +73,10 @@ export interface SystemConfigurationDto {
   /** Per-state node x/y positions for the admin state-machine visual editor
    *  (keyed map "stateName" -> { x, y }). */
   readonly nodePositions: NodePositionsDto;
+  /** Printer configuration (which printer the kiosk uses — Chrome's default
+   *  dialog, or a network ESC/POS printer proxied through core-api over raw
+   *  TCP). */
+  readonly printerConfiguration: PrinterConfigurationDto;
 }
 
 /** Projects the domain `StateMachine` into the flat {@link StateMachineDto}. */
@@ -153,6 +158,10 @@ export class GetSystemConfigurationUseCase {
         // so a clean store prefills the admin state-machine editor with the
         // auto-laid-out canvas (no saved positions).
         nodePositions: NodePositions.DEFAULT.toDto(),
+        // Default printer configuration — chrome mode = zero behavior change
+        // (the kiosk keeps using Chrome's print dialog), so a clean store
+        // prefills the admin printer section with the existing chrome behavior.
+        printerConfiguration: PrinterConfiguration.DEFAULT.toDto(),
       };
     }
 
@@ -172,6 +181,7 @@ export class GetSystemConfigurationUseCase {
       tvPanelLayout: system.tvPanelLayout.toDto(),
       edgeRoutingLayout: system.edgeRoutingLayout.toDto(),
       nodePositions: system.nodePositions.toDto(),
+      printerConfiguration: system.printerConfiguration.toDto(),
       categories: allCategories
         .slice()
         .sort((a, b) => a.code.localeCompare(b.code))

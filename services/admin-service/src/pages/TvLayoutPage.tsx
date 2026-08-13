@@ -132,6 +132,11 @@ export function TvLayoutPage({ api }: { api: IAdminApi }) {
           serviceThemes: form.serviceThemes,
           // The one field this page edits.
           tvPanelLayout: layout,
+          // Payload-only passthrough — the printer editor lives on the dedicated
+          // `/printer-config` page; the full PUT must still carry the field so
+          // the required `printerConfiguration` wire field is never dropped
+          // (mirrors the other passthrough fields this page does not edit).
+          printerConfiguration: form.printerConfiguration,
           dailyReset: {
             mode: form.dailyReset.mode,
             cronExpression:

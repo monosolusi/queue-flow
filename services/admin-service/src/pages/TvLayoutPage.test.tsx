@@ -7,6 +7,7 @@ import { ToastProvider } from '../toast/toast-context';
 import type { IAdminApi, ISystemConfigApi } from '../api/admin-api';
 import {
   DEFAULT_BRAND_COLOR,
+  DEFAULT_PRINTER_CONFIGURATION,
   DEFAULT_SERVICE_THEMES,
   DEFAULT_STATE_MACHINE,
   DEFAULT_TV_GRID_LAYOUT,
@@ -48,6 +49,7 @@ function configuredStore(): SystemConfigurationDto {
     tvPanelLayout: DEFAULT_TV_GRID_LAYOUT.map((w) => ({ ...w })),
     edgeRoutingLayout: {},
     nodePositions: {},
+    printerConfiguration: { ...DEFAULT_PRINTER_CONFIGURATION },
   };
 }
 
@@ -66,6 +68,7 @@ function makeApi(
           tvPanelLayout: payload.tvPanelLayout,
           edgeRoutingLayout: {},
           nodePositions: {},
+          printerConfiguration: payload.printerConfiguration,
         })),
   );
   const getConfig = vi.fn(() => Promise.resolve(config));
@@ -338,6 +341,8 @@ describe('TvLayoutPage', () => {
     expect(payload.brandColor).toBe(DEFAULT_BRAND_COLOR);
     expect(payload.serviceThemes).toEqual({ ...DEFAULT_SERVICE_THEMES });
     expect(payload.stateMachine).toEqual(DEFAULT_STATE_MACHINE);
+    // Printer config is a passthrough (this page does not edit it).
+    expect(payload.printerConfiguration).toEqual({ ...DEFAULT_PRINTER_CONFIGURATION });
     // Categories preserve ids.
     expect(payload.categories).toEqual([
       { id: 'cat-a', code: 'A', name: 'Customer Service' },

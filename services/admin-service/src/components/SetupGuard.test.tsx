@@ -5,7 +5,7 @@ import { SetupGuard } from './SetupGuard';
 import { SystemConfigProvider } from '../config/system-config-context';
 import type { ISystemConfigApi } from '../api/admin-api';
 import type { SystemConfigurationDto } from '../api/types';
-import { DEFAULT_SERVICE_THEMES, DEFAULT_TV_GRID_LAYOUT } from '../api/types';
+import { DEFAULT_PRINTER_CONFIGURATION, DEFAULT_SERVICE_THEMES, DEFAULT_TV_GRID_LAYOUT } from '../api/types';
 
 function cleanStore(): SystemConfigurationDto {
   return {
@@ -20,6 +20,7 @@ function cleanStore(): SystemConfigurationDto {
     tvPanelLayout: DEFAULT_TV_GRID_LAYOUT,
     edgeRoutingLayout: {},
     nodePositions: {},
+    printerConfiguration: { ...DEFAULT_PRINTER_CONFIGURATION },
   };
 }
 

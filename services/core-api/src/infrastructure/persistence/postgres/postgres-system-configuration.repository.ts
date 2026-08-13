@@ -25,6 +25,10 @@ import {
   NodePositions,
   type NodePositionsMap,
 } from '../../../domain/store-config/value-objects/node-positions';
+import {
+  PrinterConfiguration,
+  type PrinterConfigurationDto,
+} from '../../../domain/store-config/value-objects/printer-configuration';
 import { StateMachine } from '../../../domain/store-config/state-machine';
 import { StateSchema } from '../../../domain/store-config/value-objects/state-schema';
 import { StateTransitionRule } from '../../../domain/store-config/value-objects/state-transition-rule';
@@ -42,6 +46,7 @@ interface ConfigRow {
   tv_panel_layout: TvGridLayout | null;
   edge_routing_layout: EdgeRoutingLayoutMap | null;
   node_positions: NodePositionsMap | null;
+  printer_configuration: PrinterConfigurationDto | null;
 }
 
 /**
@@ -68,8 +73,8 @@ export class PostgresSystemConfigurationRepository implements ISystemConfigurati
   async save(config: SystemConfiguration): Promise<void> {
     await withDbClient(this.pool, async (client) => {
       await client.query(
-        `INSERT INTO system_configuration (id, store_name, is_initial_setup_completed, state_machine, daily_reset_policy, brand_color, service_themes, tv_panel_layout, edge_routing_layout, node_positions)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        `INSERT INTO system_configuration (id, store_name, is_initial_setup_completed, state_machine, daily_reset_policy, brand_color, service_themes, tv_panel_layout, edge_routing_layout, node_positions, printer_configuration)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          ON CONFLICT (id) DO UPDATE SET
            store_name                = EXCLUDED.store_name,
            is_initial_setup_completed = EXCLUDED.is_initial_setup_completed,
@@ -79,7 +84,8 @@ export class PostgresSystemConfigurationRepository implements ISystemConfigurati
            service_themes            = EXCLUDED.service_themes,
            tv_panel_layout           = EXCLUDED.tv_panel_layout,
            edge_routing_layout       = EXCLUDED.edge_routing_layout,
-           node_positions            = EXCLUDED.node_positions`,
+           node_positions            = EXCLUDED.node_positions,
+           printer_configuration     = EXCLUDED.printer_configuration`,
         [
           config.id.value,
           config.storeName,
@@ -97,6 +103,7 @@ export class PostgresSystemConfigurationRepository implements ISystemConfigurati
           JSON.stringify(config.tvPanelLayout.toDto()),
           JSON.stringify(config.edgeRoutingLayout.toDto()),
           JSON.stringify(config.nodePositions.toDto()),
+          JSON.stringify(config.printerConfiguration.toDto()),
         ],
       );
     });
@@ -151,6 +158,13 @@ function toConfig(row: ConfigRow): SystemConfiguration {
     // undefined here) — both paths reconstitute NodePositions.DEFAULT. Mirrors
     // the edgeRoutingLayout fallback.
     nodePositions: NodePositions.of(row.node_positions ?? undefined),
+    // Same boot-window fallback for printer_configuration (0013 migration).
+    // `of()` recovers a null/undefined column to the chrome default (zero
+    // behavior change — the kiosk keeps using Chrome's print dialog), and a
+    // pre-migration row's SELECT * simply lacks the column (pg returns
+    // undefined here) — both paths reconstitute PrinterConfiguration.DEFAULT.
+    // Mirrors the nodePositions fallback.
+    printerConfiguration: PrinterConfiguration.of(row.printer_configuration ?? undefined),
   });
 }
 

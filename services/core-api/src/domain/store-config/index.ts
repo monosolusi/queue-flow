@@ -1,5 +1,6 @@
 export * from './counter-routing-rule.aggregate';
 export * from './events/system-configuration-changed.event';
+export * from './printer-driver.port';
 export * from './repositories/counter-routing-rule.repository';
 export * from './repositories/system-configuration.repository';
 export * from './scheduler.port';
@@ -9,6 +10,7 @@ export * from './value-objects/brand-color';
 export * from './value-objects/daily-reset-policy';
 export * from './value-objects/edge-routing-layout';
 export * from './value-objects/node-positions';
+export * from './value-objects/printer-configuration';
 export * from './value-objects/priority-policy';
 export * from './value-objects/service-themes';
 export * from './value-objects/state-schema';

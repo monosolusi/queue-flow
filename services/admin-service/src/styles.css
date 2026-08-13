@@ -576,6 +576,29 @@ fieldset {
   width: auto;
 }
 
+/* Printer configuration page (/printer-config) — a standalone sibling of
+ * /tv-layout. The network ESC/POS settings (host + port) sit side by side at a
+ * narrow viewport and stack at smaller widths; the host field grows to fill so
+ * a long IP/hostname stays visible. Design tokens only (no hardcoded colors);
+ * the card + radio-group + field vocabularies are shared with /config. */
+.printer-config-page__network {
+  display: grid;
+  grid-template-columns: 1fr minmax(8rem, 12rem);
+  gap: 0.75rem 1rem;
+  margin-bottom: 0.5rem;
+}
+.printer-config-page__network .field {
+  margin-bottom: 0;
+}
+@media (max-width: 30rem) {
+  .printer-config-page__network {
+    grid-template-columns: 1fr;
+  }
+}
+.printer-config-page__loading {
+  color: var(--text-muted);
+}
+
 /* TV-display panel visibility toggles. Each row is an inline checkbox + label
  * (constrained true/false — an invalid value is not constructable). Stacks
  * vertically with the entry-list gap; no nested card background. */

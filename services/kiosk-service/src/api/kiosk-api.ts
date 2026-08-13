@@ -1,16 +1,24 @@
-import type { CategoryDto, CreatedTicketDto, StoreProfileSlice } from './types';
+import type { PrintPayload } from '../print/print-provider';
+import type { CategoryDto, CreatedTicketDto, PaperWidth, PrinterMode, StoreProfileSlice } from './types';
 
 /**
  * The slice of the core-api the kiosk consumes (ISP — only category listing,
- * ticket creation, and the store name for the receipt header; never leaks
- * admin/reporting/caller DTOs). Implementations live behind this interface so
- * tests can substitute a fake without touching the network.
+ * ticket creation, the store name for the receipt header, and the network-print
+ * proxy; never leaks admin/reporting/caller DTOs). Implementations live behind
+ * this interface so tests can substitute a fake without touching the network.
  */
 export interface IKioskApi {
   listCategories(): Promise<CategoryDto[]>;
   createTicket(categoryId: string): Promise<CreatedTicketDto>;
   /** Store profile for the receipt header + runtime accent (FR-KSK-03 / QUE-37 AC6). */
   getStoreProfile(): Promise<StoreProfileSlice>;
+  /**
+   * Proxies a ticket print to core-api's network ESC/POS printer (POST
+   * /api/print/ticket). Resolves on 2xx (204 — empty body); rejects on non-2xx.
+   * The kiosk treats a rejection as a non-fatal print failure — the caller
+   * swallows it so a printer outage never blocks the visitor flow.
+   */
+  printTicket(payload: PrintPayload): Promise<void>;
 }
 
 const API_BASE = '/api';
@@ -50,6 +58,28 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
 }
 
 /**
+ * POST helper for endpoints that return an empty body (204). Unlike `postJson`,
+ * it never parses the response — `res.json()` would reject on a 204. Throws on
+ * non-2xx so callers can try/catch.
+ */
+async function postVoid(path: string, body: unknown): Promise<void> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let detail = '';
+    try {
+      detail = (await res.json())?.message ?? '';
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new Error(`POST ${path} -> ${res.status}${detail ? `: ${detail}` : ''}`);
+  }
+}
+
+/**
  * Fetch-based {@link IKioskApi} using relative `/api` URLs — same-origin behind
  * NGINX in production, proxied to core-api:3000 by Vite in dev. No remote calls
  * (NFR-REL-01).
@@ -74,13 +104,33 @@ export class KioskApi implements IKioskApi {
     // returns `storeName`/`brandColor` even pre-setup as `''`) rather than adding
     // a dedicated endpoint (DRY). The kiosk consumes only the store-profile
     // slice (ISP): store name + brand color + this service's theme (the kiosk
-    // surface key from `serviceThemes`, QUE-47).
-    return getJson<{ storeName: string; brandColor: string; serviceThemes?: { kiosk?: string } }>(
-      '/system/config',
-    ).then((c) => ({
-      storeName: c.storeName,
-      brandColor: c.brandColor,
-      themeMode: c.serviceThemes?.kiosk === 'dark' ? 'dark' : 'light',
-    }));
+    // surface key from `serviceThemes`, QUE-47) + the printer config it needs to
+    // choose its print provider (FR-KSK-02). `printerConfiguration` is absent
+    // pre-config / before the field existed — default to `chrome` + 80mm, which
+    // is the prior behavior (BrowserPrintProvider with the page's default size).
+    return getJson<{
+      storeName: string;
+      brandColor: string;
+      serviceThemes?: { kiosk?: string };
+      printerConfiguration?: { mode?: unknown; paperWidth?: unknown };
+    }>('/system/config').then((c) => {
+      const mode = c.printerConfiguration?.mode;
+      const width = c.printerConfiguration?.paperWidth;
+      const printerMode: PrinterMode = mode === 'network-escpos' ? 'network-escpos' : 'chrome';
+      const printerPaperWidth: PaperWidth = width === 58 ? 58 : 80;
+      return {
+        storeName: c.storeName,
+        brandColor: c.brandColor,
+        themeMode: c.serviceThemes?.kiosk === 'dark' ? 'dark' : 'light',
+        printerMode,
+        printerPaperWidth,
+      };
+    });
+  }
+  printTicket(payload: PrintPayload): Promise<void> {
+    // core-api proxies ESC/POS bytes + cut to the networked thermal printer over
+    // TCP (the browser cannot open raw TCP — NFR-REL-01 keeps IO server-side).
+    // The endpoint returns 204 (empty body) on success, hence `postVoid`.
+    return postVoid('/print/ticket', payload);
   }
 }

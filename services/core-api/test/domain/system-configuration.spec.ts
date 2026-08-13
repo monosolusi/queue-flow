@@ -6,6 +6,7 @@ import {
   DailyResetPolicy,
   EdgeRoutingLayout,
   NodePositions,
+  PrinterConfiguration,
   ServiceThemes,
   StateMachine,
   StateSchema,
@@ -226,6 +227,18 @@ describe('SystemConfiguration aggregate', () => {
     expect(config.nodePositions.toDto()).toEqual({});
   });
 
+  it('defaults printerConfiguration to the chrome default (zero behavior change — Chrome print dialog)', () => {
+    const config = SystemConfiguration.create(Identifier.generate());
+    expect(config.printerConfiguration).toBe(PrinterConfiguration.DEFAULT);
+    expect(config.printerConfiguration.toDto()).toEqual({
+      mode: 'chrome',
+      paperWidth: 80,
+      host: '',
+      port: 9100,
+      cutMode: 'partial',
+    });
+  });
+
   it('reconstitute carries a custom brand color through', () => {
     const config = SystemConfiguration.reconstitute({
       id: Identifier.generate(),
@@ -238,6 +251,7 @@ describe('SystemConfiguration aggregate', () => {
       tvPanelLayout: TvPanelLayout.DEFAULT,
       edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
       nodePositions: NodePositions.DEFAULT,
+      printerConfiguration: PrinterConfiguration.DEFAULT,
     });
     expect(config.brandColor.value).toBe('#aabbcc');
   });
@@ -254,6 +268,7 @@ describe('SystemConfiguration aggregate', () => {
       tvPanelLayout: TvPanelLayout.DEFAULT,
       edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
       nodePositions: NodePositions.DEFAULT,
+      printerConfiguration: PrinterConfiguration.DEFAULT,
     });
     expect(config.serviceThemes.toDto()).toEqual({
       kiosk: 'light',
@@ -278,6 +293,7 @@ describe('SystemConfiguration aggregate', () => {
       ]),
       edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
       nodePositions: NodePositions.DEFAULT,
+      printerConfiguration: PrinterConfiguration.DEFAULT,
     });
     expect(config.tvPanelLayout.toDto()).toEqual([
       { id: 'nowServing', component: 'nowServing', x: 0, y: 0, w: 8, h: 4 },
@@ -299,6 +315,7 @@ describe('SystemConfiguration aggregate', () => {
         'SKIPPED->CALLING': { sourceSide: 'bottom', targetSide: 'top' },
       }),
       nodePositions: NodePositions.DEFAULT,
+      printerConfiguration: PrinterConfiguration.DEFAULT,
     });
     expect(config.edgeRoutingLayout.toDto()).toEqual({
       'SKIPPED->CALLING': { sourceSide: 'bottom', targetSide: 'top' },
@@ -320,10 +337,40 @@ describe('SystemConfiguration aggregate', () => {
         WAITING: { x: 0, y: 0 },
         CALLING: { x: 240, y: 0 },
       }),
+      printerConfiguration: PrinterConfiguration.DEFAULT,
     });
     expect(config.nodePositions.toDto()).toEqual({
       WAITING: { x: 0, y: 0 },
       CALLING: { x: 240, y: 0 },
+    });
+  });
+
+  it('reconstitute carries a custom network-escpos printer configuration through', () => {
+    const config = SystemConfiguration.reconstitute({
+      id: Identifier.generate(),
+      storeName: 'Toko Cetak',
+      isInitialSetupCompleted: true,
+      stateMachine: StateMachine.DEFAULT,
+      dailyResetPolicy: DailyResetPolicy.DEFAULT,
+      brandColor: BrandColor.DEFAULT,
+      serviceThemes: ServiceThemes.DEFAULT,
+      tvPanelLayout: TvPanelLayout.DEFAULT,
+      edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
+      nodePositions: NodePositions.DEFAULT,
+      printerConfiguration: PrinterConfiguration.of({
+        mode: 'network-escpos',
+        paperWidth: 58,
+        host: '192.168.1.50',
+        port: 9100,
+        cutMode: 'full',
+      }),
+    });
+    expect(config.printerConfiguration.toDto()).toEqual({
+      mode: 'network-escpos',
+      paperWidth: 58,
+      host: '192.168.1.50',
+      port: 9100,
+      cutMode: 'full',
     });
   });
 

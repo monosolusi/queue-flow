@@ -82,6 +82,7 @@ describe('SaveSystemConfigurationUseCase — daily-reset policy audit + re-arm (
       ],
       edgeRoutingLayout: {},
       nodePositions: {},
+      printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial' },
       actor: 'admin',
       ...overrides,
     };

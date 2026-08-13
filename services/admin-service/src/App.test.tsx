@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { App } from './App';
 import type { IAdminAppApi } from './api/admin-api';
 import type { AuthUserDto, SystemConfigurationDto } from './api/types';
-import { DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES, DEFAULT_STATE_MACHINE, DEFAULT_TV_GRID_LAYOUT } from './api/types';
+import { DEFAULT_BRAND_COLOR, DEFAULT_PRINTER_CONFIGURATION, DEFAULT_SERVICE_THEMES, DEFAULT_STATE_MACHINE, DEFAULT_TV_GRID_LAYOUT } from './api/types';
 import { clearToken, writeToken } from './auth/token-store';
 
 const ADMIN: AuthUserDto = { id: 'u-1', username: 'manajer', role: 'admin' };
@@ -29,6 +29,7 @@ function makeConfig(brandColor = '#2563eb'): SystemConfigurationDto {
     tvPanelLayout: DEFAULT_TV_GRID_LAYOUT,
     edgeRoutingLayout: {},
     nodePositions: {},
+    printerConfiguration: { ...DEFAULT_PRINTER_CONFIGURATION },
   };
 }
 
@@ -60,7 +61,7 @@ function makeApi(
   return {
     getSystemConfig: reject ? vi.fn(() => Promise.reject(reject)) : vi.fn(() => Promise.resolve(config)),
     saveSystemConfig: vi.fn(() =>
-      Promise.resolve({ isInitialSetupCompleted: true, storeName: config.storeName, brandColor: config.brandColor, serviceThemes: config.serviceThemes, tvPanelLayout: config.tvPanelLayout, edgeRoutingLayout: {}, nodePositions: {} }),
+      Promise.resolve({ isInitialSetupCompleted: true, storeName: config.storeName, brandColor: config.brandColor, serviceThemes: config.serviceThemes, tvPanelLayout: config.tvPanelLayout, edgeRoutingLayout: {}, nodePositions: {}, printerConfiguration: config.printerConfiguration }),
     ),
     getActiveStateMachine: vi.fn(() => Promise.resolve(config.stateMachine)),
     getDailyReport: vi.fn(),
@@ -223,6 +224,7 @@ describe('App (admin — first-run guard matrix)', () => {
           tvPanelLayout: completed.tvPanelLayout,
           edgeRoutingLayout: {},
           nodePositions: {},
+          printerConfiguration: completed.printerConfiguration,
         });
       }),
     });
@@ -272,6 +274,7 @@ describe('App (admin — first-run guard matrix)', () => {
           tvPanelLayout: current.tvPanelLayout,
           edgeRoutingLayout: {},
           nodePositions: {},
+          printerConfiguration: current.printerConfiguration,
         });
       }),
     });

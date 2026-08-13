@@ -1,5 +1,8 @@
 import type {
   DailyResetMode,
+  PrinterCutMode,
+  PrinterMode,
+  PrinterPaperWidth,
   PriorityPolicy,
   ServiceSurface,
   ThemeMode,
@@ -44,6 +47,42 @@ export const PRIORITY_POLICY_DESCRIPTIONS: Record<PriorityPolicy, string> = {
 export const DAILY_RESET_MODE_LABELS: Record<DailyResetMode, string> = {
   AUTOMATIC_CRON: 'Otomatis setiap hari',
   MANUAL: 'Manual (tombol reset)',
+};
+
+/**
+ * Friendly Bahasa Indonesia labels for the printer-mode enum (the
+ * `/printer-config` page mode radio). The enum stays as the wire `value=`
+ * (`PUT /api/system/config` sends `chrome` / `network-escpos`, never the
+ * friendly text); these maps keep the human label next to the value so the two
+ * never drift. Mirrors the QUE-34 rule: the raw enum (`chrome`,
+ * `network-escpos`) must never appear as display text — only as `value=`.
+ * "Chrome" and "ESC/POS" are the printer technology names the manager already
+ * knows, so they stay; the rest of the copy is friendly Indonesian context.
+ */
+export const PRINTER_MODE_LABELS: Record<PrinterMode, string> = {
+  chrome: 'Printer Browser (Chrome)',
+  'network-escpos': 'Printer Thermal ESC/POS (Jaringan)',
+};
+
+/**
+ * Friendly labels for the receipt paper-width radio. The mm width stays in the
+ *  label (it IS the value the manager picks between); the parenthetical is the
+ * friendly hint (small vs. the standard roll).
+ */
+export const PRINTER_PAPER_WIDTH_LABELS: Record<PrinterPaperWidth, string> = {
+  58: '58mm (kecil)',
+  80: '80mm (standar)',
+};
+
+/**
+ * Friendly labels for the thermal-printer cut-mode radio (network mode only).
+ * The enum stays as the wire `value=` (`full` / `partial` / `none`); the
+ * Indonesian "Gunting …" copy is the manager-facing term for the cut command.
+ */
+export const PRINTER_CUT_MODE_LABELS: Record<PrinterCutMode, string> = {
+  full: 'Gunting Penuh',
+  partial: 'Gunting Separuh',
+  none: 'Tidak Digunting',
 };
 
 /**

@@ -5,6 +5,7 @@ import { BrandColor } from './value-objects/brand-color';
 import { DailyResetPolicy } from './value-objects/daily-reset-policy';
 import { EdgeRoutingLayout } from './value-objects/edge-routing-layout';
 import { NodePositions } from './value-objects/node-positions';
+import { PrinterConfiguration } from './value-objects/printer-configuration';
 import { ServiceThemes } from './value-objects/service-themes';
 import { TvPanelLayout } from './value-objects/tv-panel-layout';
 import { StateMachine } from './state-machine';
@@ -25,6 +26,7 @@ export class SystemConfiguration extends AggregateRoot {
   private _tvPanelLayout: TvPanelLayout;
   private _edgeRoutingLayout: EdgeRoutingLayout;
   private _nodePositions: NodePositions;
+  private _printerConfiguration: PrinterConfiguration;
 
   private constructor(
     id: Identifier,
@@ -37,6 +39,7 @@ export class SystemConfiguration extends AggregateRoot {
     tvPanelLayout: TvPanelLayout,
     edgeRoutingLayout: EdgeRoutingLayout,
     nodePositions: NodePositions,
+    printerConfiguration: PrinterConfiguration,
   ) {
     super(id);
     this._storeName = storeName;
@@ -48,13 +51,15 @@ export class SystemConfiguration extends AggregateRoot {
     this._tvPanelLayout = tvPanelLayout;
     this._edgeRoutingLayout = edgeRoutingLayout;
     this._nodePositions = nodePositions;
+    this._printerConfiguration = printerConfiguration;
   }
 
   /** Creates a fresh, not-yet-configured instance with the default state machine,
-   * brand color, service themes, TV panel layout, edge routing layout, and node
-   * positions. `brandColor` + `serviceThemes` + `tvPanelLayout` +
-   * `edgeRoutingLayout` + `nodePositions` default so the dev seed and acceptance
-   * `seedPrdConfig` (2-arg calls) need no change. */
+   * brand color, service themes, TV panel layout, edge routing layout, node
+   * positions, and printer configuration. `brandColor` + `serviceThemes` +
+   * `tvPanelLayout` + `edgeRoutingLayout` + `nodePositions` +
+   * `printerConfiguration` default so the dev seed and acceptance `seedPrdConfig`
+   * (2-arg calls) need no change. */
   public static create(
     id: Identifier,
     storeName = '',
@@ -63,6 +68,7 @@ export class SystemConfiguration extends AggregateRoot {
     tvPanelLayout: TvPanelLayout = TvPanelLayout.DEFAULT,
     edgeRoutingLayout: EdgeRoutingLayout = EdgeRoutingLayout.DEFAULT,
     nodePositions: NodePositions = NodePositions.DEFAULT,
+    printerConfiguration: PrinterConfiguration = PrinterConfiguration.DEFAULT,
   ): SystemConfiguration {
     return new SystemConfiguration(
       id,
@@ -75,6 +81,7 @@ export class SystemConfiguration extends AggregateRoot {
       tvPanelLayout,
       edgeRoutingLayout,
       nodePositions,
+      printerConfiguration,
     );
   }
 
@@ -89,6 +96,7 @@ export class SystemConfiguration extends AggregateRoot {
     tvPanelLayout: TvPanelLayout;
     edgeRoutingLayout: EdgeRoutingLayout;
     nodePositions: NodePositions;
+    printerConfiguration: PrinterConfiguration;
   }): SystemConfiguration {
     return new SystemConfiguration(
       params.id,
@@ -101,6 +109,7 @@ export class SystemConfiguration extends AggregateRoot {
       params.tvPanelLayout,
       params.edgeRoutingLayout,
       params.nodePositions,
+      params.printerConfiguration,
     );
   }
 
@@ -138,6 +147,10 @@ export class SystemConfiguration extends AggregateRoot {
 
   public get nodePositions(): NodePositions {
     return this._nodePositions;
+  }
+
+  public get printerConfiguration(): PrinterConfiguration {
+    return this._printerConfiguration;
   }
 
   public setStoreName(name: string): void {

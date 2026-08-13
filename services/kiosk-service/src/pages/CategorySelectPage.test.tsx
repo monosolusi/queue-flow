@@ -31,7 +31,15 @@ function makeApi(
   return {
     listCategories: () => Promise.resolve(list),
     createTicket: createImpl ?? ((id: string) => Promise.resolve(ticket(id))),
-    getStoreProfile: () => Promise.resolve({ storeName, brandColor, themeMode: 'light' as const }),
+    getStoreProfile: () =>
+      Promise.resolve({
+        storeName,
+        brandColor,
+        themeMode: 'light' as const,
+        printerMode: 'chrome',
+        printerPaperWidth: 80,
+      }),
+    printTicket: () => Promise.resolve(),
   };
 }
 
@@ -67,7 +75,15 @@ describe('CategorySelectPage (kiosk — FR-KSK-01 / QUE-17)', () => {
     renderSelect({
       listCategories: () => Promise.reject(new Error('jaringan terputus')),
       createTicket: () => Promise.resolve(ticket('cat-a')),
-      getStoreProfile: () => Promise.resolve({ storeName: '', brandColor: '', themeMode: 'light' as const }),
+      getStoreProfile: () =>
+        Promise.resolve({
+          storeName: '',
+          brandColor: '',
+          themeMode: 'light' as const,
+          printerMode: 'chrome',
+          printerPaperWidth: 80,
+        }),
+      printTicket: () => Promise.resolve(),
     });
     expect(await screen.findByText(/jaringan terputus/i)).toBeInTheDocument();
   });
@@ -76,7 +92,15 @@ describe('CategorySelectPage (kiosk — FR-KSK-01 / QUE-17)', () => {
     renderSelect({
       listCategories: () => Promise.reject(new Error('jaringan terputus')),
       createTicket: () => Promise.resolve(ticket('cat-a')),
-      getStoreProfile: () => Promise.resolve({ storeName: '', brandColor: '', themeMode: 'light' as const }),
+      getStoreProfile: () =>
+        Promise.resolve({
+          storeName: '',
+          brandColor: '',
+          themeMode: 'light' as const,
+          printerMode: 'chrome',
+          printerPaperWidth: 80,
+        }),
+      printTicket: () => Promise.resolve(),
     });
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent(/jaringan terputus/i);
@@ -89,7 +113,15 @@ describe('CategorySelectPage (kiosk — FR-KSK-01 / QUE-17)', () => {
     renderSelect({
       listCategories: () => new Promise<CategoryDto[]>(() => {}),
       createTicket: () => Promise.resolve(ticket('cat-a')),
-      getStoreProfile: () => Promise.resolve({ storeName: '', brandColor: '', themeMode: 'light' as const }),
+      getStoreProfile: () =>
+        Promise.resolve({
+          storeName: '',
+          brandColor: '',
+          themeMode: 'light' as const,
+          printerMode: 'chrome',
+          printerPaperWidth: 80,
+        }),
+      printTicket: () => Promise.resolve(),
     });
     const hint = screen.getByText('Memuat kategori…');
     expect(hint).toHaveAttribute('aria-live', 'polite');
@@ -265,6 +297,7 @@ describe('CategorySelectPage (kiosk — FR-KSK-01 / QUE-17)', () => {
         new Promise<StoreProfileSlice>((resolve) => {
           resolveName = resolve;
         }),
+      printTicket: () => Promise.resolve(),
     };
     let printed: PrintPayload | undefined;
     const printProvider: IPrintProvider = {
@@ -280,7 +313,13 @@ describe('CategorySelectPage (kiosk — FR-KSK-01 / QUE-17)', () => {
     expect(await screen.findByText('Memuat kategori…')).toBeInTheDocument();
 
     // Releasing the store-profile fetch lets the load state flip to `loaded`.
-    resolveName!({ storeName: 'Toko Lambat', brandColor: '', themeMode: 'light' as const });
+    resolveName!({
+      storeName: 'Toko Lambat',
+      brandColor: '',
+      themeMode: 'light' as const,
+      printerMode: 'chrome',
+      printerPaperWidth: 80,
+    });
     expect(await screen.findByText('Customer Service')).toBeInTheDocument();
 
     await userEvent.click(screen.getByText('Customer Service'));
