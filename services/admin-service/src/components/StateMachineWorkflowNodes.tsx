@@ -122,17 +122,30 @@ export function StateIcon({ size = 22 }: { size?: number }): JSX.Element {
  * drawn) and React Flow's own hidden-when-not-connectable rule keeps the
  * read-only board clean.
  *
+ * **Every side accepts a drop (manager feedback "ada 2 titik di atas dan 2 titik
+ * di tiap sisi, kenapa yang bisa dihubungkan hanya sisi tertentu meski sisi itu
+ * kosong?").** The parent `<ReactFlow>` runs in `ConnectionMode.Loose`, so a
+ * drag started at a `source` handle may land on ANY handle of another node —
+ * including the `source` handle on the same side. In the Strict default the
+ * closest handle to the cursor would reject the drop whenever it was a `source`
+ * (React Flow's strict validity requires source→target by type), so a side read
+ * unconnectable whenever its `source` handle was the nearer of the pair. Loose
+ * mode relaxes that to "any handle but the start handle", so all four sides
+ * always accept a drop. The edge's `sourceHandle`/`targetHandle` record the
+ * exact pair, so the bezier still routes through the dragged side.
+ *
  * **Arrow direction = drag direction (manager feedback "panah sesuai arah
  * tarikan").** React Flow assigns an edge's `source` from the handle the drag
  * STARTS at and `target` from the handle it ENDS at — but keyed on the START
  * handle's TYPE: start at a `source` handle → source=startNode, target=dropNode
  * (arrow at the drop node); start at a `target` handle → the two are swapped so
- * the arrow points back at the start node. Because every side carries a `target`
- * handle, grabbing one reversed the arrow. The four `target` handles are
- * therefore made DROP-ONLY (`isConnectableStart={false}`): a `target` handle
- * may RECEIVE a dropped connection but may never START one, so every drag begins
- * at a `source` handle and the arrow always points where the manager dropped.
- * (Receiving stays gated by `isConnectableEnd`, which defaults to `true`.)
+ * the arrow points back at the start node. This reversal is keyed on the START
+ * handle's TYPE, NOT on `connectionMode` — it would reverse in any mode — so the
+ * four `target` handles are made DROP-ONLY (`isConnectableStart={false}`): a
+ * `target` handle may RECEIVE a dropped connection but may never START one, so
+ * every drag begins at a `source` handle and the arrow always points where the
+ * manager dropped. (Receiving stays gated by `isConnectableEnd`, which defaults
+ * to `true`.)
  *
  * The handle `id`s match {@link HANDLE_IDS} exactly; an edge's
  * `sourceHandle`/`targetHandle` reference them, and React Flow derives the
