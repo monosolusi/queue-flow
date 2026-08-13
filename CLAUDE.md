@@ -254,9 +254,11 @@ in that area). Each area's load-bearing essence:
   `:hover`/`.selected`/`.connectingfrom`/`.connectionindicator:not(.connectablestart)`
   (the drop-target reveal is the core fix), with an enlarged transparent
   `::before` hit area (inherits the handle's `pointer-events`); mind the
-  specificity — hover/selected must be gated on `.connectable` to tie (0,4,0)
-  the at-rest rule and win by source order, and the drop-target reveal's `:not()`
-  lifts it to (0,5,0). → memory `frontend-conventions-gotchas`
+  specificity — hover/selected and the drop-target reveal are (0,5,0) and beat
+  the at-rest (0,4,0) rule by higher specificity, while `.connectingfrom` ties
+  (0,4,0) and relies on source order; the `.connectable` gate on hover/selected
+  exists to exclude read-only/default mode (no `connectable`), not to win a tie.
+  → memory `frontend-conventions-gotchas`
 - **TV board** — `QueuedAudioProvider` decorator over `SequencerAudioProvider`
   (drain single-flight guard is load-bearing, FIFO not interrupt); history
   retains on `COMPLETED` only (never `SKIPPED`/`WAITING`); idle = empty

@@ -326,14 +326,18 @@
        manager can find where to START a transition. TARGET handles have no
        `connectablestart` and stay hidden at rest — they are drop points, only
        relevant while a connection is in progress.
-     - `.node:hover`/`.node.selected` of a `.connectable` handle (0-4-0),
+     - `.node:hover`/`.node.selected` of a `.connectable` handle (0-5-0 —
+       `.react-flow__node` is a class and `:hover`/`.selected` are class-level),
        `.connectable.connectingfrom` (0-4-0), and
-       `.connectable.connectionindicator:not(.connectablestart)` (0-5-0): full
-       opacity. The dragged source handle + every valid drop-target handle light
-       up so the manager SEES where to drop. The hover/selected selectors are
-       gated on `.connectable` (reaching 0-4-0 to tie the at-rest rule AND keeping
-       them out of default/read-only mode); all three come AFTER the at-rest rule
-       so equal-specificity ties resolve to full opacity. */
+       `.connectable.connectionindicator:not(.connectablestart)` (0-5-0 — `:not()`
+       contributes its argument): full opacity. The dragged source handle + every
+       valid drop-target handle light up so the manager SEES where to drop.
+       hover/selected and the drop-target reveal BEAT the at-rest rule by higher
+       specificity (0-5-0 > 0-4-0); only `.connectingfrom` TIES it (0-4-0) and so
+       relies on coming textually AFTER the at-rest rule (source order). The
+       `.connectable` gate on hover/selected is NOT for the specificity tie — it
+       keeps hover/selected out of default/read-only mode, which has no
+       `connectable` class (so its handles stay hidden at base 0-2-0). */
 .sm-canvas .react-flow__handle {
   width: 7px;
   height: 7px;
@@ -374,12 +378,14 @@
    drop targets lighting up is the core fix — the manager can finally SEE where
    to drop, on mouse OR touch.
 
-   Specificity: the at-rest `.connectable.connectablestart` rule is (0,4,0). Each
-   selector here is ≥ (0,4,0) AND textually AFTER it, so equal-specificity ties
-   resolve to full opacity: hover/selected are gated on `.connectable` to reach
-   (0,4,0) (and to stay out of default/read-only mode, which has no `connectable`
-   class); `.connectingfrom` is (0,4,0); the drop-target reveal carries `:not()`
-   whose argument contributes, so (0,5,0) and always wins. */
+   Specificity: the at-rest `.connectable.connectablestart` rule is (0,4,0).
+   hover/selected (`.node` class + `:hover`/`.selected` + `.handle` + `.connectable`)
+   and the drop-target reveal (`:not()` contributes its argument) are both (0,5,0) —
+   they BEAT the at-rest rule by higher specificity, so their textual order vs. the
+   at-rest rule does not matter. `.connectingfrom` is (0,4,0) — it TIES the at-rest
+   rule, so it relies on this rule coming textually AFTER it (source order) to win.
+   The `.connectable` gate on hover/selected is NOT for the specificity tie; it
+   excludes default/read-only-mode handles (no `connectable` class → base 0-2-0). */
 .sm-canvas .react-flow__node:hover .react-flow__handle.connectable,
 .sm-canvas .react-flow__node.selected .react-flow__handle.connectable,
 .sm-canvas .react-flow__handle.connectable.connectingfrom,
