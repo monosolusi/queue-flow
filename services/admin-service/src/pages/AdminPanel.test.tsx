@@ -857,8 +857,11 @@ describe('AdminPanel (post-wizard safety rails)', () => {
     fireEvent.change(screen.getByTestId('panel-action-label'), { target: { value: '' } });
 
     // Back to /config/profil — the panel's save is disabled (shared draft →
-    // wholeFormValid false). No nav badge exists anymore (the tablist is gone).
-    await userEvent.click(screen.getByTestId('designer-back'));
+    // wholeFormValid false). The designer's redundant "Kembali" button was
+    // removed (the sidebar already covers section nav), so the return is a
+    // route navigation as the sidebar would drive it. No nav badge exists
+    // anymore (the tablist is gone).
+    await goToSection('Profil & Tampilan');
     await screen.findByTestId('admin-store-name');
     expect(screen.getByTestId('admin-save')).toBeDisabled();
     await userEvent.click(screen.getByTestId('admin-save'));
