@@ -50,8 +50,6 @@ export interface ConfigDraftContextValue {
   save: () => Promise<void>;
   /** Re-run the load effect from the error state's "Coba Lagi". */
   retry: () => void;
-  /** Bumped on a successful save — lets the designer navigate back to `/config`. */
-  savedAt: number;
 }
 
 const ConfigDraftContext = createContext<ConfigDraftContextValue | null>(null);
@@ -81,7 +79,6 @@ export function ConfigDraftProvider({
   // and avoids stale-closure bugs).
   const stateRef = useRef(state);
   stateRef.current = state;
-  const [savedAt, setSavedAt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -106,9 +103,7 @@ export function ConfigDraftProvider({
    * separate `catch`es** (moved verbatim from `AdminPanel.save`): they fail for
    * different reasons and the manager must be told which one happened — sharing
    * one catch would report a failed re-read as "Gagal menyimpan" right next to
-   * the success toast. `savedAt` bumps right after the write commits so the
-   * designer can navigate back to `/config` without waiting on the best-effort
-   * re-read.
+   * the success toast.
    */
   const save = useCallback(async () => {
     if (submittingRef.current) return;
@@ -165,7 +160,6 @@ export function ConfigDraftProvider({
         return;
       }
       toast.success('Konfigurasi tersimpan.');
-      setSavedAt((n) => n + 1);
 
       try {
         // Reload so newly added categories get their server-minted ids into the
@@ -205,7 +199,6 @@ export function ConfigDraftProvider({
     submitting,
     save,
     retry,
-    savedAt,
   };
 
   return <ConfigDraftContext.Provider value={value}>{children ?? <Outlet />}</ConfigDraftContext.Provider>;
