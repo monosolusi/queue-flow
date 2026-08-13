@@ -271,37 +271,17 @@ describe('AlurStatusDesigner (dedicated /config/alur-status page)', () => {
     expect(screen.getByTestId('sm-mode')).toBeInTheDocument();
   });
 
-  it('save navigates back to /config after a successful save', async () => {
+  it('stays on the designer after a successful save (matches other config sections)', async () => {
     const { api } = makeApi();
     renderDesignerRoute(api);
     await screen.findByTestId('sm-mode');
 
     await userEvent.click(screen.getByTestId('admin-save'));
     await screen.findByText('Konfigurasi tersimpan.');
-    // The designer's savedAt effect navigates to /config → the panel renders
-    // (its store-name heading) and the designer-only canvas is gone.
-    expect(await screen.findByTestId('admin-store-name')).toBeInTheDocument();
-    expect(screen.queryByTestId('sm-canvas')).not.toBeInTheDocument();
-  });
-
-  it('stays mounted when a save happened on /config before opening the designer', async () => {
-    const { api } = makeApi();
-    renderDesignerRoute(api, '/config');
-    await screen.findByTestId('admin-store-name');
-    // Save on /config — bumps the shared `savedAt` to 1. AdminPanel does not
-    // navigate on save, so we stay on /config.
-    await userEvent.click(screen.getByTestId('admin-save'));
-    await screen.findByText('Konfigurasi tersimpan.');
-    // Open the designer by navigating to `/config/alur-status` (the
-    // state-machine section is a route now, not an in-content tab).
-    await navigateTo('/config/alur-status');
-    // The designer MUST stay mounted — a prior save must NOT bounce it back to
-    // /config before the manager can touch the diagram. (Regression guard for
-    // the `mountedSavedAt` capture: `savedAt` is monotonic in the shared
-    // provider, so a naive `if (savedAt > 0)` mount-tick would bounce instantly.)
-    expect(await screen.findByTestId('sm-mode')).toBeInTheDocument();
+    // Like every other /config/* section, the designer stays put after a
+    // successful save (no navigate()): the canvas is still mounted and the
+    // panel's profile heading is NOT rendered.
     expect(screen.getByTestId('sm-canvas')).toBeInTheDocument();
-    // Still on the designer route — the panel's store-name heading is gone.
     expect(screen.queryByTestId('admin-store-name')).not.toBeInTheDocument();
   });
 
@@ -503,8 +483,9 @@ describe('AlurStatusDesigner save outcomes', () => {
     await screen.findByTestId('sm-mode');
     await userEvent.click(screen.getByTestId('admin-save'));
     expect(await toastViewport().findByText(/kode kategori tidak valid/i)).toBeInTheDocument();
-    // The save navigates-back effect only fires on a successful save (savedAt),
-    // so the designer stays mounted and the save button re-enables.
+    // A save error does not navigate (the designer never navigates on save; it
+    // stays put like every other config section), so the save button re-enables
+    // and the designer remains mounted.
     expect(screen.getByTestId('admin-save')).not.toBeDisabled();
     expect(screen.getByTestId('sm-mode')).toBeInTheDocument();
   });

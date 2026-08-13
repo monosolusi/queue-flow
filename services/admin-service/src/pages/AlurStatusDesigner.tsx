@@ -1,7 +1,8 @@
 /**
  * Dedicated full-page designer for the "Alur Status Tiket" (ticket status flow /
- * state machine), reachable from the `/admin/config` state-machine section via
- * "Lihat Diagram".
+ * state machine). Now itself a peer `/config/alur-status` section (a sidebar
+ * leaf), not a modal-like detour — it lives on its own route so the canvas can be
+ * full-width and large.
  *
  * Manager feedback: the inline diagram on `/admin/config` was too small and hard
  * to see (`.sm-canvas` was `60vh / min 360px` crammed inside a config card). This
@@ -20,10 +21,10 @@
  * `/config ↔ /config/alur-status` keeps the provider mounted and the draft
  * persistent: a store-name edit on `/config` and a transition-label edit here
  * ride ONE full-payload save, and neither is lost on navigation. `save()` is the
- * provider's — identical to the panel's — so on a successful save fired WHILE
- * this page is mounted, `savedAt` bumps and this page navigates back to
- * `/config` (a save that happened on `/config` before mounting does NOT bounce
- * — see the `mountedSavedAt` capture in the effect).
+ * provider's — identical to the panel's — and, like every other `/config/*`
+ * section, the designer STAYS on the page after a successful save (no
+ * `navigate()`): the provider re-seeds the draft via the post-save re-GET, and
+ * the source-view sync effect below re-serializes on that external change.
  *
  * **Source-view round-trip guard.** `sourceText` is a local mirror of the draft's
  * state machine, kept in sync by a single effect keyed on the draft's graph
@@ -37,7 +38,7 @@
  * the last valid graph and the manager keeps typing toward a valid one.
  */
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader';
 import { StateMachineSource } from '../components/StateMachineSource';
 import { StateMachineWorkflow } from '../components/StateMachineWorkflow';
@@ -47,8 +48,7 @@ import { graphSignature } from '../lib/state-machine';
 import { formToXml, xmlToForm } from '../lib/state-machine-xml';
 
 export function AlurStatusDesigner(): JSX.Element {
-  const { state, setState, save, submitting, retry, savedAt } = useConfigDraft();
-  const navigate = useNavigate();
+  const { state, setState, save, submitting, retry } = useConfigDraft();
   const [view, setView] = useState<'diagram' | 'source'>('diagram');
   // The source-view mirror of the draft's state machine. Kept in sync with the
   // draft by the effect below; the textarea is controlled over this, NOT over
@@ -79,23 +79,6 @@ export function AlurStatusDesigner(): JSX.Element {
       setSourceError(null);
     }
   }, [state]);
-
-  // After a successful save, the provider bumps `savedAt`; navigate back to the
-  // config panel. (The provider stays mounted across the navigation — it is the
-  // `/config` route element — so the now-re-seeded draft is what the panel
-  // renders.) Capture `savedAt` at mount and navigate only on a CHANGE from it:
-  // `savedAt` is monotonic in the shared provider (never reset), so a save
-  // performed on `/config` BEFORE this page mounts leaves a non-zero `savedAt` —
-  // arriving here must NOT instantly bounce the manager back before they can
-  // touch the diagram. The mount tick compares equal → no-op; only a save fired
-  // WHILE the designer is mounted bumps `savedAt` and triggers the return.
-  const mountedSavedAt = useRef(savedAt);
-  useEffect(() => {
-    if (savedAt !== mountedSavedAt.current) {
-      mountedSavedAt.current = savedAt;
-      navigate('/config');
-    }
-  }, [savedAt, navigate]);
 
   if (state.status === 'loading') {
     return <div className="alur-status-designer alur-status-designer--loading">Memuat konfigurasi…</div>;
