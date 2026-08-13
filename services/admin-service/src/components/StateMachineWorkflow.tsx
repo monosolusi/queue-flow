@@ -67,14 +67,14 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import {
-  autoLayout,
   type StateMachineForm,
   defaultStateMachineForm,
   graphSignature,
 } from '../lib/state-machine';
 import {
   flowToGraph,
-  formToFlow,
+  formToFlowWithMarkers,
+  isTerminalNodeId,
   nextStateName,
   withDescriptions,
   DEFAULT_SOURCE_HANDLE,
@@ -106,10 +106,10 @@ export function StateMachineWorkflow({
   errors: string[];
 }): JSX.Element {
   const [nodes, setNodes] = useState<FlowNode[]>(
-    () => formToFlow(value, autoLayout(value.states, value.transitions)).nodes,
+    () => formToFlowWithMarkers(value, {}).nodes,
   );
   const [edges, setEdges] = useState<FlowEdge[]>(
-    () => formToFlow(value, autoLayout(value.states, value.transitions)).edges,
+    () => formToFlowWithMarkers(value, {}).edges,
   );
   // Signature of the last value we emitted (or the initial value). The sync
   // effect compares the incoming `value` signature against this; a mismatch
@@ -198,10 +198,15 @@ export function StateMachineWorkflow({
       lastEmitted.current = sig;
       const oldPositions: Record<string, { x: number; y: number }> = {};
       setNodes((prev) => {
-        for (const n of prev) oldPositions[n.data.name] = n.position;
-        return formToFlow(value, oldPositions).nodes;
+        // Only REAL state nodes carry a position worth preserving across a
+        // re-seed — the Start/End terminal markers are auto-derived from the
+        // real topology, so their positions recompute from the new
+        // `realPositions` inside `formToFlowWithMarkers` (correct: they always
+        // reflect the live graph).
+        for (const n of prev) if (n.type === 'state') oldPositions[n.data.name] = n.position;
+        return formToFlowWithMarkers(value, oldPositions).nodes;
       });
-      setEdges(() => formToFlow(value, {}).edges);
+      setEdges(() => formToFlowWithMarkers(value, {}).edges);
       setSelectedNodeId(null);
       setSelectedEdgeId(null);
     }
@@ -330,6 +335,12 @@ export function StateMachineWorkflow({
       const from = connection.source;
       const to = connection.target;
       if (!from || !to) return true;
+      // Defensive: the Start/End marker handles are `isConnectable={false}` so a
+      // drag can never start/end on them, but guard anyway so a future RF
+      // internals change (or a programmatic connection) can never seed a real
+      // transition edge onto a terminal marker — the markers are canvas-only
+      // and never reach the form/wire.
+      if (isTerminalNodeId(from) || isTerminalNodeId(to)) return false;
       return !isDuplicateTransition(edges, from, to);
     },
     [edges],
@@ -488,18 +499,21 @@ export function StateMachineWorkflow({
         const nextEdges = edges.map((e) => (e.id === edgeId ? { ...e, source: from, target: to } : e));
         commit(nodes, nextEdges);
       },
-      // Add a new outgoing transition from the given source state (the inline
-      // "Tambah aksi" button in the node properties panel). Mirrors the old
-      // `addTransitionButton` structure but anchors the source to the selected
-      // node rather than the first state. Picks the first non-duplicate target
-      // (a status not already the target of an outgoing edge from this source);
-      // no-op when every status is already a target (the button is disabled in
-      // that case, but guard anyway so a stale click can't seed a duplicate).
-      // Double-tap guard via `addPendingRef` (same as the old add buttons).
-      onAddTransitionFrom: (source) => {
+      // Add a new incoming transition to the given target state (the inline
+      // "Tambah aksi masuk" button in the node properties panel). The panel's
+      // entry-action framing: the action shown for a node is the action when
+      // transitioning INTO that node, so the new edge's `target` IS the selected
+      // node and `source` is the first non-duplicate candidate (a status not
+      // already the source of an incoming edge into this target). No-op when
+      // every status is already a source into this target (the button is
+      // disabled in that case, but guard anyway so a stale click can't seed a
+      // duplicate). Double-tap guard via `addPendingRef` (same as the old add
+      // buttons). The wire contract is unchanged — `actionLabel` stays
+      // per-Transition on the wire; this is a conceptual flip only.
+      onAddTransitionTo: (target) => {
         if (addPendingRef.current) return;
-        const target = value.states.find((s) => !isDuplicateTransition(edges, source, s));
-        if (!target) return; // no non-duplicate target left — no-op
+        const source = value.states.find((s) => !isDuplicateTransition(edges, s, target));
+        if (!source) return; // no non-duplicate source left — no-op
         addPendingRef.current = true;
         const newEdge: FlowEdge = {
           id: mintEdgeId(),

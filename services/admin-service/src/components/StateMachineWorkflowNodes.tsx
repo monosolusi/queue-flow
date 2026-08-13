@@ -73,13 +73,17 @@ export interface WorkflowHandlers {
    */
   onRerouteTransition: (edgeId: string, from: string, to: string) => void;
   /**
-   * Add a new outgoing transition from the given source state, picking the
-   * first non-duplicate target (a status not already the target of an outgoing
-   * edge from this source). No-op when every status is already a target (no
-   * non-duplicate target left). Mirrors `addTransitionButton`'s structure but
-   * anchors the source to the selected node rather than the first state.
+   * Add a new incoming transition to the given target state, picking the first
+   * non-duplicate source (a status not already the source of an incoming edge
+   * into this target). No-op when every status is already a source into this
+   * target. The panel's "Aksi masuk" framing flips from the prior
+   * `onAddTransitionFrom` (outgoing) to entry-actions (incoming): the action
+   * shown for a node is the action when transitioning INTO that node. The new
+   * edge's `target` IS the selected node; `source` is the first non-duplicate
+   * candidate. Mirrors `addTransitionButton`'s structure but anchors the target
+   * to the selected node rather than the first state.
    */
-  onAddTransitionFrom: (source: string) => void;
+  onAddTransitionTo: (target: string) => void;
 }
 
 export const WorkflowContext = createContext<WorkflowHandlers | null>(null);
@@ -215,6 +219,96 @@ export function TransitionEdge(props: EdgeProps): JSX.Element {
   );
 }
 
+/**
+ * A canvas-only Start terminal marker — a compact BPMN-style "play" affordance
+ * (▶ glyph) with a "Mulai" label. Auto-derived by `deriveTerminalMarkers` for
+ * the graph's in-degree-0 source states; NOT in the form/wire/XML. ONE
+ * `<Handle type="source" position={Position.Right} id={HANDLE_IDS.right}
+ * isConnectable={false} />` — non-interactive (the manager cannot drag a
+ * transition from a marker; the marker is a visual entry cue, not a state).
+ * The programmatic terminal edges still attach since React Flow renders an
+ * edge to a node's handle regardless of the handle's `isConnectable` (the same
+ * mechanism that lets the existing read-only default-mode edges render).
+ *
+ * Inline `<svg>` (no external assets — NFR-REL-01) using `currentColor` so it
+ * adapts to the design tokens + light/dark mode. The `data-testid` makes the
+ * marker a reliable click target in tests (selection drives the properties
+ * panel's marker branch). No description — the marker is not a state.
+ */
+export function StartNode({ }: NodeProps): JSX.Element {
+  return (
+    <div
+      className="terminal-node terminal-node--start"
+      data-testid="sm-node-start"
+      aria-label="Titik awal alur"
+    >
+      <Handle type="source" position={Position.Right} id={HANDLE_IDS.right} isConnectable={false} />
+      <span className="terminal-node__glyph" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
+          <path d="M8 5l12 7-12 7z" fill="currentColor" />
+        </svg>
+      </span>
+      <span className="terminal-node__label">Mulai</span>
+    </div>
+  );
+}
+
+/**
+ * A canvas-only End terminal marker — a bold-ring "stop" affordance (■ glyph)
+ * with a "Selesai" label. Auto-derived for the graph's out-degree-0 sink
+ * states; NOT in the form/wire/XML. ONE `<Handle type="source"
+ * position={Position.Left} id={HANDLE_IDS.left} isConnectable={false} />` —
+ * the `source`-typed handle on the LEFT is the terminal edge's TARGET (the
+ * sink→End edge drops onto this handle). `isConnectable={false}` keeps the
+ * manager from dragging a transition from/to the marker; the programmatic
+ * terminal edge still attaches (same mechanism as `StartNode`).
+ *
+ * Inline `<svg>` (no external assets — NFR-REL-01) using `currentColor`.
+ */
+export function EndNode({ }: NodeProps): JSX.Element {
+  return (
+    <div
+      className="terminal-node terminal-node--end"
+      data-testid="sm-node-end"
+      aria-label="Titik akhir alur"
+    >
+      <Handle type="source" position={Position.Left} id={HANDLE_IDS.left} isConnectable={false} />
+      <span className="terminal-node__glyph" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
+          <rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor" />
+        </svg>
+      </span>
+      <span className="terminal-node__label">Selesai</span>
+    </div>
+  );
+}
+
+/**
+ * A canvas-only terminal edge (Start→source / sink→End): a clean bezier via
+ * {@link getBezierPath} + {@link BaseEdge} (forwarding the `markerEnd` so the
+ * arrow reads), wrapped in a `<g className="terminal-edge">` so the CSS can
+ * style it as a dashed muted line — visually distinct from a solid transition
+ * edge (the markers are visual affordances, not real transitions). NO label
+ * chip: terminal edges carry an empty `actionLabel` (no Caller button), so
+ * the transition-edge chip would render an empty "Label aksi" placeholder;
+ * the terminal edge reads cleaner as a bare dashed arrow.
+ */
+export function TerminalEdge(props: EdgeProps): JSX.Element {
+  const [edgePath] = getBezierPath({
+    sourceX: props.sourceX,
+    sourceY: props.sourceY,
+    sourcePosition: props.sourcePosition,
+    targetX: props.targetX,
+    targetY: props.targetY,
+    targetPosition: props.targetPosition,
+  });
+  return (
+    <g className="terminal-edge">
+      <BaseEdge id={props.id} path={edgePath} markerEnd={props.markerEnd} />
+    </g>
+  );
+}
+
 /** Stable node/edge type maps (module-level so React Flow doesn't warn). */
-export const nodeTypes = { state: StateNode };
-export const edgeTypes = { transition: TransitionEdge };
+export const nodeTypes = { state: StateNode, start: StartNode, end: EndNode };
+export const edgeTypes = { transition: TransitionEdge, terminal: TerminalEdge };

@@ -96,27 +96,55 @@ export function StateMachineWorkflowProperties({
   );
 
   if (selectedNode) {
+    // Canvas-only terminal markers (Start/End) — auto-derived visual
+    // affordances, NOT real states. They carry no name/description on the form,
+    // so the state editor below would render a spurious editor for `__start`/
+    // `__end`. Branch to a read-only marker panel first: a heading naming the
+    // marker + a hint explaining what it denotes (entry/exit). No editing
+    // controls — the manager cannot rename/delete a marker (it is derived from
+    // the topology, not a form entity); the back button returns to the palette.
+    if (selectedNode.type === 'start' || selectedNode.type === 'end') {
+      const isStart = selectedNode.type === 'start';
+      return (
+        <aside className="sm-properties" data-testid="sm-properties" aria-label="Properti titik alur">
+          {backButton}
+          <p className="sm-properties__heading">{isStart ? 'Titik awal alur' : 'Titik akhir alur'}</p>
+          <div className="sm-properties__field">
+            <p className="sm-properties__hint" data-testid="panel-marker-description">
+              {isStart
+                ? 'Status awal — status tanpa transisi masuk. Panah keluar dari titik ini ke status pertama.'
+                : 'Status akhir — status tanpa transisi keluar. Panah masuk ke titik ini dari status terakhir.'}
+            </p>
+          </div>
+        </aside>
+      );
+    }
     const name = selectedNode.data.name;
     const description = describeState(form, name);
-    // The node's outgoing transitions (its "actions" — the caller-panel buttons
-    // that leave this status). Manager feedback: a state node's properties
-    // should surface its actions inline and editable — "update status → update
-    // to" — rather than a read-only badge + a click-to-jump list. Each outgoing
-    // edge is rendered as a row with a "Update to" <select> (re-point the target
-    // via onRerouteTransition, source stays this node), a "Label aksi" <input>
-    // (onEditTransitionLabel), and a "Hapus" button (onDeleteTransition, disabled
-    // when only one transition remains — the ≥1-transition invariant). The
-    // edges are read directly from the canvas because the inline editor needs
-    // the edge `id` to call the handlers — the outgoing edges are exactly
-    // `edges.filter(e => e.source === name)`.
-    const outgoing = edges.filter((e) => e.source === name);
-    // The "Tambah aksi" button is disabled when every status on the canvas is
-    // already a target of an outgoing edge from this node (no non-duplicate
-    // target left — adding would produce a duplicate edge, which the graph
-    // invariant rejects). `isDuplicateTransition` is the single source of truth
-    // for the duplicate check, shared with onConnect / onRerouteTransition /
-    // onAddTransitionFrom.
-    const canAddAction = !form.states.every((s) => isDuplicateTransition(edges, name, s));
+    // The node's INCOMING transitions — reframed as "Aksi masuk" (entry
+    // actions): the action shown for a node is the action when transitioning
+    // INTO that node. Each incoming edge is one caller button that enters this
+    // status (e.g. CALLING shows "Panggil Berikutnya" ←WAITING and "Panggil
+    // Ulang" ←SKIPPED). The `actionLabel` STAYS per-Transition on the wire
+    // (unchanged) — this is a conceptual framing flip only, not a wire/domain
+    // change. Each row renders a "← Dari" prefix, a "Dari" <select> (re-point
+    // the SOURCE via onRerouteTransition, target stays this node), a "Label
+    // aksi" <input> (onEditTransitionLabel), and a "Hapus" button
+    // (onDeleteTransition, disabled when only one transition remains — the
+    // ≥1-transition invariant). The edges are read directly from the canvas
+    // because the inline editor needs the edge `id` to call the handlers — the
+    // incoming edges are exactly `edges.filter(e => e.target === name)`.
+    // The node's INCOMING REAL transitions — terminal edges (Start→source) are
+    // excluded so a source state with no real incoming transitions shows the
+    // empty hint, not a spurious "Dari __start" row.
+    const incoming = edges.filter((e) => e.target === name && e.type !== 'terminal');
+    // The "Tambah aksi masuk" button is disabled when every status on the
+    // canvas is already a SOURCE of an incoming edge into this node (no
+    // non-duplicate source left — adding would produce a duplicate edge, which
+    // the graph invariant rejects). `isDuplicateTransition` is the single
+    // source of truth for the duplicate check, shared with onConnect /
+    // onRerouteTransition / onAddTransitionTo.
+    const canAddAction = !form.states.every((s) => isDuplicateTransition(edges, s, name));
     return (
       <aside className="sm-properties" data-testid="sm-properties" aria-label="Properti status">
         {backButton}
@@ -143,25 +171,31 @@ export function StateMachineWorkflowProperties({
             name). NOT editable: the wire contract carries no description field,
             so this is a client-side derivation only. Manager feedback: replace
             the read-only "Status" badge + sub-description + consequence block
-            with a single labeled "Deskripsi" field. */}
+            with a single labeled "Deskripsi" field. The description is a
+            SEPARATE facet from the entry-action panel — it stays "N transisi
+            keluar" (unchanged) so the calibrated manager feedback holds. */}
         <div className="sm-properties__field">
           <p className="sm-properties__label">Deskripsi</p>
           <p className="sm-properties__hint" data-testid="panel-state-description">
             {description}
           </p>
         </div>
-        {/* Inline-editable "Aksi" list — the node's outgoing transitions. Each
-            row is a card with a "Update status →" prefix, a "Update to" select
-            (all statuses on the canvas), a "Label aksi" input, and a "Hapus"
-            button. Manager feedback: "update status → update to" — the actions
-            are editable inline, not click-to-jump. */}
+        {/* Inline-editable "Aksi masuk" list — the node's INCOMING transitions
+            (entry actions). Each row is a card with a "← Dari" prefix, a
+            "Dari" select (all statuses on the canvas — re-point the source),
+            a "Label aksi" input, and a "Hapus" button. The hint under the label
+            clarifies the entry-action framing: each incoming transition is one
+            caller button that enters this status. */}
         <div className="sm-properties__field">
           <p className="sm-properties__label" id="panel-state-actions-label">
-            Aksi
+            Aksi masuk
           </p>
-          {outgoing.length === 0 ? (
+          <p className="sm-properties__hint">
+            Tombol caller saat transisi masuk ke status ini. Setiap transisi masuk adalah satu tombol.
+          </p>
+          {incoming.length === 0 ? (
             <p className="sm-properties__hint" data-testid="panel-state-actions-empty">
-              Belum ada aksi keluar. Tambah aksi untuk mengubah status ini ke status lain.
+              Belum ada aksi masuk. Tambah aksi masuk untuk membuat transisi dari status lain ke status ini.
             </p>
           ) : (
             <ul
@@ -169,23 +203,23 @@ export function StateMachineWorkflowProperties({
               aria-labelledby="panel-state-actions-label"
               data-testid="panel-state-actions"
             >
-              {outgoing.map((edge) => {
-                const toId = `panel-action-to-${edge.id}`;
+              {incoming.map((edge) => {
+                const fromId = `panel-action-from-${edge.id}`;
                 const labelId = `panel-action-label-${edge.id}`;
                 return (
                   <li key={edge.id} className="sm-properties__action">
                     <span className="sm-properties__action-prefix" aria-hidden="true">
-                      Update status →
+                      ← Dari
                     </span>
-                    <label className="sm-properties__action-label" htmlFor={toId}>
-                      Update to
+                    <label className="sm-properties__action-label" htmlFor={fromId}>
+                      Dari
                     </label>
                     <select
-                      id={toId}
+                      id={fromId}
                       className="sm-properties__input"
-                      data-testid={`panel-action-to-${edge.id}`}
-                      value={edge.target}
-                      onChange={(e) => handlers.onRerouteTransition(edge.id, name, e.target.value)}
+                      data-testid={`panel-action-from-${edge.id}`}
+                      value={edge.source}
+                      onChange={(e) => handlers.onRerouteTransition(edge.id, e.target.value, name)}
                     >
                       {form.states.map((s) => (
                         <option key={s} value={s}>
@@ -224,10 +258,10 @@ export function StateMachineWorkflowProperties({
             type="button"
             className="btn btn--secondary sm-properties__add-action"
             data-testid="panel-add-action"
-            onClick={() => handlers.onAddTransitionFrom(name)}
+            onClick={() => handlers.onAddTransitionTo(name)}
             disabled={!canAddAction}
           >
-            + Tambah aksi
+            + Tambah aksi masuk
           </button>
         </div>
         <button
