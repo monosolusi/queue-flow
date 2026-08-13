@@ -4,6 +4,7 @@ import {
   DEFAULT_TERMINAL_NODES,
   type EdgeRoutingLayoutDto,
   type EdgeSide,
+  type NodeActionType,
   type NodeActionsDto,
   type NodePositionsDto,
   type StateMachineDto,
@@ -29,6 +30,19 @@ export const DEFAULT_TARGET_SIDE: EdgeSide = 'left';
  *  validated in `validateCustomStateMachine`). Exported so the DOM-dependent
  *  XML codec (`state-machine-xml.ts`) reuses the one enum source of truth. */
 export const EDGE_SIDES: readonly EdgeSide[] = ['top', 'right', 'bottom', 'left'];
+
+/** SME-friendly label for each node-action type. A `Record<NodeActionType,
+ *  string>` is an EXHAUSTIVE guard: widening the `NodeActionType` union (in
+ *  `api/types.ts`) to add e.g. `WEBHOOK` makes this map a compile error until a
+ *  label is added — which is exactly the point. This map is the single source
+ *  of truth for the properties panel's "Aksi" dropdown options (the options
+ *  list is DERIVED from its keys, so the dropdown can never drift from the
+ *  union the way a hand-maintained parallel literal could). One entry today;
+ *  widening (e.g. a webhook / notify action) is a one-line addition here.
+ *  Mirrors core-api's `ACTION_TYPES` closed enum. */
+export const NODE_ACTION_TYPE_LABELS: Record<NodeActionType, string> = {
+  UPDATE_STATUS: 'Update Status',
+};
 
 /** One transition edge in the editable state machine. */
 export interface Transition {
