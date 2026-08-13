@@ -562,4 +562,93 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     expect(renamed?.sourceSide).toBe('bottom');
     expect(renamed?.targetSide).toBe('top');
   });
+
+  // --- State-panel "Aksi" list + edge reroute (manager feedback) ---
+  //
+  // The manager reported two issues: (1) they could not connect SERVING to
+  // COMPLETED from the panel — the route was read-only and only editable by
+  // dragging handles on the canvas; (2) adding a state was confusing because
+  // its interactions with the ticket (the caller-panel buttons / "actions"
+  // that enter/leave it) were invisible — the panel only showed a name + a
+  // derived description + delete. The fix surfaces the state's incoming/
+  // outgoing transitions as a clickable list (each item jumps the canvas
+  // selection to that edge) and replaces the read-only route paragraph with
+  // two editable "Dari"/"Ke" selects.
+
+  it('the state panel lists the state\'s outgoing + incoming "Aksi" (actions on its transitions)', () => {
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
+    selectStateNode('SERVING');
+    const panel = screen.getByTestId('sm-properties');
+    // Outgoing action: SERVING → COMPLETED ("Selesai Layan").
+    const outBtn = within(panel).getByTestId('panel-state-action-out-SERVING->COMPLETED') as HTMLButtonElement;
+    expect(outBtn).toBeInTheDocument();
+    expect(outBtn).toHaveTextContent('COMPLETED');
+    expect(outBtn).toHaveTextContent('Selesai Layan');
+    // Incoming action: CALLING → SERVING ("Mulai Melayani").
+    const inBtn = within(panel).getByTestId('panel-state-action-in-CALLING->SERVING') as HTMLButtonElement;
+    expect(inBtn).toBeInTheDocument();
+    expect(inBtn).toHaveTextContent('CALLING');
+    expect(inBtn).toHaveTextContent('Mulai Melayani');
+  });
+
+  it('clicking a state-panel action jumps the canvas selection to that edge (panel switches to the edge editor)', () => {
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
+    selectStateNode('SERVING');
+    const panel = screen.getByTestId('sm-properties');
+    // Click the outgoing action for SERVING (SERVING → COMPLETED).
+    const outBtn = within(panel).getByTestId('panel-state-action-out-SERVING->COMPLETED');
+    fireEvent.click(outBtn);
+    // The panel switches to the EDGE editor — the action-label input and
+    // the "Hapus transisi" button are the edge-editor affordances.
+    const edgePanel = screen.getByTestId('sm-properties');
+    expect(within(edgePanel).getByTestId('panel-action-label')).toBeInTheDocument();
+    expect(within(edgePanel).getByTestId('panel-delete-transition')).toBeInTheDocument();
+    // The state-panel "Aksi" list is gone (the editor switched views).
+    expect(within(edgePanel).queryByTestId('panel-state-actions')).not.toBeInTheDocument();
+  });
+
+  it('re-routes an edge via the panel "Ke" select (CALLING stays, target becomes COMPLETED)', () => {
+    // The fix for "can't connect X to Y from the panel": the edge editor's
+    // "Dari"/"Ke" selects lift a reroute via `onRerouteTransition`. Changing
+    // the "Ke" select on WAITING->CALLING to COMPLETED re-points the edge to
+    // WAITING->COMPLETED (a non-duplicate pair) — `commit` lifts the new form
+    // and the first transition becomes WAITING → COMPLETED.
+    const onChange = vi.fn();
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const }, [], onChange);
+    selectEdge('WAITING->CALLING#0');
+    const toSelect = screen.getByTestId('panel-transition-to') as HTMLSelectElement;
+    fireEvent.change(toSelect, { target: { value: 'COMPLETED' } });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next = onChange.mock.calls[0][0];
+    expect(next.transitions[0].from).toBe('WAITING');
+    expect(next.transitions[0].to).toBe('COMPLETED');
+  });
+
+  it('a duplicate reroute reverts (controlled `<select>` keeps the live edge value, onChange NOT called)', () => {
+    // The controlled-component revert: a reroute that would duplicate an
+    // existing edge is rejected with a toast and `commit`/`onChange` is NOT
+    // called, so the controlled `<select>` snaps back to the live edge value
+    // on the next re-render (no state change leaks). Setup: a graph that
+    // already has WAITING→COMPLETED; selecting WAITING→CALLING and changing
+    // "Ke" to COMPLETED would duplicate it.
+    const onChange = vi.fn();
+    const form: StateMachineForm = {
+      mode: 'custom' as const,
+      states: ['WAITING', 'CALLING', 'COMPLETED'],
+      transitions: [
+        { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' },
+        { from: 'WAITING', to: 'COMPLETED', actionLabel: 'Skip' },
+      ],
+      positions: {},
+    };
+    renderWorkflow(form, [], onChange);
+    selectEdge('WAITING->CALLING#0');
+    const toSelect = screen.getByTestId('panel-transition-to') as HTMLSelectElement;
+    fireEvent.change(toSelect, { target: { value: 'COMPLETED' } });
+    // The duplicate guard rejects the reroute — `onChange` is NOT called.
+    expect(onChange).not.toHaveBeenCalled();
+    // The controlled `<select>` reverts to the live edge value (CALLING) —
+    // the DOM reflects the controlled value, not the rejected pick.
+    expect(toSelect.value).toBe('CALLING');
+  });
 });
