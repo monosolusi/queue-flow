@@ -869,6 +869,34 @@ describe('Alur Status Tiket designer — warning relocation + dedicated full-pag
     expect(wfRule('.sm-properties__action-prefix')).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
     expect(wfRule('.sm-properties__action-label')).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
   });
+
+  // --- Canvas-only Start/End terminal markers + terminal edge rules ---
+  //   The auto-derived Start/End marker nodes + the dashed terminal edge are
+  //   canvas-only visual chrome (no wire/form representation). Their rules MUST
+  //   stay token-only (no hardcoded hex) so they adapt to the design tokens +
+  //   light/dark mode like the rest of the canvas. jsdom applies no CSS (css:
+  //   false), so a hardcoded-color regression is pinned here.
+  it('the terminal marker + edge rules are token-only (no hardcoded color)', () => {
+    expect(wfCss).toContain('.terminal-node');
+    expect(wfCss).toContain('.terminal-edge');
+    // The base marker pill is a flex pill with a neutral muted ring.
+    expect(wfRule('.terminal-node')).toContain('display: flex');
+    expect(wfRule('.terminal-node')).toContain('border-radius: 999px');
+    // Start is the accent-tinted entry cue.
+    expect(wfRule('.terminal-node--start')).toContain('border-color: var(--accent)');
+    expect(wfRule('.terminal-node--start')).toContain('color: var(--accent)');
+    // End is the bold muted exit cue.
+    expect(wfRule('.terminal-node--end')).toContain('border-width: 2.5px');
+    // The terminal edge is a dashed line, distinct from solid transition edges.
+    expect(wfRule('.terminal-edge .react-flow__edge-path')).toContain('stroke-dasharray');
+    // No rule in the terminal block carries a hardcoded color literal.
+    expect(wfRule('.terminal-node')).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    expect(wfRule('.terminal-node--start')).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    expect(wfRule('.terminal-node--end')).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    expect(wfRule('.terminal-node__glyph')).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    expect(wfRule('.terminal-node__label')).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    expect(wfRule('.terminal-edge .react-flow__edge-path')).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+  });
 });
 
 describe('shared .btn baseline is element-agnostic (manager feedback: Link-as-btn overlapped + underlined)', () => {
