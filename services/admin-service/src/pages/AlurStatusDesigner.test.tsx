@@ -15,6 +15,7 @@ import {
   DEFAULT_SERVICE_THEMES,
   DEFAULT_TV_GRID_LAYOUT,
   type SaveSystemConfigurationPayload,
+  type SaveSystemConfigurationResult,
   type SystemConfigurationDto,
 } from '../api/types';
 
@@ -338,6 +339,89 @@ describe('AlurStatusDesigner (dedicated /config/alur-status page)', () => {
     await userEvent.click(screen.getByTestId('admin-save'));
     await screen.findByText('Konfigurasi tersimpan.');
     expect(save).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers a Layar Penuh toggle that overlays the editor full-screen (modal a11y + Esc exits)', async () => {
+    // Manager feedback: "add option to make it full screen." The toggle adds a
+    // `--fullscreen` modifier to the designer root (a CSS position:fixed overlay
+    // — see styles.test.ts) and flips its label to the exit action. The overlay
+    // is a modal dialog (mirrors `TvLayoutEditOverlay`): role="dialog" +
+    // aria-modal="true" + tabindex=-1, focus moves into it on open, and restores
+    // to the trigger on close. Esc exits (guarded while saving). The Simpan
+    // button + Diagram/Sumber toggle stay available while full-screen.
+    const { api } = makeApi();
+    renderDesignerRoute(api);
+    await screen.findByTestId('sm-mode');
+
+    const root = document.querySelector('.alur-status-designer') as HTMLElement;
+    // Not full-screen: no dialog semantics, no modifier.
+    expect(root).not.toHaveClass('alur-status-designer--fullscreen');
+    expect(root).not.toHaveAttribute('role');
+    expect(root).not.toHaveAttribute('aria-modal');
+    expect(root).not.toHaveAttribute('tabindex');
+    const toggle = screen.getByTestId('designer-toggle-fullscreen');
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    expect(toggle).toHaveTextContent('Layar Penuh');
+
+    await userEvent.click(toggle);
+    // Dialog semantics apply only while full-screen.
+    expect(root).toHaveClass('alur-status-designer--fullscreen');
+    expect(root).toHaveAttribute('role', 'dialog');
+    expect(root).toHaveAttribute('aria-modal', 'true');
+    expect(root).toHaveAttribute('aria-label', 'Editor Alur Status Tiket — Layar Penuh');
+    expect(root).toHaveAttribute('tabindex', '-1');
+    // Focus moved into the dialog container (WCAG 2.4.3).
+    expect(root).toHaveFocus();
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    expect(toggle).toHaveTextContent('Keluar dari Layar Penuh');
+    // The save button stays available while full-screen.
+    expect(screen.getByTestId('admin-save')).toBeInTheDocument();
+
+    // Esc exits the overlay + restores focus to the trigger.
+    await act(async () => {
+      fireEvent.keyDown(document, { key: 'Escape' });
+    });
+    expect(root).not.toHaveClass('alur-status-designer--fullscreen');
+    expect(root).not.toHaveAttribute('role');
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    expect(toggle).toHaveTextContent('Layar Penuh');
+    expect(toggle).toHaveFocus();
+  });
+
+  it('Esc does not exit full-screen while a save is in flight (no mid-save yank)', async () => {
+    // Parity with `TvLayoutEditOverlay`: the Esc close is guarded while
+    // submitting so a mid-save Escape does not yank the manager out of the
+    // full-screen overlay before the toast lands. The save is non-destructive
+    // (the draft persists), so once it resolves Esc exits again.
+    const { api, save } = makeApi();
+    let resolveSave!: (value: SaveSystemConfigurationResult) => void;
+    const pending = new Promise<SaveSystemConfigurationResult>((resolve) => {
+      resolveSave = resolve;
+    });
+    (save as ReturnType<typeof vi.fn>).mockImplementation(() => pending);
+    renderDesignerRoute(api);
+    await screen.findByTestId('sm-mode');
+    const root = document.querySelector('.alur-status-designer') as HTMLElement;
+    await userEvent.click(screen.getByTestId('designer-toggle-fullscreen'));
+    expect(root).toHaveClass('alur-status-designer--fullscreen');
+
+    // Start a save → submitting=true → the Simpan button enters its "Menyimpan…"
+    // state. Esc must NOT exit while the save is pending.
+    await userEvent.click(screen.getByTestId('admin-save'));
+    expect(screen.getByTestId('admin-save')).toHaveTextContent('Menyimpan…');
+    await act(async () => {
+      fireEvent.keyDown(document, { key: 'Escape' });
+    });
+    expect(root).toHaveClass('alur-status-designer--fullscreen');
+
+    // Once the save resolves (submitting=false), Esc exits again.
+    await act(async () => {
+      resolveSave({ ...configuredStore() });
+    });
+    await act(async () => {
+      fireEvent.keyDown(document, { key: 'Escape' });
+    });
+    expect(root).not.toHaveClass('alur-status-designer--fullscreen');
   });
 
   it('renders no redundant back button (the sidebar already covers section nav)', async () => {

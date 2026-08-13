@@ -40,6 +40,27 @@ function wfRule(sel: string): string {
   return m[1];
 }
 
+/** Same as {@link atRuleBlock} but against the StateMachineWorkflow component
+ *  CSS (for media-scoped rules that `wfRule` cannot isolate — `wfRule` returns
+ *  the first selector match, which may be the non-media fallback). */
+function wfAtRuleBlock(prelude: string): string {
+  const escaped = prelude.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const start = wfCss.search(new RegExp(`${escaped}\\s*\\{`));
+  if (start === -1) throw new Error(`at-rule not found in state-machine-workflow.css: ${prelude}`);
+  let depth = 0;
+  let bodyStart = -1;
+  for (let i = start; i < wfCss.length; i++) {
+    if (wfCss[i] === '{') {
+      if (depth === 0) bodyStart = i + 1;
+      depth++;
+    } else if (wfCss[i] === '}') {
+      depth--;
+      if (depth === 0) return wfCss.slice(bodyStart, i);
+    }
+  }
+  throw new Error(`unbalanced braces in at-rule: ${prelude}`);
+}
+
 /** Same as {@link rule} but against the vendored _interactions.css baseline. */
 function intRule(sel: string): string {
   const escaped = sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -678,14 +699,79 @@ describe('Alur Status Tiket designer — warning relocation + dedicated full-pag
     expect(designer).not.toMatch(/max-width:\s*920px/);
   });
 
-  it('the designer canvas is tall (descendant selector beats the base .sm-canvas height)', () => {
+  it('the designer canvas is tall on narrow viewports (descendant selector beats the base .sm-canvas height)', () => {
     // The base `.sm-canvas` (60vh / min 360px) is the inline config-card size the
     // manager found too small. `.alur-status-designer .sm-canvas` (specificity
-    // 0-2-0) overrides it without changing the StateMachineWorkflow API. Guard
-    // the tall height + the larger min-height.
+    // 0-2-0) overrides it without changing the StateMachineWorkflow API. This
+    // `calc(100vh - 16rem)` is the NARROW-viewport fallback (the page may scroll
+    // when the stacked panel + chrome exceed the viewport — acceptable on a
+    // narrow stacked layout). At ≥48rem the desktop flex-fill block below takes
+    // over so there is NO page scroll (see the next test). Guard the fallback
+    // height + the larger min-height.
     const canvas = wfRule('.alur-status-designer .sm-canvas');
     expect(canvas).toContain('height: calc(100vh - 16rem)');
     expect(canvas).toContain('min-height: 30rem');
+  });
+
+  it('on desktop the canvas flex-fills the viewport (no page scroll, biggest size, same height as the right panel)', () => {
+    // Manager feedback: "the editor is smaller than its properties bar on the
+    // right and sometimes needs scrolling — make it the biggest size, no
+    // scrolling." The fragile `calc(100vh - 16rem)` approximation is replaced by
+    // a flex-fill: the app-shell main column becomes a fixed-viewport flex column
+    // ON the designer route only (`:has` scope — every other page keeps its
+    // document flow), <main> flexes to fill below the topbar, the designer flexes
+    // to fill <main>, the workflow layout flexes to fill the designer, and the
+    // canvas stretches to the row (height: auto + align-items: stretch). The
+    // canvas + the right panel then share the SAME row height (the "smaller than
+    // its properties bar" gap closes) and the page never scrolls.
+    //
+    // The flex-fill is scoped to `@media (min-width: 48rem)` so the narrow-
+    // viewport stacked layout keeps the prior scrolling behavior. Asserting
+    // INSIDE the media block (via atRuleBlock / wfAtRuleBlock) — a flat
+    // `toContain` would still pass if the flex-fill leaked outside the media
+    // block (a regression that would break the narrow stacked layout).
+    const desktopShell = atRuleBlock('@media (min-width: 48rem)');
+    expect(desktopShell).toContain('.app-shell:has(.alur-status-designer) .app-shell__main');
+    expect(desktopShell).toMatch(/\.app-shell:has\(\.alur-status-designer\) \.app-shell__main\s*\{[^}]*height: 100vh/);
+    expect(desktopShell).toMatch(/\.app-shell__main\s*\{[^}]*overflow: hidden/);
+    expect(desktopShell).toContain('.app-shell:has(.alur-status-designer) #main-content');
+    expect(desktopShell).toMatch(/#main-content\s*\{[^}]*flex: 1 1 0/);
+    expect(desktopShell).toMatch(/#main-content\s*\{[^}]*min-height: 0/);
+    // The designer root flex-fills <main> (no scroll) — inside the same media
+    // block (NOT the base `.alur-status-designer` rule, which `rule()` would
+    // return instead).
+    expect(desktopShell).toMatch(/\.alur-status-designer\s*\{[^}]*flex: 1 1 0/);
+    expect(desktopShell).toMatch(/\.alur-status-designer\s*\{[^}]*overflow: hidden/);
+
+    const desktopWf = wfAtRuleBlock('@media (min-width: 48rem)');
+    expect(desktopWf).toMatch(/\.alur-status-designer \.sm-workflow-layout\s*\{[^}]*flex: 1 1 0/);
+    expect(desktopWf).toMatch(/\.alur-status-designer \.sm-workflow-layout\s*\{[^}]*min-height: 0/);
+    expect(desktopWf).toMatch(/\.alur-status-designer \.sm-canvas\s*\{[^}]*height: auto/);
+    expect(desktopWf).toMatch(/\.alur-status-designer \.sm-canvas\s*\{[^}]*min-height: 0/);
+    // The narrow fallback (calc) must stay OUTSIDE the desktop media block — it
+    // is the non-media rule, so it must NOT appear inside `desktopWf`.
+    expect(desktopWf).not.toContain('calc(100vh - 16rem)');
+  });
+
+  it('offers a full-screen editor overlay (manager feedback: "add option to make it full screen")', () => {
+    // A CSS `position: fixed` overlay scoped to the designer root — NOT the
+    // browser Fullscreen API — so it is reliable on the offline LAN browser (no
+    // permission prompt, no `:fullscreen` cross-browser drift). Covers the app
+    // shell chrome so the canvas gets the whole viewport. z-index 40 sits above
+    // the sticky topbar (z-index 10) + sidebar (auto) but BELOW the save toast
+    // (z-index 60) — a save fired while full-screen still announces. Token
+    // background (light/dark + brandColor re-theme); no hardcoded color literal.
+    // Hides the long live-ticket caution to maximize canvas space (the caution
+    // stays visible in the normal view).
+    const overlay = wfRule('.alur-status-designer--fullscreen');
+    expect(overlay).toContain('position: fixed');
+    expect(overlay).toContain('inset: 0');
+    expect(overlay).toContain('z-index: 40');
+    expect(overlay).toContain('height: 100vh');
+    expect(overlay).toContain('background: var(--surface)');
+    expect(overlay).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    const hiddenWarning = wfRule('.alur-status-designer--fullscreen .admin-panel__warning');
+    expect(hiddenWarning).toContain('display: none');
   });
 
   it('selects the active view off the ARIA state itself (no --active modifier to drift)', () => {

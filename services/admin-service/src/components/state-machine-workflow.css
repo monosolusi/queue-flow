@@ -534,10 +534,66 @@
    The inline canvas on /admin/config was too small (60vh / min 360px crammed in
    a config card). On the designer page the canvas fills the <main> width and a
    tall height. The descendant selector (specificity 0-2-0) overrides the base
-   `.sm-canvas` (0-1-0) without changing the StateMachineWorkflow API. */
+   `.sm-canvas` (0-1-0) without changing the StateMachineWorkflow API.
+
+   The `calc(100vh - 16rem)` below is the NARROW-viewport fallback (a tall,
+   viewport-relative height; the page may scroll when the stacked panel + chrome
+   exceed the viewport — acceptable on a narrow stacked layout). At ≥48rem
+   (desktop) the block AFTER this one switches the canvas to a flex-fill of the
+   viewport so there is NO page scroll and the canvas is the biggest size the
+   viewport allows below the page chrome (manager feedback: "editor is smaller
+   than its properties bar on the right and sometimes needs scrolling — make it
+   the biggest size, no scrolling"). */
 .alur-status-designer .sm-canvas {
   height: calc(100vh - 16rem);
   min-height: 30rem;
+}
+
+/* Desktop flex-fill: the app-shell main column is a fixed-viewport flex column
+   on the designer route (see the `:has(.alur-status-designer)` rules in
+   styles.css), so `.sm-workflow-layout` can flex to fill the remaining height
+   and the canvas can stretch to the row (height: auto + the flex row's default
+   align-items: stretch). `min-height: 0` lets the flex algorithm size the canvas
+   to the remaining space rather than its min-content. React Flow measures the
+   container via a ResizeObserver, so a flex-stretched (definite) height is fine.
+   The right panel (`flex: 0 0 16rem`) stretches to the same row height via
+   align-items: stretch — so the canvas and the properties panel are now the SAME
+   height, addressing "editor is smaller than its properties bar". */
+@media (min-width: 48rem) {
+  .alur-status-designer .sm-workflow-layout {
+    flex: 1 1 0;
+    min-height: 0;
+  }
+  .alur-status-designer .sm-canvas {
+    height: auto;
+    min-height: 0;
+  }
+}
+
+/* --- Full-screen editor overlay (manager feedback: "add option to make it full
+   screen") ---------------------------------------------------------------
+   A CSS `position: fixed` overlay scoped to the designer root (NOT the browser
+   Fullscreen API — reliable on the offline LAN browser, no permission prompt,
+   no `:fullscreen` cross-browser drift). Covers the app shell chrome (sidebar +
+   topbar) so the canvas gets the whole viewport; the Diagram/Sumber toggle +
+   Simpan stay so the manager can still switch views + save. z-index 40 sits
+   ABOVE the sticky topbar (z-index 10) + the sticky sidebar (auto) but BELOW the
+   save toast (z-index 60) — so a save fired while full-screen still announces.
+   Esc exits (handled in AlurStatusDesigner). Hides the long live-ticket caution
+   to maximize canvas space; the caution stays visible in the normal (non-full-
+   screen) view. Token background so light/dark + brandColor re-theme apply; no
+   hardcoded color literal (styles.test.ts static guard). */
+.alur-status-designer--fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  height: 100vh;
+  padding: 1rem;
+  background: var(--surface);
+  overflow: hidden;
+}
+.alur-status-designer--fullscreen .admin-panel__warning {
+  display: none;
 }
 
 /* Diagram / Source segmented toggle (view switch). A `role="group"`
