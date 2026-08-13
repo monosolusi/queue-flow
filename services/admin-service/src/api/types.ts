@@ -174,7 +174,7 @@ export interface NodePosition {
 export type NodePositionsDto = Record<string, NodePosition>;
 
 /**
- * When a node-level action executes (Kaleo execution-type, closed enum).
+ * When a node-level action executes (execution-type, closed enum).
  * `ON_ENTRY` fires on entering the status; `ON_EXIT` fires on leaving it.
  * Mirrors core-api's `NodeActionExecutionType` VO.
  */
@@ -185,7 +185,7 @@ export type NodeActionExecutionType = 'ON_ENTRY' | 'ON_EXIT';
  */
 export type NodeActionType = 'UPDATE_STATUS';
 /**
- * One Kaleo-style node-level action, NOT linked to any transition edge. An
+ * One node-level action, NOT linked to any transition edge. An
  * `UPDATE_STATUS` action sets the ticket status to `value` (a state name).
  * Mirrors core-api's `NodeActionProps` VO.
  */
@@ -195,7 +195,7 @@ export interface NodeActionDto {
   readonly value: string;
 }
 /**
- * Persisted node-level actions keyed by state name (Kaleo parity). An admin-
+ * Persisted node-level actions keyed by state name. An admin-
  * only config concern — NOT consumed by caller/tv/kiosk (ISP). Mirrors core-
  * api's `NodeActions` VO + the `nodePositions` field-for-field precedent:
  * keyed by state name so a rename moves the key (the form helpers
@@ -304,7 +304,7 @@ export interface SystemConfigurationDto {
    *  the deterministic autoLayout); `toForm` keeps a defensive `?? {}`
    *  coercion (belt-and-suspenders, same as `edgeRoutingLayout`). */
   readonly nodePositions: NodePositionsDto;
-  /** Node-level actions keyed by state name (Kaleo parity, admin-only config).
+  /** Node-level actions keyed by state name (admin-only config).
    *  Always present — the backend defaults to `{}` (no node-level actions);
    *  `toForm` keeps a defensive `?? {}` coercion (belt-and-suspenders, same as
    *  `nodePositions`). */

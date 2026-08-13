@@ -75,7 +75,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     // The new transition is an OUTGOING self-edge from WAITING (the selected
     // node): the first non-duplicate TARGET from WAITING is WAITING itself
     // (WAITING→WAITING does not exist; WAITING→CALLING already exists). The
-    // Kaleo-style "Aksi" framing anchors the source to the selected node.
+    // node-level "Aksi" framing anchors the source to the selected node.
     const added = next.transitions[next.transitions.length - 1];
     expect(added.from).toBe('WAITING');
     expect(added.to).toBe('WAITING');
@@ -647,7 +647,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
 
   // --- State-panel inline "Aksi" editor + edge reroute (manager feedback) ---
   //
-  // Manager feedback: Kaleo-style — a state node's properties should surface
+  // Manager feedback: node-level — a state node's properties should surface
   // its OUTGOING actions as "Aksi" (the action type, read-only "Update Status")
   // + "Nilai" (the value = the target status, an editable <select> re-pointing
   // the target). No "Dari" (the source is the selected node, implicit) and no
@@ -831,7 +831,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     );
   });
 
-  // --- Node-level "Aksi" (Kaleo parity) — independent of edges ----------------
+  // --- Node-level "Aksi" — independent of edges ----------------
   // The node-level Aksi section is NOT linked to any transition: adding /
   // editing / deleting a node action must NOT create / remove / reroute any
   // edge on the canvas (the core acceptance of the decoupling).

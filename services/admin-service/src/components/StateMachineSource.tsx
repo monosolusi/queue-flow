@@ -1,6 +1,7 @@
 /**
- * The XML "Source" view of the Alur Status Tiket graph — a Kaleo-Designer-style
- * editable source pane alongside the visual {@link StateMachineWorkflow} diagram.
+ * The XML "Source" view of the Alur Status Tiket graph — an editable XML
+ * source pane alongside the visual {@link StateMachineWorkflow} diagram
+ * (a designer-style visual/source toggle).
  *
  * Purely presentational: it renders a controlled `<textarea>` carrying the
  * serialized graph (an XML document with `<state>` x/y positions + `<transition>`
