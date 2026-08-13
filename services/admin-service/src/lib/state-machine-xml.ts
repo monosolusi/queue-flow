@@ -11,12 +11,24 @@
  * ```xml
  * <?xml version="1.0" encoding="UTF-8"?>
  * <stateMachine>
- *   <state name="WAITING" x="0" y="0"/>
- *   <state name="CALLING" x="240" y="0"/>
+ *   <state name="WAITING" x="0" y="0" description="Tiket menunggu dipanggil">
+ *     <action execution="ON_ENTRY" type="UPDATE_STATUS" value="CALLING"/>
+ *   </state>
+ *   <state name="CALLING" x="240" y="0" description="Sedang dipanggil ke counter"/>
  *   <transition from="WAITING" to="CALLING" actionLabel="Panggil Berikutnya"/>
  *   <transition from="CALLING" to="SKIPPED" actionLabel="Lewati / Absen" sourceSide="bottom" targetSide="top"/>
+ *   <start auto="true"/>
+ *   <end x="720" y="0"/>
  * </stateMachine>
  * ```
+ *
+ * Each `<state>` carries a `description` attr ONLY when a non-empty saved
+ * override is present (parsed back on parse — sparse serialization; the derived
+ * fallback is NOT emitted) + optional `<action>` children (the Kaleo-style
+ * node-level actions). `<start>`/`<end>` carry the terminal-marker state
+ * (`auto="true"` | `hidden="true"` | `x`/`y`), always emitted so the XML fully
+ * reflects `form.terminalNodes` (manager feedback: "XML harus memuat semua
+ * informasi node").
  *
  * Positions are the single source of truth shared with the Diagram view: an
  * absent position (empty `positions` map, i.e. an un-customized graph) is
@@ -43,7 +55,13 @@ import {
   type StateMachineForm,
   type Transition,
 } from './state-machine';
-import type { EdgeSide } from '../api/types';
+import type {
+  EdgeSide,
+  NodeActionDto,
+  NodeActionExecutionType,
+  NodeActionType,
+  TerminalNodeStateDto,
+} from '../api/types';
 
 // `EdgeSide` is the wire enum `'top'|'right'|'bottom'|'left'` (from
 // `api/types`); `EDGE_SIDES` (imported from the pure `state-machine.ts`) is its
@@ -103,6 +121,20 @@ function coord(n: number): string {
  * source is the human-readable twin of the wire map, so they omit the same
  * default entries.
  */
+/**
+ * Serializes one terminal-marker state as a `<start>`/`<end>` element:
+ * `'auto'` → `<start auto="true"/>`; `'hidden'` → `<start hidden="true"/>`;
+ * `{x,y}` → `<start x=".." y=".."/>`. Both elements are ALWAYS emitted (even
+ * when `'auto'`) so the XML fully reflects `form.terminalNodes` — the manager's
+ * "XML harus memuat semua informasi node" feedback. A reader sees the marker
+ * state explicitly rather than inferring it from absence.
+ */
+function terminalElement(tag: 'start' | 'end', state: TerminalNodeStateDto): string {
+  if (state === 'auto') return `  <${tag} auto="true"/>`;
+  if (state === 'hidden') return `  <${tag} hidden="true"/>`;
+  return `  <${tag} x="${coord(state.x)}" y="${coord(state.y)}"/>`;
+}
+
 export function formToXml(form: StateMachineForm): string {
   const lines: string[] = ['<?xml version="1.0" encoding="UTF-8"?>', '<stateMachine>'];
   // The SAME default-positions derivation the Diagram uses (`formToFlow` in
@@ -125,9 +157,19 @@ export function formToXml(form: StateMachineForm): string {
       desc !== undefined && desc.trim().length > 0
         ? ` description="${escapeXmlAttr(desc)}"`
         : '';
-    lines.push(
-      `  <state name="${escapeXmlAttr(name)}" x="${coord(pos.x)}" y="${coord(pos.y)}"${descAttr}/>`,
-    );
+    const actions = form.nodeActions[name] ?? [];
+    const open = `  <state name="${escapeXmlAttr(name)}" x="${coord(pos.x)}" y="${coord(pos.y)}"${descAttr}`;
+    if (actions.length === 0) {
+      lines.push(`${open}/>`);
+    } else {
+      lines.push(`${open}>`);
+      for (const a of actions) {
+        lines.push(
+          `    <action execution="${a.executionType}" type="${a.type}" value="${escapeXmlAttr(a.value)}"/>`,
+        );
+      }
+      lines.push('  </state>');
+    }
   }
   for (const t of form.transitions) {
     const parts = [
@@ -141,6 +183,11 @@ export function formToXml(form: StateMachineForm): string {
     }
     lines.push(`  <transition ${parts.join(' ')}/>`);
   }
+  // Terminal markers — ALWAYS emitted so the XML fully reflects
+  // `form.terminalNodes` (manager feedback: "XML harus memuat semua informasi
+  // node"). `<start>`/`<end>` after `<transition>`s.
+  lines.push(terminalElement('start', form.terminalNodes.start));
+  lines.push(terminalElement('end', form.terminalNodes.end));
   lines.push('</stateMachine>');
   return lines.join('\n');
 }
@@ -248,6 +295,7 @@ export function xmlToForm(xml: string): XmlToFormOk | XmlToFormErr {
   // and the VO trim/drop at the boundaries; the source view keeps the manager's
   // text as typed so the textarea does not flicker while editing).
   const descriptions: Record<string, string> = {};
+  const nodeActions: Record<string, NodeActionDto[]> = {};
   for (const el of stateEls) {
     const name = requiredAttr(el, 'name');
     if (name === null) return { ok: false, error: 'Setiap <state> harus memiliki atribut "name".' };
@@ -268,6 +316,37 @@ export function xmlToForm(xml: string): XmlToFormOk | XmlToFormErr {
     }
     states.push(name);
     positions[name] = { x, y };
+    // Parse the per-state <action> children (Kaleo-style node-level actions).
+    const actionEls = Array.from(el.children).filter((c) => c.tagName === 'action');
+    if (actionEls.length > 0) {
+      const parsed: NodeActionDto[] = [];
+      for (const aEl of actionEls) {
+        const execution = requiredAttr(aEl, 'execution');
+        const type = requiredAttr(aEl, 'type');
+        const value = requiredAttr(aEl, 'value');
+        if (execution === null || type === null || value === null) {
+          return {
+            ok: false,
+            error: 'Setiap <action> harus memiliki "execution", "type", dan "value".',
+          };
+        }
+        if (execution !== 'ON_ENTRY' && execution !== 'ON_EXIT') {
+          return {
+            ok: false,
+            error: '"execution" pada <action> harus "ON_ENTRY" atau "ON_EXIT".',
+          };
+        }
+        if (type !== 'UPDATE_STATUS') {
+          return { ok: false, error: '"type" pada <action> harus "UPDATE_STATUS".' };
+        }
+        parsed.push({
+          executionType: execution as NodeActionExecutionType,
+          type: type as NodeActionType,
+          value,
+        });
+      }
+      nodeActions[name] = parsed;
+    }
   }
 
   const transitions: Transition[] = [];
@@ -291,27 +370,62 @@ export function xmlToForm(xml: string): XmlToFormOk | XmlToFormErr {
     transitions.push(t);
   }
 
+  // Parse the <start>/<end> terminal elements → terminalNodes. Default 'auto'
+  // when absent (backward-compat with XML written before this change). A
+  // terminal may carry `auto="true"`, `hidden="true"`, or `x`/`y`.
+  const terminalNodes = parseTerminalNodes(root);
+  if ('error' in terminalNodes) return { ok: false, error: terminalNodes.error };
+
   const form: StateMachineForm = {
     mode: 'custom',
     states,
     transitions,
     positions,
-    // The XML Source view carries no node-level actions (they are panel-only,
-    // NOT serialized to XML — `formToXml` omits them). Emit `{}` here; the
-    // caller (`AlurStatusDesigner.handleSourceChange`) merges the existing
-    // `nodeActions` back so a source edit preserves node actions (the source
-    // edits only the graph + positions, never the node-level Aksi list).
-    nodeActions: {},
-    // Per-state description overrides parsed from the `description` attribute
-    // (sparse — only non-empty values are stored). The caller merges the
-    // existing descriptions back if needed; a source edit carries the parsed
-    // descriptions verbatim (the source is the human-editable single source of
-    // truth, so a saved description survives an XML edit).
+    // nodeActions, descriptions, and terminalNodes are all parsed from the
+    // XML → xmlToForm returns a COMPLETE form (no caller merge-back needed).
+    nodeActions,
     descriptions,
+    terminalNodes,
   };
   const errors = validateCustomStateMachine(form);
   if (errors.length > 0) {
     return { ok: false, error: errors[0] };
   }
   return { ok: true, form };
+}
+
+/**
+ * Parses the `<start>`/`<end>` terminal elements into a {@link TerminalNodesDto}.
+ * Each terminal defaults to `'auto'` when its element is absent (backward-compat
+ * with XML written before terminal markers were serialized). A present element
+ * carries `auto="true"`, `hidden="true"`, or finite `x`/`y`. On a malformed
+ * marker (missing x/y, or non-numeric x/y) returns an error result so a
+ * half-typed source never crashes the designer.
+ */
+function parseTerminalNodes(
+  root: Element,
+): { start: TerminalNodeStateDto; end: TerminalNodeStateDto } | { error: string } {
+  const startEl = Array.from(root.getElementsByTagName('start')).at(-1) ?? null;
+  const endEl = Array.from(root.getElementsByTagName('end')).at(-1) ?? null;
+  const parseOne = (el: Element | null, tag: 'start' | 'end'): TerminalNodeStateDto | { error: string } => {
+    if (!el) return 'auto';
+    if (el.getAttribute('hidden') === 'true') return 'hidden';
+    if (el.getAttribute('auto') === 'true') return 'auto';
+    const xRaw = requiredAttr(el, 'x');
+    const yRaw = requiredAttr(el, 'y');
+    if (xRaw === null || yRaw === null) {
+      return { error: `<${tag}> harus memiliki "auto", "hidden", atau "x" dan "y".` };
+    }
+    const x = Number(xRaw);
+    const y = Number(yRaw);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      return { error: `Atribut "x" dan "y" pada <${tag}> harus berupa angka.` };
+    }
+    return { x, y };
+  };
+  const start = parseOne(startEl, 'start');
+  if (typeof start === 'object' && 'error' in start) return { error: start.error };
+  const end = parseOne(endEl, 'end');
+  if (typeof end === 'object' && 'error' in end) return { error: end.error };
+  return { start, end };
 }

@@ -65,6 +65,7 @@ describe('PrintTicketUseCase', () => {
       edgeRoutingLayout: d.edgeRoutingLayout,
       nodePositions: d.nodePositions,
       nodeActions: d.nodeActions,
+      terminalNodes: d.terminalNodes,
       printerConfiguration: printer,
     });
     void repo.save(config);

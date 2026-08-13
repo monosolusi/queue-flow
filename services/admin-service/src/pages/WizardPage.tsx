@@ -15,6 +15,7 @@ import {
   DEFAULT_SERVICE_THEMES,
   type TvGridLayout,
   DEFAULT_TV_GRID_LAYOUT,
+  DEFAULT_TERMINAL_NODES,
 } from '../api/types';
 import { coerceTvGridLayout, defaultTvGridLayout } from '../lib/tv-grid-layout';
 import { coercePrinterConfiguration } from '../lib/printer';
@@ -41,6 +42,7 @@ import {
   toNodeActionsDto,
   toNodePositionsDto,
   toStateMachineDto,
+  toTerminalNodesDto,
   validateCustomStateMachine,
 } from '../lib/state-machine';
 
@@ -390,6 +392,9 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
         // `nodeActions`. Coerce defensively — the backend always returns
         // `descriptions` (defaulting to `{}`).
         const smDescriptions = config.stateMachine.descriptions ?? {};
+        // Terminal markers are payload-only passthrough on the wizard (no
+        // marker UI), exactly like `nodeActions`. Coerce defensively.
+        const smTerminalNodes = config.terminalNodes ?? DEFAULT_TERMINAL_NODES;
         setForm({
           storeName: config.storeName,
           brandColor: config.brandColor || DEFAULT_BRAND_COLOR,
@@ -413,7 +418,7 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
           // default-structure graph with custom routing loads as custom, and a
           // wizard re-edit preserves the handles on re-save.
           stateMachine: {
-            mode: isDefaultGraph(config.stateMachine.states, smMergedTransitions, smPositions)
+            mode: isDefaultGraph(config.stateMachine.states, smMergedTransitions, smPositions, smTerminalNodes)
               ? 'default'
               : 'custom',
             states: [...config.stateMachine.states],
@@ -421,6 +426,7 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
             positions: smPositions,
             nodeActions: smNodeActions,
             descriptions: smDescriptions,
+            terminalNodes: smTerminalNodes,
           },
           dailyReset: {
             mode: config.dailyResetPolicy.mode,
@@ -607,6 +613,9 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
         // Node actions — payload-only passthrough on the wizard (no Aksi UI);
         // `{}` for a first-run store (mirrors `nodePositions`).
         nodeActions: toNodeActionsDto(form.stateMachine),
+        // Terminal markers — payload-only passthrough on the wizard (no marker
+        // UI); `auto/auto` for a first-run store (mirrors `nodeActions`).
+        terminalNodes: toTerminalNodesDto(form.stateMachine),
         dailyReset: {
           mode: form.dailyReset.mode,
           cronExpression: form.dailyReset.mode === 'AUTOMATIC_CRON' ? form.dailyReset.cronExpression : null,

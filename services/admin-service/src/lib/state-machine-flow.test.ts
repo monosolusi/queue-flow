@@ -24,7 +24,7 @@ import {
   type FlowNode,
 } from './state-machine-flow';
 import { autoLayout, defaultStateMachineForm, type StateMachineForm } from './state-machine';
-import { DEFAULT_STATE_MACHINE } from '../api/types';
+import { DEFAULT_STATE_MACHINE, DEFAULT_TERMINAL_NODES } from '../api/types';
 // Type-only: verifies the framework-free marker trick in the guard at the
 // bottom of this file (tests may depend on `@xyflow/react`; the lib cannot).
 import type { EdgeMarker } from '@xyflow/react';
@@ -122,7 +122,7 @@ describe('formToFlow', () => {
           ? { ...t, sourceSide: 'bottom' as const, targetSide: 'top' as const }
           : { ...t },
       ),
-      positions: {}, nodeActions: {}, descriptions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const { edges } = formToFlow(form, {});
     const waitingCalling = edges.find((e) => e.source === 'WAITING' && e.target === 'CALLING')!;
     expect(waitingCalling.sourceHandle).toBe(HANDLE_IDS.bottom);
@@ -149,7 +149,7 @@ describe('formToFlow', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go', sourceSide: 'bottom' }],
-      positions: {}, nodeActions: {}, descriptions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const { edges } = formToFlow(form, {});
     expect(edges[0].sourceHandle).toBe(HANDLE_IDS.bottom);
     expect(edges[0].targetHandle).toBe(DEFAULT_TARGET_HANDLE);
@@ -186,7 +186,7 @@ describe('formToFlow', () => {
     // snap the nodes back to their pre-save locations.
     const form: StateMachineForm = {
       ...defaultStateMachineForm(),
-      positions: { WAITING: { x: 99, y: 88 } }, nodeActions: {},    };
+      positions: { WAITING: { x: 99, y: 88 } }, nodeActions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const positions = { WAITING: { x: 10, y: 20 } }; // stale oldPositions
     const { nodes } = formToFlow(form, positions);
     const waiting = nodes.find((n) => n.id === 'WAITING')!;
@@ -355,9 +355,12 @@ describe('flowToGraph', () => {
     expect(result.states).toEqual(['A', 'B']);
     // The states array is `string[]` — no object carries the description.
     expect(result.states.every((s) => typeof s === 'string')).toBe(true);
-    // The output shape is exactly `{ states, transitions, positions }` — no
-    // `description` key (the client-side description never reaches the form).
-    expect(Object.keys(result).sort()).toEqual(['positions', 'states', 'transitions']);
+    // The output shape is exactly `{ states, transitions, positions,
+    // terminalNodes }` — no `description` key (the client-side description
+    // never reaches the form). `terminalNodes` is the fixed-shape
+    // start/end-marker state (auto/pinned/hidden), preserved from
+    // `prevTerminalNodes` when no marker is present on the canvas.
+    expect(Object.keys(result).sort()).toEqual(['positions', 'states', 'terminalNodes', 'transitions']);
   });
 
   it('formToFlow stamps data.description from describeState on every node', () => {
@@ -384,7 +387,7 @@ describe('flowToGraph', () => {
         { from: 'ONHOLD', to: 'WAITING', actionLabel: 'Kembali' },
         { from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut' },
       ],
-      positions: {}, nodeActions: {}, descriptions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const nodes: import('./state-machine-flow').FlowNode[] = [
       { id: 'WAITING', type: 'state', position: { x: 0, y: 0 }, data: { name: 'WAITING', description: '' } },
       { id: 'ONHOLD', type: 'state', position: { x: 0, y: 0 }, data: { name: 'ONHOLD', description: '' } },
@@ -636,6 +639,175 @@ describe('flowToGraph filters terminal markers', () => {
   });
 });
 
+describe('formToFlowWithMarkers terminal-node three-state model', () => {
+  // A simple A→B graph: A is the sole source (in-degree 0), B is the sole sink
+  // (out-degree 0). Under `terminalNodes: { start: 'auto', end: 'auto' }` BOTH
+  // markers emit (topology has a source AND a sink), pinned:false, positioned
+  // by the deriveTerminalMarkers math (one rank left/right of the real bounds).
+  const abForm = (): StateMachineForm => ({
+    mode: 'custom',
+    states: ['A', 'B'],
+    transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+    positions: { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
+    nodeActions: {},
+    descriptions: {},
+    terminalNodes: { start: 'auto', end: 'auto' },
+  });
+
+  it("'auto' emits both markers (topology has sources/sinks) with pinned:false at the derived rank offset", () => {
+    const { nodes } = formToFlowWithMarkers(abForm(), {});
+    const start = nodes.find((n) => n.id === START_NODE_ID);
+    const end = nodes.find((n) => n.id === END_NODE_ID);
+    expect(start).toBeDefined();
+    expect(end).toBeDefined();
+    expect(start?.pinned).toBe(false);
+    expect(end?.pinned).toBe(false);
+    // A is at x=0 (leftmost) → Start sits one rank (240) left → x=-240.
+    expect(start?.position.x).toBe(-240);
+    // B is at x=240 (rightmost) → End sits one rank right → x=480.
+    expect(end?.position.x).toBe(480);
+  });
+
+  it("'hidden' omits the marker node AND its terminal edges", () => {
+    const form: StateMachineForm = {
+      ...abForm(),
+      terminalNodes: { start: 'hidden', end: 'auto' },
+    };
+    const { nodes, edges } = formToFlowWithMarkers(form, {});
+    expect(nodes.find((n) => n.id === START_NODE_ID)).toBeUndefined();
+    // The Start→A terminal edge is gone (an edge with no source node cannot
+    // render); the End marker + its sink edge remain.
+    expect(edges.filter((e) => e.source === START_NODE_ID)).toHaveLength(0);
+    expect(nodes.find((n) => n.id === END_NODE_ID)).toBeDefined();
+    expect(edges.filter((e) => e.target === END_NODE_ID)).toHaveLength(1);
+  });
+
+  it("an explicit {x,y} emits the marker ALWAYS (even with no sources/sinks), pinned:true at the given position", () => {
+    // A pure cycle (A→B, B→A): no sources, no sinks → 'auto' would emit NO
+    // markers. An explicit {x,y} overrides that — the marker is willed by the
+    // manager regardless of topology, pinned:true, at the exact position.
+    const cycleForm: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [
+        { from: 'A', to: 'B', actionLabel: 'go' },
+        { from: 'B', to: 'A', actionLabel: 'back' },
+      ],
+      positions: { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
+      nodeActions: {},
+      descriptions: {},
+      terminalNodes: { start: { x: -300, y: 50 }, end: 'auto' },
+    };
+    const { nodes, edges } = formToFlowWithMarkers(cycleForm, {});
+    const start = nodes.find((n) => n.id === START_NODE_ID);
+    expect(start).toBeDefined();
+    expect(start?.pinned).toBe(true);
+    expect(start?.position).toEqual({ x: -300, y: 50 });
+    // No End marker: 'auto' on a pure cycle (no sinks) emits none.
+    expect(nodes.find((n) => n.id === END_NODE_ID)).toBeUndefined();
+    // A pinned Start on a cycle has no source to point at → no terminal edges.
+    expect(edges.filter((e) => e.source === START_NODE_ID)).toHaveLength(0);
+  });
+
+  it("'auto' on a pure cycle emits NO markers (no sources AND no sinks)", () => {
+    const cycleForm: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [
+        { from: 'A', to: 'B', actionLabel: 'go' },
+        { from: 'B', to: 'A', actionLabel: 'back' },
+      ],
+      positions: { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
+      nodeActions: {},
+      descriptions: {},
+      terminalNodes: { start: 'auto', end: 'auto' },
+    };
+    const { nodes } = formToFlowWithMarkers(cycleForm, {});
+    expect(nodes.find((n) => n.id === START_NODE_ID)).toBeUndefined();
+    expect(nodes.find((n) => n.id === END_NODE_ID)).toBeUndefined();
+  });
+});
+
+describe('flowToGraph captures terminalNodes back from the canvas', () => {
+  // flowToGraph is the inverse: a present marker with `pinned` → {x,y}; a
+  // present marker without `pinned` → 'auto'; an ABSENT marker preserves the
+  // prior `prevTerminalNodes[key]` (absence is ambiguous: 'hidden' OR an auto
+  // marker dropped because the topology has no sources/sinks). This is the
+  // pure-function drag-capture path the plan calls out (jsdom can't simulate a
+  // real React Flow pointer-geometry drag, so the pinning semantics are proven
+  // here on the pure mapper the component's onNodeDragStop consults).
+
+  it('a present pinned marker captures as {x,y} (a drag pins the marker)', () => {
+    const nodes: FlowNode[] = [
+      { id: 'A', type: 'state', position: { x: 0, y: 0 }, data: { name: 'A', description: '' } },
+      {
+        id: START_NODE_ID,
+        type: START_NODE_TYPE,
+        position: { x: -500, y: 30 },
+        data: { name: START_NODE_ID, description: '' },
+        pinned: true,
+      },
+    ];
+    const { terminalNodes } = flowToGraph(nodes, []);
+    expect(terminalNodes.start).toEqual({ x: -500, y: 30 });
+    // End absent → preserved from the default prevTerminalNodes ('auto').
+    expect(terminalNodes.end).toBe('auto');
+  });
+
+  it('a present auto marker (pinned falsy) captures as "auto"', () => {
+    const nodes: FlowNode[] = [
+      { id: 'A', type: 'state', position: { x: 0, y: 0 }, data: { name: 'A', description: '' } },
+      {
+        id: START_NODE_ID,
+        type: START_NODE_TYPE,
+        position: { x: -240, y: 0 },
+        data: { name: START_NODE_ID, description: '' },
+        // pinned omitted → auto-derived position.
+      },
+    ];
+    const { terminalNodes } = flowToGraph(nodes, []);
+    expect(terminalNodes.start).toBe('auto');
+  });
+
+  it('an absent marker preserves a prior "hidden" (absence ≠ auto-drop on a no-source graph)', () => {
+    // The disambiguation case: the canvas has no Start marker. That could mean
+    // the manager hid it ('hidden') OR the topology simply has no sources so
+    // the auto marker didn't emit. The caller passes the prior terminalNodes
+    // to disambiguate — a prior 'hidden' is preserved, NOT reset to 'auto'.
+    const nodes: FlowNode[] = [
+      { id: 'A', type: 'state', position: { x: 0, y: 0 }, data: { name: 'A', description: '' } },
+    ];
+    const prev = { start: 'hidden' as const, end: 'auto' as const };
+    const { terminalNodes } = flowToGraph(nodes, [], prev);
+    expect(terminalNodes.start).toBe('hidden');
+    expect(terminalNodes.end).toBe('auto');
+  });
+
+  it('an absent marker preserves a prior pinned {x,y}', () => {
+    // Symmetric to the hidden-preserve case: a prior pinned position is kept
+    // when the marker is absent on the canvas (e.g. a source-view edit that
+    // hasn't re-seeded yet). The default prevTerminalNodes would be 'auto', so
+    // passing the prior pinned state is load-bearing.
+    const nodes: FlowNode[] = [
+      { id: 'A', type: 'state', position: { x: 0, y: 0 }, data: { name: 'A', description: '' } },
+    ];
+    const prev = { start: { x: -999, y: 0 }, end: 'auto' as const };
+    const { terminalNodes } = flowToGraph(nodes, [], prev);
+    expect(terminalNodes.start).toEqual({ x: -999, y: 0 });
+  });
+
+  it("defaults prevTerminalNodes to auto/auto when omitted (legacy call sites)", () => {
+    // The 3rd arg defaults to DEFAULT_TERMINAL_NODES so the legacy 2-arg call
+    // sites (the round-trip test above) read an absent marker as 'auto', not
+    // undefined — the captured terminalNodes is always a complete {start,end}.
+    const nodes: FlowNode[] = [
+      { id: 'A', type: 'state', position: { x: 0, y: 0 }, data: { name: 'A', description: '' } },
+    ];
+    const { terminalNodes } = flowToGraph(nodes, []);
+    expect(terminalNodes).toEqual({ ...DEFAULT_TERMINAL_NODES });
+  });
+});
+
 describe('withDescriptions skips non-state nodes', () => {
   it('leaves a terminal marker node untouched (description stays empty)', () => {
     // A Start marker passed through withDescriptions keeps its `description: ''`
@@ -785,7 +957,7 @@ describe('side ↔ handle mappers', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go', sourceSide: 'bottom', targetSide: 'top' }],
-      positions: {}, nodeActions: {}, descriptions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const { nodes, edges } = formToFlow(form, {});
     const { transitions } = flowToGraph(nodes, edges);
     expect(transitions[0].sourceSide).toBe('bottom');

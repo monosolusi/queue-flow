@@ -15,6 +15,7 @@ import { TvPanelLayout, type TvGridLayout } from '../../domain/store-config';
 import { EdgeRoutingLayout, type EdgeRoutingLayoutDto } from '../../domain/store-config';
 import { NodePositions, type NodePositionsDto } from '../../domain/store-config';
 import { NodeActions, type NodeActionsDto } from '../../domain/store-config';
+import { TerminalNodes, type TerminalNodesDto } from '../../domain/store-config';
 import { PrinterConfiguration, type PrinterConfigurationDto } from '../../domain/store-config';
 import { type IDailyResetSchedulerPort } from '../../domain/store-config';
 import {
@@ -130,6 +131,16 @@ export interface SaveSystemConfigurationCommand {
    *  change-gated (like `nodePositions`/`edgeRoutingLayout`/`brandColor`).
    *  Not audited (admin-only config, not in the NFR-SEC-02 list). */
   readonly nodeActions: NodeActionsDto;
+  /** Persisted Start/End terminal-node presence + position for the admin
+   *  state-machine editor (fixed-shape `{ start, end }`; each terminal is
+   *  `'auto'` | `'hidden'` | `{ x, y }`). Required on the wire; the VO recovers
+   *  a null/undefined to the auto/auto default (markers render at derived
+   *  positions) and rejects a present-but-malformed value. NO state-membership
+   *  cross-check (terminal ids `__start`/`__end` are not state names — that is
+   *  the whole reason this is a dedicated field, unlike `nodePositions`/
+   *  `nodeActions`). Not change-gated (like `nodePositions`/`nodeActions`).
+   *  Not audited (admin-only config, not in the NFR-SEC-02 list). */
+  readonly terminalNodes: TerminalNodesDto;
   /** Printer configuration (which printer the kiosk uses — Chrome's default
    *  dialog, or a network ESC/POS printer proxied through core-api over raw
    *  TCP). Required on the wire; the VO recovers a null/undefined to the chrome
@@ -150,6 +161,7 @@ export interface SaveSystemConfigurationResult {
   readonly edgeRoutingLayout: EdgeRoutingLayoutDto;
   readonly nodePositions: NodePositionsDto;
   readonly nodeActions: NodeActionsDto;
+  readonly terminalNodes: TerminalNodesDto;
   readonly printerConfiguration: PrinterConfigurationDto;
 }
 
@@ -286,6 +298,13 @@ export class SaveSystemConfigurationUseCase {
     // no post-commit side-effect. Validated pre-tx so a malformed map (non-array
     // value, bad executionType/type enum, non-string/empty value) fails fast.
     const nodeActions = NodeActions.of(command.nodeActions);
+    // Terminal nodes (Start/End markers) — same shape: pure admin appearance,
+    // not change-gated, no post-commit side-effect. Validated pre-tx so a
+    // malformed map (non-object raw, bad terminal value, non-finite x/y) fails
+    // fast. NO state-membership cross-check here — terminal ids `__start`/
+    // `__end` are not state names (the whole reason this is a dedicated field,
+    // unlike `nodePositions`/`nodeActions` whose keys ARE cross-checked above).
+    const terminalNodes = TerminalNodes.of(command.terminalNodes);
     // Printer configuration — same shape: pure operational config, not
     // change-gated, no post-commit side-effect. Validated pre-tx so a malformed
     // printer config (bad mode/paperWidth/cutMode enum, non-integer port,
@@ -406,6 +425,7 @@ export class SaveSystemConfigurationUseCase {
         edgeRoutingLayout,
         nodePositions,
         nodeActions,
+        terminalNodes,
         printerConfiguration,
       });
       system.completeInitialSetup(); // idempotent — validates store name, flips the flag
@@ -460,6 +480,7 @@ export class SaveSystemConfigurationUseCase {
         edgeRoutingLayout: system.edgeRoutingLayout.toDto(),
         nodePositions: system.nodePositions.toDto(),
         nodeActions: system.nodeActions.toDto(),
+        terminalNodes: system.terminalNodes.toDto(),
         printerConfiguration: system.printerConfiguration.toDto(),
       };
     });

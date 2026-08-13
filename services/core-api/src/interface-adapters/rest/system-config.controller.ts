@@ -40,6 +40,7 @@ const REQUIRED_CONFIG_FIELDS: ReadonlyArray<keyof SaveSystemConfigurationCommand
   'edgeRoutingLayout',
   'nodePositions',
   'nodeActions',
+  'terminalNodes',
   'printerConfiguration',
 ];
 
@@ -69,6 +70,7 @@ const CONFIG_FIELD_SHAPES: ReadonlyArray<{
   { field: 'edgeRoutingLayout', kind: 'object' },
   { field: 'nodePositions', kind: 'object' },
   { field: 'nodeActions', kind: 'object' },
+  { field: 'terminalNodes', kind: 'object' },
   { field: 'printerConfiguration', kind: 'object' },
 ];
 
@@ -304,6 +306,37 @@ function configNestedShapeErrors(body: Partial<SaveSystemConfigurationCommand>):
       });
     }
   }
+  // terminalNodes: the VO throws `InvalidValueObjectException` (→ 400) on a
+  // present-but-malformed value (non-object raw, a terminal value that is not
+  // 'auto'/'hidden'/a plain {x,y}, or a non-finite x/y). This boundary guard
+  // catches the crash class (a terminal value that is a non-object, non-string
+  // would TypeError in the VO's `isPlainObject`/`===` checks before it can
+  // throw a clean InvalidValueObjectException; a present-but-non-number x/y
+  // would reach `Number.isFinite` as a non-number) and gives consistent,
+  // field-named error messages. The three-state enum membership (auto/hidden)
+  // + finite-ness stays in the VO (SRP). NO state-membership cross-check
+  // (terminal ids are not state names, unlike nodePositions/nodeActions).
+  // Unknown extra properties on a pinned {x,y} are ignored.
+  const terminalNodes = body.terminalNodes;
+  if (terminalNodes != null && typeof terminalNodes === 'object' && !Array.isArray(terminalNodes)) {
+    const tn = terminalNodes as unknown as Record<string, unknown>;
+    for (const key of ['start', 'end'] as const) {
+      const value = tn[key];
+      if (value == null) continue; // absent → 'auto' default (VO)
+      if (typeof value === 'string') continue; // 'auto' / 'hidden' — enum stays in the VO
+      if (typeof value !== 'object' || Array.isArray(value)) {
+        errs.push(`terminalNodes['${key}'] must be 'auto', 'hidden', or { x, y }`);
+        continue;
+      }
+      const e = value as Record<string, unknown>;
+      if (e.x != null && typeof e.x !== 'number') {
+        errs.push(`terminalNodes['${key}'].x must be a number`);
+      }
+      if (e.y != null && typeof e.y !== 'number') {
+        errs.push(`terminalNodes['${key}'].y must be a number`);
+      }
+    }
+  }
   // printerConfiguration: the VO throws `InvalidValueObjectException` (→ 400)
   // on a present-but-invalid field (bad mode/paperWidth/cutMode enum,
   // non-integer port, network-escpos with no host). This boundary guard catches
@@ -428,6 +461,7 @@ export class SystemConfigController {
       edgeRoutingLayout: body.edgeRoutingLayout!,
       nodePositions: body.nodePositions!,
       nodeActions: body.nodeActions!,
+      terminalNodes: body.terminalNodes!,
       printerConfiguration: body.printerConfiguration!,
       actor: principal?.username ?? 'system',
     };

@@ -1,12 +1,14 @@
 import {
   DEFAULT_NODE_ACTIONS,
   DEFAULT_STATE_MACHINE,
+  DEFAULT_TERMINAL_NODES,
   type EdgeRoutingLayoutDto,
   type EdgeSide,
   type NodeActionsDto,
   type NodePositionsDto,
   type StateMachineDto,
   type StateTransitionDto,
+  type TerminalNodesDto,
 } from '../api/types';
 
 /**
@@ -105,6 +107,22 @@ export interface StateMachineForm {
    * is absent ⇒ `descriptionFor` falls back to `describeState`).
    */
   descriptions: Record<string, string>;
+  /**
+   * Start/End terminal-marker states (a fixed-shape `{ start, end }`, NOT keyed
+   * by state name — the terminal ids `__start`/`__end` are reserved canvas
+   * markers, not state names). `'auto'` derives the marker position from the
+   * real node bounds; `{x,y}` is a manager-pinned explicit position; `'hidden'`
+   * omits the marker. The terminal EDGES stay auto-derived from topology, so
+   * the manager controls marker PRESENCE + POSITION only. Travels the wire in
+   * the separate `terminalNodes` field (built by `toTerminalNodesDto`).
+   *
+   * Canvas-rendered (unlike `nodeActions`): `formToFlowWithMarkers` consults it
+   * for marker presence + position, and `flowToGraph` captures it back from the
+   * canvas. So `graphSignature` INCLUDES it (a terminal edit re-seeds the
+   * canvas), and `updateState`/`removeState` need NO rename/delete propagation
+   * (fixed start/end keys, not state-name-keyed).
+   */
+  terminalNodes: TerminalNodesDto;
 }
 
 /** The PRD §7 default graph prefilled into the editor's default mode. */
@@ -118,6 +136,7 @@ export function defaultStateMachineForm(): StateMachineForm {
     // No per-state description overrides — the canonical copy (describeState)
     // is the fallback for each of the 5 PRD §7 default statuses.
     descriptions: {},
+    terminalNodes: { ...DEFAULT_TERMINAL_NODES },
   };
 }
 
@@ -138,8 +157,13 @@ export function isDefaultGraph(
   states: readonly string[],
   transitions: readonly Transition[],
   positions: Record<string, { x: number; y: number }> = {},
+  terminalNodes: TerminalNodesDto = DEFAULT_TERMINAL_NODES,
 ): boolean {
   if (Object.keys(positions).length > 0) return false;
+  // A manager-pinned or hidden terminal marker is a customization (auto/auto
+  // is the default-derived UX), so a store with non-auto terminals loads as
+  // `mode: 'custom'` (editable), not read-only default.
+  if (terminalNodes.start !== 'auto' || terminalNodes.end !== 'auto') return false;
   if (states.length !== DEFAULT_STATE_MACHINE.states.length) return false;
   if (transitions.length !== DEFAULT_STATE_MACHINE.transitions.length) return false;
   const sameStates = states.every((s, i) => s === DEFAULT_STATE_MACHINE.states[i]);
@@ -283,6 +307,25 @@ export function toNodePositionsDto(form: StateMachineForm): NodePositionsDto {
  */
 export function toNodeActionsDto(form: StateMachineForm): NodeActionsDto {
   return { ...form.nodeActions };
+}
+
+/**
+ * Builds the terminal-marker wire map from the form. A deep copy of
+ * `form.terminalNodes` (the form is the source of truth — built by
+ * `flowToGraph` on a canvas commit, by the panel/drop terminal handlers on a
+ * marker edit, or by `xmlToForm` on a Source edit). `auto/auto` means "derive
+ * both markers from the real node bounds". Mirrors `toNodeActionsDto`'s doc
+ * style: read `form.terminalNodes` directly, do not special-case mode (default
+ * mode force-resets the graph in `toStateMachineDto` and the default canvas
+ * carries auto/auto terminals, so the map is `auto/auto` regardless). The
+ * `{x,y}` branch is deep-copied so the wire payload never aliases the form's
+ * mutable position object.
+ */
+export function toTerminalNodesDto(form: StateMachineForm): TerminalNodesDto {
+  const { start, end } = form.terminalNodes;
+  const copyPos = (v: TerminalNodesDto['start']): TerminalNodesDto['start'] =>
+    typeof v === 'object' && v !== null ? { x: v.x, y: v.y } : v;
+  return { start: copyPos(start), end: copyPos(end) };
 }
 
 /** Horizontal gap between ranks (left-to-right flow). */
@@ -735,8 +778,21 @@ export function removeState(form: StateMachineForm, i: number): StateMachineForm
  * `nodeActions`): a description edit is form-only and must not re-seed the
  * canvas — the node card's `data.description` refreshes via the
  * `formToFlow`/`withDescriptions` memo recompute on form change instead.
+ *
+ * INCLUDES `terminalNodes` (canvas-rendered, unlike `nodeActions`): a marker
+ * add/delete/reposition is a structural canvas change the guards must detect —
+ * a source-view terminal edit re-seeds the canvas to the source terminalNodes,
+ * and a panel/drop terminal edit (non-stamping — raw `onChange` → the sync
+ * effect re-seeds) shows up as an external signature change. The drag path
+ * stamps via `commit` (the dragged marker's new position flows through
+ * `flowToGraph` → `terminalNodes` → this signature before `onChange`), so a
+ * drag does NOT re-seed (the marker stays where dropped). Each terminal is
+ * canonicalized to `'auto'` | `'hidden'` | `x,y` so the signature is stable
+ * across equivalent serializations.
  */
 export function graphSignature(form: StateMachineForm): string {
+  const canonTerminal = (v: TerminalNodesDto['start']): string =>
+    v === 'auto' || v === 'hidden' ? v : `${v.x},${v.y}`;
   return JSON.stringify({
     s: form.states,
     t: form.transitions.map((t) => ({
@@ -749,5 +805,6 @@ export function graphSignature(form: StateMachineForm): string {
     p: Object.entries(form.positions)
       .map(([k, v]) => `${k}:${v.x},${v.y}`)
       .sort(),
+    tn: { start: canonTerminal(form.terminalNodes.start), end: canonTerminal(form.terminalNodes.end) },
   });
 }

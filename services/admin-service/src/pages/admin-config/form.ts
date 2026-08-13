@@ -1,5 +1,5 @@
 import type { SystemConfigurationDto } from '../../api/types';
-import { DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES, DEFAULT_TV_GRID_LAYOUT } from '../../api/types';
+import { DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES, DEFAULT_TERMINAL_NODES, DEFAULT_TV_GRID_LAYOUT } from '../../api/types';
 import type { DailyResetMode, PrinterConfigurationDto, PriorityPolicy, ServiceThemesMap, TvGridLayout } from '../../api/types';
 import { coerceServiceThemes } from '../../lib/service-themes';
 import { coerceTvGridLayout } from '../../lib/tv-grid-layout';
@@ -114,20 +114,29 @@ export function toForm(config: SystemConfigurationDto): AdminForm {
   // defensively — the backend always returns `descriptions` (defaulting to `{}`);
   // the `?? {}` is belt-and-suspenders (same pattern as `nodeActions ?? {}`).
   const descriptions = config.stateMachine.descriptions ?? {};
+  // Terminal markers (Start/End) — a fixed-shape { start, end }, NOT keyed by
+  // state name. Coerce defensively — the backend always returns `terminalNodes`
+  // (defaulting to auto/auto); the `?? DEFAULT_TERMINAL_NODES` is belt-and-
+  // suspenders (same pattern as `nodeActions ?? {}`).
+  const terminalNodes = config.terminalNodes ?? DEFAULT_TERMINAL_NODES;
   return {
     storeName: config.storeName,
     // Build a StateMachineForm with the client-only `mode` preset inferred by
     // deep-equal against the PRD §7 default graph (mirrors the wizard's prefill
     // inference). `mode` is stripped at save (never on the wire). The inference
-    // now passes `positions` so a store with saved positions loads editable
-    // (`mode: 'custom'`), not read-only default.
+    // now passes `positions` + `terminalNodes` so a store with saved positions
+    // or non-auto terminal markers loads editable (`mode: 'custom'`), not
+    // read-only default.
     stateMachine: {
-      mode: isDefaultGraph(config.stateMachine.states, mergedTransitions, positions) ? 'default' : 'custom',
+      mode: isDefaultGraph(config.stateMachine.states, mergedTransitions, positions, terminalNodes)
+        ? 'default'
+        : 'custom',
       states: [...config.stateMachine.states],
       transitions: mergedTransitions,
       positions,
       nodeActions,
       descriptions,
+      terminalNodes,
     },
     brandColor: config.brandColor || DEFAULT_BRAND_COLOR,
     // Coerce a partial/degraded GET projection into a complete 4-surface map

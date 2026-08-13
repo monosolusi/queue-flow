@@ -108,13 +108,13 @@ export function AlurStatusDesigner(): JSX.Element {
       // change and skips the re-serialize (preserves `next` verbatim — no
       // reformat/cursor jump). Mode is forced to 'custom' by `xmlToForm`.
       lastEmittedSig.current = graphSignature(result.form);
-      // `xmlToForm` emits `nodeActions: {}` (the XML Source view carries no
-      // node-level actions — they are panel-only). Merge the existing
-      // `nodeActions` back so a source edit preserves the node-level Aksi list
-      // (the source edits only the graph + positions, never the Aksi list).
+      // `xmlToForm` now returns a COMPLETE form — it parses `<action>` children
+      // → nodeActions and `<start>`/`<end>` → terminalNodes from the XML, so the
+      // former nodeActions merge-back is gone (the source carries every node
+      // facet now — manager feedback: "XML harus memuat semua informasi node").
       setState({
         status: 'ready',
-        form: { ...form, stateMachine: { ...result.form, nodeActions: form.stateMachine.nodeActions } },
+        form: { ...form, stateMachine: result.form },
       });
       setSourceError(null);
     } else {

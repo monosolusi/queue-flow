@@ -81,6 +81,7 @@ import {
   DEFAULT_SOURCE_HANDLE,
   DEFAULT_TARGET_HANDLE,
   EDGE_ARROW_MARKER,
+  TERMINAL_EDGE_TYPE,
   isDuplicateTransition,
   rejectionMessageForConnection,
   type FlowEdge,
@@ -236,11 +237,17 @@ export function StateMachineWorkflow({
   // the wire form.
   const commit = useCallback(
     (nextNodes: FlowNode[], nextEdges: FlowEdge[]) => {
-      const { states, transitions, positions } = flowToGraph(nextNodes, nextEdges);
+      const { states, transitions, positions, terminalNodes } = flowToGraph(
+        nextNodes,
+        nextEdges,
+        value.terminalNodes,
+      );
       // `nodeActions` + `descriptions` are panel-only (not canvas-rendered), so
       // `flowToGraph` ignores them (like `mode`). Carry them from `value` so a
       // canvas commit preserves them across the `flowToGraph` round-trip —
-      // mirrors how `mode` is preserved from `value.mode` below.
+      // mirrors how `mode` is preserved from `value.mode` below. `terminalNodes`
+      // IS canvas-rendered → `flowToGraph` captures it (pinned markers → {x,y},
+      // auto markers → 'auto', absent markers preserved via `value.terminalNodes`).
       const form: StateMachineForm = {
         mode: value.mode,
         states,
@@ -248,14 +255,33 @@ export function StateMachineWorkflow({
         positions,
         nodeActions: value.nodeActions,
         descriptions: value.descriptions,
+        terminalNodes,
       };
-      const refreshed = withDescriptions(nextNodes, form);
+      // REBUILD the marker nodes from the form so auto markers re-attach to the
+      // (possibly moved) state bounds after a state drag — an auto marker's
+      // position derives from the real node bounds, which moved. State nodes
+      // stay from `nextNodes` (they carry the dragged positions + selection
+      // flags); the `selected` flag is carried onto rebuilt markers so a marker
+      // drag (which pins + selects) keeps its selection across the rebuild.
+      const rebuilt = formToFlowWithMarkers(form, {});
+      const selById = new Map(nextNodes.map((n) => [n.id, n.selected ?? false]));
+      const markerNodes = rebuilt.nodes
+        .filter((n) => n.type !== 'state')
+        .map((n) => ({ ...n, selected: selById.get(n.id) ?? n.selected }));
+      const stateNodes = nextNodes.filter((n) => n.type === 'state');
+      const refreshed = withDescriptions([...stateNodes, ...markerNodes], form);
+      // Transition edges keep `nextEdges` (preserves `sm-edge-N` ids + the
+      // `selected` flag — a label/route edit must not lose the selected-edge id
+      // or the panel closes mid-edit). Marker edges rebuild (re-route to the
+      // re-derived marker positions + topology).
+      const transEdges = nextEdges.filter((e) => e.type !== TERMINAL_EDGE_TYPE);
+      const rebuiltMarkerEdges = rebuilt.edges.filter((e) => e.type === TERMINAL_EDGE_TYPE);
       setNodes(refreshed);
-      setEdges(nextEdges);
+      setEdges([...transEdges, ...rebuiltMarkerEdges]);
       lastEmitted.current = graphSignature(form);
       onChange(form);
     },
-    [value.mode, value.nodeActions, value.descriptions, onChange],
+    [value.mode, value.nodeActions, value.descriptions, value.terminalNodes, onChange],
   );
 
   // Lift a FORM-ONLY edit (a node-action add/delete/edit touches no nodes/edges,
@@ -306,7 +332,19 @@ export function StateMachineWorkflow({
       if (draggedNodes.length === 0) return;
       const moved = new Map(draggedNodes.map((n) => [n.id, n.position]));
       const nextNodes = nodesRef.current.map((n) =>
-        moved.has(n.id) ? { ...n, position: moved.get(n.id)! } : n,
+        moved.has(n.id)
+          ? {
+              ...n,
+              position: moved.get(n.id)!,
+              // A dragged terminal marker pins at the drop position (it is no
+              // longer auto-derived). `commit` → `flowToGraph` reads `pinned`
+              // to capture the marker as `{x,y}` in `terminalNodes`, and the
+              // stamp via `commit` skips the re-seed so the marker stays where
+              // dropped (a non-stamping panel/drop terminal edit would re-seed
+              // and re-derive — correct for those, wrong for a drag).
+              ...(isTerminalNodeId(n.id) ? { pinned: true } : {}),
+            }
+          : n,
       );
       commit(nextNodes, edgesRef.current);
     },
@@ -583,6 +621,21 @@ export function StateMachineWorkflow({
         setNodes((prev) => withDescriptions(prev, next));
         lift(next);
       },
+      // Terminal marker (Start/End) handlers — NON-stamping (raw `onChange`,
+      // no `lastEmitted` stamp) so the sync effect re-seeds the canvas: a marker
+      // add/reset/delete must re-render the markers via `formToFlowWithMarkers`.
+      // The drag path is the exception — it stamps via `commit` (no re-seed, the
+      // marker stays where dropped). `key` is the fixed terminal key ('start' |
+      // 'end'), NOT a state name.
+      onResetTerminalAuto: (key) => {
+        onChange({ ...value, terminalNodes: { ...value.terminalNodes, [key]: 'auto' } });
+      },
+      onDeleteTerminal: (key) => {
+        onChange({ ...value, terminalNodes: { ...value.terminalNodes, [key]: 'hidden' } });
+      },
+      onDropTerminal: (key, position) => {
+        onChange({ ...value, terminalNodes: { ...value.terminalNodes, [key]: { x: position.x, y: position.y } } });
+      },
     }),
     [value, nodes, edges, commit, lift, selectedNodeId, selectedEdgeId, toast, mintEdgeId],
   );
@@ -672,6 +725,7 @@ export function StateMachineWorkflow({
             onNodeDragStop={onNodeDragStop}
             onSelectionChange={onSelectionChange}
             onDropPosition={addStateAt}
+            onDropTerminal={(key, position) => handlers.onDropTerminal(key, position)}
             handlers={handlers}
           />
         </ReactFlowProvider>
@@ -700,6 +754,36 @@ export function StateMachineWorkflow({
             >
               <StateIcon size={18} />
               <span>Status</span>
+            </div>
+            <div
+              className="sm-palette__item"
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData('application/reactflow', 'start');
+                e.dataTransfer.effectAllowed = 'move';
+              }}
+            >
+              <span className="sm-palette__glyph" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
+                  <path d="M8 5l12 7-12 7z" fill="currentColor" />
+                </svg>
+              </span>
+              <span>Mulai</span>
+            </div>
+            <div
+              className="sm-palette__item"
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData('application/reactflow', 'end');
+                e.dataTransfer.effectAllowed = 'move';
+              }}
+            >
+              <span className="sm-palette__glyph" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
+                  <rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor" />
+                </svg>
+              </span>
+              <span>Selesai</span>
             </div>
           </aside>
         ))}
@@ -737,6 +821,7 @@ function FlowCanvas({
   onNodeDragStop,
   onSelectionChange,
   onDropPosition,
+  onDropTerminal,
   handlers,
 }: {
   nodes: FlowNode[];
@@ -753,6 +838,9 @@ function FlowCanvas({
   onNodeDragStop: (event: unknown, node: Node, draggedNodes: Node[]) => void;
   onSelectionChange: (params: OnSelectionChangeParams) => void;
   onDropPosition: (position: { x: number; y: number }) => void;
+  /** Drop a Start/End terminal marker from the palette at the flow position.
+   *  Non-stamping (re-seeds the canvas via the sync effect). */
+  onDropTerminal: (key: 'start' | 'end', position: { x: number; y: number }) => void;
   handlers: WorkflowHandlers;
 }): JSX.Element {
   const { screenToFlowPosition } = useReactFlow();
@@ -768,9 +856,12 @@ function FlowCanvas({
         onDrop={(e) => {
           e.preventDefault();
           const type = e.dataTransfer.getData('application/reactflow');
-          if (type !== 'state') return;
           const position = screenToFlowPosition({ x: e.clientX, y: e.clientY });
-          onDropPosition(position);
+          if (type === 'state') {
+            onDropPosition(position);
+          } else if (type === 'start' || type === 'end') {
+            onDropTerminal(type, position);
+          }
         }}
       >
         <ReactFlow

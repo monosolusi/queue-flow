@@ -206,6 +206,30 @@ export interface NodeActionDto {
  */
 export type NodeActionsDto = Record<string, NodeActionDto[]>;
 
+/**
+ * One terminal (Start/End) marker's persisted state. `'auto'` — derive the
+ * marker position from the real node bounds (the default; current UX).
+ * `{x,y}` — manager-pinned explicit position. `'hidden'` — manager deleted;
+ * marker omitted. Mirrors core-api's `TerminalNodeState` VO. The terminal EDGES
+ * stay auto-derived from topology (sources = in-degree 0, sinks = out-degree 0)
+ * — the manager controls marker PRESENCE + POSITION only, not edges.
+ */
+export type TerminalNodeStateDto = 'auto' | 'hidden' | { readonly x: number; readonly y: number };
+
+/**
+ * Persisted Start/End terminal-marker states. A fixed-shape `{ start, end }`
+ * (NOT keyed by state name, unlike `nodePositions`/`nodeActions` — the terminal
+ * ids `__start`/`__end` are reserved canvas markers, not state names, so the
+ * backend `nodePositions` cross-check would reject them → a dedicated field).
+ * Mirrors core-api's `TerminalNodes` VO + the `nodeActions` field-for-field
+ * precedent. Not change-gated for audit (an appearance concern, like
+ * {@link NodePositionsDto} / {@link NodeActionsDto}).
+ */
+export interface TerminalNodesDto {
+  readonly start: TerminalNodeStateDto;
+  readonly end: TerminalNodeStateDto;
+}
+
 /** How the kiosk produces a thermal-printer receipt. `chrome` prints via the
  *  browser's print dialog (the default — zero setup, uses the manager's
  *  Chrome print settings); `network-escpos` streams raw ESC/POS bytes over TCP
@@ -309,6 +333,13 @@ export interface SystemConfigurationDto {
    *  `toForm` keeps a defensive `?? {}` coercion (belt-and-suspenders, same as
    *  `nodePositions`). */
   readonly nodeActions: NodeActionsDto;
+  /** Start/End terminal-marker states (appearance concern, not change-gated).
+   *  Always present — the backend defaults to {@link DEFAULT_TERMINAL_NODES}
+   *  (auto/auto) so a store that never touches the markers keeps the existing
+   *  auto-derived entry/exit affordances (zero visual regression); `toForm`
+   *  keeps a defensive `?? DEFAULT_TERMINAL_NODES` coercion (belt-and-suspenders,
+   *  same as `nodeActions`). */
+  readonly terminalNodes: TerminalNodesDto;
   /** Printer configuration for the kiosk receipt printer. Always present — the
    *  backend defaults to {@link DEFAULT_PRINTER_CONFIGURATION} so a store that
    *  never configures the printer keeps the chrome default (zero behavior
@@ -367,6 +398,11 @@ export interface SaveSystemConfigurationPayload {
    *  is the source of truth for node actions now and always sends the map,
    *  built by `toNodeActionsDto`; `{}` when no node-level actions were added). */
   readonly nodeActions: NodeActionsDto;
+  /** Start/End terminal-marker states (REQUIRED on the PUT — the client is the
+   *  source of truth for terminal markers now and always sends the map, built
+   *  by `toTerminalNodesDto`; `auto/auto` when the canvas was never
+   *  customized). */
+  readonly terminalNodes: TerminalNodesDto;
   /** Printer configuration — REQUIRED on the PUT (the client is the source of
    *  truth for the printer mode + settings); the dedicated `/printer-config`
    *  page edits it, every other full-save site passes it through unchanged. */
@@ -392,6 +428,10 @@ export interface SaveSystemConfigurationResult {
    *  ignores the result body and re-GETs, so this is not load-bearing; kept
    *  for contract completeness (mirrors `nodePositions`). */
   readonly nodeActions: NodeActionsDto;
+  /** Always echoed by the backend (mirrors the persisted map). The save path
+   *  ignores the result body and re-GETs, so this is not load-bearing; kept for
+   *  contract completeness (mirrors `nodeActions`). */
+  readonly terminalNodes: TerminalNodesDto;
   /** Always echoed by the backend (the save result mirrors the persisted config).
    *  The save path ignores the result body and re-GETs, so this is not
    *  load-bearing; kept for contract completeness (mirrors `nodePositions`). */
@@ -457,6 +497,14 @@ export const DEFAULT_NODE_POSITIONS: NodePositionsDto = {};
  * {@link DEFAULT_NODE_POSITIONS}).
  */
 export const DEFAULT_NODE_ACTIONS: NodeActionsDto = {};
+
+/**
+ * Auto/auto terminal markers — "derive both Start and End from the real node
+ * bounds". Matches the backend `TerminalNodes.DEFAULT` so a store that never
+ * touches the markers keeps the existing auto-derived entry/exit affordances
+ * (zero visual regression, mirroring {@link DEFAULT_NODE_ACTIONS}).
+ */
+export const DEFAULT_TERMINAL_NODES: TerminalNodesDto = { start: 'auto', end: 'auto' };
 
 /**
  * The default printer configuration — chrome (browser print dialog), 80mm
