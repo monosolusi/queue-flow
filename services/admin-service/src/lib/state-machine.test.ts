@@ -8,11 +8,13 @@ import {
   canonicalStatusOf,
   defaultStateMachineForm,
   describeState,
+  descriptionFor,
   graphSignature,
   isDefaultGraph,
   mergeEdgeSides,
   missingCanonicalStates,
   removeState,
+  updateStateDescription,
   toEdgeRoutingLayoutDto,
   toNodeActionsDto,
   toNodePositionsDto,
@@ -34,10 +36,13 @@ describe('toStateMachineDto (wire-boundary mapping)', () => {
       mode: 'custom',
       states: ['WAITING', 'CALLING'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' }],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     expect(toStateMachineDto(form)).toEqual({
       states: ['WAITING', 'CALLING'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' }],
+      // Descriptions travel INSIDE the stateMachine object (full-stack slice);
+      // an empty map round-trips as `{}` (the wire payload stays lean).
+      descriptions: {},
     });
   });
 
@@ -51,10 +56,13 @@ describe('toStateMachineDto (wire-boundary mapping)', () => {
       mode: 'default',
       states: ['WAITING', 'BOGUS'],
       transitions: [{ from: 'WAITING', to: 'BOGUS', actionLabel: 'Setengah Jadi' }],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     expect(toStateMachineDto(abandoned)).toEqual({
       states: [...DEFAULT_STATE_MACHINE.states],
       transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
+      // Default mode force-resets the graph AND the descriptions map (the
+      // PRD §7 default machine carries no per-state description overrides).
+      descriptions: {},
     });
   });
 
@@ -71,7 +79,7 @@ describe('validateCustomStateMachine (Indonesian, no internal terms)', () => {
   });
 
   it('reports an empty schema in manager-facing Indonesian', () => {
-    const errors = validateCustomStateMachine({ mode: 'custom', states: [], transitions: [], positions: {}, nodeActions: {} });
+    const errors = validateCustomStateMachine({ mode: 'custom', states: [], transitions: [], positions: {}, nodeActions: {}, descriptions: {} });
     expect(errors).toContain('Alur status harus memiliki minimal satu status.');
     expect(errors).toContain('Alur status harus memiliki minimal satu transisi.');
     // "state machine" / "state" is developer vocabulary — the editor is on
@@ -84,7 +92,7 @@ describe('validateCustomStateMachine (Indonesian, no internal terms)', () => {
       mode: 'custom',
       states: ['WAITING', 'WAITING', ' '],
       transitions: [{ from: 'WAITING', to: 'GHOST', actionLabel: 'Panggil' }],
-      positions: {}, nodeActions: {},    });
+      positions: {}, nodeActions: {}, descriptions: {},    });
     expect(errors).toContain("Status 'WAITING' duplikat.");
     expect(errors).toContain('Nama status tidak boleh kosong.');
     expect(errors).toContain("Transisi 'WAITING'→'GHOST': status 'GHOST' tidak dikenal.");
@@ -99,7 +107,7 @@ describe('validateCustomStateMachine (Indonesian, no internal terms)', () => {
         { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' },
         { from: 'WAITING', to: 'CALLING', actionLabel: '' },
       ],
-      positions: {}, nodeActions: {},    });
+      positions: {}, nodeActions: {}, descriptions: {},    });
     expect(errors).toContain("Transisi 'WAITING'→'CALLING' duplikat.");
     expect(errors).toContain('Label aksi tidak boleh kosong.');
   });
@@ -112,7 +120,7 @@ describe('validateCustomStateMachine (Indonesian, no internal terms)', () => {
       mode: 'custom',
       states: ['WAITING', 'CALLING'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' }],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     expect(validateCustomStateMachine(noCompleted)).toEqual([]);
     expect(missingCanonicalStates(noCompleted).length).toBeGreaterThan(0);
   });
@@ -127,7 +135,7 @@ describe('missingCanonicalStates (non-blocking dropped-standard-status warning)'
     // A `mode: 'default'` form is force-reset to the standard graph at the wire
     // boundary, so its live `states` can never be what gets saved.
     expect(
-      missingCanonicalStates({ mode: 'default', states: [], transitions: [], positions: {}, nodeActions: {} }),
+      missingCanonicalStates({ mode: 'default', states: [], transitions: [], positions: {}, nodeActions: {}, descriptions: {} }),
     ).toEqual([]);
   });
 
@@ -136,7 +144,7 @@ describe('missingCanonicalStates (non-blocking dropped-standard-status warning)'
       mode: 'custom',
       states: ['WAITING', 'CALLING'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' }],
-      positions: {}, nodeActions: {},    });
+      positions: {}, nodeActions: {}, descriptions: {},    });
     expect(missing.map((m) => m.state)).toEqual(['SERVING', 'SKIPPED', 'COMPLETED']);
     // The consequence names the caller BUTTON / the report metric, never the
     // backend mechanism — the reader is a non-technical store manager.
@@ -153,7 +161,7 @@ describe('missingCanonicalStates (non-blocking dropped-standard-status warning)'
       mode: 'custom',
       states: [' WAITING ', 'CALLING', 'SERVING', 'SKIPPED', 'COMPLETED'],
       transitions: [{ from: 'CALLING', to: 'SERVING', actionLabel: 'Mulai Melayani' }],
-      positions: {}, nodeActions: {},    });
+      positions: {}, nodeActions: {}, descriptions: {},    });
     expect(padded).toEqual([]);
   });
 });
@@ -176,7 +184,7 @@ describe('describeState (client-side description derivation)', () => {
         { from: 'ONHOLD', to: 'WAITING', actionLabel: 'Kembali' },
         { from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut' },
       ],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     expect(describeState(form, 'ONHOLD')).toBe('2 transisi keluar');
   });
 
@@ -185,7 +193,7 @@ describe('describeState (client-side description derivation)', () => {
       mode: 'custom',
       states: ['WAITING', 'ONHOLD'],
       transitions: [{ from: 'WAITING', to: 'ONHOLD', actionLabel: 'Tahan' }],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     // ONHOLD has no outgoing transition (only incoming) — the 0-outgoing branch.
     expect(describeState(form, 'ONHOLD')).toBe('Status kustom');
   });
@@ -198,19 +206,23 @@ describe('describeState (client-side description derivation)', () => {
     expect(describeState(form, 'CALLING')).toBe('Sedang dipanggil ke counter');
   });
 
-  it('the description is never serialized (wire contract unchanged)', () => {
-    // `describeState` is a pure client-side helper; it adds NO field to the
-    // wire form. `toStateMachineDto` strips `mode` and emits `{ states,
-    // transitions }` — no `description` key.
+  it('the derived description is never serialized as a top-level `description` key (descriptions travel inside stateMachine)', () => {
+    // `describeState` is a pure client-side helper; it adds NO top-level
+    // `description` field to the wire form. Per-state description OVERRIDES
+    // travel INSIDE the `stateMachine` object as `descriptions` (a full-stack
+    // vertical slice), never as a top-level `description` key. The derived
+    // fallback copy is never serialized at all.
     const form: StateMachineForm = {
       mode: 'custom',
       states: ['WAITING', 'ONHOLD'],
       transitions: [{ from: 'WAITING', to: 'ONHOLD', actionLabel: 'Tahan' }],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     describeState(form, 'ONHOLD'); // derive (no-op on the wire shape)
     const dto = toStateMachineDto(form);
     expect((dto as unknown as Record<string, unknown>).description).toBeUndefined();
-    expect(Object.keys(dto).sort()).toEqual(['states', 'transitions']);
+    // The wire shape is `{ states, transitions, descriptions }` — descriptions
+    // live inside the stateMachine payload, the derived copy is NOT serialized.
+    expect(Object.keys(dto).sort()).toEqual(['descriptions', 'states', 'transitions']);
   });
 });
 
@@ -253,7 +265,7 @@ describe('connection sides (sourceSide / targetSide)', () => {
       transitions: [
         { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', sourceSide: 'bottom', targetSide: 'top' },
       ],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     const dto = toStateMachineDto(form);
     expect(dto.transitions).toEqual([{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }]);
     expect(Object.keys(dto.transitions[0] as object).sort()).toEqual(['actionLabel', 'from', 'to']);
@@ -267,7 +279,7 @@ describe('connection sides (sourceSide / targetSide)', () => {
         { from: 'A', to: 'B', actionLabel: 'go' }, // default → omitted
         { from: 'B', to: 'C', actionLabel: 'up', sourceSide: 'bottom', targetSide: 'top' },
       ],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     expect(toEdgeRoutingLayoutDto(form)).toEqual({
       'B->C': { sourceSide: 'bottom', targetSide: 'top' },
     });
@@ -283,7 +295,7 @@ describe('connection sides (sourceSide / targetSide)', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
-      positions: { A: { x: 10, y: 20 }, B: { x: 30, y: 40 } }, nodeActions: {},    };
+      positions: { A: { x: 10, y: 20 }, B: { x: 30, y: 40 } }, nodeActions: {}, descriptions: {},    };
     expect(toNodePositionsDto(form)).toEqual({
       A: { x: 10, y: 20 },
       B: { x: 30, y: 40 },
@@ -306,12 +318,12 @@ describe('connection sides (sourceSide / targetSide)', () => {
       transitions: [
         { from: 'A', to: 'B', actionLabel: 'go', sourceSide: DEFAULT_SOURCE_SIDE, targetSide: DEFAULT_TARGET_SIDE },
       ],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     const absent: StateMachineForm = {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     expect(graphSignature(explicit)).toBe(graphSignature(absent));
   });
 
@@ -320,12 +332,12 @@ describe('connection sides (sourceSide / targetSide)', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go', sourceSide: 'bottom', targetSide: 'top' }],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     const horizontal: StateMachineForm = {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     expect(graphSignature(vertical)).not.toBe(graphSignature(horizontal));
   });
 
@@ -338,12 +350,12 @@ describe('connection sides (sourceSide / targetSide)', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
-      positions: { A: { x: 10, y: 20 } }, nodeActions: {},    };
+      positions: { A: { x: 10, y: 20 } }, nodeActions: {}, descriptions: {},    };
     const moved: StateMachineForm = {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
-      positions: { A: { x: 99, y: 20 } }, nodeActions: {},    };
+      positions: { A: { x: 99, y: 20 } }, nodeActions: {}, descriptions: {},    };
     expect(graphSignature(positioned)).not.toBe(graphSignature(moved));
   });
 
@@ -388,7 +400,7 @@ describe('connection sides (sourceSide / targetSide)', () => {
       transitions: [
         { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', sourceSide: 'bottom', targetSide: 'top' },
       ],
-      positions: { WAITING: { x: 10, y: 20 }, CALLING: { x: 30, y: 40 } }, nodeActions: {},    };
+      positions: { WAITING: { x: 10, y: 20 }, CALLING: { x: 30, y: 40 } }, nodeActions: {}, descriptions: {},    };
     const renamed = updateState(form, 0, 'PENDING');
     expect(renamed.transitions[0].from).toBe('PENDING');
     expect(renamed.transitions[0].sourceSide).toBe('bottom');
@@ -403,7 +415,7 @@ describe('connection sides (sourceSide / targetSide)', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go', sourceSide: 'bottom', targetSide: 'top' }],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     const patched = updateTransition(form, 0, { actionLabel: 'go fast' });
     expect(patched.transitions[0].actionLabel).toBe('go fast');
     expect(patched.transitions[0].sourceSide).toBe('bottom');
@@ -415,7 +427,7 @@ describe('connection sides (sourceSide / targetSide)', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     const added = addTransition(form);
     expect(added.transitions[1].sourceSide).toBeUndefined();
     expect(added.transitions[1].targetSide).toBeUndefined();
@@ -436,6 +448,7 @@ describe('node actions (Kaleo-style node-level, panel-only)', () => {
           { executionType: 'ON_EXIT', type: 'UPDATE_STATUS', value: 'A' },
         ],
       },
+      descriptions: {},
     };
     expect(toNodeActionsDto(form)).toEqual({
       A: [{ executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'B' }],
@@ -463,6 +476,7 @@ describe('node actions (Kaleo-style node-level, panel-only)', () => {
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
       positions: {},
       nodeActions: {},
+      descriptions: {},
     };
     const withActions: StateMachineForm = {
       ...base,
@@ -482,6 +496,7 @@ describe('node actions (Kaleo-style node-level, panel-only)', () => {
       nodeActions: {
         WAITING: [{ executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'CALLING' }],
       },
+      descriptions: {},
     };
     const renamed = updateState(form, 0, 'PENDING');
     expect(renamed.nodeActions.PENDING).toEqual([
@@ -500,12 +515,81 @@ describe('node actions (Kaleo-style node-level, panel-only)', () => {
         A: [{ executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'B' }],
         B: [{ executionType: 'ON_EXIT', type: 'UPDATE_STATUS', value: 'A' }],
       },
+      descriptions: {},
     };
     const removed = removeState(form, 0);
     expect(removed.nodeActions.A).toBeUndefined();
     expect(removed.nodeActions.B).toEqual([
       { executionType: 'ON_EXIT', type: 'UPDATE_STATUS', value: 'A' },
     ]);
+  });
+});
+
+describe('descriptionFor / updateStateDescription (per-state override + fallback)', () => {
+  function formWith(descriptions: Record<string, string>): StateMachineForm {
+    return { ...defaultStateMachineForm(), mode: 'custom', descriptions };
+  }
+
+  it('descriptionFor returns the saved override when present (non-empty)', () => {
+    const form = formWith({ WAITING: 'Antrian dimulai di sini' });
+    expect(descriptionFor(form, 'WAITING')).toBe('Antrian dimulai di sini');
+  });
+
+  it('descriptionFor falls back to describeState when the override is absent', () => {
+    const form = formWith({});
+    // WAITING is a canonical status → the canonical description is the fallback.
+    expect(descriptionFor(form, 'WAITING')).toBe(describeState(form, 'WAITING'));
+    expect(descriptionFor(form, 'WAITING')).toBe(CANONICAL_STATE_DESCRIPTIONS.WAITING);
+  });
+
+  it('descriptionFor falls back to describeState when the override is empty/whitespace', () => {
+    // An empty/whitespace saved value is treated as absent (the key is deleted
+    // by updateStateDescription, but a corrupt prefill could leave a blank).
+    const form = formWith({ WAITING: '   ' });
+    expect(descriptionFor(form, 'WAITING')).toBe(describeState(form, 'WAITING'));
+  });
+
+  it('updateStateDescription sets a non-empty value', () => {
+    const form = formWith({});
+    const next = updateStateDescription(form, 'WAITING', 'Antrian dimulai di sini');
+    expect(next.descriptions.WAITING).toBe('Antrian dimulai di sini');
+  });
+
+  it('updateStateDescription deletes the key when the value is empty/whitespace', () => {
+    const form = formWith({ WAITING: 'Antrian dimulai di sini' });
+    const next = updateStateDescription(form, 'WAITING', '');
+    expect(next.descriptions.WAITING).toBeUndefined();
+    // Whitespace-only also clears.
+    const next2 = updateStateDescription(form, 'WAITING', '   ');
+    expect(next2.descriptions.WAITING).toBeUndefined();
+  });
+
+  it('updateState (rename) moves the descriptions entry to the new key + drops the old', () => {
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['WAITING', 'CALLING'],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
+      positions: { WAITING: { x: 10, y: 20 } },
+      nodeActions: {},
+      descriptions: { WAITING: 'Antrian dimulai di sini' },
+    };
+    const renamed = updateState(form, 0, 'PENDING');
+    expect(renamed.descriptions.PENDING).toBe('Antrian dimulai di sini');
+    expect(renamed.descriptions.WAITING).toBeUndefined();
+  });
+
+  it('removeState drops the descriptions entry for the removed state', () => {
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+      positions: { A: { x: 10, y: 20 }, B: { x: 30, y: 40 } },
+      nodeActions: {},
+      descriptions: { A: 'Status A', B: 'Status B' },
+    };
+    const removed = removeState(form, 0);
+    expect(removed.descriptions.A).toBeUndefined();
+    expect(removed.descriptions.B).toBe('Status B');
   });
 });
 
@@ -543,7 +627,7 @@ describe('mergeEdgeSides (wire map → form transitions)', () => {
         { from: 'A', to: 'B', actionLabel: 'go' }, // default
         { from: 'B', to: 'C', actionLabel: 'up', sourceSide: 'bottom', targetSide: 'top' }, // vertical
       ],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     const wire = toEdgeRoutingLayoutDto(form);
     const merged = mergeEdgeSides(
       form.transitions.map((t) => ({ from: t.from, to: t.to, actionLabel: t.actionLabel })),

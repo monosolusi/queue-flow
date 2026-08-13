@@ -324,6 +324,7 @@ describe('AlurStatusDesigner (dedicated /config/alur-status page)', () => {
       stateMachine: {
         states: ['WAITING', 'CALLING'],
         transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' }],
+        descriptions: {},
       },
     };
     const { api, save } = makeApi(trimmedFlow);

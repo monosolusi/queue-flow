@@ -122,7 +122,7 @@ describe('formToFlow', () => {
           ? { ...t, sourceSide: 'bottom' as const, targetSide: 'top' as const }
           : { ...t },
       ),
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     const { edges } = formToFlow(form, {});
     const waitingCalling = edges.find((e) => e.source === 'WAITING' && e.target === 'CALLING')!;
     expect(waitingCalling.sourceHandle).toBe(HANDLE_IDS.bottom);
@@ -149,7 +149,7 @@ describe('formToFlow', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go', sourceSide: 'bottom' }],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     const { edges } = formToFlow(form, {});
     expect(edges[0].sourceHandle).toBe(HANDLE_IDS.bottom);
     expect(edges[0].targetHandle).toBe(DEFAULT_TARGET_HANDLE);
@@ -384,7 +384,7 @@ describe('flowToGraph', () => {
         { from: 'ONHOLD', to: 'WAITING', actionLabel: 'Kembali' },
         { from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut' },
       ],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     const nodes: import('./state-machine-flow').FlowNode[] = [
       { id: 'WAITING', type: 'state', position: { x: 0, y: 0 }, data: { name: 'WAITING', description: '' } },
       { id: 'ONHOLD', type: 'state', position: { x: 0, y: 0 }, data: { name: 'ONHOLD', description: '' } },
@@ -785,7 +785,7 @@ describe('side ↔ handle mappers', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go', sourceSide: 'bottom', targetSide: 'top' }],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     const { nodes, edges } = formToFlow(form, {});
     const { transitions } = flowToGraph(nodes, edges);
     expect(transitions[0].sourceSide).toBe('bottom');

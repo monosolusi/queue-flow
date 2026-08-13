@@ -35,6 +35,7 @@ import {
 } from '../../../domain/store-config/value-objects/printer-configuration';
 import { StateMachine } from '../../../domain/store-config/state-machine';
 import { StateSchema } from '../../../domain/store-config/value-objects/state-schema';
+import { StateDescriptions } from '../../../domain/store-config/value-objects/state-descriptions';
 import { StateTransitionRule } from '../../../domain/store-config/value-objects/state-transition-rule';
 import { Identifier } from '../../../domain/shared';
 import { withDbClient } from './transaction-context';
@@ -43,7 +44,14 @@ interface ConfigRow {
   id: string;
   store_name: string;
   is_initial_setup_completed: boolean;
-  state_machine: { states: string[]; transitions: { from: string; to: string; actionLabel: string }[] };
+  state_machine: {
+    states: string[];
+    transitions: { from: string; to: string; actionLabel: string }[];
+    /** Per-state description overrides — lazy key (absent on pre-feature rows,
+     *  defaults to `{}`). Mirrors the `timezone`-in-`daily_reset_policy` lazy-
+     *  key pattern. */
+    descriptions?: Record<string, string>;
+  };
   daily_reset_policy: DailyResetPolicyProps;
   brand_color: string;
   service_themes: ServiceThemesMap | null;
@@ -121,6 +129,11 @@ function serializeStateMachine(sm: StateMachine) {
   return {
     states: [...sm.stateSchema.states],
     transitions: sm.transitions.map((t) => ({ from: t.from, to: t.to, actionLabel: t.actionLabel })),
+    // Per-state description overrides, materialized from the VO. Always written
+    // (the VO defaults to `{}` = no overrides) so the `descriptions` key appears
+    // lazily on the next save of a pre-feature row (mirrors the `timezone`-in-
+    // `daily_reset_policy` lazy-key pattern). No SQL migration needed.
+    descriptions: sm.stateDescriptions.toDto(),
   };
 }
 
@@ -133,6 +146,12 @@ function toConfig(row: ConfigRow): SystemConfiguration {
     stateMachine: new StateMachine(
       StateSchema.of(sm.states),
       sm.transitions.map((t) => StateTransitionRule.of(t.from, t.to, t.actionLabel)),
+      // Lazy-key backward-compat: a pre-feature row's `state_machine` JSONB
+      // carries no `descriptions` key, so `sm.descriptions` is `undefined`.
+      // `StateDescriptions.of(undefined)` recovers to the empty default (derive
+      // from canonical copy), mirroring the `timezone`-in-`daily_reset_policy`
+      // fallback. No SQL migration — the key appears lazily on the next save.
+      StateDescriptions.of(sm.descriptions ?? undefined),
     ),
     dailyResetPolicy: deserializePolicy(row.daily_reset_policy),
     // Defensive `?? BrandColor.DEFAULT.value` for the boot window between a code

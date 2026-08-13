@@ -309,6 +309,7 @@ describe('WizardPage (FR-WZD-02..06)', () => {
           { from: 'SERVING', to: 'PREPARING', actionLabel: 'Siapkan' },
           { from: 'PREPARING', to: 'COMPLETED', actionLabel: 'Selesai Layan' },
         ],
+        descriptions: {},
       },
     };
     const { api } = makeApi(customConfig);

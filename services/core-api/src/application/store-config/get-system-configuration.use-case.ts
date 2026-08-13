@@ -25,6 +25,16 @@ export interface StateMachineDto {
     readonly to: string;
     readonly actionLabel: string;
   }[];
+  /**
+   * Per-state editable descriptions (intrinsic per-state metadata, part of the
+   * state-machine definition). Always present on the read projection — the VO
+   * defaults to `{}` (no overrides — derive from canonical copy) when unset.
+   * Travels INSIDE the `stateMachine` object (NOT a top-level field), so the
+   * admin/wizard full-save passthrough sites carry it automatically (they pass
+   * `stateMachine` through). ISP: caller/tv/kiosk DTOs do NOT widen to include
+   * this (TS structural typing ignores the extra response field).
+   */
+  readonly descriptions: Record<string, string>;
 }
 
 /** A category projected for the config read surface. */
@@ -92,6 +102,10 @@ export function projectStateMachine(sm: StateMachine): StateMachineDto {
       to: t.to,
       actionLabel: t.actionLabel,
     })),
+    // Materialize the per-state description overrides from the VO. `{}` (no
+    // overrides) is the default — the admin client derives the canonical copy
+    // as the fallback when no saved description is present.
+    descriptions: sm.stateDescriptions.toDto(),
   };
 }
 

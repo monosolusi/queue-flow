@@ -126,6 +126,55 @@
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
+/* Sub-view back button ("Kembali ke status") — returns from a "Transisi keluar"
+   / "Aksi" sub-view to the overview. Same affordance as the overview back
+   button, distinct semantics (it does NOT clear the canvas selection). */
+.sm-properties__back--sub {
+  margin-bottom: 0.4rem;
+}
+/* Nav cards — drill into the "Transisi keluar" / "Aksi" sub-views. Full-width
+   buttons with a row layout (label + count) so the manager sees the section's
+   item count at a glance. ≥44px touch target; theme-aware via tokens. */
+.sm-properties__nav-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-height: 44px;
+  margin-top: 0.4rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+.sm-properties__nav-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.sm-properties__nav-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.sm-properties__nav-label {
+  color: var(--text);
+}
+.sm-properties__nav-count {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+/* Editable description <textarea> — mirrors the input styling, with vertical
+   resize disabled so the panel layout stays stable. */
+.sm-properties__textarea {
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.35;
+}
 .sm-properties__route {
   margin: 0;
   color: var(--text-muted);

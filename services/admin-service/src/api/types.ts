@@ -112,6 +112,18 @@ export interface StateTransitionDto {
 export interface StateMachineDto {
   readonly states: readonly string[];
   readonly transitions: readonly StateTransitionDto[];
+  /**
+   * Per-state editable descriptions (intrinsic per-state metadata, part of the
+   * state-machine definition). Travels INSIDE the `stateMachine` object (NOT a
+   * top-level field), so `REQUIRED_CONFIG_FIELDS` needs no new entry and the
+   * full-save passthrough sites (PrinterConfigPage/TvLayoutPage/wizard) need no
+   * new passthrough — they already pass `stateMachine` through. `{}` means "no
+   * per-state overrides — derive from the canonical copy / outgoing-transition
+   * count" (the {@link DEFAULT_STATE_MACHINE} default). Always present on the
+   * read projection — the backend defaults to `{}` when unset (lazy-key
+   * backward-compat, mirroring the `timezone`-in-`daily_reset_policy` pattern).
+   */
+  readonly descriptions: Record<string, string>;
 }
 
 /**
@@ -409,6 +421,9 @@ export const DEFAULT_STATE_MACHINE: StateMachineDto = {
     { from: 'SKIPPED', to: 'CALLING', actionLabel: 'Panggil Ulang' },
     { from: 'SERVING', to: 'COMPLETED', actionLabel: 'Selesai Layan' },
   ],
+  // No per-state description overrides — the canonical copy (describeState) is
+  // the fallback for each of the 5 PRD §7 default statuses. `{}` = derive.
+  descriptions: {},
 };
 
 export const DEFAULT_DAILY_RESET: DailyResetPolicyDto = {
