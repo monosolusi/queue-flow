@@ -49,6 +49,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Background,
+  ConnectionMode,
   Controls,
   ReactFlow,
   ReactFlowProvider,
@@ -761,19 +762,31 @@ function FlowCanvas({
           nodesDraggable={isCustom}
           nodesConnectable={isCustom}
           elementsSelectable={isCustom}
+          connectionMode={ConnectionMode.Loose}
           fitView
           deleteKeyCode={null}
-          // Arrow direction = drag direction (manager feedback "panah sesuai
-          // arah tarikan"). The fix lives in `StateNode` (StateMachineWorkflowNodes):
-          // its four `target` handles are DROP-ONLY via `isConnectableStart={false}`,
-          // so every drag starts at a `source` handle and the arrow always points
-          // where the manager dropped. React Flow assigns source/target by the
-          // START handle's TYPE (not by drag direction or a connection-mode toggle),
-          // so `connectionMode` is left at the strict default — it keeps the
-          // directed-edge contract (a source-start drag may only land on a target
-          // handle, which React Flow highlights as the valid drop target). See the
-          // `StateNode` JSDoc for the full mechanism. CANVAS-ONLY — never reaches
-          // the wire Transition.
+          // Loose connection mode so a drag started at a `source` handle may LAND
+          // on ANY handle of another node — including the other `source` handle on
+          // the same side (manager feedback: "ada 2 titik di atas dan 2 titik di
+          // tiap sisi, kenapa yang bisa dihubungkan hanya sisi tertentu meski sisi
+          // itu kosong?"). Root cause: each side carries one `source` + one
+          // `target` handle; React Flow picks the handle under the cursor as the
+          // drop target (XYHandle.isValidHandle), and in the Strict default a
+          // source-start drag may only END on a target-typed handle — so when the
+          // closest handle was a `source` the drop was rejected and the whole side
+          // read unconnectable. Loose mode relaxes that to "any handle but the one
+          // the drag started at" (XYHandle strict-vs-loose validity branch), so
+          // every side accepts a drop. CANVAS-ONLY — never reaches the wire
+          // Transition.
+          //
+          // Arrow direction = drag direction is preserved (manager feedback "panah
+          // sesuai arah tarikan"): React Flow keys the edge's source/target on the
+          // START handle's TYPE (XYHandle.getHandleParams: `isTarget = fromType ===
+          // 'target'`), NOT on connection mode — so starting from a `target` handle
+          // would reverse the arrow in ANY mode. `StateNode` keeps the four `target`
+          // handles DROP-ONLY via `isConnectableStart={false}`, so no drag ever
+          // starts from a target handle and the arrow always points where the
+          // manager dropped. See the `StateNode` JSDoc for the full mechanism.
           // Hide the React Flow attribution badge: the link points to
           // reactflow.dev (unreachable on the offline LAN, NFR-REL-01) and would
           // confuse a non-technical manager. The MIT license does not require
