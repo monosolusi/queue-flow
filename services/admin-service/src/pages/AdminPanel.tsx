@@ -1,5 +1,4 @@
-import { useId, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useRef, useState } from 'react';
 import type {
   DailyResetMode,
   ServiceSurface,
@@ -24,8 +23,7 @@ import {
   updateCategory,
   updateRouting,
 } from './admin-config/form';
-import { DEFAULT_SECTION, type SectionId } from './admin-config/config-sections';
-import { ConfigSectionNav } from './admin-config/ConfigSectionNav';
+import type { SectionId } from './admin-config/config-sections';
 import { useConfigDraft } from './admin-config/config-draft-context';
 import { computeFormValidity } from './admin-config/validity';
 
@@ -45,21 +43,21 @@ function describedBy(
 
 /**
  * The operational configuration panel (FR-ADM-01 / QUE-24). After first-run
- * setup the manager edits every operational area here — store name, state
- * machine, categories, counter routing, the daily-reset policy, and the brand
- * color — without re-running the guided wizard. The wizard is first-run only
- * (gated by {@link WizardGuard}), so the store-name + state-machine editing
- * that used to live only in the wizard now lives here too (no functionality
- * lost). The state-machine EDITOR moved to a dedicated full-page designer at
- * `/config/alur-status` (large canvas + JSON source view — the inline diagram
- * was too small per manager feedback); this section now shows a live-ticket
- * warning, a summary, and a "Lihat Diagram" link to that designer. The designer
- * edits the SAME draft this panel does (see below), so the two ride one save.
+ * setup the manager edits every operational area here — store name, categories,
+ * counter routing, the daily-reset policy, and the brand color — without
+ * re-running the guided wizard. The wizard is first-run only (gated by
+ * {@link WizardGuard}), so the store-name editing that used to live only in the
+ * wizard now lives here too (no functionality lost). The state-machine EDITOR
+ * is a dedicated full-page designer at `/config/alur-status` (large canvas +
+ * XML source view — the inline diagram was too small per manager feedback); it
+ * is NOT an `AdminPanel` section — it is a sibling route under the same
+ * `ConfigDraftProvider`, editing the SAME draft (see below), so the two ride
+ * one save.
  *
  * The panel is a thin editor over the existing config save surface: it reads
  * the shared mutable config draft from {@link useConfigDraft} (the
  * `/config`-route {@link ConfigDraftProvider}), lets the manager edit the
- * in-scope sections, and the provider PUTs the full payload back
+ * in-scope section, and the provider PUTs the full payload back
  * (`PUT /api/system/config`) — mapping the form to the wire shape through the
  * shared `toStateMachineDto`, which strips the client-only `stateMachine.mode`
  * preset and force-resets the default graph exactly as the wizard's finalize
@@ -69,39 +67,37 @@ function describedBy(
  * are mapped to codes on load (the PUT expects codes). The panel consumes only
  * `IAdminApi` (via the provider — ISP) and owns no realtime/WS surface (SRP).
  *
- * Because it is now the ONLY post-setup editor, it also carries the two safety
- * rails the wizard used to own alone: the degenerate-routing guard (`routingValid`
- * — an all-unassigned matrix is unsavable) and the live-ticket warning on the
- * state-machine section (removing a status a live ticket occupies strands it).
+ * Because it is now the ONLY post-setup editor, it also carries the safety
+ * rail the wizard used to own alone: the degenerate-routing guard
+ * (`routingValid` — an all-unassigned matrix is unsavable). The live-ticket
+ * warning for the state machine lives on the designer now (it is the only
+ * state-machine surface).
  *
  * The draft is owned by the {@link ConfigDraftProvider} (the `/config` route
  * element rendering `<Outlet/>`), not this panel: the provider stays mounted
- * across `/config ↔ /config/alur-status`, so the draft + a cross-section edit
- * ride ONE full-payload save and navigation between the panel and the designer
- * loses no in-progress edits. The provider keeps its OWN config read rather than
- * consuming the shared `SystemConfigProvider` snapshot (a mutable draft must not
- * be clobbered by a `refresh()`), and calls the shared `refresh()` after a
- * successful save so app-wide chrome (the shell's sidebar store name) reflects
- * the new configuration without a page reload. Per-section validity
- * (`sectionValidity` / `wholeFormValid` / `smErrors` / …) is computed once from
- * the shared form by the pure {@link computeFormValidity} helper, shared with
- * the designer so both surfaces agree on the save-gate + nav badges (DRY).
+ * across all `/config/*` children, so the draft + a cross-section edit ride
+ * ONE full-payload save and navigation between the sections (and the designer)
+ * loses no in-progress edits. The provider keeps its OWN config read rather
+ * than consuming the shared `SystemConfigProvider` snapshot (a mutable draft
+ * must not be clobbered by a `refresh()`), and calls the shared `refresh()`
+ * after a successful save so app-wide chrome (the shell's sidebar store name)
+ * reflects the new configuration without a page reload. Per-section validity
+ * (`sectionValidity` / `wholeFormValid` / `smErrors` / …) is computed once
+ * from the shared form by the pure {@link computeFormValidity} helper, shared
+ * with the designer so both surfaces agree on the save-gate (DRY).
  *
- * Section navigation: the panel renders one section at a time behind a left
- * in-content ARIA tablist (`ConfigSectionNav`) — the manager no longer
- * scrolls one long form. `activeSection` is a SEPARATE `useState` from
- * `PanelState`: the post-save reload replaces `PanelState`, so bundling would
- * snap the manager back to the default section on every save. The draft stays
- * centralized (all fields), so switching sections changes visibility only — a
- * manager can edit profile, switch to state-machine, edit, then save once and
- * both edits ride the one full-payload PUT. Each EDITABLE section renders its
- * own save button (`data-testid="admin-save"` stays unique — only the active
- * section renders); the `manual` section has no save (its operations are
- * separate POSTs), and the `state-machine` section has no save either — it is
- * a read-only summary + launcher whose edit+save lives on the designer page.
- * The full PUT requires a valid whole payload, so each section's save is
- * disabled unless the WHOLE form is valid, and the nav shows an error badge on
- * items whose own section is invalid.
+ * Section navigation: each section is a real route under `/config/*`
+ * (generalizing the `/config/alur-status` pattern — the in-content tablist was
+ * consolidated into the sidebar). This component receives the active section
+ * as a `section` prop (set by the route element in `App.tsx`) and renders only
+ * that section. The draft stays centralized (all fields), so switching routes
+ * changes visibility only — a manager can edit `/config/profil`, navigate to
+ * `/config/alur-status`, edit, then save once and both edits ride the one
+ * full-payload PUT. Each EDITABLE section renders its own save button
+ * (`data-testid="admin-save"` stays unique — only the mounted section
+ * renders); the `manual` section has no save (its operations are separate
+ * POSTs). The full PUT requires a valid whole payload, so each section's save
+ * is disabled unless the WHOLE form is valid.
  *
  * Save / reset / cleanup outcomes are announced through the app-wide toast
  * stack (`useToast`) — auto-dismissing for successes, sticky for errors. The
@@ -109,20 +105,17 @@ function describedBy(
  * messaging is reserved for page content (the config-load failure and every
  * `*-errors` validation list below).
  */
-export function AdminPanel() {
+export function AdminPanel({ section }: { section: SectionId }) {
   // The shared config draft (load/save/reload/retry) is owned by the
   // `/config`-route ConfigDraftProvider so this panel and the
   // `/config/alur-status` designer edit ONE draft and ride ONE full save.
   const { api, state, setState, save, submitting, retry } = useConfigDraft();
   const toast = useToast();
-  // The active in-content section. DELIBERATELY separate from the provider's
-  // `PanelState`: the post-save reload replaces `PanelState`, so bundling
-  // `activeSection` there would snap the manager back to the default section
-  // every time they saved. Separate state → saving routing keeps them on routing.
-  const [activeSection, setActiveSection] = useState<SectionId>(DEFAULT_SECTION);
-  // Shared `useId()` base so each nav tab's `aria-controls` resolves to the
-  // panel this component renders with the matching `${idBase}-panel-${id}` id.
-  const idBase = useId();
+  // The active section is now a route-driven prop (no in-content tablist), so
+  // there is no `activeSection` state to keep separate from `PanelState`. The
+  // route element sets this prop; the draft stays centralized, so a route
+  // switch changes visibility only — no edits lost.
+  const activeSection = section;
 
   // --- Manual override operations (FR-ADM-02 / QUE-25) ---
   // Manual daily-reset state + the synchronous in-flight guard (double-tap).
@@ -162,14 +155,15 @@ export function AdminPanel() {
 
   // Per-section validity bag — computed once from the shared form by the pure
   // `computeFormValidity` helper, shared with the `/config/alur-status` designer
-  // so both surfaces agree on the save-gate + nav badges (DRY — one computation,
-  // two consumers of the same draft). Each validator mirrors a wizard-step guard
+  // so both surfaces agree on the save-gate (DRY — one computation, two
+  // consumers of the same draft). Each validator mirrors a wizard-step guard
   // so the operational panel cannot save a value the backend would 400; see
-  // `validity.ts` for the per-field rationale. `PUT /api/system/config` is a FULL
-  // save — every section's save button sends the whole draft — so each section's
-  // save is disabled unless the WHOLE form is valid (`wholeFormValid`). The nav
-  // shows an error badge on the items whose own section is invalid so
-  // cross-section invalidity is visible wherever the manager is.
+  // `validity.ts` for the per-field rationale. `PUT /api/system/config` is a
+  // FULL save — every section's save button sends the whole draft — so each
+  // section's save is disabled unless the WHOLE form is valid (`wholeFormValid`).
+  // (The `smErrors` / `sectionValidity` fields the helper also produces are
+  // consumed by the designer; this panel only needs the per-section error
+  // surfaces + the whole-form gate.)
   const {
     storeNameError,
     brandColorErrors,
@@ -178,8 +172,6 @@ export function AdminPanel() {
     cronError,
     resetToError,
     routingValid,
-    smErrors,
-    sectionValidity,
     wholeFormValid,
   } = computeFormValidity(form);
 
@@ -236,13 +228,13 @@ export function AdminPanel() {
   }
 
   // One save button element, rendered at the foot of whichever EDITABLE section
-  // is active. Exactly one is in the DOM at a time (only the active section
-  // renders), so `data-testid="admin-save"` stays unique. The `manual` and
-  // `state-machine` sections do NOT render it: `manual` owns two separate POSTs,
-  // and `state-machine` is a read-only launcher (its save lives on the designer).
-  // The PUT is a FULL save — every section sends the whole draft — so the
-  // button is disabled unless the WHOLE form is valid, regardless of which
-  // section it sits on.
+  // is mounted. Exactly one is in the DOM at a time (only the route's section
+  // renders), so `data-testid="admin-save"` stays unique. The `manual` section
+  // does NOT render it — `manual` owns two separate POSTs. (The state-machine
+  // editor is not a section here; its save lives on the `/config/alur-status`
+  // designer, which shares the same draft + `admin-save` testid.) The PUT is a
+  // FULL save — every section sends the whole draft — so the button is disabled
+  // unless the WHOLE form is valid, regardless of which section it sits on.
   const saveButton = (
     <button
       type="button"
@@ -265,33 +257,14 @@ export function AdminPanel() {
           messaging is reserved for page content: the config-load failure above
           and every `*-errors` validation list below. */}
 
-      <div className="admin-config__layout">
-        <ConfigSectionNav
-          active={activeSection}
-          onSelect={setActiveSection}
-          sectionValidity={sectionValidity}
-          idBase={idBase}
-        />
-        {/* Only the active section renders — switching changes visibility, not
-            the draft, so a manager can edit profile, switch to state-machine,
-            edit, then save once → both edits in one payload. The panel owns one
-            centralized draft; every save sends the full payload.
-            ARIA note: this single panel is re-identified per active section
-            (`id`/`aria-labelledby` carry the active `SectionId`), so a non-active
-            tab's `aria-controls` points at a panel id that is NOT currently in
-            the DOM. This is an intentional trade-off of the one-section-at-a-time
-            design (mounting all six panels `hidden` would defeat the "don't show
-            all configurations" requirement) — the active tab's `aria-controls`
-            always resolves, and a manager activates a tab before reading its
-            panel, so the practical impact is limited. Do not "fix" by mounting
-            all panels; do not file the dangling references as a bug. */}
-        <section
-          className="admin-config__content"
-          role="tabpanel"
-          id={`${idBase}-panel-${activeSection}`}
-          aria-labelledby={`${idBase}-tab-${activeSection}`}
-          tabIndex={0}
-        >
+      {/* Only the route's section renders — the section is route-driven now
+          (no in-content tablist), so switching `/config/*` routes changes
+          visibility, not the draft. A manager can edit `/config/profil`,
+          navigate to `/config/alur-status`, edit, then save once → both edits
+          in one payload. The panel owns one centralized draft; every save
+          sends the full payload. No tablist → no tabpanel semantics: this is
+          a plain section. */}
+      <section className="admin-config__content">
           {activeSection === 'profile' && (
             <>
               {/* Store profile — store name (migrated from the wizard; the
@@ -597,98 +570,6 @@ export function AdminPanel() {
             </>
           )}
 
-          {activeSection === 'state-machine' && (
-            <>
-              {/* State machine — editable (migrated from the wizard; the wizard
-                  is first-run only now). The visual diagram moved to a dedicated
-                  full-page designer at `/config/alur-status` (the inline canvas was
-                  too small per manager feedback); this section summarizes the current
-                  graph, surfaces any validation errors, states the live-ticket risk,
-                  and links into the designer. The designer edits the SAME shared
-                  draft (ConfigDraftProvider), so an edit there is reflected here on
-                  return and both ride one full save. */}
-              <section className="config-card">
-                <h2 className="config-card__title">Alur Status Tiket</h2>
-                <p className="admin-panel__hint">
-                  Pilih alur status standar atau susun sendiri. Label aksi menjadi tombol di panel caller.
-                </p>
-                {/* Summary of the current graph — mode + counts — so the manager
-                    sees the shape without opening the diagram. */}
-                <p className="sm-summary" data-testid="sm-summary">
-                  Alur {form.stateMachine.mode === 'default' ? 'standar' : 'kustom'} —{' '}
-                  {form.stateMachine.states.length} status,{' '}
-                  {form.stateMachine.transitions.length} transisi.
-                </p>
-                {/* Inline validation errors (custom mode only). The designer's
-                    diagram view also renders an `sm-errors` list inside its
-                    StateMachineWorkflow; this one keeps the section's nav-badge story
-                    visible without navigating, and reflects a designer edit on
-                    return (shared draft). Default mode is always valid → empty. */}
-                {smErrors.length > 0 && (
-                  <ul className="wizard__errors" data-testid="sm-errors">
-                    {smErrors.map((msg) => (
-                      <li key={msg}>{msg}</li>
-                    ))}
-                  </ul>
-                )}
-                {/* Live-ticket warning at the DECISION POINT — immediately before
-                    the "Lihat Diagram" action, not above the <h2>. Manager feedback
-                    moved this twice: first from the bottom of the card (where it was
-                    dempet-dempet against the editor and got missed) to the VERY TOP
-                    via `--top`; that overcorrected — a caution floating above the
-                    title detaches from the context of what the manager is about to
-                    do, and breaks the title-first rhythm every other config section
-                    follows. The right spot is right before the action: the
-                    consequence caution carries maximum persuasive weight at the
-                    moment the manager is about to act, and the title-first invariant
-                    now matches the rest of the section. The `--top` modifier is
-                    dropped (no longer in CSS); the base `.admin-panel__warning`
-                    margin gives breathing room, and `admin-panel__card-action` adds
-                    the top spacing the link needs following the warning.
-
-                    The active alur status is resolved per operation, so a ticket
-                    sitting in a status that this save removes or renames has no
-                    legal next step: the caller's action buttons for it disappear and
-                    the ticket can only be cleared by a daily reset. The wizard framed
-                    this as one-time guided setup; here it sits next to Kategori on a
-                    panel the manager opens daily, so the risk has to be stated. A
-                    backend guard is out of scope for this change.
-
-                    The complementary hazard — a custom flow that DROPS a standard
-                    status, which breaks a caller action (and the report's
-                    service-time average) for every FUTURE ticket — is warned about
-                    inside the designer's StateMachineWorkflow (it derives from the
-                    form alone, so the designer gets it with no prop threading). */}
-                <p className="admin-panel__warning" data-testid="state-machine-warning">
-                  Perhatian: mengubah atau menghapus status yang sedang dipakai tiket aktif membuat tiket
-                  tersebut tidak bisa dilanjutkan — tombol aksinya hilang di panel caller. Ubah alur status
-                  saat antrian kosong, misalnya setelah reset harian.
-                </p>
-                {/* Open the dedicated full-page diagram designer. A relative Link
-                    (→ /config/alur-status) so it is a real anchor: keyboard-
-                    accessible, bookmarkable, and testable. The shared draft persists
-                    across the navigation (ConfigDraftProvider is the route element).
-
-                    This section is read-only — a summary + a live-ticket warning +
-                    this launcher. The state-machine EDITOR (and its `Simpan` action)
-                    lives on the designer page, which edits the SAME shared draft and
-                    owns the full-payload save. So this section renders NO save button:
-                    a `Simpan` here would fire a full PUT with nothing in this section
-                    to edit — it visibly "did nothing" (manager feedback), so it was
-                    removed. The `btn--secondary` surface (not `btn--primary`, which
-                    every other config section reserves for save) keeps this as a
-                    navigation link, not a commit. */}
-                <Link
-                  to="alur-status"
-                  className="btn btn--secondary admin-panel__card-action"
-                  data-testid="sm-open-designer"
-                >
-                  Lihat Diagram
-                </Link>
-              </section>
-            </>
-          )}
-
           {activeSection === 'manual' && (
             // Manual override operations (FR-ADM-02 / QUE-25). No save button —
             // the two operations are separate POSTs, not the full-config PUT.
@@ -753,8 +634,7 @@ export function AdminPanel() {
               )}
             </section>
           )}
-        </section>
-      </div>
+      </section>
     </div>
   );
 }

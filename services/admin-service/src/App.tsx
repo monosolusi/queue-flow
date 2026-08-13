@@ -40,13 +40,23 @@ import { ConfigDraftProvider } from './pages/admin-config/config-draft-context';
  *               tokenless visitor to `/login`.
  * `/config`   — the operational config panel (setup-complete + authed). A nested
  *               route group whose element is a `ConfigDraftProvider` (owns the
- *               shared mutable draft + `save()`), rendering `<Outlet/>`:
- *                 `/config`             → the sectioned panel (index).
+ *               shared mutable draft + `save()`), rendering `<Outlet/>` with one
+ *               child route per config section (generalizing the
+ *               `/config/alur-status` pattern — the in-content tablist was
+ *               consolidated into the sidebar):
+ *                 `/config`             → index redirect to `/config/profil`.
+ *                 `/config/profil`      → Profil & Tampilan (store name + brand
+ *                                         color + per-service themes).
+ *                 `/config/kategori`    → Kategori.
+ *                 `/config/counter-routing` → Counter & Routing.
+ *                 `/config/reset-harian` → Reset Harian.
+ *                 `/config/operasi-manual` → Operasi Manual.
  *                 `/config/alur-status` → the full-page Alur Status Tiket
  *                                         diagram designer (large canvas +
- *                                         JSON source view). The provider stays
- *                 mounted across the two URLs, so the draft + a cross-section
- *                 edit ride ONE full-payload save and navigation loses no edits.
+ *                                         XML source view). The provider stays
+ *                 mounted across all `/config/*` URLs, so the draft + a
+ *                 cross-section edit ride ONE full-payload save and navigation
+ *                 loses no edits.
  * `/users`    — the user-management page, admin-only (setup-complete + authed;
  *               the backend `GET|POST|DELETE /api/users` is admin-only too).
  * `/wizard`   — the 6-step first-run setup wizard, gated by WizardGuard
@@ -190,7 +200,12 @@ function AppRoutes({ api }: { api: IAdminAppApi }) {
               </SetupGuard>
             }
           >
-            <Route index element={<AdminPanel />} />
+            <Route index element={<Navigate to="profil" replace />} />
+            <Route path="profil" element={<AdminPanel section="profile" />} />
+            <Route path="kategori" element={<AdminPanel section="categories" />} />
+            <Route path="counter-routing" element={<AdminPanel section="routing" />} />
+            <Route path="reset-harian" element={<AdminPanel section="daily-reset" />} />
+            <Route path="operasi-manual" element={<AdminPanel section="manual" />} />
             <Route path="alur-status" element={<AlurStatusDesigner />} />
           </Route>
           <Route

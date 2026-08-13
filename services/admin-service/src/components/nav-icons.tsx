@@ -106,3 +106,62 @@ export function PrinterIcon() {
     </>,
   );
 }
+
+export function ProfileIcon() {
+  // A storefront with a peaked roof + a window — "store profile & appearance".
+  return navIcon(
+    <>
+      <path d="M4 9.5 5.5 5h13L20 9.5" />
+      <path d="M4 9.5h16V20a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1Z" />
+      <path d="M4 9.5a2 2 0 0 0 4 0 2 2 0 0 0 4 0 2 2 0 0 0 4 0 2 2 0 0 0 4 0" />
+      <path d="M10 21v-5h4v5" />
+    </>,
+  );
+}
+
+export function CategoryIcon() {
+  // A stack of two layered tags/tickets — "categories".
+  return navIcon(
+    <>
+      <path d="M3.5 8.5 9.5 3.5h6v6L10.5 14.5a1.4 1.4 0 0 1-2 0L3.5 9.5a1.4 1.4 0 0 1 0-1Z" />
+      <path d="M8 9.5h.01" />
+      <path d="M7 17.5 13 12.5h6v6L13.5 23.5a1.4 1.4 0 0 1-2 0L7 18.5a1.4 1.4 0 0 1 0-1Z" />
+    </>,
+  );
+}
+
+export function CounterRoutingIcon() {
+  // A counter window + branching arrows — "counter & routing".
+  return navIcon(
+    <>
+      <rect x={3} y={5} width={8} height={14} rx={1} />
+      <path d="M6 9h2M6 13h2M6 17h2" />
+      <path d="M14 8h3a3 3 0 0 1 3 3v0a3 3 0 0 1-3 3h-3" />
+      <path d="M16 12l-2-2 2-2" />
+      <path d="M14 18h3a3 3 0 0 0 3-3v0" />
+    </>,
+  );
+}
+
+export function ResetDailyIcon() {
+  // A circular arrow + a sun — "daily reset / roll-over".
+  return navIcon(
+    <>
+      <path d="M20 12a8 8 0 1 1-2.3-5.6" />
+      <path d="M20 4v3h-3" />
+      <circle cx={12} cy={12} r={2.5} />
+    </>,
+  );
+}
+
+export function ManualOpsIcon() {
+  // A wrench + gear — "manual operations / overrides".
+  return navIcon(
+    <>
+      <path d="M14.5 5.5a3.5 3.5 0 0 1 4 4l-9 9-3.5.5.5-3.5Z" />
+      <path d="M13 7 17 11" />
+      <circle cx={18} cy={18} r={2.2} />
+      <path d="M18 14.5v1.3M18 20.2v1.3M21.5 18h-1.3M15.8 18h-1.3" />
+    </>,
+  );
+}

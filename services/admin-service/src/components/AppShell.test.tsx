@@ -71,22 +71,35 @@ describe('AppShell', () => {
     expect(screen.getByText('QMS Admin')).toBeInTheDocument();
   });
 
-  it('renders the five enabled nav links (grouped, task-oriented IA)', () => {
+  it('renders the two-level nav IA (big groups + Konfigurasi Sistem sub-groups)', () => {
     renderShell('/');
+    // Flat-group leaves.
     expect(screen.getByRole('link', { name: 'Status Antrian' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Konfigurasi' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Analitik & Laporan' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Log Audit' })).toBeInTheDocument();
     // Pengguna resolves to the real /users surface (QUE-43 landed AuthN/AuthZ +
     // user management, absorbing the disabled placeholder this ticket originally
     // shipped). It is a normal enabled NavLink now — no disabled machinery.
     expect(screen.getByRole('link', { name: 'Pengguna' })).toHaveAttribute('href', '/users');
-    // Group headings render as non-heading labels. The "Pengguna" group label
-    // and its single item both read "Pengguna", so scope the group assertion to
-    // the .nav-group__label element to disambiguate.
+    // Konfigurasi Sistem is the only two-level group — its leaves live under
+    // the Tampilan / Antrean / Sistem sub-groups (the in-content tablist was
+    // consolidated into the sidebar; TV + Printer keep their own routes).
+    expect(screen.getByRole('link', { name: 'Profil & Tampilan' })).toHaveAttribute('href', '/config/profil');
+    expect(screen.getByRole('link', { name: 'Tampilan TV' })).toHaveAttribute('href', '/tv-layout');
+    expect(screen.getByRole('link', { name: 'Kategori' })).toHaveAttribute('href', '/config/kategori');
+    expect(screen.getByRole('link', { name: 'Counter & Routing' })).toHaveAttribute('href', '/config/counter-routing');
+    expect(screen.getByRole('link', { name: 'Alur Status Tiket' })).toHaveAttribute('href', '/config/alur-status');
+    expect(screen.getByRole('link', { name: 'Reset Harian' })).toHaveAttribute('href', '/config/reset-harian');
+    expect(screen.getByRole('link', { name: 'Operasi Manual' })).toHaveAttribute('href', '/config/operasi-manual');
+    expect(screen.getByRole('link', { name: 'Konfigurasi Printer' })).toHaveAttribute('href', '/printer-config');
+    // Big-group headings render as non-heading labels.
     expect(screen.getByText('Operasional')).toBeInTheDocument();
     expect(screen.getByText('Konfigurasi Sistem')).toBeInTheDocument();
     expect(screen.getByText('Pengguna', { selector: '.nav-group__label' })).toBeInTheDocument();
+    // Sub-group headings (Tampilan / Antrean / Sistem) render too.
+    expect(screen.getByText('Tampilan', { selector: '.nav-subgroup__label' })).toBeInTheDocument();
+    expect(screen.getByText('Antrean', { selector: '.nav-subgroup__label' })).toBeInTheDocument();
+    expect(screen.getByText('Sistem', { selector: '.nav-subgroup__label' })).toBeInTheDocument();
   });
 
   it('marks the active link with nav-link--active + aria-current', () => {
@@ -95,15 +108,15 @@ describe('AppShell', () => {
     expect(dashboard).toHaveClass('nav-link--active');
     expect(dashboard).toHaveAttribute('aria-current', 'page');
     // The other links are not active.
-    expect(screen.getByRole('link', { name: 'Konfigurasi' })).not.toHaveClass('nav-link--active');
+    expect(screen.getByRole('link', { name: 'Profil & Tampilan' })).not.toHaveClass('nav-link--active');
     expect(screen.getByRole('link', { name: 'Analitik & Laporan' })).not.toHaveClass('nav-link--active');
   });
 
-  it('marks the Konfigurasi link active on /config', () => {
-    renderShell('/config');
-    const config = screen.getByRole('link', { name: 'Konfigurasi' });
-    expect(config).toHaveClass('nav-link--active');
-    expect(config).toHaveAttribute('aria-current', 'page');
+  it('marks the Profil & Tampilan link active on /config/profil', () => {
+    renderShell('/config/profil');
+    const profil = screen.getByRole('link', { name: 'Profil & Tampilan' });
+    expect(profil).toHaveClass('nav-link--active');
+    expect(profil).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('link', { name: 'Status Antrian' })).not.toHaveClass('nav-link--active');
   });
 
@@ -151,8 +164,9 @@ describe('AppShell', () => {
     renderShell('/');
     // The visible group label is aria-hidden (a visual cue), so the grouping
     // structure for SR users must come from role="group" + aria-label on the
-    // items cluster — otherwise the nav is a flat 5-link list with no grouping
+    // items cluster — otherwise the nav is a flat list with no grouping
     // (CLAUDE.md ARIA rule: a labelled cluster is role="group" + aria-label).
+    // The two-level nav adds a role="group" + aria-label per sub-group too.
     const groups = screen.getAllByRole('group');
     const labels = groups.map((g) => g.getAttribute('aria-label'));
     expect(labels).toContain('Operasional');
@@ -160,8 +174,15 @@ describe('AppShell', () => {
     expect(labels).toContain('Konfigurasi Sistem');
     expect(labels).toContain('Audit');
     expect(labels).toContain('Pengguna');
-    // The group label elements themselves stay visual-only.
+    // The Konfigurasi Sistem sub-groups carry their own role="group" + label.
+    expect(labels).toContain('Tampilan');
+    expect(labels).toContain('Antrean');
+    expect(labels).toContain('Sistem');
+    // The big-group + sub-group label elements themselves stay visual-only.
     document.querySelectorAll('.nav-group__label').forEach((el) => {
+      expect(el).toHaveAttribute('aria-hidden', 'true');
+    });
+    document.querySelectorAll('.nav-subgroup__label').forEach((el) => {
       expect(el).toHaveAttribute('aria-hidden', 'true');
     });
   });

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { AlurStatusDesigner } from './AlurStatusDesigner';
 import { AdminPanel } from './AdminPanel';
 import { ConfigDraftProvider } from './admin-config/config-draft-context';
@@ -17,6 +17,25 @@ import {
   type SaveSystemConfigurationPayload,
   type SystemConfigurationDto,
 } from '../api/types';
+
+/**
+ * Captures the router's `navigate` so tests can switch `/config/*` routes
+ * (the in-content tablist is gone — section switches are navigations now).
+ * Mirrors the probe in `AdminPanel.test.tsx`.
+ */
+const navigateRef: { current: ((to: string) => void) | null } = { current: null };
+function NavigateProbe() {
+  const navigate = useNavigate();
+  navigateRef.current = navigate;
+  return null;
+}
+
+/** Navigates to a `/config/*` route, wrapped in `act` so React flushes. */
+async function navigateTo(to: string): Promise<void> {
+  await act(async () => {
+    navigateRef.current?.(to);
+  });
+}
 
 /**
  * A configured store — `isInitialSetupCompleted: true`, two categories (with
@@ -91,13 +110,20 @@ function makeApi(config: SystemConfigurationDto = configuredStore()) {
  * `renderConfigRoute` helper in `AdminPanel.test.tsx`.
  */
 function renderDesignerRoute(api: IAdminApi, initialEntry = '/config/alur-status') {
+  navigateRef.current = null;
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
       <SystemConfigProvider api={api}>
         <ToastProvider>
+          <NavigateProbe />
           <Routes>
             <Route path="/config" element={<ConfigDraftProvider api={api} />}>
-              <Route index element={<AdminPanel />} />
+              <Route index element={<AdminPanel section="profile" />} />
+              <Route path="profil" element={<AdminPanel section="profile" />} />
+              <Route path="kategori" element={<AdminPanel section="categories" />} />
+              <Route path="counter-routing" element={<AdminPanel section="routing" />} />
+              <Route path="reset-harian" element={<AdminPanel section="daily-reset" />} />
+              <Route path="operasi-manual" element={<AdminPanel section="manual" />} />
               <Route path="alur-status" element={<AlurStatusDesigner />} />
             </Route>
           </Routes>
@@ -108,6 +134,27 @@ function renderDesignerRoute(api: IAdminApi, initialEntry = '/config/alur-status
 }
 
 describe('AlurStatusDesigner (dedicated /config/alur-status page)', () => {
+  it('surfaces the live-ticket strand caution (re-surfaced from the removed AdminPanel section)', async () => {
+    // The live-ticket strand warning used to live on the AdminPanel
+    // state-machine section; that section was removed when the in-content
+    // tablist was consolidated into the sidebar. The designer is now the
+    // decision point where the manager edits the state machine, so the caution
+    // moved here. It is always visible (both Diagram + Source views) — the
+    // active alur status is resolved per operation, so a ticket sitting in a
+    // status this save removes has no legal next step (caller buttons vanish).
+    // Distinct from the dropped-standard-status caution inside
+    // StateMachineWorkflow (`sm-standard-warning`), which warns about FUTURE
+    // tickets. Uses the existing `.admin-panel__warning` class (the
+    // warning-at-decision-point invariant).
+    const { api } = makeApi();
+    renderDesignerRoute(api);
+    const warning = await screen.findByTestId('state-machine-warning');
+    expect(warning).toHaveTextContent(/tiket aktif/);
+    expect(warning).toHaveTextContent(/tidak bisa dilanjutkan/i);
+    expect(warning).toHaveTextContent(/panel caller/i);
+    expect(warning).toHaveClass('admin-panel__warning');
+  });
+
   it('renders the Diagram view by default with the workflow editor', async () => {
     const { api } = makeApi();
     renderDesignerRoute(api);
@@ -245,9 +292,9 @@ describe('AlurStatusDesigner (dedicated /config/alur-status page)', () => {
     // navigate on save, so we stay on /config.
     await userEvent.click(screen.getByTestId('admin-save'));
     await screen.findByText('Konfigurasi tersimpan.');
-    // Open the designer via the state-machine section's "Lihat Diagram" link.
-    await userEvent.click(screen.getByRole('tab', { name: /^Alur Status Tiket( belum valid)?$/ }));
-    await userEvent.click(screen.getByTestId('sm-open-designer'));
+    // Open the designer by navigating to `/config/alur-status` (the
+    // state-machine section is a route now, not an in-content tab).
+    await navigateTo('/config/alur-status');
     // The designer MUST stay mounted — a prior save must NOT bounce it back to
     // /config before the manager can touch the diagram. (Regression guard for
     // the `mountedSavedAt` capture: `savedAt` is monotonic in the shared
@@ -267,11 +314,10 @@ describe('AlurStatusDesigner (dedicated /config/alur-status page)', () => {
     await userEvent.clear(storeNameInput);
     await userEvent.type(storeNameInput, 'Toko Baru');
 
-    // The panel opens on the profile section — switch to the state-machine
-    // section to reach the "Lihat Diagram" link into the designer. The provider
-    // stays mounted across the navigation → the store-name edit persists.
-    await userEvent.click(screen.getByRole('tab', { name: /^Alur Status Tiket( belum valid)?$/ }));
-    await userEvent.click(screen.getByTestId('sm-open-designer'));
+    // The panel opens on the profile section — navigate to the designer route
+    // (the state-machine section is a route now). The provider stays mounted
+    // across the navigation → the store-name edit persists.
+    await navigateTo('/config/alur-status');
     await screen.findByTestId('sm-mode');
     await userEvent.click(screen.getByLabelText(/Susun alur status sendiri/));
     // The inline edge input moved to the right-side properties panel (redesign):

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { AdminPanel } from './AdminPanel';
 import { AlurStatusDesigner } from './AlurStatusDesigner';
 import { ConfigDraftProvider } from './admin-config/config-draft-context';
@@ -24,6 +24,21 @@ import {
   type SystemConfigurationDto,
   type TvGridLayout,
 } from '../api/types';
+
+/**
+ * A module-level holder for the rendered route tree's `navigate`, captured by a
+ * tiny probe mounted inside the router. The config sections are real routes now
+ * (no in-content tablist), so switching sections is a navigation — the probe
+ * exposes `useNavigate()` to the `goToSection` helper without re-mounting the
+ * provider (which would lose the shared draft the cross-section tests pin).
+ * Reset before each render so a stale fn from a prior test never leaks.
+ */
+const navigateRef: { current: ((to: string) => void) | null } = { current: null };
+function NavigateProbe() {
+  const navigate = useNavigate();
+  navigateRef.current = navigate;
+  return null;
+}
 
 /**
  * A configured store — `isInitialSetupCompleted: true`, with two categories
@@ -123,26 +138,35 @@ function makeApi(
  * Renders the REAL nested `/config` route tree (the production wiring from
  * `App.tsx`): `MemoryRouter` → `SystemConfigProvider` → `ToastProvider` →
  * `Routes` with `/config`'s element = `ConfigDraftProvider` (rendering its
- * `<Outlet/>`), the index child = `AdminPanel`, and the `alur-status` child =
+ * `<Outlet/>`), one child route per config section (profil/kategori/counter-
+ * routing/reset-harian/operasi-manual) mounting `<AdminPanel section=…/>`, an
+ * index redirect to `/config/profil`, and the `alur-status` child =
  * `AlurStatusDesigner`. `AdminPanel`/`AlurStatusDesigner` take NO `api` prop —
  * they read the shared draft from `useConfigDraft()` — so the only way to mount
  * them is through the provider, exactly as production routes them. The provider
- * is the route element so it stays mounted across `/config ↔ /config/alur-status`
- * → the shared draft persists (the cross-section-edit-rides-one-save invariant
- * the combined-save test pins). `SystemConfigProvider` wraps it because
+ * is the route element so it stays mounted across all `/config/*` URLs → the
+ * shared draft persists (the cross-section-edit-rides-one-save invariant the
+ * combined-save test pins). `SystemConfigProvider` wraps it because
  * `ConfigDraftProvider` calls `useSystemConfigContext().refresh()` after a save.
  *
  * No `AuthProvider`/`RequireAuth`/`SetupGuard` — the tests drive the panel
  * directly (the old harness did too); auth is covered by the auth-context specs.
  */
-function renderConfigRoute(api: IAdminApi, initialEntry = '/config') {
+function renderConfigRoute(api: IAdminApi, initialEntry = '/config/profil') {
+  navigateRef.current = null;
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
       <SystemConfigProvider api={api}>
         <ToastProvider>
+          <NavigateProbe />
           <Routes>
             <Route path="/config" element={<ConfigDraftProvider api={api} />}>
-              <Route index element={<AdminPanel />} />
+              <Route index element={<AdminPanel section="profile" />} />
+              <Route path="profil" element={<AdminPanel section="profile" />} />
+              <Route path="kategori" element={<AdminPanel section="categories" />} />
+              <Route path="counter-routing" element={<AdminPanel section="routing" />} />
+              <Route path="reset-harian" element={<AdminPanel section="daily-reset" />} />
+              <Route path="operasi-manual" element={<AdminPanel section="manual" />} />
               <Route path="alur-status" element={<AlurStatusDesigner />} />
             </Route>
           </Routes>
@@ -182,18 +206,35 @@ function alertRegion() {
 }
 
 /**
- * Switches the active in-content section by clicking its nav tab. The `<h1>`
- * header (`form.storeName || 'QMS Admin'`) is always visible regardless of
- * section, so `findByText('Apotek Sehat')` remains the ready-signal and does
- * NOT imply a section — call this to reach a section's inputs. Uses userEvent
- * (real timers throughout these tests). The matcher tolerates the "belum
- * valid" sr-only label an invalid section's tab appends to its accessible
- * name, so navigating to an invalid section (e.g. unassigned routing) still
- * resolves.
+ * Navigates to a config section's route. The config sections are real routes
+ * under `/config/*` now (the in-content tablist was consolidated into the
+ * sidebar), so switching sections is a `navigate()` call against the probe
+ * captured in {@link renderConfigRoute} — NOT a tab click. The `<h1>` header
+ * (`form.storeName || 'QMS Admin'`) is always visible regardless of section,
+ * so `findByText('Apotek Sehat')` remains the ready-signal and does NOT imply
+ * a section — call this to reach a section's inputs. The provider stays
+ * mounted across the navigation, so the shared draft persists.
  */
 async function goToSection(label: string): Promise<void> {
-  await userEvent.click(screen.getByRole('tab', { name: new RegExp(`^${label}( belum valid)?$`) }));
+  const to = SECTION_ROUTE[label];
+  if (!to) throw new Error(`unknown section label: ${label}`);
+  // Wrap the route navigation in `act` so React flushes the re-render before
+  // the test's next sync query (the navigate triggers a batched state update
+  // that a single `await` microtask does not reliably drain).
+  await act(async () => {
+    navigateRef.current?.(to);
+  });
 }
+
+/** Maps a section's friendly label to its `/config/*` route. */
+const SECTION_ROUTE: Record<string, string> = {
+  'Profil & Tampilan': '/config/profil',
+  Kategori: '/config/kategori',
+  'Counter & Routing': '/config/counter-routing',
+  'Reset Harian': '/config/reset-harian',
+  'Operasi Manual': '/config/operasi-manual',
+  'Alur Status Tiket': '/config/alur-status',
+};
 
 /** The `<li>` row that owns the labelled input. */
 function rowOf(label: string): HTMLElement {
@@ -227,14 +268,14 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     await goToSection('Counter & Routing');
     expect(screen.getByTestId('routing-categories-0')).toHaveTextContent('Customer Service');
 
-    // State machine is editable now (migrated from the wizard; the wizard is
-    // first-run only). The visual diagram moved to a dedicated full-page
-    // designer at `/config/alur-status` (manager feedback: the inline canvas was
-    // too small), so the section now shows a graph summary + a "Lihat Diagram"
-    // link into that designer (the `sm-mode` editor lives on the designer now).
-    await goToSection('Alur Status Tiket');
-    expect(screen.getByTestId('sm-summary')).toHaveTextContent(/Alur standar/);
-    expect(screen.getByTestId('sm-open-designer')).toHaveTextContent('Lihat Diagram');
+    // State machine is editable on the dedicated full-page designer at
+    // `/config/alur-status` (a sibling route, NOT an AdminPanel section). The
+    // panel no longer renders a state-machine section — navigating there mounts
+    // the designer (sm-mode editor). Asserted in the designer suite; here we
+    // only confirm the panel has no state-machine section content (sm-summary /
+    // sm-open-designer were removed with the tablist).
+    expect(screen.queryByTestId('sm-summary')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('sm-open-designer')).not.toBeInTheDocument();
   });
 
   it('announces a save through the polite toast region, with no inline success paragraph left behind', async () => {
@@ -374,14 +415,13 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     await userEvent.clear(storeNameInput);
     await userEvent.type(storeNameInput, 'Toko Baru');
 
-    // The state-machine EDITOR moved to a dedicated full-page designer at
-    // `/config/alur-status`. Navigate there via the "Lihat Diagram" link. The
-    // ConfigDraftProvider is the `/config` route element, so it stays mounted
-    // across the navigation → the store-name edit persists, and both edits ride
-    // ONE full-payload save (a per-section save still sends the full payload —
-    // do NOT split into two).
+    // The state-machine EDITOR is a dedicated full-page designer at
+    // `/config/alur-status` (a sibling route, not an AdminPanel section).
+    // Navigate there directly. The ConfigDraftProvider is the `/config` route
+    // element, so it stays mounted across the navigation → the store-name edit
+    // persists, and both edits ride ONE full-payload save (a per-section save
+    // still sends the full payload — do NOT split into two).
     await goToSection('Alur Status Tiket');
-    await userEvent.click(screen.getByTestId('sm-open-designer'));
     // The designer renders the StateMachineWorkflow (Diagram view) by default.
     await screen.findByTestId('sm-mode');
     await userEvent.click(screen.getByLabelText(/Susun alur status sendiri/));
@@ -643,35 +683,25 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     ).toBe(true);
   });
 
-  // --- New: section-navigation ARIA + one-section-at-a-time + per-section save ---
+  // --- Section navigation is route-based now (the in-content ARIA tablist was
+  //     consolidated into the sidebar); one section renders per /config/* route. ---
 
-  it('renders an ARIA tablist with 7 tabs, roving tabindex, and tabpanel labelled by the active tab', async () => {
+  it('renders NO in-content tablist/tabpanel (the section nav is the sidebar now)', async () => {
+    // The in-content `ConfigSectionNav` tablist was consolidated into the
+    // sidebar two-level nav. Guard against its re-introduction: no tablist,
+    // no tabs, no tabpanel semantics on the panel itself (the section is a
+    // plain <section>, not a role="tabpanel").
     const { api } = makeApi();
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
 
-    const tablist = screen.getByRole('tablist');
-    expect(tablist).toHaveAttribute('aria-label', 'Bagian konfigurasi');
-    const tabs = screen.getAllByRole('tab');
-    expect(tabs).toHaveLength(6);
-
-    // Default active = profile: its tab is selected + in the tab order; the
-    // rest rove (tabindex -1, aria-selected false).
-    const profileTab = screen.getByRole('tab', { name: /^Profil & Tampilan( belum valid)?$/ });
-    expect(profileTab).toHaveAttribute('aria-selected', 'true');
-    expect(profileTab).toHaveAttribute('tabindex', '0');
-    tabs
-      .filter((t) => t !== profileTab)
-      .forEach((t) => {
-        expect(t).toHaveAttribute('aria-selected', 'false');
-        expect(t).toHaveAttribute('tabindex', '-1');
-      });
-
-    // The single tabpanel is labelled by the active tab and the active tab's
-    // aria-controls resolves to its id (the panel re-identifies per section).
-    const panel = screen.getByRole('tabpanel');
-    expect(panel).toHaveAttribute('aria-labelledby', profileTab.getAttribute('id'));
-    expect(profileTab).toHaveAttribute('aria-controls', panel.getAttribute('id'));
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+    expect(screen.queryAllByRole('tab')).toHaveLength(0);
+    expect(screen.queryByRole('tabpanel')).not.toBeInTheDocument();
+    // The content section is a plain <section>, no tabpanel ARIA.
+    const content = document.querySelector('.admin-config__content');
+    expect(content).not.toBeNull();
+    expect(content).not.toHaveAttribute('role');
   });
 
   it('renders only the active section — profile on load, Kategori after navigating to it', async () => {
@@ -784,8 +814,9 @@ describe('AdminPanel (post-wizard safety rails)', () => {
     const { api, save } = makeApi();
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
+    // The state-machine editor is the `/config/alur-status` designer route now
+    // (not an AdminPanel section) — navigate there directly.
     await goToSection('Alur Status Tiket');
-    await userEvent.click(screen.getByTestId('sm-open-designer'));
     await screen.findByTestId('sm-mode');
 
     await userEvent.click(screen.getByLabelText(/Susun alur status sendiri/));
@@ -809,28 +840,29 @@ describe('AdminPanel (post-wizard safety rails)', () => {
     expect(screen.getByTestId('admin-save')).not.toBeDisabled();
   });
 
-  it('an invalid custom flow on the designer is reflected on the /config section + nav badge (shared draft)', async () => {
+  it('an invalid custom flow on the designer disables the panel save too (shared draft coherence)', async () => {
     // The designer edits the SAME draft as the panel (ConfigDraftProvider is the
-    // route element). So an invalid edit made on the designer must surface on the
-    // panel's section as an inline `sm-errors` + a nav badge when the manager
-    // navigates back — the validity is computed from the shared draft by
-    // `computeFormValidity` in both places.
-    const { api } = makeApi();
+    // `/config` route element, mounted across all `/config/*` children). So an
+    // invalid edit made on the designer must gate the panel's save when the
+    // manager navigates back — the validity is computed from the shared draft
+    // by `computeFormValidity` in both places (the in-content nav badge is gone
+    // with the tablist, but the whole-form save-gate still holds).
+    const { api, save } = makeApi();
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
     await goToSection('Alur Status Tiket');
-    await userEvent.click(screen.getByTestId('sm-open-designer'));
     await screen.findByTestId('sm-mode');
     await userEvent.click(screen.getByLabelText(/Susun alur status sendiri/));
     fireEvent.click(screen.getByTestId('rf__edge-WAITING->CALLING#0'));
     fireEvent.change(screen.getByTestId('panel-action-label'), { target: { value: '' } });
 
-    // Back to /config — the section's inline sm-errors + the nav badge both show.
+    // Back to /config/profil — the panel's save is disabled (shared draft →
+    // wholeFormValid false). No nav badge exists anymore (the tablist is gone).
     await userEvent.click(screen.getByTestId('designer-back'));
-    await goToSection('Alur Status Tiket');
-    expect(screen.getByTestId('sm-errors')).toHaveTextContent('Label aksi tidak boleh kosong.');
-    const smTab = screen.getByRole('tab', { name: /Alur Status Tiket belum valid/ });
-    expect(smTab).toHaveTextContent('belum valid');
+    await screen.findByTestId('admin-store-name');
+    expect(screen.getByTestId('admin-save')).toBeDisabled();
+    await userEvent.click(screen.getByTestId('admin-save'));
+    expect(save).not.toHaveBeenCalled();
   });
 
   it('warns — without blocking save — when the ticket flow drops a standard status', async () => {
@@ -851,8 +883,9 @@ describe('AdminPanel (post-wizard safety rails)', () => {
     const { api, save } = makeApi(trimmedFlow);
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
+    // The warning lives on the designer now (the StateMachineWorkflow renders it
+    // from the form alone) — navigate to the designer route directly.
     await goToSection('Alur Status Tiket');
-    await userEvent.click(screen.getByTestId('sm-open-designer'));
     await screen.findByTestId('sm-mode');
 
     const warning = screen.getByTestId('sm-standard-warning');
@@ -869,93 +902,46 @@ describe('AdminPanel (post-wizard safety rails)', () => {
     expect(save).toHaveBeenCalledTimes(1);
   });
 
-  it('warns that editing the ticket flow can strand a live ticket', async () => {
-    // The alur status is resolved per operation, so a ticket sitting in a status
-    // this save removes has no legal next step — its caller action buttons
-    // vanish. The wizard framed this as one-time guided setup; the panel is a
-    // daily surface, so the consequence has to be stated. Manager feedback moved
-    // this twice: first from the bottom of the card (dempat-dempet, missed) to
-    // the VERY TOP; that overcorrected — a caution above the <h2> detaches from
-    // what the manager is about to do and breaks the title-first rhythm every
-    // other section follows. It now sits at the DECISION POINT: immediately
-    // before the "Lihat Diagram" action, so the consequence carries maximum
-    // weight at the moment of action. The title is the first child again, and
-    // the `--top` modifier is gone (the base `.admin-panel__warning` margin gives
-    // the spacing, `admin-panel__card-action` gaps the link below it).
+  it('the state-machine section is gone from the panel — it is the /config/alur-status designer route now', async () => {
+    // The state-machine section (read-only summary + "Lihat Diagram" launcher)
+    // was consolidated into the dedicated `/config/alur-status` designer route —
+    // it is NOT an AdminPanel section anymore. Guard the consolidation: none of
+    // the former section's testids render on the panel (sm-summary /
+    // sm-open-designer / state-machine-warning were removed with the section),
+    // and navigating to `/config/alur-status` mounts the designer (sm-mode), not
+    // the panel. The dropped-standard-status caution still renders on the
+    // designer (`sm-standard-warning`); the live-ticket strand caution
+    // (`state-machine-warning`) was RE-SURFACED on the AlurStatusDesigner page
+    // (the new decision point) — guarded in `AlurStatusDesigner.test.tsx`.
     const { api } = makeApi();
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
-    await goToSection('Alur Status Tiket');
 
-    const warning = screen.getByTestId('state-machine-warning');
-    expect(warning).toHaveTextContent(/tidak bisa dilanjutkan/i);
-    expect(warning).toHaveTextContent(/panel caller/i);
-    // Title-first (matches every other config section): the config card's first
-    // child is the <h2>, NOT the warning.
-    const card = warning.closest('.config-card');
-    expect(card).not.toBeNull();
-    expect(card!.firstElementChild).toHaveClass('config-card__title');
-    // The `--top` modifier is gone (dropped from CSS).
-    expect(warning).not.toHaveClass('admin-panel__warning--top');
-    // The warning sits AFTER the summary and BEFORE the "Lihat Diagram" link —
-    // i.e. at the decision point, right before the action it cautions.
-    const summary = screen.getByTestId('sm-summary');
-    const link = screen.getByTestId('sm-open-designer');
-    expect(
-      warning.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_PRECEDING,
-    ).toBeTruthy();
-    expect(
-      warning.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    // The panel (profile section) carries none of the former state-machine
+    // section's testids.
+    expect(screen.queryByTestId('sm-summary')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('sm-open-designer')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('state-machine-warning')).not.toBeInTheDocument();
+
+    // Navigating to /config/alur-status mounts the designer, not the panel.
+    await goToSection('Alur Status Tiket');
+    expect(await screen.findByTestId('sm-mode')).toBeInTheDocument();
+    expect(screen.queryByTestId('admin-store-name')).not.toBeInTheDocument();
   });
 
-  it('the Alur Status Tiket section renders no save button (read-only launcher)', async () => {
-    // The state-machine EDITOR + its `Simpan` action live on the dedicated
-    // `/config/alur-status` designer; this /config section is a read-only
-    // summary + warning + "Lihat Diagram" launcher. A save button here fired a
-    // full PUT with nothing in the section to edit — it visibly "did nothing"
-    // (manager feedback) — so it was removed. The launcher is the only action;
-    // the manager edits + saves on the designer. Asserting absence locks the
-    // fix in (a future re-add would re-introduce the dead button).
-    const { api, save } = makeApi();
-    renderPanel(api);
-    await screen.findByText('Apotek Sehat');
-    await goToSection('Alur Status Tiket');
-
-    expect(screen.queryByTestId('admin-save')).not.toBeInTheDocument();
-    // The summary + launcher the manager DOES need are still present.
-    expect(screen.getByTestId('sm-summary')).toBeInTheDocument();
-    expect(screen.getByTestId('sm-open-designer')).toBeInTheDocument();
-    // No accidental save fires while the section is the active surface.
-    expect(save).not.toHaveBeenCalled();
-  });
-
-  it('shows a nav error badge on an invalid section and clears it once fixed', async () => {
-    // The nav surfaces cross-section invalidity: a manager on profile can see
-    // that routing is broken via the badge on its tab. Never color alone — the
-    // dot is aria-hidden and an .sr-only "belum valid" label carries the AT
-    // text (CLAUDE.md a11y rule).
+  it('shows no in-content nav error badge (the tablist + badges were consolidated into the sidebar)', async () => {
+    // The in-content tablist was consolidated into the sidebar two-level nav,
+    // and validity badges were dropped with it (accepted trade-off). The
+    // whole-form save-gate still holds — guarded by the shared-draft coherence
+    // test above. This locks the badge machinery out so it cannot creep back.
     const { api } = makeApi(unassignedRoutingStore());
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
 
-    // Routing is invalid (all-unassigned): the routing tab carries the badge.
-    const routingTab = screen.getByRole('tab', { name: /Counter & Routing belum valid/ });
-    expect(routingTab.querySelector('.admin-config__nav-badge')).toHaveAttribute('aria-hidden', 'true');
-    expect(routingTab).toHaveTextContent('belum valid');
-
-    // Fix: assign a category to a counter on the routing section.
-    await goToSection('Counter & Routing');
-    await userEvent.click(screen.getByTestId('routing-edit-0'));
-    const search = screen.getByRole('combobox', { name: /Kategori dilayani/ });
-    await userEvent.type(search, 'Customer');
-    await userEvent.click(screen.getByRole('option', { name: /Customer Service/ }));
-    await userEvent.click(screen.getByTestId('routing-modal-save'));
-
-    // The badge clears once routing is valid again.
-    const fixedTab = screen.getByRole('tab', { name: /^Counter & Routing$/ });
-    expect(fixedTab.querySelector('.admin-config__nav-badge')).toBeNull();
-    expect(fixedTab).not.toHaveTextContent('belum valid');
+    // No tablist, no badges, no "belum valid" sr-only labels.
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+    expect(document.querySelector('.admin-config__nav-badge')).toBeNull();
+    expect(screen.queryByText('belum valid')).not.toBeInTheDocument();
   });
 });
 
@@ -1019,13 +1005,18 @@ describe('AdminPanel shared-config coherence', () => {
     const providerApi: ISystemConfigApi = { getSystemConfig: vi.fn(() => Promise.resolve(shared)) };
 
     render(
-      <MemoryRouter initialEntries={['/config']}>
+      <MemoryRouter initialEntries={['/config/profil']}>
         <SystemConfigProvider api={providerApi}>
           <ToastProvider>
             <SharedStoreName />
             <Routes>
               <Route path="/config" element={<ConfigDraftProvider api={api} />}>
-                <Route index element={<AdminPanel />} />
+                <Route index element={<AdminPanel section="profile" />} />
+                <Route path="profil" element={<AdminPanel section="profile" />} />
+                <Route path="kategori" element={<AdminPanel section="categories" />} />
+                <Route path="counter-routing" element={<AdminPanel section="routing" />} />
+                <Route path="reset-harian" element={<AdminPanel section="daily-reset" />} />
+                <Route path="operasi-manual" element={<AdminPanel section="manual" />} />
                 <Route path="alur-status" element={<AlurStatusDesigner />} />
               </Route>
             </Routes>
