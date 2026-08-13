@@ -15,7 +15,7 @@ function defaultForm(): StateMachineForm {
     mode: 'default',
     states: [...DEFAULT_STATE_MACHINE.states],
     transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
-    positions: {}, nodeActions: {},  };
+    positions: {}, nodeActions: {}, descriptions: {},  };
 }
 
 describe('formToXml', () => {
@@ -44,7 +44,7 @@ describe('formToXml', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
-      positions: { A: { x: 10, y: 20 }, B: { x: 240, y: 0 } }, nodeActions: {},    };
+      positions: { A: { x: 10, y: 20 }, B: { x: 240, y: 0 } }, nodeActions: {}, descriptions: {},    };
     const xml = formToXml(form);
     expect(xml).toContain('<state name="A" x="10" y="20"/>');
     expect(xml).toContain('<state name="B" x="240" y="0"/>');
@@ -55,7 +55,7 @@ describe('formToXml', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     const xml = formToXml(form);
     // A is the sole source → rank 0 → x=0; B follows A → rank 1 → x=240; both
     // index 0 in their rank → y=0.
@@ -101,7 +101,7 @@ describe('formToXml', () => {
       transitions: [
         { from: 'A', to: 'B', actionLabel: 'go', sourceSide: 'bottom', targetSide: 'top' },
       ],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     const xml = formToXml(form);
     expect(xml).toContain('sourceSide="bottom"');
     expect(xml).toContain('targetSide="top"');
@@ -112,7 +112,7 @@ describe('formToXml', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go', sourceSide: 'bottom' }],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     const xml = formToXml(form);
     expect(xml).toContain('sourceSide="bottom"');
     // targetSide materialized to the default ('left').
@@ -124,7 +124,7 @@ describe('formToXml', () => {
       mode: 'custom',
       states: ['A&B'],
       transitions: [{ from: 'A&B', to: 'A&B', actionLabel: 'go "there" <now>' }],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     const xml = formToXml(form);
     expect(xml).toContain('name="A&amp;B"');
     expect(xml).toContain('from="A&amp;B"');
@@ -138,7 +138,7 @@ describe('formToXml', () => {
       mode: 'custom',
       states: ['A'],
       transitions: [],
-      positions: { A: { x: 10.123456, y: 20.999 } }, nodeActions: {},    };
+      positions: { A: { x: 10.123456, y: 20.999 } }, nodeActions: {}, descriptions: {},    };
     const xml = formToXml(form);
     expect(xml).toContain('x="10.12"');
     expect(xml).toContain('y="21"');
@@ -276,7 +276,7 @@ describe('xmlToForm', () => {
         { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' },
         { from: 'CALLING', to: 'SERVING', actionLabel: 'Mulai Melayani' },
       ],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     const result = xmlToForm(formToXml(form));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -296,7 +296,7 @@ describe('xmlToForm', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
-      positions: { A: { x: 10, y: 20 }, B: { x: 240, y: 80 } }, nodeActions: {},    };
+      positions: { A: { x: 10, y: 20 }, B: { x: 240, y: 80 } }, nodeActions: {}, descriptions: {},    };
     const result = xmlToForm(formToXml(form));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -309,7 +309,7 @@ describe('xmlToForm', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'up', sourceSide: 'bottom', targetSide: 'top' }],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     const result = xmlToForm(formToXml(form));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -324,5 +324,71 @@ describe('xmlToForm', () => {
     const xml = formToXml(defaultForm());
     expect(xml).not.toContain('sourceSide');
     expect(xml).not.toContain('targetSide');
+  });
+
+  it('formToXml emits a description attribute only for non-empty overrides (sparse serialization)', () => {
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+      positions: { A: { x: 10, y: 20 }, B: { x: 240, y: 80 } },
+      nodeActions: {},
+      descriptions: { A: 'Antrian dimulai di sini', B: '' },
+    };
+    const xml = formToXml(form);
+    // A's non-empty override is serialized as a `description` attribute.
+    expect(xml).toContain('description="Antrian dimulai di sini"');
+    // B's empty value is dropped (sparse) — no `description` attribute on B.
+    expect(xml).toContain('<state name="B" x="240" y="80"/>');
+    // The derived fallback (canonical copy / transition count) is NOT
+    // serialized — only real overrides appear in the source.
+    expect(xml).not.toContain('description="1 transisi keluar"');
+  });
+
+  it('xmlToForm round-trips the description attribute through formToXml→xmlToForm', () => {
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+      positions: { A: { x: 10, y: 20 }, B: { x: 240, y: 80 } },
+      nodeActions: {},
+      descriptions: { A: 'Antrian dimulai di sini' },
+    };
+    const result = xmlToForm(formToXml(form));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.form.descriptions.A).toBe('Antrian dimulai di sini');
+    // B had no override → no key in the round-tripped descriptions map.
+    expect(result.form.descriptions.B).toBeUndefined();
+  });
+
+  it('formToXml omits the description attribute entirely when no overrides are present', () => {
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+      positions: { A: { x: 10, y: 20 }, B: { x: 240, y: 80 } },
+      nodeActions: {},
+      descriptions: {},
+    };
+    const xml = formToXml(form);
+    expect(xml).not.toContain('description=');
+  });
+
+  it('xmlToForm parses an explicit description attribute and skips an empty one', () => {
+    const xml =
+      '<?xml version="1.0" encoding="UTF-8"?>\n' +
+      '<stateMachine>\n' +
+      '  <state name="A" x="10" y="20" description="Antrian dimulai di sini"/>\n' +
+      '  <state name="B" x="240" y="80" description=""/>\n' +
+      '  <transition from="A" to="B" actionLabel="go"/>\n' +
+      '</stateMachine>';
+    const result = xmlToForm(xml);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.form.descriptions.A).toBe('Antrian dimulai di sini');
+    // An empty description attribute is skipped (sparse — an empty/whitespace
+    // override round-trips as an absent key so descriptionFor falls back).
+    expect(result.form.descriptions.B).toBeUndefined();
   });
 });

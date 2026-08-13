@@ -18,7 +18,7 @@
  */
 import {
   autoLayout,
-  describeState,
+  descriptionFor,
   type StateMachineForm,
   type Transition,
 } from './state-machine';
@@ -26,9 +26,10 @@ import { DEFAULT_STATE_MACHINE, type EdgeSide } from '../api/types';
 
 /** Node payload: the state name (the node id IS the state name — names are
  *  unique per `validateCustomStateMachine`, so they are valid unique node ids)
- *  + a short manager-facing description derived client-side via
- *  {@link describeState} (canonical copy for the 5 PRD §7 defaults, else a
- *  summary of the outgoing-transition count). The description is CANVAS-ONLY —
+ *  + a short manager-facing description via {@link descriptionFor} (the saved
+ *  per-state override when present, else the derived canonical copy for the 5
+ *  PRD §7 defaults, else a summary of the outgoing-transition count). The
+ *  description is CANVAS-ONLY —
  *  {@link flowToGraph} reads just `name` (never `description`), so it never
  *  reaches the wire {@link Transition} / {@link StateMachineDto}. The index
  *  signature makes it assignable to React Flow's `data: Record<string, unknown>`
@@ -223,9 +224,10 @@ export function handleToSide(handle: string | undefined): EdgeSide | undefined {
 /**
  * Derive React Flow nodes/edges from the form. Node `id` = the state name.
  * Each node: `{ id: name, type: 'state', position, data: { name, description } }`
- * — the `description` is a client-side derivation via {@link describeState}
- * (canonical copy for the 5 PRD §7 defaults, else `${n} transisi keluar` or
- * `Status kustom`), computed here so the node card renders it with no form
+ * — the `description` is the effective copy via {@link descriptionFor} (the
+ * saved per-state override when present, else the derived canonical copy for
+ * the 5 PRD §7 defaults, else `${n} transisi keluar` or `Status kustom`),
+ * computed here so the node card renders it with no form
  * dependency (the context stays behavior-only — see `WorkflowHandlers`). Each
  * edge: `{ id: \`${t.from}->${t.to}#${i}\`, source, target, type: 'transition',
  * data: { actionLabel } }`.
@@ -259,7 +261,7 @@ export function formToFlow(
     id: name,
     type: 'state',
     position: value.positions[name] ?? positions[name] ?? auto[name] ?? { x: 0, y: 0 },
-    data: { name, description: describeState(value, name) },
+    data: { name, description: descriptionFor(value, name) },
   }));
   const edges: FlowEdge[] = value.transitions.map((t, i) => ({
     id: `${t.from}->${t.to}#${i}`,
@@ -465,19 +467,21 @@ export function flowToGraph(
 }
 
 /**
- * Re-stamp each node's `data.description` from the form via {@link describeState}.
- * Pure helper the parent calls inside `commit` so a mutation that changes a
- * state's outgoing-transition count (delete state, delete/add transition) also
- * refreshes the affected node cards' descriptions. The description is
- * CANVAS-ONLY — this never changes the wire form ({@link flowToGraph} ignores it).
+ * Re-stamp each node's `data.description` from the form via {@link descriptionFor}
+ * (the saved per-state override when present, otherwise the derived
+ * {@link describeState} fallback). Pure helper the parent calls inside `commit`
+ * so a mutation that changes a state's outgoing-transition count (delete state,
+ * delete/add transition) OR a description edit (form-only `lift`) also refreshes
+ * the affected node cards' descriptions. The description is CANVAS-ONLY — this
+ * never changes the wire form ({@link flowToGraph} ignores it).
  */
 export function withDescriptions(nodes: readonly FlowNode[], form: StateMachineForm): FlowNode[] {
   // Skip non-state nodes (the canvas-only Start/End terminal markers). They
-  // carry no state name in the form, so `describeState(form, name)` would
+  // carry no state name in the form, so `descriptionFor(form, name)` would
   // return a spurious summary; pass them through untouched (their
   // `description: ''` placeholder stays).
   return nodes.map((n) =>
-    n.type === 'state' ? { ...n, data: { ...n.data, description: describeState(form, n.data.name) } } : n,
+    n.type === 'state' ? { ...n, data: { ...n.data, description: descriptionFor(form, n.data.name) } } : n,
   );
 }
 

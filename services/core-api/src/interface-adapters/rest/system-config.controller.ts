@@ -119,6 +119,24 @@ function configNestedShapeErrors(body: Partial<SaveSystemConfigurationCommand>):
     ) {
       errs.push('stateMachine.transitions must be an array of { from, to, actionLabel: string }');
     }
+    // `descriptions` is optional (backward-compat with direct API calls / tests
+    // that omit it). `StateDescriptions.of` DOES handle non-object and
+    // non-string values cleanly (throws `InvalidValueObjectException`), so this
+    // shape guard is belt-and-suspenders at the interface-adapters boundary —
+    // it produces a 400 before the use case is entered (SRP — the controller
+    // owns transport-shape validation, the VO + use case own enum/key
+    // membership). Unknown extra properties are ignored.
+    if (sm.descriptions != null) {
+      if (typeof sm.descriptions !== 'object' || Array.isArray(sm.descriptions)) {
+        errs.push('stateMachine.descriptions must be a plain object of string -> string');
+      } else {
+        for (const [key, value] of Object.entries(sm.descriptions as Record<string, unknown>)) {
+          if (typeof value !== 'string') {
+            errs.push(`stateMachine.descriptions['${key}'] must be a string`);
+          }
+        }
+      }
+    }
   }
   const dr = body.dailyReset;
   if (dr != null && typeof dr === 'object' && !Array.isArray(dr)) {

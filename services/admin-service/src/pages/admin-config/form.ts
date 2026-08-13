@@ -109,6 +109,11 @@ export function toForm(config: SystemConfigurationDto): AdminForm {
   // returns `nodeActions` (defaulting to `{}`); the `?? {}` is belt-and-
   // suspenders (same pattern as `nodePositions ?? {}`).
   const nodeActions = config.nodeActions ?? {};
+  // Per-state description overrides travel INSIDE the `stateMachine` object
+  // (intrinsic per-state metadata, part of the state-machine definition). Coerce
+  // defensively — the backend always returns `descriptions` (defaulting to `{}`);
+  // the `?? {}` is belt-and-suspenders (same pattern as `nodeActions ?? {}`).
+  const descriptions = config.stateMachine.descriptions ?? {};
   return {
     storeName: config.storeName,
     // Build a StateMachineForm with the client-only `mode` preset inferred by
@@ -122,6 +127,7 @@ export function toForm(config: SystemConfigurationDto): AdminForm {
       transitions: mergedTransitions,
       positions,
       nodeActions,
+      descriptions,
     },
     brandColor: config.brandColor || DEFAULT_BRAND_COLOR,
     // Coerce a partial/degraded GET projection into a complete 4-surface map

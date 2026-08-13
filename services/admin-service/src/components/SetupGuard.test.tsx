@@ -11,7 +11,7 @@ function cleanStore(): SystemConfigurationDto {
   return {
     isInitialSetupCompleted: false,
     storeName: '',
-    stateMachine: { states: [], transitions: [] },
+    stateMachine: { states: [], transitions: [], descriptions: {} },
     dailyResetPolicy: { mode: 'MANUAL', cronExpression: null, resetTicketNumberTo: 1, archivePreviousDayData: true, timezone: 'Asia/Jakarta' },
     categories: [],
     routingRules: [],

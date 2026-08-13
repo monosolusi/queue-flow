@@ -6,6 +6,7 @@ import { CounterRoutingRule } from '../../domain/store-config';
 import { SystemConfiguration } from '../../domain/store-config';
 import { StateMachine } from '../../domain/store-config';
 import { StateSchema } from '../../domain/store-config';
+import { StateDescriptions } from '../../domain/store-config';
 import { StateTransitionRule } from '../../domain/store-config';
 import { DailyResetPolicy, DailyResetMode } from '../../domain/store-config';
 import { BrandColor } from '../../domain/store-config';
@@ -56,6 +57,18 @@ export interface WizardRoutingRuleDto {
 export interface WizardStateMachineDto {
   readonly states: readonly string[];
   readonly transitions: readonly { from: string; to: string; actionLabel: string }[];
+  /**
+   * Per-state editable descriptions (intrinsic per-state metadata, part of the
+   * state-machine definition). Optional on the wire for backward-compat with
+   * direct API calls / existing tests that omit it — the VO recovers
+   * `undefined` to the empty default (derive from canonical copy). Travels
+   * INSIDE the `stateMachine` object (NOT a top-level field), so
+   * `REQUIRED_CONFIG_FIELDS` needs no new entry and the payload-only
+   * passthrough sites (PrinterConfigPage/TvLayoutPage/wizard) need no new
+   * passthrough — they already pass `stateMachine` through. Not change-gated
+   * for audit (mirrors `nodePositions`/`nodeActions`).
+   */
+  readonly descriptions?: Record<string, string>;
 }
 
 export interface WizardDailyResetDto {
@@ -332,6 +345,21 @@ export class SaveSystemConfigurationUseCase {
         }
       }
     }
+    // State-membership cross-check (anti-corruption): the VO stays free of a
+    // `StateMachine` dependency (DIP), so it cannot validate that a description
+    // key corresponds to a real state. That check belongs here, in the use
+    // case, which already built the state machine. Keys are state names, so
+    // they must be ⊆ the active state-schema STATES. Done pre-tx so a
+    // description key that names no state fails fast (NFR-REL-02 — no illegal
+    // description map burns a write). Mirrors the `nodePositions`/
+    // `nodeActions` cross-checks.
+    for (const key of stateMachine.stateDescriptions.keys()) {
+      if (!stateNames.has(key)) {
+        throw new InvalidValueObjectException(
+          `state descriptions key '${key}' is not a state in the active state machine`,
+        );
+      }
+    }
 
     // Whether the daily-reset policy changed (or this is the initial setup).
     // Hoisted out of the tx so the post-commit re-arm (below) can read it
@@ -462,7 +490,15 @@ export class SaveSystemConfigurationUseCase {
   private buildStateMachine(dto: WizardStateMachineDto): StateMachine {
     const schema = StateSchema.of([...dto.states]);
     const rules = dto.transitions.map((t) => StateTransitionRule.of(t.from, t.to, t.actionLabel));
-    return new StateMachine(schema, rules);
+    // Per-state editable descriptions (intrinsic per-state metadata, part of the
+    // state-machine definition). `StateDescriptions.of` is permissive on a
+    // missing `descriptions` key (backward-compat with direct API calls / tests
+    // that omit it → empty default = derive from canonical copy). The state-
+    // membership cross-check (every key ⊆ the active state schema) runs below
+    // in `execute`, mirroring `nodePositions`/`nodeActions` (DIP — the VO stays
+    // free of a `StateMachine` dependency).
+    const descriptions = StateDescriptions.of(dto.descriptions ?? undefined);
+    return new StateMachine(schema, rules, descriptions);
   }
 
   private buildCategories(dtos: readonly WizardCategoryDto[]): Category[] {

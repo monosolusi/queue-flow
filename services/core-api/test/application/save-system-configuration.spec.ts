@@ -11,6 +11,7 @@ import {
   NodeActions,
   NodePositions,
   PrinterConfiguration,
+  StateDescriptions,
 } from '../../src/domain/store-config';
 import type { DomainEvent } from '../../src/domain/shared/domain-event';
 import type { IEventDispatcher } from '../../src/domain/shared/event-dispatcher.port';
@@ -962,5 +963,178 @@ describe('SaveSystemConfigurationUseCase — nodeActions', () => {
     const saved = await repos.config.get();
     expect(saved!.nodeActions.toDto()).toEqual({});
     expect(saved!.nodeActions.equals(NodeActions.DEFAULT)).toBe(true);
+  });
+});
+
+/**
+ * Per-state editable descriptions (intrinsic per-state metadata, part of the
+ * state-machine definition). Travels INSIDE the `stateMachine` object
+ * (`WizardStateMachineDto.descriptions`), so the command's `stateMachine`
+ * field carries it — NOT a top-level command field. The save use case builds
+ * the `StateDescriptions` VO from `dto.descriptions` and cross-checks each key
+ * against the active state machine's states (mirrors the `nodeActions` /
+ * `nodePositions` cross-checks). Not audited (mirrors `nodePositions`/
+ * `nodeActions`).
+ */
+describe('SaveSystemConfigurationUseCase — stateMachine.descriptions', () => {
+  function buildUseCase() {
+    return {
+      config: new InMemorySystemConfigurationRepository(),
+      categories: new InMemoryCategoryRepository(),
+      routingRules: new InMemoryCounterRoutingRuleRepository(),
+    };
+  }
+
+  function command(descriptions: Record<string, string>): SaveSystemConfigurationCommand {
+    const sm = projectStateMachine(StateMachine.DEFAULT);
+    return {
+      storeName: 'Toko Brand',
+      stateMachine: { ...sm, descriptions },
+      dailyReset: {
+        mode: DailyResetMode.MANUAL,
+        cronExpression: null,
+        resetTicketNumberTo: 1,
+        archivePreviousDayData: true,
+      },
+      categories: [{ code: 'A', name: 'Customer Service' }],
+      routingRules: [
+        {
+          counterId: 1,
+          counterName: 'Loket 1',
+          assignedCategoryCodes: ['A'],
+          priorityPolicy: PriorityPolicy.FIFO_GLOBAL,
+        },
+      ],
+      brandColor: '#2563eb',
+      serviceThemes: { kiosk: 'light', tv: 'light', caller: 'light', admin: 'light' },
+      tvPanelLayout: [
+        { id: 'nowServing', component: 'nowServing', x: 0, y: 0, w: 12, h: 4 },
+        { id: 'waitingQueue', component: 'waitingQueue', x: 0, y: 4, w: 6, h: 3 },
+        { id: 'callHistory', component: 'callHistory', x: 6, y: 4, w: 6, h: 3 },
+        { id: 'countersServing', component: 'countersServing', x: 0, y: 7, w: 12, h: 3 },
+        { id: 'runningText', component: 'runningText', x: 0, y: 10, w: 12, h: 1 },
+      ],
+      edgeRoutingLayout: {},
+      nodePositions: {},
+      nodeActions: {},
+      printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
+      actor: 'admin',
+    };
+  }
+
+  it('persists a non-empty descriptions map and the aggregate carries it', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    const descriptions = {
+      WAITING: 'Tiket menunggu dipanggil',
+      CALLING: 'Sedang dipanggil ke counter',
+    };
+    await useCase.execute(command(descriptions));
+
+    const saved = await repos.config.get();
+    expect(saved!.stateMachine.stateDescriptions.toDto()).toEqual(descriptions);
+    expect(saved!.stateMachine.stateDescriptions.descriptionFor('WAITING')).toBe(
+      'Tiket menunggu dipanggil',
+    );
+  });
+
+  it('round-trips a re-GET via the aggregate (descriptions preserved)', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    const descriptions = { WAITING: 'Tiket menunggu', SERVING: 'Sedang dilayani' };
+    await useCase.execute(command(descriptions));
+
+    const saved = await repos.config.get();
+    expect(saved!.stateMachine.stateDescriptions.toDto()).toEqual(descriptions);
+  });
+
+  it('rejects a descriptions key that is not a state in the active state machine (cross-check, NFR-REL-02)', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    // NOPE is not a state in the default state machine — the cross-check must
+    // throw InvalidValueObjectException pre-tx.
+    await expect(
+      useCase.execute(command({ NOPE: 'A description for a non-state' })),
+    ).rejects.toThrow(InvalidValueObjectException);
+    // Nothing persisted — fail-fast happened before the tx opened.
+    expect(await repos.config.get()).toBeNull();
+  });
+
+  it('accepts an empty descriptions map (no per-state overrides; derive from canonical copy)', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    await useCase.execute(command({}));
+    const saved = await repos.config.get();
+    expect(saved!.stateMachine.stateDescriptions.toDto()).toEqual({});
+    expect(saved!.stateMachine.stateDescriptions.equals(StateDescriptions.DEFAULT)).toBe(true);
+  });
+
+  it('DROPS empty/whitespace values (a cleared field round-trips as an absent key)', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    await useCase.execute(
+      command({ WAITING: 'Tiket menunggu', CALLING: '   ', SERVING: '' }),
+    );
+    const saved = await repos.config.get();
+    expect(saved!.stateMachine.stateDescriptions.toDto()).toEqual({ WAITING: 'Tiket menunggu' });
+  });
+
+  it('backward-compat: an absent descriptions key (undefined) recovers to the empty default', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    // A direct API call / legacy test that omits `descriptions` from the
+    // stateMachine payload — the VO recovers `undefined` to DEFAULT.
+    const sm = projectStateMachine(StateMachine.DEFAULT);
+    const { descriptions: _omit, ...smWithoutDescriptions } = sm;
+    void _omit;
+    const cmd: SaveSystemConfigurationCommand = {
+      ...command({}),
+      stateMachine: smWithoutDescriptions,
+    };
+    await useCase.execute(cmd);
+    const saved = await repos.config.get();
+    expect(saved!.stateMachine.stateDescriptions.toDto()).toEqual({});
   });
 });

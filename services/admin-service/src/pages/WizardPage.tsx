@@ -384,6 +384,12 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
         // uses the form-based StateMachineEditor with no Aksi UI), exactly like
         // `tvPanelLayout`/`printerConfiguration`. Coerce defensively.
         const smNodeActions = config.nodeActions ?? {};
+        // Per-state description overrides travel inside the `stateMachine`
+        // object. Payload-only passthrough on the wizard (the wizard's form-
+        // based StateMachineEditor surfaces no description edit), exactly like
+        // `nodeActions`. Coerce defensively — the backend always returns
+        // `descriptions` (defaulting to `{}`).
+        const smDescriptions = config.stateMachine.descriptions ?? {};
         setForm({
           storeName: config.storeName,
           brandColor: config.brandColor || DEFAULT_BRAND_COLOR,
@@ -414,6 +420,7 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
             transitions: smMergedTransitions,
             positions: smPositions,
             nodeActions: smNodeActions,
+            descriptions: smDescriptions,
           },
           dailyReset: {
             mode: config.dailyResetPolicy.mode,

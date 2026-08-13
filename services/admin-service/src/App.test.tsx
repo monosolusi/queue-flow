@@ -14,7 +14,7 @@ function makeConfig(brandColor = '#2563eb'): SystemConfigurationDto {
   return {
     isInitialSetupCompleted: true,
     storeName: 'Apotek Sehat',
-    stateMachine: { states: [], transitions: [] },
+    stateMachine: { states: [], transitions: [], descriptions: {} },
     dailyResetPolicy: {
       mode: 'MANUAL',
       cronExpression: null,

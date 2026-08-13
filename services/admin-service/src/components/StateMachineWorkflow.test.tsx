@@ -65,6 +65,9 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     // editor (the node's outgoing transitions — the independent button-label
     // surface, decoupled from the node-level "Aksi" section).
     selectStateNode('WAITING');
+    // Navigate to the "Transisi keluar" sub-view (panel redesign: the node
+    // editor splits into overview + transitions/actions sub-views).
+    fireEvent.click(screen.getByTestId('panel-goto-transitions'));
     fireEvent.click(screen.getByTestId('panel-add-transition'));
     expect(onChange).toHaveBeenCalledTimes(1);
     const next = onChange.mock.calls[0][0];
@@ -131,7 +134,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING', 'EXTRA'],
       transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     renderWorkflow(customForm, [], onChange);
     // Select the EXTRA node on the canvas → panel renders the node editor.
     selectStateNode('EXTRA');
@@ -174,7 +177,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING', 'EXTRA'],
       transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     renderWorkflow(customForm, [], onChange);
     // Select the EXTRA node on the canvas → panel renders the node editor.
     selectStateNode('EXTRA');
@@ -195,7 +198,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING', 'EXTRA'],
       transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     renderWorkflow(customForm, [], onChange);
     selectStateNode('EXTRA');
     const panel = screen.getByTestId('sm-properties');
@@ -293,6 +296,8 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     // Select the WAITING node → panel renders the inline "Transisi keluar"
     // editor → add an outgoing edge via the "Tambah transisi" button.
     selectStateNode('WAITING');
+    // Navigate to the "Transisi keluar" sub-view (panel redesign).
+    fireEvent.click(screen.getByTestId('panel-goto-transitions'));
     fireEvent.click(screen.getByTestId('panel-add-transition'));
     const renderedEdges = document.querySelectorAll('.react-flow__edge');
     expect(renderedEdges.length).toBeGreaterThan(0);
@@ -326,15 +331,135 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     expect(screen.getByTestId('sm-palette')).toBeInTheDocument();
   });
 
-  it('selecting a node shows its panel (name input + Deskripsi + inline Aksi + delete button)', () => {
+  // --- Panel navigation restructure (manager feedback) ---
+  //
+  // The node editor splits into an overview (name + editable description + two
+  // nav cards "Transisi keluar"/"Aksi" + delete) and two sub-views
+  // (transitions / actions), each with a "Kembali ke status" back button →
+  // overview. The sub-view resets to overview when the selection changes.
+
+  it('panel-goto-transitions navigates to the Transisi keluar sub-view; panel-back-to-status returns to overview (selection kept)', () => {
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
+    selectStateNode('SERVING');
+    const panel = screen.getByTestId('sm-properties');
+    // Overview: nav card present, transitions editor NOT yet shown.
+    expect(within(panel).getByTestId('panel-goto-transitions')).toBeInTheDocument();
+    expect(within(panel).queryByTestId('panel-add-transition')).not.toBeInTheDocument();
+    // Navigate to the "Transisi keluar" sub-view.
+    fireEvent.click(within(panel).getByTestId('panel-goto-transitions'));
+    expect(within(panel).getByTestId('panel-add-transition')).toBeInTheDocument();
+    // The back button returns to the overview (the canvas selection is NOT
+    // cleared — the node editor stays open; only the sub-view resets).
+    fireEvent.click(within(panel).getByTestId('panel-back-to-status'));
+    expect(within(panel).queryByTestId('panel-add-transition')).not.toBeInTheDocument();
+    expect(within(panel).getByTestId('panel-state-name')).toBeInTheDocument();
+    // The selection is still active (sm-properties still shown, not the palette).
+    expect(screen.getByTestId('sm-properties')).toBeInTheDocument();
+    expect(screen.queryByTestId('sm-palette')).not.toBeInTheDocument();
+  });
+
+  it('panel-goto-actions navigates to the Aksi sub-view; panel-back-to-status returns to overview', () => {
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
+    selectStateNode('SERVING');
+    const panel = screen.getByTestId('sm-properties');
+    expect(within(panel).queryByTestId('panel-add-node-action')).not.toBeInTheDocument();
+    fireEvent.click(within(panel).getByTestId('panel-goto-actions'));
+    expect(within(panel).getByTestId('panel-add-node-action')).toBeInTheDocument();
+    fireEvent.click(within(panel).getByTestId('panel-back-to-status'));
+    expect(within(panel).queryByTestId('panel-add-node-action')).not.toBeInTheDocument();
+    expect(within(panel).getByTestId('panel-state-name')).toBeInTheDocument();
+  });
+
+  it('selecting a different node resets the sub-view to overview', () => {
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
+    selectStateNode('SERVING');
+    const panel = screen.getByTestId('sm-properties');
+    // Enter the "Aksi" sub-view on SERVING.
+    fireEvent.click(within(panel).getByTestId('panel-goto-actions'));
+    expect(within(panel).getByTestId('panel-add-node-action')).toBeInTheDocument();
+    // Select a different node on the canvas — the sub-view resets to overview
+    // (the new node's name input is shown, NOT the previous sub-view).
+    selectStateNode('WAITING');
+    const panel2 = screen.getByTestId('sm-properties');
+    expect(within(panel2).getByTestId('panel-state-name')).toBeInTheDocument();
+    expect(within(panel2).queryByTestId('panel-add-node-action')).not.toBeInTheDocument();
+  });
+
+  it('the sm-panel-back button returns to the palette from a sub-view (via back-to-status → overview → sm-panel-back)', () => {
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
+    selectStateNode('SERVING');
+    const panel = screen.getByTestId('sm-properties');
+    fireEvent.click(within(panel).getByTestId('panel-goto-actions'));
+    // The top-level sm-panel-back lives on the overview; from a sub-view the
+    // manager first returns to the overview (panel-back-to-status), then uses
+    // sm-panel-back to clear the canvas selection (palette returns).
+    fireEvent.click(within(panel).getByTestId('panel-back-to-status'));
+    fireEvent.click(screen.getByTestId('sm-panel-back'));
+    expect(screen.queryByTestId('sm-properties')).not.toBeInTheDocument();
+    expect(screen.getByTestId('sm-palette')).toBeInTheDocument();
+  });
+
+  it('typing a description lifts via onEditStateDescription (form-only, no canvas re-seed)', () => {
+    // Use a stateful parent so the controlled <textarea> reflects the lifted
+    // form (a vi.fn() parent never feeds back, so the controlled value would
+    // revert and React's value-tracker would deduplicate a subsequent change).
+    let form: StateMachineForm = { ...defaultStateMachineForm(), mode: 'custom' };
+    const onChange = vi.fn((next: StateMachineForm) => {
+      form = next;
+    });
+    const { rerender } = render(<StateMachineWorkflow value={form} onChange={onChange} errors={[]} />);
+    selectStateNode('WAITING');
+    const descField = screen.getByTestId('panel-state-description') as HTMLTextAreaElement;
+    // Before the edit, the WAITING node card shows the derived canonical
+    // description ("Tiket menunggu dipanggil").
+    const cardBefore = screen.getByTestId('sm-node-card-WAITING');
+    expect(cardBefore).toHaveTextContent('Tiket menunggu dipanggil');
+    // Typing a description lifts a form-only change (no canvas re-seed —
+    // graphSignature excludes descriptions). The handler calls
+    // `setNodes(withDescriptions(...))` before `lift` so the canvas node card
+    // refreshes immediately (descriptions are canvas-rendered, unlike
+    // nodeActions which are panel-only).
+    fireEvent.change(descField, { target: { value: 'Antrian dimulai di sini' } });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(form.descriptions.WAITING).toBe('Antrian dimulai di sini');
+    // The canvas node card updates to the new description WITHOUT a re-render
+    // from the parent (the handler's `setNodes(withDescriptions(...))` patches
+    // the local node state directly). This is the MAJOR-1 regression guard:
+    // without `setNodes(withDescriptions(...))`, the card would stay stale
+    // (showing the derived canonical copy) until a later structural change.
+    const cardAfter = screen.getByTestId('sm-node-card-WAITING');
+    expect(cardAfter).toHaveTextContent('Antrian dimulai di sini');
+    // Re-render with the lifted form (stateful parent feeds back).
+    rerender(<StateMachineWorkflow value={form} onChange={onChange} errors={[]} />);
+    // Emptying the field clears the override (the key is deleted so
+    // descriptionFor falls back to the derived canonical copy).
+    const descField2 = screen.getByTestId('panel-state-description') as HTMLTextAreaElement;
+    fireEvent.change(descField2, { target: { value: '' } });
+    expect(onChange).toHaveBeenCalledTimes(2);
+    expect(form.descriptions.WAITING).toBeUndefined();
+    // The canvas node card reverts to the derived canonical copy.
+    const cardCleared = screen.getByTestId('sm-node-card-WAITING');
+    expect(cardCleared).toHaveTextContent('Tiket menunggu dipanggil');
+    // The canvas edge count is unchanged (descriptions are form-only; no
+    // graphSignature change → no re-seed).
+    expect(document.querySelectorAll('.react-flow__edge').length).toBeGreaterThan(0);
+  });
+
+  it('selecting a node shows its panel (name input + Deskripsi + nav cards + delete button)', () => {
     renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
     selectStateNode('CALLING');
     const panel = screen.getByTestId('sm-properties');
     expect(within(panel).getByTestId('panel-state-name')).toBeInTheDocument();
-    // The read-only "Deskripsi" field shows the canonical description.
-    expect(within(panel).getByTestId('panel-state-description')).toHaveTextContent(
-      'Sedang dipanggil ke counter',
-    );
+    // The panel redesign: the overview shows an EDITABLE description <textarea>
+    // (value = saved override, placeholder = derived canonical description).
+    // CALLING has no saved override → the field is empty with the derived
+    // canonical description as its placeholder.
+    const descField = within(panel).getByTestId('panel-state-description') as HTMLTextAreaElement;
+    expect(descField.value).toBe('');
+    expect(descField.placeholder).toBe('Sedang dipanggil ke counter');
+    // The overview surfaces the two nav cards (Transisi keluar / Aksi).
+    expect(within(panel).getByTestId('panel-goto-transitions')).toBeInTheDocument();
+    expect(within(panel).getByTestId('panel-goto-actions')).toBeInTheDocument();
     expect(within(panel).getByTestId('panel-delete-state')).toBeInTheDocument();
   });
 
@@ -356,7 +481,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom',
       states: ['WAITING', 'CALLING'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' }],
-      positions: {}, nodeActions: {},    });
+      positions: {}, nodeActions: {}, descriptions: {},    });
     selectEdge('WAITING->CALLING#0');
     const panel = screen.getByTestId('sm-properties');
     expect(within(panel).getByTestId('panel-delete-transition')).toBeDisabled();
@@ -408,7 +533,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
         mode: 'custom',
         states: ['ONHOLD', 'CALLING'],
         transitions: [{ from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut' }],
-        positions: {}, nodeActions: {},      },
+        positions: {}, nodeActions: {}, descriptions: {},      },
       [],
       onChange,
     );
@@ -420,6 +545,8 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     // ONHOLD→CALLING already exists). The node now has 2 outgoing → "2
     // transisi keluar".
     selectStateNode('ONHOLD');
+    // Navigate to the "Transisi keluar" sub-view (panel redesign).
+    fireEvent.click(screen.getByTestId('panel-goto-transitions'));
     fireEvent.click(screen.getByTestId('panel-add-transition'));
     expect(onChange).toHaveBeenCalledTimes(1);
     // The node card description refreshes via `withDescriptions` in `commit`.
@@ -474,7 +601,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
           ? { ...t, sourceSide: 'bottom' as const, targetSide: 'top' as const }
           : { ...t },
       ),
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     renderWorkflow(form, [], onChange);
     // Select the vertical edge and edit its label — `commit` lifts the
     // `flowToGraph`-captured form (with the sides) to the parent.
@@ -503,7 +630,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
         { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', sourceSide: 'bottom', targetSide: 'top' },
         ...DEFAULT_STATE_MACHINE.transitions.slice(1).map((t) => ({ ...t })),
       ],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     renderWorkflow(customForm, [], onChange);
     // Select the WAITING node and rename it to PENDING.
     selectStateNode('WAITING');
@@ -534,6 +661,9 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
     selectStateNode('SERVING');
     const panel = screen.getByTestId('sm-properties');
+    // Navigate to the "Transisi keluar" sub-view (panel redesign: the node
+    // editor splits into overview + transitions/actions sub-views).
+    fireEvent.click(within(panel).getByTestId('panel-goto-transitions'));
     // SERVING has one OUTGOING: SERVING → COMPLETED (index 4 in the default
     // graph). The "Transisi keluar" editor renders an editable "Label aksi"
     // input and a "Ke" select showing COMPLETED.
@@ -548,12 +678,15 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     expect(within(panel).queryByTestId('panel-transition-label-CALLING->SERVING#1')).not.toBeInTheDocument();
   });
 
-  it('the state panel shows the read-only Deskripsi field (derived description)', () => {
+  it('the state panel shows the editable Deskripsi field (derived description as placeholder)', () => {
     renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
     selectStateNode('SERVING');
     const panel = screen.getByTestId('sm-properties');
-    // The "Deskripsi" field shows the canonical description for SERVING.
-    expect(within(panel).getByTestId('panel-state-description')).toHaveTextContent('Sedang dilayani');
+    // The "Deskripsi" field is an editable <textarea>; with no saved override
+    // the field is empty and the derived canonical description is the placeholder.
+    const descField = within(panel).getByTestId('panel-state-description') as HTMLTextAreaElement;
+    expect(descField.value).toBe('');
+    expect(descField.placeholder).toBe('Sedang dilayani');
     // The old "Status" badge / sub-description / consequence blocks are gone.
     expect(within(panel).queryByTestId('panel-state-status')).not.toBeInTheDocument();
     expect(within(panel).queryByTestId('panel-state-badge')).not.toBeInTheDocument();
@@ -561,7 +694,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     expect(within(panel).queryByTestId('panel-state-consequence')).not.toBeInTheDocument();
   });
 
-  it('the state panel Deskripsi shows the derived summary for a custom node', () => {
+  it('the state panel Deskripsi shows the derived summary as placeholder for a custom node', () => {
     const customForm: StateMachineForm = {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING', 'ONHOLD'],
@@ -569,12 +702,15 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
         { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' },
         { from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut' },
       ],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     renderWorkflow(customForm);
     selectStateNode('ONHOLD');
     const panel = screen.getByTestId('sm-properties');
-    // ONHOLD has 1 outgoing transition → derived "1 transisi keluar".
-    expect(within(panel).getByTestId('panel-state-description')).toHaveTextContent('1 transisi keluar');
+    // ONHOLD has 1 outgoing transition → derived "1 transisi keluar" is the
+    // placeholder (no saved override → empty value).
+    const descField = within(panel).getByTestId('panel-state-description') as HTMLTextAreaElement;
+    expect(descField.value).toBe('');
+    expect(descField.placeholder).toBe('1 transisi keluar');
     // No old badge block.
     expect(within(panel).queryByTestId('panel-state-badge')).not.toBeInTheDocument();
   });
@@ -585,9 +721,11 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     renderWorkflow(customForm, [], onChange);
     selectStateNode('WAITING');
+    // Navigate to the "Transisi keluar" sub-view (panel redesign).
+    fireEvent.click(screen.getByTestId('panel-goto-transitions'));
     fireEvent.click(screen.getByTestId('panel-add-transition'));
     expect(onChange).toHaveBeenCalledTimes(1);
     const next = onChange.mock.calls[0][0];
@@ -615,9 +753,11 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
         { from: 'CALLING', to: 'CALLING', actionLabel: 'ulang' },
         { from: 'CALLING', to: 'WAITING', actionLabel: 'kembali' },
       ],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     renderWorkflow(customForm);
     selectStateNode('CALLING');
+    // Navigate to the "Transisi keluar" sub-view (panel redesign).
+    fireEvent.click(screen.getByTestId('panel-goto-transitions'));
     expect(screen.getByTestId('panel-add-transition')).toBeDisabled();
   });
 
@@ -625,6 +765,8 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     const onChange = vi.fn();
     renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const }, [], onChange);
     selectStateNode('SERVING');
+    // Navigate to the "Transisi keluar" sub-view (panel redesign).
+    fireEvent.click(screen.getByTestId('panel-goto-transitions'));
     // SERVING's outgoing edge is SERVING → COMPLETED (index 4). Change "Ke"
     // to SKIPPED (a status that is not already the target of an outgoing edge
     // from SERVING, so the reroute is non-duplicate). The source stays SERVING;
@@ -645,9 +787,11 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     renderWorkflow(oneTransitionForm);
     selectStateNode('WAITING');
+    // Navigate to the "Transisi keluar" sub-view (panel redesign).
+    fireEvent.click(screen.getByTestId('panel-goto-transitions'));
     const deleteBtn = screen.getByTestId('panel-transition-delete-WAITING->CALLING#0');
     expect(deleteBtn).toBeDisabled();
   });
@@ -656,6 +800,8 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     const onChange = vi.fn();
     renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const }, [], onChange);
     selectStateNode('SERVING');
+    // Navigate to the "Transisi keluar" sub-view (panel redesign).
+    fireEvent.click(screen.getByTestId('panel-goto-transitions'));
     const deleteBtn = screen.getByTestId('panel-transition-delete-SERVING->COMPLETED#4');
     expect(deleteBtn).not.toBeDisabled();
     fireEvent.click(deleteBtn);
@@ -673,10 +819,13 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING', 'LONELY'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     renderWorkflow(customForm);
     selectStateNode('LONELY');
     const panel = screen.getByTestId('sm-properties');
+    // Navigate to the "Transisi keluar" sub-view (panel redesign: the node
+    // editor splits into overview + transitions/actions sub-views).
+    fireEvent.click(within(panel).getByTestId('panel-goto-transitions'));
     expect(within(panel).getByTestId('panel-transitions-empty')).toHaveTextContent(
       'Belum ada transisi keluar. Tambah transisi untuk membuat tombol dari status ini ke status lain.',
     );
@@ -691,10 +840,19 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
     selectStateNode('SERVING');
     const panel = screen.getByTestId('sm-properties');
-    // "Transisi keluar" — SERVING has 1 outgoing edge → the <ul> renders.
+    // The panel redesign splits the node editor into an overview (name +
+    // description + two nav cards) and two sub-views (transitions / actions).
+    // The overview surfaces both nav cards — the manager picks which sub-view.
+    expect(within(panel).getByTestId('panel-goto-transitions')).toBeInTheDocument();
+    expect(within(panel).getByTestId('panel-goto-actions')).toBeInTheDocument();
+    // Navigate to "Transisi keluar" — SERVING has 1 outgoing edge → the <ul>
+    // renders.
+    fireEvent.click(within(panel).getByTestId('panel-goto-transitions'));
     expect(within(panel).getByTestId('panel-transitions')).toBeInTheDocument();
-    // "Aksi" — the node-level Aksi section renders (empty by default: the
-    // empty hint + "Tambah aksi" button, NOT the <ul>).
+    // Return to the overview, then navigate to "Aksi" — the node-level Aksi
+    // section renders (empty by default: the empty hint + "Tambah aksi" button).
+    fireEvent.click(within(panel).getByTestId('panel-back-to-status'));
+    fireEvent.click(within(panel).getByTestId('panel-goto-actions'));
     expect(within(panel).getByTestId('panel-node-actions-empty')).toBeInTheDocument();
     expect(within(panel).getByTestId('panel-add-node-action')).toBeInTheDocument();
   });
@@ -705,11 +863,14 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
-      positions: {}, nodeActions: {},
+      positions: {}, nodeActions: {}, descriptions: {},
     };
     renderWorkflow(customForm, [], onChange);
     selectStateNode('WAITING');
     const edgeCountBefore = document.querySelectorAll('.react-flow__edge').length;
+    // Navigate to the "Aksi" sub-view (panel redesign: node editor splits into
+    // overview + transitions/actions sub-views).
+    fireEvent.click(screen.getByTestId('panel-goto-actions'));
     fireEvent.click(screen.getByTestId('panel-add-node-action'));
     expect(onChange).toHaveBeenCalledTimes(1);
     const next = onChange.mock.calls[0][0];
@@ -737,9 +898,13 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       nodeActions: {
         WAITING: [{ executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'CALLING' }],
       },
+      descriptions: {},
     };
     renderWorkflow(customForm, [], onChange);
     selectStateNode('WAITING');
+    // Navigate to the "Aksi" sub-view (the panel redesign splits the node editor
+    // into overview + transitions/actions sub-views).
+    fireEvent.click(screen.getByTestId('panel-goto-actions'));
     // Edit "Saat" → ON_EXIT.
     fireEvent.change(screen.getByTestId('panel-node-action-saat-0'), { target: { value: 'ON_EXIT' } });
     expect(onChange).toHaveBeenCalledTimes(1);
@@ -764,9 +929,13 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       nodeActions: {
         WAITING: [{ executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'CALLING' }],
       },
+      descriptions: {},
     };
     renderWorkflow(customForm, [], onChange);
     selectStateNode('WAITING');
+    // Navigate to the "Aksi" sub-view (panel redesign: node editor splits into
+    // overview + transitions/actions sub-views).
+    fireEvent.click(screen.getByTestId('panel-goto-actions'));
     fireEvent.click(screen.getByTestId('panel-node-action-delete-0'));
     expect(onChange).toHaveBeenCalledTimes(1);
     const next = onChange.mock.calls[0][0];
@@ -809,7 +978,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
         { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' },
         { from: 'WAITING', to: 'COMPLETED', actionLabel: 'Skip' },
       ],
-      positions: {}, nodeActions: {},    };
+      positions: {}, nodeActions: {}, descriptions: {},    };
     renderWorkflow(form, [], onChange);
     selectEdge('WAITING->CALLING#0');
     const toSelect = screen.getByTestId('panel-transition-to') as HTMLSelectElement;

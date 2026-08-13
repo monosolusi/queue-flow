@@ -216,6 +216,7 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
     bad.stateMachine = {
       states: ['WAITING', 'CALLING'],
       transitions: [{ from: 'WAITING', to: 'NOPE', actionLabel: 'x' }],
+      descriptions: {},
     };
     const res = await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad);
     expect(res.status).toBe(400);
@@ -491,5 +492,76 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
 
     const cfg = await request(app.getHttpServer()).get('/api/system/config');
     expect(cfg.body.nodeActions).toEqual(actions);
+  });
+
+  it('PUT with a malformed stateMachine.descriptions (non-object / non-string value) is 400 (boundary nested-shape guard)', async () => {
+    // descriptions present but a string → nested-shape guard (plain object).
+    const bad1 = wizardPayload() as unknown as Record<string, unknown>;
+    bad1.stateMachine = { ...(bad1.stateMachine as object), descriptions: 'not-an-object' };
+    expect(
+      (await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad1)).status,
+    ).toBe(400);
+
+    // descriptions present but an array → nested-shape guard (plain object).
+    const bad2 = wizardPayload() as unknown as Record<string, unknown>;
+    bad2.stateMachine = { ...(bad2.stateMachine as object), descriptions: ['WAITING'] };
+    expect(
+      (await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad2)).status,
+    ).toBe(400);
+
+    // descriptions value non-string → nested-shape guard.
+    const bad3 = wizardPayload() as unknown as Record<string, unknown>;
+    bad3.stateMachine = { ...(bad3.stateMachine as object), descriptions: { WAITING: 5 } };
+    expect(
+      (await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad3)).status,
+    ).toBe(400);
+
+    // None of the rejected payloads silently completed setup.
+    const cfg = await request(app.getHttpServer()).get('/api/system/config');
+    expect(cfg.body.isInitialSetupCompleted).toBe(false);
+  });
+
+  it('PUT accepts an absent stateMachine.descriptions (backward-compat, lazy key) and a re-GET returns {}', async () => {
+    // A legacy payload that omits `descriptions` from the stateMachine object
+    // is accepted (the VO recovers `undefined` to DEFAULT; no SQL migration).
+    const payload = wizardPayload();
+    const { descriptions: _omit, ...smWithoutDescriptions } = payload.stateMachine;
+    void _omit;
+    const res = await request(app.getHttpServer())
+      .put('/api/system/config')
+      .set(authHeader(token))
+      .send({ ...payload, stateMachine: smWithoutDescriptions });
+    expect(res.status).toBe(200);
+    // The PUT result does not echo `stateMachine` (only top-level config
+    // fields); the re-GET is the authoritative round-trip check.
+    const cfg = await request(app.getHttpServer()).get('/api/system/config');
+    expect(cfg.body.stateMachine.descriptions).toEqual({});
+  });
+
+  it('PUT saves stateMachine.descriptions and a re-GET returns them (round-trip)', async () => {
+    const descriptions = {
+      WAITING: 'Tiket menunggu dipanggil',
+      CALLING: 'Sedang dipanggil ke counter',
+    };
+    const payload = wizardPayload() as unknown as Record<string, unknown>;
+    payload.stateMachine = { ...(payload.stateMachine as object), descriptions };
+    const res = await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(payload);
+    expect(res.status).toBe(200);
+    // The PUT result does not echo `stateMachine`; the re-GET is the
+    // authoritative round-trip check.
+    const cfg = await request(app.getHttpServer()).get('/api/system/config');
+    expect(cfg.body.stateMachine.descriptions).toEqual(descriptions);
+  });
+
+  it('PUT with a stateMachine.descriptions key that is not a state is 400 (cross-check, INVALID_VALUE_OBJECT)', async () => {
+    // NOPE is not a state in the default state machine — the use-case
+    // state-membership cross-check throws InvalidValueObjectException → 400.
+    const bad = wizardPayload() as unknown as Record<string, unknown>;
+    bad.stateMachine = { ...(bad.stateMachine as object), descriptions: { NOPE: 'A description' } };
+    const res = await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad);
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_VALUE_OBJECT');
+    const cfg = await request(app.getHttpServer()).get('/api/system/config');
+    expect(cfg.body.isInitialSetupCompleted).toBe(false);
   });
 });

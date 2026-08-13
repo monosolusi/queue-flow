@@ -92,6 +92,19 @@ export interface StateMachineForm {
    * wire in the separate `nodeActions` map (built by `toNodeActionsDto`).
    */
   nodeActions: NodeActionsDto;
+  /**
+   * Per-state editable descriptions keyed by state name (intrinsic per-state
+   * metadata, part of the state-machine definition). Panel-only edit via
+   * `lift(updateStateDescription(...))` (form-only, like `nodeActions`), so
+   * `graphSignature` excludes `descriptions` (a description edit must not
+   * re-seed the canvas). The canvas node card's `data.description` updates via
+   * the `formToFlow`/`withDescriptions` memo recompute on form change. Travels
+   * the wire INSIDE the `stateMachine` object (`toStateMachineDto` includes
+   * `descriptions`), NOT as a top-level field — so no new passthrough site.
+   * Empty/whitespace values are stripped (an empty saved description ⇒ the key
+   * is absent ⇒ `descriptionFor` falls back to `describeState`).
+   */
+  descriptions: Record<string, string>;
 }
 
 /** The PRD §7 default graph prefilled into the editor's default mode. */
@@ -102,6 +115,9 @@ export function defaultStateMachineForm(): StateMachineForm {
     transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
     positions: {},
     nodeActions: { ...DEFAULT_NODE_ACTIONS },
+    // No per-state description overrides — the canonical copy (describeState)
+    // is the fallback for each of the 5 PRD §7 default statuses.
+    descriptions: {},
   };
 }
 
@@ -157,6 +173,13 @@ export function toStateMachineDto(form: StateMachineForm): StateMachineDto {
     ? {
         states: [...DEFAULT_STATE_MACHINE.states],
         transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
+        // Default mode → no per-state description overrides. The canonical
+        // defaults are DERIVED (describeState), not stored — so a store that
+        // keeps the default graph ships `{}` regardless of any description
+        // text the manager typed before flipping back to default (the
+        // force-reset discards it, mirroring how it discards states/
+        // transitions/positions/nodeActions).
+        descriptions: {},
       }
     : {
         states: form.states,
@@ -164,7 +187,26 @@ export function toStateMachineDto(form: StateMachineForm): StateMachineDto {
         // wire {@link StateTransitionDto}; they travel in the separate
         // {@link EdgeRoutingLayoutDto} map (see {@link toEdgeRoutingLayoutDto}).
         transitions: form.transitions.map((t) => ({ from: t.from, to: t.to, actionLabel: t.actionLabel })),
+        // Strip empty/whitespace values defensively so the wire stays lean
+        // (`updateStateDescription` already deletes empties, but a corrupt
+        // prefill or a direct form edit could leave a blank entry). The VO on
+        // the backend also drops empties, so this is belt-and-suspenders.
+        descriptions: stripEmptyDescriptions(form.descriptions ?? {}),
       };
+}
+
+/**
+ * Returns a copy of `descriptions` with empty/whitespace values removed (a
+ * cleared description field round-trips as an absent key so `descriptionFor`
+ * falls back to the derived canonical copy). Pure helper used by
+ * {@link toStateMachineDto} to keep the wire payload lean.
+ */
+function stripEmptyDescriptions(descriptions: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(descriptions)) {
+    if (value.trim().length > 0) out[key] = value;
+  }
+  return out;
 }
 
 /**
@@ -508,12 +550,15 @@ export function referencedStates(form: StateMachineForm): Set<string> {
  * the canonical description when the state is one of the 5 PRD §7 defaults (via
  * {@link canonicalStatusOf}); otherwise derives a summary from the number of
  * outgoing transitions (`${n} transisi keluar` when n > 0, else `Status kustom`).
- * The description is a CLIENT-SIDE derivation only — it is never part of the wire
- * form ({@link StateMachineForm} carries only `mode`/`states`/`transitions`),
- * so adding it here changes no wire contract. For a canonical status the
- * properties panel surfaces the richer {@link canonicalStatusOf} record (the
- * status's sub-description AND its consequence) instead of this short copy —
- * this helper stays the SVG-card fallback used when only the name is known.
+ *
+ * This is now the FALLBACK for {@link descriptionFor} when no saved per-state
+ * description override is present. The wire carries `descriptions` INSIDE the
+ * `stateMachine` object ({@link StateMachineForm.descriptions} →
+ * {@link toStateMachineDto}); a saved non-empty override wins over this derived
+ * copy. For a canonical status with no override, the properties panel surfaces
+ * the richer {@link canonicalStatusOf} record (the status's sub-description AND
+ * its consequence) instead of this short copy — this helper stays the SVG-card
+ * fallback used when only the name is known (and the edit field's placeholder).
  */
 export function describeState(form: StateMachineForm, name: string): string {
   const canonical = canonicalStatusOf(name);
@@ -521,6 +566,42 @@ export function describeState(form: StateMachineForm, name: string): string {
   const outgoing = form.transitions.filter((t) => t.from === name).length;
   if (outgoing > 0) return `${outgoing} transisi keluar`;
   return 'Status kustom';
+}
+
+/**
+ * The effective description for a state: the saved per-state override when a
+ * non-empty one is stored, otherwise the derived {@link describeState} fallback.
+ * This is the single source of truth the canvas node card
+ * (`formToFlow`/`withDescriptions`) and the properties panel's edit field
+ * placeholder read. An empty/whitespace saved description ⇒ the key is absent
+ * (`updateStateDescription` deletes empties) ⇒ the derived fallback wins.
+ */
+export function descriptionFor(form: StateMachineForm, name: string): string {
+  const saved = form.descriptions?.[name];
+  if (saved !== undefined && saved.trim().length > 0) return saved;
+  return describeState(form, name);
+}
+
+/**
+ * Set/trim a per-state description override. If the new value is empty/
+ * whitespace, the key is DELETED (a cleared description field round-trips as an
+ * absent key so {@link descriptionFor} falls back to the derived canonical copy
+ * and the wire payload stays lean). Returns a new form — pure over the
+ * {@link StateMachineForm} slice (the panel lifts this via `lift`, form-only,
+ * so `graphSignature` excludes `descriptions` and the canvas never re-seeds).
+ */
+export function updateStateDescription(
+  form: StateMachineForm,
+  name: string,
+  value: string,
+): StateMachineForm {
+  const descriptions = { ...(form.descriptions ?? {}) };
+  if (value.trim().length === 0) {
+    delete descriptions[name];
+  } else {
+    descriptions[name] = value;
+  }
+  return { ...form, descriptions };
 }
 
 // --- form mutation helpers (pure over the StateMachineForm slice) ------------
@@ -577,7 +658,15 @@ export function updateState(form: StateMachineForm, i: number, value: string): S
     nodeActions[value] = nodeActions[oldName];
     delete nodeActions[oldName];
   }
-  return { ...form, states, transitions, positions, nodeActions };
+  // The descriptions map is keyed by state name (mirrors `positions`/
+  // `nodeActions`), so a rename moves the entry to the new key (the manager's
+  // edited description follows the renamed status, not the old name).
+  const descriptions = { ...(form.descriptions ?? {}) };
+  if (oldName !== value && descriptions[oldName] !== undefined) {
+    descriptions[value] = descriptions[oldName];
+    delete descriptions[oldName];
+  }
+  return { ...form, states, transitions, positions, nodeActions, descriptions };
 }
 
 export function addState(form: StateMachineForm): StateMachineForm {
@@ -598,7 +687,18 @@ export function removeState(form: StateMachineForm, i: number): StateMachineForm
   // re-attach to a re-created status under the same name.
   const nodeActions = { ...form.nodeActions };
   delete nodeActions[removedName];
-  return { ...form, states: form.states.filter((_, idx) => idx !== i), positions, nodeActions };
+  // Drop the descriptions entry too (the map is keyed by state name, mirrors
+  // `positions`/`nodeActions`), or the stale description would survive a
+  // re-add and silently re-attach to a re-created status under the same name.
+  const descriptions = { ...(form.descriptions ?? {}) };
+  delete descriptions[removedName];
+  return {
+    ...form,
+    states: form.states.filter((_, idx) => idx !== i),
+    positions,
+    nodeActions,
+    descriptions,
+  };
 }
 
 // --- graph signature (change detection for the re-seed / source-sync guards) ---
@@ -631,7 +731,10 @@ export function removeState(form: StateMachineForm, i: number): StateMachineForm
  * Excludes `nodeActions` (panel-only, NOT canvas-rendered — like `mode`): a
  * node-action edit must not re-seed the canvas, and an external nodeActions-
  * only change needs no re-seed (the panel reads `form.nodeActions` directly on
- * re-render).
+ * re-render). Excludes `descriptions` too (panel-only edit via `lift`, like
+ * `nodeActions`): a description edit is form-only and must not re-seed the
+ * canvas — the node card's `data.description` refreshes via the
+ * `formToFlow`/`withDescriptions` memo recompute on form change instead.
  */
 export function graphSignature(form: StateMachineForm): string {
   return JSON.stringify({

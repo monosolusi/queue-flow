@@ -114,8 +114,19 @@ export function formToXml(form: StateMachineForm): string {
   const auto = autoLayout(form.states, form.transitions);
   for (const name of form.states) {
     const pos = form.positions[name] ?? auto[name] ?? { x: 0, y: 0 };
+    // Emit a `description` attribute ONLY when a non-empty saved override is
+    // present. The derived fallback (canonical copy / transition count) is NOT
+    // serialized — it stays a client-side derivation, so the XML stays lean and
+    // a round-trip does not pin the canonical copy into the source text (the
+    // manager edits only real overrides here). Mirrors how `formToXml` omits
+    // default connection sides (sparse serialization).
+    const desc = form.descriptions?.[name];
+    const descAttr =
+      desc !== undefined && desc.trim().length > 0
+        ? ` description="${escapeXmlAttr(desc)}"`
+        : '';
     lines.push(
-      `  <state name="${escapeXmlAttr(name)}" x="${coord(pos.x)}" y="${coord(pos.y)}"/>`,
+      `  <state name="${escapeXmlAttr(name)}" x="${coord(pos.x)}" y="${coord(pos.y)}"${descAttr}/>`,
     );
   }
   for (const t of form.transitions) {
@@ -231,6 +242,12 @@ export function xmlToForm(xml: string): XmlToFormOk | XmlToFormErr {
 
   const states: string[] = [];
   const positions: Record<string, { x: number; y: number }> = {};
+  // Per-state description overrides parsed from the `description` attribute.
+  // An absent or empty attribute is skipped (the derived fallback wins). A
+  // present non-empty value is stored verbatim (untrimmed — `updateStateDescription`
+  // and the VO trim/drop at the boundaries; the source view keeps the manager's
+  // text as typed so the textarea does not flicker while editing).
+  const descriptions: Record<string, string> = {};
   for (const el of stateEls) {
     const name = requiredAttr(el, 'name');
     if (name === null) return { ok: false, error: 'Setiap <state> harus memiliki atribut "name".' };
@@ -244,6 +261,10 @@ export function xmlToForm(xml: string): XmlToFormOk | XmlToFormErr {
     const y = Number(yRaw);
     if (!Number.isFinite(x) || !Number.isFinite(y)) {
       return { ok: false, error: 'Atribut "x" dan "y" pada <state> harus berupa angka.' };
+    }
+    const descRaw = el.getAttribute('description');
+    if (descRaw !== null && descRaw.trim().length > 0) {
+      descriptions[name] = descRaw;
     }
     states.push(name);
     positions[name] = { x, y };
@@ -281,6 +302,12 @@ export function xmlToForm(xml: string): XmlToFormOk | XmlToFormErr {
     // `nodeActions` back so a source edit preserves node actions (the source
     // edits only the graph + positions, never the node-level Aksi list).
     nodeActions: {},
+    // Per-state description overrides parsed from the `description` attribute
+    // (sparse — only non-empty values are stored). The caller merges the
+    // existing descriptions back if needed; a source edit carries the parsed
+    // descriptions verbatim (the source is the human-editable single source of
+    // truth, so a saved description survives an XML edit).
+    descriptions,
   };
   const errors = validateCustomStateMachine(form);
   if (errors.length > 0) {

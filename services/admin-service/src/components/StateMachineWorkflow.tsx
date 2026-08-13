@@ -70,6 +70,7 @@ import {
   type StateMachineForm,
   defaultStateMachineForm,
   graphSignature,
+  updateStateDescription,
 } from '../lib/state-machine';
 import {
   flowToGraph,
@@ -236,18 +237,25 @@ export function StateMachineWorkflow({
   const commit = useCallback(
     (nextNodes: FlowNode[], nextEdges: FlowEdge[]) => {
       const { states, transitions, positions } = flowToGraph(nextNodes, nextEdges);
-      // `nodeActions` is panel-only (not canvas-rendered), so `flowToGraph`
-      // ignores it (like `mode`). Carry it from `value.nodeActions` so a canvas
-      // commit preserves node actions across the `flowToGraph` round-trip —
+      // `nodeActions` + `descriptions` are panel-only (not canvas-rendered), so
+      // `flowToGraph` ignores them (like `mode`). Carry them from `value` so a
+      // canvas commit preserves them across the `flowToGraph` round-trip —
       // mirrors how `mode` is preserved from `value.mode` below.
-      const form: StateMachineForm = { mode: value.mode, states, transitions, positions, nodeActions: value.nodeActions };
+      const form: StateMachineForm = {
+        mode: value.mode,
+        states,
+        transitions,
+        positions,
+        nodeActions: value.nodeActions,
+        descriptions: value.descriptions,
+      };
       const refreshed = withDescriptions(nextNodes, form);
       setNodes(refreshed);
       setEdges(nextEdges);
       lastEmitted.current = graphSignature(form);
       onChange(form);
     },
-    [value.mode, value.nodeActions, onChange],
+    [value.mode, value.nodeActions, value.descriptions, onChange],
   );
 
   // Lift a FORM-ONLY edit (a node-action add/delete/edit touches no nodes/edges,
@@ -559,6 +567,21 @@ export function StateMachineWorkflow({
         const nodeActions = { ...value.nodeActions };
         nodeActions[state] = (nodeActions[state] ?? []).map((a, idx) => (idx === index ? { ...a, ...patch } : a));
         lift({ ...value, nodeActions });
+      },
+      // Per-state description override edit. `updateStateDescription` trims +
+      // deletes empties so a cleared field falls back to the derived canonical
+      // copy. Unlike the node-action handlers (panel-only, never canvas-
+      // rendered), descriptions ARE canvas-rendered on the node card, so the
+      // canvas must be refreshed. `lift` stamps `graphSignature` (which excludes
+      // `descriptions`) → the sync effect skips the re-seed → no canvas snap,
+      // so the handler calls `setNodes(withDescriptions(...))` BEFORE `lift` to
+      // patch each node card's `data.description` directly (positions preserved
+      // — `withDescriptions` only touches `data.description`, mirroring what
+      // `commit` does without the full `flowToGraph` round-trip).
+      onEditStateDescription: (state, desc) => {
+        const next = updateStateDescription(value, state, desc);
+        setNodes((prev) => withDescriptions(prev, next));
+        lift(next);
       },
     }),
     [value, nodes, edges, commit, lift, selectedNodeId, selectedEdgeId, toast, mintEdgeId],

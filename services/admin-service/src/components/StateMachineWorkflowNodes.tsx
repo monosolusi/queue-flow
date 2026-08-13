@@ -105,6 +105,16 @@ export interface WorkflowHandlers {
    * lift (no canvas change).
    */
   onEditNodeAction: (state: string, index: number, patch: Partial<NodeActionDto>) => void;
+  /**
+   * Set/trim a per-state description override for `state`. An empty/whitespace
+   * `value` clears the override (the key is deleted so `descriptionFor` falls
+   * back to the derived canonical copy). Lifts via `lift` (form-only —
+   * `graphSignature` excludes `descriptions`, so the sync effect skips the
+   * re-seed); the handler calls `setNodes(withDescriptions(...))` BEFORE `lift`
+   * so the node card's `data.description` refreshes on the canvas (descriptions
+   * are canvas-rendered, unlike `nodeActions` which are panel-only).
+   */
+  onEditStateDescription: (state: string, value: string) => void;
 }
 
 export const WorkflowContext = createContext<WorkflowHandlers | null>(null);
