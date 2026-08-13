@@ -10,6 +10,7 @@ import { EdgeRoutingLayout, type EdgeRoutingLayoutDto } from '../../domain/store
 import { NodePositions, type NodePositionsDto } from '../../domain/store-config';
 import { NodeActions, type NodeActionsDto } from '../../domain/store-config';
 import { TerminalNodes, type TerminalNodesDto } from '../../domain/store-config';
+import { EndSources, type EndSourcesDto } from '../../domain/store-config';
 import { PrinterConfiguration, type PrinterConfigurationDto } from '../../domain/store-config';
 import type { PriorityPolicy } from '../../domain/shared';
 
@@ -92,6 +93,12 @@ export interface SystemConfigurationDto {
    *  state-machine editor (fixed-shape `{ start, end }`; each terminal is
    *  `'auto'` | `'hidden'` | `{ x, y }`). */
   readonly terminalNodes: TerminalNodesDto;
+  /** Explicit "end sources" for the admin state-machine editor — a flat array
+   *  of state NAMES the manager dragged an explicit arrow from into the End
+   *  terminal marker. Purely visual canvas metadata (like `nodePositions`);
+   *  NOT consumed by caller / tv / kiosk (ISP — TS structural typing ignores
+   *  the extra response field on their narrower DTOs). */
+  readonly endSources: EndSourcesDto;
   /** Printer configuration (which printer the kiosk uses — Chrome's default
    *  dialog, or a network ESC/POS printer proxied through core-api over raw
    *  TCP). */
@@ -189,6 +196,9 @@ export class GetSystemConfigurationUseCase {
         // positions (Start/End stay the pre-marker-persistence auto-derived
         // canvas-only nodes on a clean store).
         terminalNodes: TerminalNodes.DEFAULT.toDto(),
+        // Default end sources — empty array = no explicit end sources (the End
+        // marker falls back to the auto-derived sink behavior on a clean store).
+        endSources: EndSources.DEFAULT.toDto(),
         // Default printer configuration — chrome mode = zero behavior change
         // (the kiosk keeps using Chrome's print dialog), so a clean store
         // prefills the admin printer section with the existing chrome behavior.
@@ -214,6 +224,7 @@ export class GetSystemConfigurationUseCase {
       nodePositions: system.nodePositions.toDto(),
       nodeActions: system.nodeActions.toDto(),
       terminalNodes: system.terminalNodes.toDto(),
+      endSources: system.endSources.toDto(),
       printerConfiguration: system.printerConfiguration.toDto(),
       categories: allCategories
         .slice()

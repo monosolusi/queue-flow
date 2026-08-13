@@ -4,6 +4,7 @@ import {
   formToFlow,
   formToFlowWithMarkers,
   deriveTerminalMarkers,
+  hasEndSource,
   isTerminalNodeId,
   handleToSide,
   nextStateName,
@@ -122,7 +123,7 @@ describe('formToFlow', () => {
           ? { ...t, sourceSide: 'bottom' as const, targetSide: 'top' as const }
           : { ...t },
       ),
-      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const { edges } = formToFlow(form, {});
     const waitingCalling = edges.find((e) => e.source === 'WAITING' && e.target === 'CALLING')!;
     expect(waitingCalling.sourceHandle).toBe(HANDLE_IDS.bottom);
@@ -149,7 +150,7 @@ describe('formToFlow', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go', sourceSide: 'bottom' }],
-      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const { edges } = formToFlow(form, {});
     expect(edges[0].sourceHandle).toBe(HANDLE_IDS.bottom);
     expect(edges[0].targetHandle).toBe(DEFAULT_TARGET_HANDLE);
@@ -186,7 +187,7 @@ describe('formToFlow', () => {
     // snap the nodes back to their pre-save locations.
     const form: StateMachineForm = {
       ...defaultStateMachineForm(),
-      positions: { WAITING: { x: 99, y: 88 } }, nodeActions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: { WAITING: { x: 99, y: 88 } }, nodeActions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const positions = { WAITING: { x: 10, y: 20 } }; // stale oldPositions
     const { nodes } = formToFlow(form, positions);
     const waiting = nodes.find((n) => n.id === 'WAITING')!;
@@ -387,7 +388,7 @@ describe('flowToGraph', () => {
         { from: 'ONHOLD', to: 'WAITING', actionLabel: 'Kembali' },
         { from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut' },
       ],
-      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const nodes: import('./state-machine-flow').FlowNode[] = [
       { id: 'WAITING', type: 'state', position: { x: 0, y: 0 }, data: { name: 'WAITING', description: '' } },
       { id: 'ONHOLD', type: 'state', position: { x: 0, y: 0 }, data: { name: 'ONHOLD', description: '' } },
@@ -770,6 +771,7 @@ describe('formToFlowWithMarkers terminal-node three-state model', () => {
     positions: { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
     nodeActions: {},
     descriptions: {},
+    endSources: [],
     terminalNodes: { start: 'auto', end: 'auto' },
   });
 
@@ -815,6 +817,7 @@ describe('formToFlowWithMarkers terminal-node three-state model', () => {
       positions: { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
       nodeActions: {},
       descriptions: {},
+      endSources: [],
       terminalNodes: { start: { x: -300, y: 50 }, end: 'auto' },
     };
     const { nodes, edges } = formToFlowWithMarkers(cycleForm, {});
@@ -839,6 +842,7 @@ describe('formToFlowWithMarkers terminal-node three-state model', () => {
       positions: { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
       nodeActions: {},
       descriptions: {},
+      endSources: [],
       terminalNodes: { start: 'auto', end: 'auto' },
     };
     const { nodes } = formToFlowWithMarkers(cycleForm, {});
@@ -857,6 +861,7 @@ describe('formToFlowWithMarkers terminal-node three-state model', () => {
       positions: { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
       nodeActions: {},
       descriptions: {},
+      endSources: [],
       terminalNodes: { start: 'auto', end: 'auto' },
     };
     const { nodes, edges } = formToFlowWithMarkers(strayOnly, {});
@@ -895,6 +900,7 @@ describe('formToFlowWithMarkers terminal-node three-state model', () => {
       positions: { A: { x: 0, y: 0 } },
       nodeActions: {},
       descriptions: {},
+      endSources: [],
       terminalNodes: { start: { x: -300, y: 50 }, end: 'auto' },
     };
     const { nodes, edges } = formToFlowWithMarkers(pinnedOnStray, {});
@@ -919,6 +925,7 @@ describe('formToFlowWithMarkers terminal-node three-state model', () => {
       positions: { A: { x: 0, y: 0 } },
       nodeActions: {},
       descriptions: {},
+      endSources: [],
       terminalNodes: { start: 'auto', end: 'hidden' },
     };
     const { nodes, edges } = formToFlowWithMarkers(strayOnly, {});
@@ -1157,10 +1164,177 @@ describe('side ↔ handle mappers', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go', sourceSide: 'bottom', targetSide: 'top' }],
-      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const { nodes, edges } = formToFlow(form, {});
     const { transitions } = flowToGraph(nodes, edges);
     expect(transitions[0].sourceSide).toBe('bottom');
     expect(transitions[0].targetSide).toBe('top');
+  });
+});
+
+describe('formToFlowWithMarkers explicit End connections (endSources)', () => {
+  // The End marker emits EXPLICIT terminal edges for each `endSources` entry
+  // that is NOT already a sink (de-duplicated — a sink already has an auto
+  // arrow). The End marker node itself emits when there are explicit
+  // endSources even if the topology has no sinks (the manager willed End
+  // connections). All explicit edges are `type: 'terminal'` so `flowToGraph`
+  // filters them out (never reach the wire transitions — `__end` is not a
+  // real state).
+
+  it('emits an explicit terminal edge for an endSource that is NOT a sink', () => {
+    // A→B: A is the source, B is the sink. An explicit endSource 'A' (NOT a
+    // sink — it has an outgoing edge) emits an explicit A→__end edge.
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+      positions: { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
+      nodeActions: {},
+      descriptions: {},
+      endSources: ['A'],
+      terminalNodes: { start: 'auto', end: 'auto' },
+    };
+    const { edges } = formToFlowWithMarkers(form, {});
+    const explicit = edges.find((e) => e.id === 'A->__end#x');
+    expect(explicit).toBeDefined();
+    expect(explicit?.type).toBe(TERMINAL_EDGE_TYPE);
+    expect(explicit?.source).toBe('A');
+    expect(explicit?.target).toBe(END_NODE_ID);
+    expect(explicit?.data.explicit).toBe(true);
+  });
+
+  it('does NOT emit a duplicate explicit edge for an endSource that IS a sink', () => {
+    // A→B: B is the sink (out-degree 0) → the auto arrow B→__end already
+    // draws. An explicit endSource 'B' is de-duplicated — no `B->__end#x`.
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+      positions: { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
+      nodeActions: {},
+      descriptions: {},
+      endSources: ['B'],
+      terminalNodes: { start: 'auto', end: 'auto' },
+    };
+    const { edges } = formToFlowWithMarkers(form, {});
+    // The auto arrow is present (id `${B}->${END_NODE_ID}`, no #x suffix).
+    expect(edges.find((e) => e.id === 'B->__end')).toBeDefined();
+    // No duplicate explicit edge.
+    expect(edges.find((e) => e.id === 'B->__end#x')).toBeUndefined();
+  });
+
+  it('skips a stale endSource entry not in form.states (defensive)', () => {
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+      positions: { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
+      nodeActions: {},
+      descriptions: {},
+      endSources: ['GONE'],
+      terminalNodes: { start: 'auto', end: 'auto' },
+    };
+    const { edges } = formToFlowWithMarkers(form, {});
+    expect(edges.find((e) => e.id === 'GONE->__end#x')).toBeUndefined();
+  });
+
+  it('emits the End marker when end === "auto" and there are explicit endSources but no sinks', () => {
+    // A pure cycle (A→B, B→A): no sources, no sinks → 'auto' would emit NO
+    // End marker. But an explicit endSource ['A'] forces the End marker to
+    // emit (the manager willed End connections) at the rightmost real-node
+    // rank + vertical center (the auto-derivation fallback math).
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [
+        { from: 'A', to: 'B', actionLabel: 'go' },
+        { from: 'B', to: 'A', actionLabel: 'back' },
+      ],
+      positions: { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
+      nodeActions: {},
+      descriptions: {},
+      endSources: ['A'],
+      terminalNodes: { start: 'auto', end: 'auto' },
+    };
+    const { nodes, edges } = formToFlowWithMarkers(form, {});
+    const end = nodes.find((n) => n.id === END_NODE_ID);
+    expect(end).toBeDefined();
+    expect(end?.pinned).toBe(false);
+    // The End marker sits one rank right of the rightmost real node (B at
+    // x=240 → End at x=480), at the vertical center (y=0).
+    expect(end?.position.x).toBe(480);
+    // The explicit edge A→__end is present.
+    expect(edges.find((e) => e.id === 'A->__end#x')).toBeDefined();
+  });
+
+  it('explicit terminal edges never reach flowToGraph transitions (canvas-only)', () => {
+    // The End marker's explicit edges are `type: 'terminal'` so `flowToGraph`
+    // filters them out — `__end` is not a real state and must never reach the
+    // wire transitions.
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+      positions: { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
+      nodeActions: {},
+      descriptions: {},
+      endSources: ['A'],
+      terminalNodes: { start: 'auto', end: 'auto' },
+    };
+    const { nodes, edges } = formToFlowWithMarkers(form, {});
+    const { transitions } = flowToGraph(nodes, edges);
+    // Only the real transition A→B; no `__end` leaked into transitions.
+    expect(transitions).toHaveLength(1);
+    expect(transitions.every((t) => t.from !== '__end' && t.to !== '__end')).toBe(true);
+  });
+});
+
+describe('hasEndSource (duplicate End-connection predicate)', () => {
+  const edges: FlowEdge[] = [
+    { id: 'A->__end', source: 'A', target: END_NODE_ID, type: TERMINAL_EDGE_TYPE, data: { actionLabel: '' } },
+    { id: 'B->__end#x', source: 'B', target: END_NODE_ID, type: TERMINAL_EDGE_TYPE, data: { actionLabel: '', explicit: true } },
+    { id: 'A->B#0', source: 'A', target: 'B', type: 'transition', data: { actionLabel: 'go' } },
+  ];
+  it('returns true for a source with an auto sink→End arrow', () => {
+    expect(hasEndSource(edges, 'A')).toBe(true);
+  });
+  it('returns true for a source with an explicit End edge', () => {
+    expect(hasEndSource(edges, 'B')).toBe(true);
+  });
+  it('returns false for a source with no End connection', () => {
+    expect(hasEndSource(edges, 'C')).toBe(false);
+  });
+  it('ignores real transition edges (a transition to a state coincidentally named like a sink is unaffected)', () => {
+    // A→B is a real transition (type: 'transition') — hasEndSource only
+    // considers terminal edges targeting __end.
+    expect(hasEndSource(edges, 'A')).toBe(true); // A has the auto arrow
+    // A real transition A→B does NOT make hasEndSource(edges, 'A') true via B.
+    const onlyTrans: FlowEdge[] = [
+      { id: 'A->B#0', source: 'A', target: 'B', type: 'transition', data: { actionLabel: 'go' } },
+    ];
+    expect(hasEndSource(onlyTrans, 'A')).toBe(false);
+  });
+});
+
+describe('rejectionMessageForConnection (End-marker duplicate message)', () => {
+  it('returns a manager-facing message when dropping onto End from an already-connected source', () => {
+    const edges: FlowEdge[] = [
+      { id: 'A->__end', source: 'A', target: END_NODE_ID, type: TERMINAL_EDGE_TYPE, data: { actionLabel: '' } },
+    ];
+    const msg = rejectionMessageForConnection(
+      { isValid: false, fromId: 'A', toId: END_NODE_ID },
+      edges,
+    );
+    expect(msg).toBe('Status A sudah terhubung ke titik akhir.');
+  });
+  it('falls back to the duplicate-transition message for a non-End duplicate', () => {
+    const edges: FlowEdge[] = [
+      { id: 'A->B#0', source: 'A', target: 'B', type: 'transition', data: { actionLabel: 'go' } },
+    ];
+    const msg = rejectionMessageForConnection(
+      { isValid: false, fromId: 'A', toId: 'B' },
+      edges,
+    );
+    expect(msg).toBe('Transisi dari A ke B sudah ada.');
   });
 });

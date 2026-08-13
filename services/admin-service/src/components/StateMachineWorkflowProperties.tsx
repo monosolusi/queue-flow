@@ -193,7 +193,83 @@ export function StateMachineWorkflowProperties({
         ? "Posisi otomatis — diturunkan dari status pada kanvas."
         : isHidden
           ? "Tersembunyi."
-          : `Posisi pinned: x=${(terminal as { x: number; y: number }).x}, y=${(terminal as { x: number; y: number }).y}`;
+          : `Posisi ditetapkan: x=${(terminal as { x: number; y: number }).x}, y=${(terminal as { x: number; y: number }).y}`;
+      // End-marker-only: the "Transisi masuk" list. Auto sinks = states with
+      // out-degree 0 (the auto-derived sink→End arrows); explicit = the
+      // manager-drawn `endSources` entries that are NOT auto sinks (de-duped on
+      // the canvas — an endSource that is also a sink already has an auto arrow
+      // and is NOT re-listed as explicit). Each explicit row carries a "Hapus"
+      // button (lifts via `onRemoveEndSource`, non-stamping); auto rows are
+      // read-only (topology-derived — delete the state's outgoing transitions
+      // or the state itself to remove one).
+      let endIncoming: JSX.Element | null = null;
+      if (!isStart) {
+        const stateSet = new Set(form.states);
+        const outDeg = new Map<string, number>();
+        for (const s of form.states) outDeg.set(s, 0);
+        for (const t of form.transitions) {
+          if (!stateSet.has(t.from) || !stateSet.has(t.to)) continue;
+          outDeg.set(t.from, (outDeg.get(t.from) ?? 0) + 1);
+        }
+        const autoSinks = form.states.filter((s) => (outDeg.get(s) ?? 0) === 0);
+        const autoSinkSet = new Set(autoSinks);
+        const explicit = form.endSources.filter(
+          (s) => stateSet.has(s) && !autoSinkSet.has(s),
+        );
+        const rows: JSX.Element[] = [
+          ...autoSinks.map((s) => (
+            <li
+              key={`auto-${s}`}
+              className="sm-properties__action"
+              data-testid={`panel-end-source-${s}`}
+            >
+              <span className="sm-properties__action-label">{s}</span>
+              <span className="sm-properties__hint">Otomatis — status tanpa transisi keluar</span>
+            </li>
+          )),
+          ...explicit.map((s) => (
+            <li
+              key={`explicit-${s}`}
+              className="sm-properties__action"
+              data-testid={`panel-end-source-${s}`}
+            >
+              <span className="sm-properties__action-label">{s}</span>
+              <button
+                type="button"
+                className="sm-properties__action-delete"
+                data-testid={`panel-end-source-delete-${s}`}
+                aria-label={`Hapus transisi masuk dari ${s}`}
+                onClick={() => handlers.onRemoveEndSource(s)}
+              >
+                Hapus
+              </button>
+            </li>
+          )),
+        ];
+        endIncoming = (
+          <div className="sm-properties__field" data-testid="panel-end-incoming">
+            <p className="sm-properties__label" id="panel-end-incoming-label">
+              Transisi masuk
+            </p>
+            <p className="sm-properties__hint">
+              Status yang berakhir di titik akhir. Seret garis dari sebuah status ke titik akhir untuk menambahkan.
+            </p>
+            {rows.length === 0 ? (
+              <p className="sm-properties__hint" data-testid="panel-end-incoming-empty">
+                Belum ada transisi masuk. Seret garis dari sebuah status ke titik akhir untuk menambahkan.
+              </p>
+            ) : (
+              <ul
+                className="sm-properties__actions"
+                aria-labelledby="panel-end-incoming-label"
+                data-testid="panel-end-incoming-list"
+              >
+                {rows}
+              </ul>
+            )}
+          </div>
+        );
+      }
       return (
         <aside className="sm-properties" data-testid="sm-properties" aria-label="Properti titik alur">
           {backButton}
@@ -202,12 +278,13 @@ export function StateMachineWorkflowProperties({
             <p className="sm-properties__hint" data-testid="panel-marker-description">
               {isStart
                 ? "Status awal — status yang punya transisi keluar tapi tidak punya transisi masuk. Panah keluar dari titik ini ke status pertama. Status yang belum punya transisi sama sekali tidak terhubung ke sini."
-                : "Status akhir — status yang punya transisi masuk tapi tidak punya transisi keluar. Panah masuk ke titik ini dari status terakhir. Status yang belum punya transisi sama sekali tidak terhubung ke sini."}
+                : "Status akhir — status yang punya transisi masuk tapi tidak punya transisi keluar. Panah masuk ke titik ini dari status terakhir. Status yang belum punya transisi sama sekali tidak terhubung ke sini. Seret garis dari sebuah status ke titik akhir untuk menambahkan transisi masuk."}
             </p>
             <p className="sm-properties__hint" data-testid={`panel-terminal-info-${key}`}>
               {posInfo}
             </p>
           </div>
+          {endIncoming}
           <div className="sm-properties__field">
             <button
               type="button"

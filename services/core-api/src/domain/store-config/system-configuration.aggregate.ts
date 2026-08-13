@@ -4,6 +4,7 @@ import { InvalidValueObjectException } from '../shared/errors';
 import { BrandColor } from './value-objects/brand-color';
 import { DailyResetPolicy } from './value-objects/daily-reset-policy';
 import { EdgeRoutingLayout } from './value-objects/edge-routing-layout';
+import { EndSources } from './value-objects/end-sources';
 import { NodeActions } from './value-objects/node-actions';
 import { NodePositions } from './value-objects/node-positions';
 import { PrinterConfiguration } from './value-objects/printer-configuration';
@@ -30,6 +31,7 @@ export class SystemConfiguration extends AggregateRoot {
   private _nodePositions: NodePositions;
   private _nodeActions: NodeActions;
   private _terminalNodes: TerminalNodes;
+  private _endSources: EndSources;
   private _printerConfiguration: PrinterConfiguration;
 
   private constructor(
@@ -45,6 +47,7 @@ export class SystemConfiguration extends AggregateRoot {
     nodePositions: NodePositions,
     nodeActions: NodeActions,
     terminalNodes: TerminalNodes,
+    endSources: EndSources,
     printerConfiguration: PrinterConfiguration,
   ) {
     super(id);
@@ -59,6 +62,7 @@ export class SystemConfiguration extends AggregateRoot {
     this._nodePositions = nodePositions;
     this._nodeActions = nodeActions;
     this._terminalNodes = terminalNodes;
+    this._endSources = endSources;
     this._printerConfiguration = printerConfiguration;
   }
 
@@ -66,8 +70,8 @@ export class SystemConfiguration extends AggregateRoot {
    * brand color, service themes, TV panel layout, edge routing layout, node
    * positions, and printer configuration. `brandColor` + `serviceThemes` +
    * `tvPanelLayout` + `edgeRoutingLayout` + `nodePositions` + `nodeActions` +
-   * `terminalNodes` + `printerConfiguration` default so the dev seed and
-   * acceptance `seedPrdConfig` (2-arg calls) need no change. */
+   * `terminalNodes` + `endSources` + `printerConfiguration` default so the dev
+   * seed and acceptance `seedPrdConfig` (2-arg calls) need no change. */
   public static create(
     id: Identifier,
     storeName = '',
@@ -78,6 +82,7 @@ export class SystemConfiguration extends AggregateRoot {
     nodePositions: NodePositions = NodePositions.DEFAULT,
     nodeActions: NodeActions = NodeActions.DEFAULT,
     terminalNodes: TerminalNodes = TerminalNodes.DEFAULT,
+    endSources: EndSources = EndSources.DEFAULT,
     printerConfiguration: PrinterConfiguration = PrinterConfiguration.DEFAULT,
   ): SystemConfiguration {
     return new SystemConfiguration(
@@ -93,6 +98,7 @@ export class SystemConfiguration extends AggregateRoot {
       nodePositions,
       nodeActions,
       terminalNodes,
+      endSources,
       printerConfiguration,
     );
   }
@@ -110,6 +116,7 @@ export class SystemConfiguration extends AggregateRoot {
     nodePositions: NodePositions;
     nodeActions: NodeActions;
     terminalNodes: TerminalNodes;
+    endSources: EndSources;
     printerConfiguration: PrinterConfiguration;
   }): SystemConfiguration {
     return new SystemConfiguration(
@@ -125,6 +132,7 @@ export class SystemConfiguration extends AggregateRoot {
       params.nodePositions,
       params.nodeActions,
       params.terminalNodes,
+      params.endSources,
       params.printerConfiguration,
     );
   }
@@ -171,6 +179,10 @@ export class SystemConfiguration extends AggregateRoot {
 
   public get terminalNodes(): TerminalNodes {
     return this._terminalNodes;
+  }
+
+  public get endSources(): EndSources {
+    return this._endSources;
   }
 
   public get printerConfiguration(): PrinterConfiguration {

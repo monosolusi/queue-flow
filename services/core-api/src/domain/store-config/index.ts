@@ -9,6 +9,7 @@ export * from './system-configuration.aggregate';
 export * from './value-objects/brand-color';
 export * from './value-objects/daily-reset-policy';
 export * from './value-objects/edge-routing-layout';
+export * from './value-objects/end-sources';
 export * from './value-objects/node-positions';
 export * from './value-objects/node-actions';
 export * from './value-objects/terminal-nodes';

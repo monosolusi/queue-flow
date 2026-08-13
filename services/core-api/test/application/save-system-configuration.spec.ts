@@ -8,6 +8,7 @@ import {
   DailyResetMode,
   SystemConfigurationChangedEvent,
   EdgeRoutingLayout,
+  EndSources,
   NodeActions,
   NodePositions,
   PrinterConfiguration,
@@ -78,6 +79,7 @@ describe('SaveSystemConfigurationUseCase — category id preservation (QUE-24)',
       nodePositions: {},
       nodeActions: {},
       terminalNodes: { start: 'auto', end: 'auto' },
+      endSources: [],
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
       actor: 'admin',
     };
@@ -202,6 +204,7 @@ describe('SaveSystemConfigurationUseCase — brandColor (QUE-36)', () => {
       nodePositions: {},
       nodeActions: {},
       terminalNodes: { start: 'auto', end: 'auto' },
+      endSources: [],
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
       actor: 'admin',
     };
@@ -327,6 +330,7 @@ describe('SaveSystemConfigurationUseCase — SYSTEM_CONFIG_CHANGED broadcast (FR
       nodePositions: {},
       nodeActions: {},
       terminalNodes: { start: 'auto', end: 'auto' },
+      endSources: [],
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
       actor: 'admin',
     };
@@ -441,6 +445,7 @@ describe('SaveSystemConfigurationUseCase — edgeRoutingLayout', () => {
       nodePositions: {},
       nodeActions: {},
       terminalNodes: { start: 'auto', end: 'auto' },
+      endSources: [],
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
       actor: 'admin',
     };
@@ -590,6 +595,7 @@ describe('SaveSystemConfigurationUseCase — nodePositions', () => {
       nodePositions: nodePositions as SaveSystemConfigurationCommand['nodePositions'],
       nodeActions: {},
       terminalNodes: { start: 'auto', end: 'auto' },
+      endSources: [],
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
       actor: 'admin',
     };
@@ -684,6 +690,152 @@ describe('SaveSystemConfigurationUseCase — nodePositions', () => {
 });
 
 /**
+ * End sources persistence (explicit "end sources" for the admin state-machine
+ * editor — the flat array of state NAMES the manager dragged an explicit arrow
+ * from into the End terminal marker; multiple allowed). `endSources` is a
+ * required field on the save command; the use case validates it pre-tx
+ * (fail-fast — a malformed array never acquires a transaction), performs the
+ * state-membership cross-check (anti-corruption: the VO stays free of a
+ * StateMachine dependency), and the persisted aggregate carries it through. The
+ * result echoes the stored array back to the caller. The cross-check is against
+ * the state-schema STATES (mirrors `nodePositions`/`nodeActions`).
+ */
+describe('SaveSystemConfigurationUseCase — endSources', () => {
+  function buildUseCase() {
+    return {
+      config: new InMemorySystemConfigurationRepository(),
+      categories: new InMemoryCategoryRepository(),
+      routingRules: new InMemoryCounterRoutingRuleRepository(),
+    };
+  }
+
+  function command(endSources: string[]): SaveSystemConfigurationCommand {
+    return {
+      storeName: 'Toko Brand',
+      stateMachine: projectStateMachine(StateMachine.DEFAULT),
+      dailyReset: {
+        mode: DailyResetMode.MANUAL,
+        cronExpression: null,
+        resetTicketNumberTo: 1,
+        archivePreviousDayData: true,
+      },
+      categories: [{ code: 'A', name: 'Customer Service' }],
+      routingRules: [
+        {
+          counterId: 1,
+          counterName: 'Loket 1',
+          assignedCategoryCodes: ['A'],
+          priorityPolicy: PriorityPolicy.FIFO_GLOBAL,
+        },
+      ],
+      brandColor: '#2563eb',
+      serviceThemes: { kiosk: 'light', tv: 'light', caller: 'light', admin: 'light' },
+      tvPanelLayout: [
+        { id: 'nowServing', component: 'nowServing', x: 0, y: 0, w: 12, h: 4 },
+        { id: 'waitingQueue', component: 'waitingQueue', x: 0, y: 4, w: 6, h: 3 },
+        { id: 'callHistory', component: 'callHistory', x: 6, y: 4, w: 6, h: 3 },
+        { id: 'countersServing', component: 'countersServing', x: 0, y: 7, w: 12, h: 3 },
+        { id: 'runningText', component: 'runningText', x: 0, y: 10, w: 12, h: 1 },
+      ],
+      edgeRoutingLayout: {},
+      nodePositions: {},
+      nodeActions: {},
+      terminalNodes: { start: 'auto', end: 'auto' },
+      endSources,
+      printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
+      actor: 'admin',
+    };
+  }
+
+  it('persists a non-empty endSources (multiple allowed) and echoes it in the result', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    const sources = ['WAITING', 'COMPLETED'];
+    const result = await useCase.execute(command(sources));
+
+    expect(result.endSources).toEqual(sources);
+    const saved = await repos.config.get();
+    expect(saved!.endSources.toDto()).toEqual(sources);
+  });
+
+  it('round-trips a re-GET via the aggregate (end sources preserved)', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    const sources = ['WAITING', 'COMPLETED'];
+    await useCase.execute(command(sources));
+
+    const saved = await repos.config.get();
+    expect(saved!.endSources.toDto()).toEqual(sources);
+  });
+
+  it('rejects an endSources entry that is not a state in the active state machine (cross-check, NFR-REL-02)', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    // NOPE is not a state in the default state machine — the cross-check must
+    // throw InvalidValueObjectException pre-tx.
+    await expect(useCase.execute(command(['NOPE']))).rejects.toThrow(
+      InvalidValueObjectException,
+    );
+    // Nothing persisted — fail-fast happened before the tx opened.
+    expect(await repos.config.get()).toBeNull();
+  });
+
+  it('rejects a non-string entry pre-tx with InvalidValueObjectException (VO of())', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    await expect(
+      useCase.execute(command(['WAITING', 5] as unknown as string[])),
+    ).rejects.toThrow(InvalidValueObjectException);
+    expect(await repos.config.get()).toBeNull();
+  });
+
+  it('accepts an empty endSources (DEFAULT — auto-derived sink behavior)', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    const result = await useCase.execute(command([]));
+    expect(result.endSources).toEqual([]);
+    const saved = await repos.config.get();
+    expect(saved!.endSources.toDto()).toEqual([]);
+    expect(saved!.endSources.equals(EndSources.DEFAULT)).toBe(true);
+  });
+});
+
+/**
  * Printer configuration persistence (which printer the kiosk uses — Chrome's
  * default dialog, or a network ESC/POS printer proxied through core-api).
  * `printerConfiguration` is a required field on the save command; the use case
@@ -732,6 +884,7 @@ describe('SaveSystemConfigurationUseCase — printerConfiguration', () => {
       nodePositions: {},
       nodeActions: {},
       terminalNodes: { start: 'auto', end: 'auto' },
+      endSources: [],
       printerConfiguration: printer as unknown as SaveSystemConfigurationCommand['printerConfiguration'],
       actor: 'admin',
     };
@@ -850,6 +1003,7 @@ describe('SaveSystemConfigurationUseCase — nodeActions', () => {
       nodePositions: {},
       nodeActions: nodeActions as SaveSystemConfigurationCommand['nodeActions'],
       terminalNodes: { start: 'auto', end: 'auto' },
+      endSources: [],
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
       actor: 'admin',
     };
@@ -1025,6 +1179,7 @@ describe('SaveSystemConfigurationUseCase — stateMachine.descriptions', () => {
       nodePositions: {},
       nodeActions: {},
       terminalNodes: { start: 'auto', end: 'auto' },
+      endSources: [],
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
       actor: 'admin',
     };
@@ -1197,6 +1352,7 @@ describe('SaveSystemConfigurationUseCase — terminalNodes', () => {
       nodePositions: {},
       nodeActions: {},
       terminalNodes: terminalNodes as SaveSystemConfigurationCommand['terminalNodes'],
+      endSources: [],
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
       actor: 'admin',
     };

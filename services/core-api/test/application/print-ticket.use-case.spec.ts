@@ -66,6 +66,7 @@ describe('PrintTicketUseCase', () => {
       nodePositions: d.nodePositions,
       nodeActions: d.nodeActions,
       terminalNodes: d.terminalNodes,
+      endSources: d.endSources,
       printerConfiguration: printer,
     });
     void repo.save(config);
