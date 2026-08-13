@@ -253,6 +253,33 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it('no-ops a rename to an empty/blank name (manager feedback: "ketika nama status node dihapus, error")', () => {
+    // Clearing the name input used to commit a node with an empty id (`''`),
+    // which then tripped `validateCustomStateMachine` → "Nama status tidak boleh
+    // kosong" and blocked the save. The empty/whitespace guard must no-op; the
+    // controlled input reverts to the prior name on re-render, so the name can
+    // never be blank and no degenerate empty node is ever committed.
+    const onChange = vi.fn();
+    const customForm = {
+      mode: 'custom' as const,
+      states: ['WAITING', 'CALLING', 'EXTRA'],
+      transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
+      positions: {},
+    };
+    renderWorkflow(customForm, [], onChange);
+    selectStateNode('EXTRA');
+    const panel = screen.getByTestId('sm-properties');
+    const nameInput = within(panel).getByTestId('panel-state-name') as HTMLInputElement;
+    // Empty string.
+    fireEvent.change(nameInput, { target: { value: '' } });
+    expect(onChange).not.toHaveBeenCalled();
+    // Whitespace-only (the rename input uppercases; whitespace survives).
+    fireEvent.change(nameInput, { target: { value: '   ' } });
+    expect(onChange).not.toHaveBeenCalled();
+    // The controlled value reverts to the prior name — no blank commit.
+    expect(nameInput.value).toBe('EXTRA');
+  });
+
   it('renders one typeless connection handle on every side of every node', () => {
     // Feedback fix: the manager can draw a transition edge from any point to any
     // point only if each node has one TYPELESS handle per side — a single
@@ -636,5 +663,92 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     // The controlled `<select>` reverts to the live edge value (CALLING) —
     // the DOM reflects the controlled value, not the rejected pick.
     expect(toSelect.value).toBe('CALLING');
+  });
+
+  // --- Calibrated "status standar" picker (manager feedback: "pilihan status
+  //     ada banyak, tidak jelas itu apa aja — kalibrasi dan cek ulang") --------
+  it('palette lists the canonical statuses NOT yet on the canvas, each with a sub-description', () => {
+    // A custom graph missing SERVING/SKIPPED/COMPLETED → the picker offers
+    // exactly those three, each labelled with its canonical sub-description so
+    // the manager knows what each is before adding. The "semua sudah ada" note
+    // is absent (statuses are still missing).
+    const customForm: StateMachineForm = {
+      mode: 'custom' as const,
+      states: ['WAITING', 'CALLING'],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
+      positions: {},
+    };
+    renderWorkflow(customForm);
+    expect(screen.getByTestId('sm-palette-standard')).toBeInTheDocument();
+    expect(screen.queryByTestId('sm-palette-all-standard')).not.toBeInTheDocument();
+    expect(screen.getByTestId('sm-add-standard-SERVING')).toBeInTheDocument();
+    expect(screen.getByTestId('sm-add-standard-SKIPPED')).toBeInTheDocument();
+    expect(screen.getByTestId('sm-add-standard-COMPLETED')).toBeInTheDocument();
+    // The absent canonicals (WAITING/CALLING are present) are NOT offered.
+    expect(screen.queryByTestId('sm-add-standard-WAITING')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('sm-add-standard-CALLING')).not.toBeInTheDocument();
+  });
+
+  it('palette shows "semua sudah ada" when all 5 canonical statuses are on the canvas', () => {
+    // The default graph has all five → the picker is empty and the note shows.
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
+    expect(screen.getByTestId('sm-palette-all-standard')).toBeInTheDocument();
+    expect(screen.queryByTestId('sm-add-standard-SERVING')).not.toBeInTheDocument();
+  });
+
+  it('adds a canonical status under its load-bearing name via the picker', () => {
+    // Adding SERVING from the picker commits it under the exact canonical name
+    // (the system identity the queue engine keys off), NOT a generated STATUS_N.
+    const onChange = vi.fn();
+    const customForm: StateMachineForm = {
+      mode: 'custom' as const,
+      states: ['WAITING', 'CALLING'],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
+      positions: {},
+    };
+    renderWorkflow(customForm, [], onChange);
+    fireEvent.click(screen.getByTestId('sm-add-standard-SERVING'));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next = onChange.mock.calls[0][0];
+    expect(next.states).toContain('SERVING');
+  });
+
+  // --- Properties panel "Status" property (manager feedback: "status node itu
+  //     apa? masukn d properties" + "tambahkan properties untuk status, dan sub
+  //     description juga") -----------------------------------------------------
+  it('properties panel shows the "Status standar" badge + sub-description + consequence for a canonical node', () => {
+    // The status is DERIVED from the name (the name IS the load-bearing system
+    // identity). For a canonical node the panel surfaces a read-only "Status
+    // standar" badge, the status's sub-description, and the consequence (what
+    // stops working without it) — so the manager understands the status's role
+    // before editing or dropping it.
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
+    selectStateNode('SERVING');
+    const panel = screen.getByTestId('sm-properties');
+    expect(within(panel).getByTestId('panel-state-badge')).toHaveTextContent('Status standar');
+    expect(within(panel).getByTestId('panel-state-subdescription')).toHaveTextContent('Sedang dilayani');
+    expect(within(panel).getByTestId('panel-state-consequence')).toBeInTheDocument();
+  });
+
+  it('properties panel shows the "Status kustom" badge + derived sub-description, no consequence, for a custom node', () => {
+    // A custom (non-canonical) node gets a "Status kustom" badge + the derived
+    // summary, and NO consequence (the consequence is a canonical-status
+    // property — a custom status has no engine-coupled role to lose).
+    const customForm: StateMachineForm = {
+      mode: 'custom' as const,
+      states: ['WAITING', 'CALLING', 'ONHOLD'],
+      transitions: [
+        { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' },
+        { from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut' },
+      ],
+      positions: {},
+    };
+    renderWorkflow(customForm);
+    selectStateNode('ONHOLD');
+    const panel = screen.getByTestId('sm-properties');
+    expect(within(panel).getByTestId('panel-state-badge')).toHaveTextContent('Status kustom');
+    // ONHOLD has 1 outgoing transition → derived "1 transisi keluar".
+    expect(within(panel).getByTestId('panel-state-subdescription')).toHaveTextContent('1 transisi keluar');
+    expect(within(panel).queryByTestId('panel-state-consequence')).not.toBeInTheDocument();
   });
 });

@@ -378,19 +378,76 @@ export function validateCustomStateMachine(form: StateMachineForm): string[] {
 }
 
 /**
- * What each status of the standard (PRD §7) flow powers, in manager-facing
- * Indonesian. Keyed by the status names in {@link DEFAULT_STATE_MACHINE}; the
- * copy names the caller BUTTON (or the report metric) that stops working, never
- * the backend mechanism, because the reader is a non-technical store manager.
+ * The five PRD §7 canonical system statuses — the "hardcoded" set the queue
+ * engine keys off as load-bearing identities (QueueTicket.create() writes
+ * WAITING, complete() writes COMPLETED, markCalling() writes CALLING, …; the
+ * fixed caller commands AND the lifecycle timestamps are coupled to these
+ * literal names — see core-api `TicketStatus`). This catalog is the SINGLE
+ * source of truth for the canonical status metadata: the description + the
+ * consequence maps and `describeState` all derive from it. Each entry carries:
+ *  - `name`: the canonical status name — the system identity, NOT a display
+ *    label. Renaming it breaks the engine, so the designer treats canonical
+ *    names as fixed system roles (the calibrated "status standar" picker adds
+ *    a node under this exact name) while custom statuses keep a free name.
+ *  - `description`: a manager-facing sub-description (what the status IS).
+ *  - `consequence`: what stops working without it — surfaced by the missing-
+ *    status warning AND the properties panel's sub-description so the manager
+ *    understands the status's role before editing or dropping it.
  */
-const CANONICAL_STATE_CONSEQUENCES: Record<string, string> = {
-  WAITING:
-    'tiket baru dari kiosk selalu dibuat di status ini, jadi tanpa status ini tiket tidak pernah bisa dipanggil',
-  CALLING: 'tombol "Panggil Berikutnya" di panel caller berhenti berfungsi',
-  SERVING: 'tombol "Mulai Melayani" di panel caller berhenti berfungsi',
-  SKIPPED: 'tombol "Lewati / Absen" dan "Panggil Ulang" di panel caller berhenti berfungsi',
-  COMPLETED: 'tombol "Selesai Layan" berhenti berfungsi dan lama layanan tidak tercatat di laporan',
-};
+export interface CanonicalStatus {
+  readonly name: string;
+  readonly description: string;
+  readonly consequence: string;
+}
+
+export const CANONICAL_STATUSES: readonly CanonicalStatus[] = [
+  { name: 'WAITING', description: 'Tiket menunggu dipanggil', consequence: 'tiket baru dari kiosk selalu dibuat di status ini, jadi tanpa status ini tiket tidak pernah bisa dipanggil' },
+  { name: 'CALLING', description: 'Sedang dipanggil ke counter', consequence: 'tombol "Panggil Berikutnya" di panel caller berhenti berfungsi' },
+  { name: 'SERVING', description: 'Sedang dilayani', consequence: 'tombol "Mulai Melayani" di panel caller berhenti berfungsi' },
+  { name: 'SKIPPED', description: 'Dilewati / absen', consequence: 'tombol "Lewati / Absen" dan "Panggil Ulang" di panel caller berhenti berfungsi' },
+  { name: 'COMPLETED', description: 'Layanan selesai', consequence: 'tombol "Selesai Layan" berhenti berfungsi dan lama layanan tidak tercatat di laporan' },
+];
+
+/**
+ * Friendly Indonesian short descriptions for the 5 canonical states — derived
+ * from {@link CANONICAL_STATUSES} (the single source of truth). The canonical
+ * copy shown on the SVG state card and in the properties panel; custom states
+ * derive a summary from their outgoing transitions instead (the wire contract
+ * carries no description field, so this map is a CLIENT-SIDE derivation — never
+ * serialized).
+ */
+export const CANONICAL_STATE_DESCRIPTIONS: Record<string, string> = Object.fromEntries(
+  CANONICAL_STATUSES.map((s): [string, string] => [s.name, s.description]),
+);
+
+/**
+ * Look up the canonical system status a node represents, by name. Returns `null`
+ * for a custom (non-canonical) name — the node IS a custom status the manager
+ * coined. The name IS the system identity (the queue engine keys off the
+ * canonical names as literals), so the status is DERIVED from the name rather
+ * than stored as a separate field — a true free-display-name vs. hardcoded-
+ * status decoupling would require a domain rewrite (aggregate + repos + DB +
+ * wire DTO + all frontends), out of scope for this manager-feedback fix. The
+ * properties panel reads this to surface "what status is this node" (manager
+ * feedback: "status node itu apa? masukn d properties").
+ */
+export function canonicalStatusOf(name: string): CanonicalStatus | null {
+  return CANONICAL_STATUSES.find((s) => s.name === name) ?? null;
+}
+
+/**
+ * The canonical system statuses NOT yet on the canvas — the calibrated "status
+ * standar" choices the add-picker offers (manager feedback: "pilihan status
+ * ada banyak, tidak jelas itu apa aja — kalibrasi dan cek ulang"). Each carries
+ * its sub-description so the manager knows exactly what each is before adding
+ * it. Empty when the graph already has all five (the default graph always does).
+ * Adding one inserts it under its canonical name (the load-bearing system
+ * identity) so the engine keeps working.
+ */
+export function availableCanonicalStatuses(states: readonly string[]): CanonicalStatus[] {
+  const present = new Set(states.map((s) => s.trim()));
+  return CANONICAL_STATUSES.filter((s) => !present.has(s.name));
+}
 
 /** One status of the standard flow that the edited graph no longer contains. */
 export interface MissingCanonicalState {
@@ -423,7 +480,7 @@ export function missingCanonicalStates(form: StateMachineForm): MissingCanonical
   const present = new Set(form.states.map((s) => s.trim()));
   return DEFAULT_STATE_MACHINE.states
     .filter((state) => !present.has(state))
-    .map((state) => ({ state, consequence: CANONICAL_STATE_CONSEQUENCES[state] ?? '' }));
+    .map((state) => ({ state, consequence: canonicalStatusOf(state)?.consequence ?? '' }));
 }
 
 /** States referenced by at least one transition — removing these would dangle an edge. */
@@ -437,33 +494,20 @@ export function referencedStates(form: StateMachineForm): Set<string> {
 }
 
 /**
- * Friendly Indonesian short descriptions for the 5 PRD §7 default states — the
- * canonical copy shown on the SVG state card and in the properties panel. Used
- * by {@link describeState} as the canonical lookup; custom states derive a
- * summary from their outgoing transitions instead (the wire contract carries
- * no description field, so this map is a CLIENT-SIDE derivation — never
- * serialized).
- */
-export const CANONICAL_STATE_DESCRIPTIONS: Record<string, string> = {
-  WAITING: 'Tiket menunggu dipanggil',
-  CALLING: 'Sedang dipanggil ke counter',
-  SERVING: 'Sedang dilayani',
-  SKIPPED: 'Dilewati / absen',
-  COMPLETED: 'Layanan selesai',
-};
-
-/**
  * Pure helper: derive a short manager-facing description for a state. Returns
- * the canonical description when the state is one of the 5 PRD §7 defaults;
- * otherwise derives a summary from the number of outgoing transitions
- * (`${n} transisi keluar` when n > 0, else `Status kustom`). The description is
- * a CLIENT-SIDE derivation only — it is never part of the wire form
- * ({@link StateMachineForm} carries only `mode`/`states`/`transitions`), so
- * adding it here changes no wire contract.
+ * the canonical description when the state is one of the 5 PRD §7 defaults (via
+ * {@link canonicalStatusOf}); otherwise derives a summary from the number of
+ * outgoing transitions (`${n} transisi keluar` when n > 0, else `Status kustom`).
+ * The description is a CLIENT-SIDE derivation only — it is never part of the wire
+ * form ({@link StateMachineForm} carries only `mode`/`states`/`transitions`),
+ * so adding it here changes no wire contract. For a canonical status the
+ * properties panel surfaces the richer {@link canonicalStatusOf} record (the
+ * status's sub-description AND its consequence) instead of this short copy —
+ * this helper stays the SVG-card fallback used when only the name is known.
  */
 export function describeState(form: StateMachineForm, name: string): string {
-  const canonical = CANONICAL_STATE_DESCRIPTIONS[name];
-  if (canonical) return canonical;
+  const canonical = canonicalStatusOf(name);
+  if (canonical) return canonical.description;
   const outgoing = form.transitions.filter((t) => t.from === name).length;
   if (outgoing > 0) return `${outgoing} transisi keluar`;
   return 'Status kustom';
