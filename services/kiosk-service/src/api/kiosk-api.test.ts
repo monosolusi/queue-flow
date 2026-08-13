@@ -111,6 +111,8 @@ describe('KioskApi (wire contract — FR-ENG-01 / QUE-9)', () => {
       storeName: 'Toko Contoh',
       brandColor: '#2563eb',
       themeMode: 'light',
+      printerMode: 'chrome',
+      printerPaperWidth: 80,
     };
     const fetchMock = fetchReturning(rawConfig);
     vi.stubGlobal('fetch', fetchMock);
@@ -122,5 +124,85 @@ describe('KioskApi (wire contract — FR-ENG-01 / QUE-9)', () => {
     expect(url).toBe('/api/system/config');
     expect(init?.method).toBeUndefined();
     expect(result).toEqual(expected);
+  });
+
+  it('getStoreProfile maps printerConfiguration.mode/paperWidth → printerMode/printerPaperWidth', async () => {
+    const rawConfig = {
+      storeName: 'Toko ESC/POS',
+      brandColor: '',
+      serviceThemes: { kiosk: 'dark' },
+      printerConfiguration: { mode: 'network-escpos', paperWidth: 58, host: '192.168.1.50', port: 9100, cutMode: 'full' },
+    };
+    const fetchMock = fetchReturning(rawConfig);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await api.getStoreProfile();
+
+    // The kiosk only carries the mode + paper width (ISP) — host/port/cutMode
+    // stay server-side for the network proxy.
+    expect(result.printerMode).toBe('network-escpos');
+    expect(result.printerPaperWidth).toBe(58);
+    expect(result.themeMode).toBe('dark');
+  });
+
+  it('getStoreProfile defaults to chrome/80mm when printerConfiguration is absent (prior behavior)', async () => {
+    const rawConfig = { storeName: '', brandColor: '', serviceThemes: {} };
+    vi.stubGlobal('fetch', fetchReturning(rawConfig));
+
+    const result = await api.getStoreProfile();
+
+    expect(result.printerMode).toBe('chrome');
+    expect(result.printerPaperWidth).toBe(80);
+  });
+
+  it('getStoreProfile defaults to chrome/80mm on an unknown mode/paperWidth', async () => {
+    const rawConfig = {
+      storeName: '',
+      brandColor: '',
+      printerConfiguration: { mode: 'bogus', paperWidth: 999 },
+    };
+    vi.stubGlobal('fetch', fetchReturning(rawConfig));
+
+    const result = await api.getStoreProfile();
+
+    expect(result.printerMode).toBe('chrome');
+    expect(result.printerPaperWidth).toBe(80);
+  });
+
+  it('printTicket POSTs /api/print/ticket with the payload and resolves on 204', async () => {
+    const fetchMock = vi.fn((..._args: FetchArgs) =>
+      Promise.resolve({ ok: true, status: 204, json: () => Promise.resolve({}) }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.printTicket({
+      ticketNumber: 'A-001',
+      categoryName: 'Customer Service',
+      storeName: 'Toko Contoh',
+      issuedAt: 1_700_000_000_000,
+      waitingAhead: 2,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/print/ticket');
+    expect(init?.method).toBe('POST');
+    expect(jsonBody(init)).toEqual({
+      ticketNumber: 'A-001',
+      categoryName: 'Customer Service',
+      storeName: 'Toko Contoh',
+      issuedAt: 1_700_000_000_000,
+      waitingAhead: 2,
+    });
+  });
+
+  it('printTicket rejects on a non-2xx response', async () => {
+    vi.stubGlobal('fetch', () =>
+      Promise.resolve({ ok: false, status: 502, json: () => Promise.resolve({ message: 'unreachable' }) }),
+    );
+
+    await expect(
+      api.printTicket({ ticketNumber: 'A-001', categoryName: 'CS', issuedAt: 1, waitingAhead: 0 }),
+    ).rejects.toThrow(/POST \/print\/ticket -> 502: unreachable/);
   });
 });

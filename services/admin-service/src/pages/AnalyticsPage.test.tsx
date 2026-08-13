@@ -10,7 +10,7 @@ import type {
   RangeReportDto,
   SystemConfigurationDto,
 } from '../api/types';
-import { DEFAULT_STATE_MACHINE, DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES, DEFAULT_TV_GRID_LAYOUT } from '../api/types';
+import { DEFAULT_STATE_MACHINE, DEFAULT_BRAND_COLOR, DEFAULT_PRINTER_CONFIGURATION, DEFAULT_SERVICE_THEMES, DEFAULT_TV_GRID_LAYOUT } from '../api/types';
 
 /**
  * The calendar's visible month + the day-button names depend on `new Date()`
@@ -53,6 +53,7 @@ function configuredStore(): SystemConfigurationDto {
     tvPanelLayout: DEFAULT_TV_GRID_LAYOUT,
     edgeRoutingLayout: {},
     nodePositions: {},
+    printerConfiguration: { ...DEFAULT_PRINTER_CONFIGURATION },
   };
 }
 

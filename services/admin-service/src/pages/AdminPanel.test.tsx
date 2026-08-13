@@ -11,12 +11,14 @@ import type { IAdminApi, ISystemConfigApi } from '../api/admin-api';
 import {
   DEFAULT_STATE_MACHINE,
   DEFAULT_BRAND_COLOR,
+  DEFAULT_PRINTER_CONFIGURATION,
   DEFAULT_SERVICE_THEMES,
   DEFAULT_TV_GRID_LAYOUT,
   type CleanupTransactionLogResultDto,
   type EdgeRoutingLayoutDto,
   type ManualResetResultDto,
   type NodePositionsDto,
+  type PrinterConfigurationDto,
   type SaveSystemConfigurationPayload,
   type ServiceThemesMap,
   type SystemConfigurationDto,
@@ -52,6 +54,7 @@ function configuredStore(): SystemConfigurationDto {
     tvPanelLayout: DEFAULT_TV_GRID_LAYOUT,
     edgeRoutingLayout: {},
     nodePositions: {},
+    printerConfiguration: { ...DEFAULT_PRINTER_CONFIGURATION },
   };
 }
 
@@ -67,7 +70,7 @@ function unassignedRoutingStore(): SystemConfigurationDto {
 
 function makeApi(
   config: SystemConfigurationDto = configuredStore(),
-  saveImpl?: (payload: SaveSystemConfigurationPayload) => Promise<{ isInitialSetupCompleted: boolean; storeName: string; brandColor: string; serviceThemes: ServiceThemesMap; tvPanelLayout: TvGridLayout; edgeRoutingLayout: EdgeRoutingLayoutDto; nodePositions: NodePositionsDto }>,
+  saveImpl?: (payload: SaveSystemConfigurationPayload) => Promise<{ isInitialSetupCompleted: boolean; storeName: string; brandColor: string; serviceThemes: ServiceThemesMap; tvPanelLayout: TvGridLayout; edgeRoutingLayout: EdgeRoutingLayoutDto; nodePositions: NodePositionsDto; printerConfiguration: PrinterConfigurationDto }>,
   overrides?: {
     manualReset?: () => Promise<ManualResetResultDto>;
     cleanup?: (retentionDays: number) => Promise<CleanupTransactionLogResultDto>;
@@ -76,7 +79,7 @@ function makeApi(
   const save = vi.fn(
     saveImpl ??
       ((payload: SaveSystemConfigurationPayload) =>
-        Promise.resolve({ isInitialSetupCompleted: true, storeName: payload.storeName, brandColor: payload.brandColor, serviceThemes: payload.serviceThemes, tvPanelLayout: payload.tvPanelLayout, edgeRoutingLayout: {}, nodePositions: {} })),
+        Promise.resolve({ isInitialSetupCompleted: true, storeName: payload.storeName, brandColor: payload.brandColor, serviceThemes: payload.serviceThemes, tvPanelLayout: payload.tvPanelLayout, edgeRoutingLayout: {}, nodePositions: {}, printerConfiguration: payload.printerConfiguration })),
   );
   // The panel reloads the config after a successful save; default to returning
   // the same config (with ids preserved) so the post-save repopulate succeeds.
@@ -356,6 +359,9 @@ describe('AdminPanel (QUE-24 / FR-ADM-01)', () => {
     expect((payload.stateMachine as unknown as Record<string, unknown>).mode).toBeUndefined();
     // brandColor is editable (AC3) and prefilled from the loaded config.
     expect(payload.brandColor).toBe(DEFAULT_BRAND_COLOR);
+    // Printer config is a passthrough (the /printer-config page edits it, not
+    // the /config panel) — the full PUT must still carry the required field.
+    expect(payload.printerConfiguration).toEqual({ ...DEFAULT_PRINTER_CONFIGURATION });
   });
 
   it('edits storeName + a custom state-machine transition and sends them on the PUT payload', async () => {
@@ -1006,6 +1012,7 @@ describe('AdminPanel shared-config coherence', () => {
           tvPanelLayout: payload.tvPanelLayout,
           edgeRoutingLayout: {},
           nodePositions: {},
+          printerConfiguration: payload.printerConfiguration,
         });
       },
     );

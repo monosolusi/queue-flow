@@ -161,6 +161,45 @@ export interface NodePosition {
  */
 export type NodePositionsDto = Record<string, NodePosition>;
 
+/** How the kiosk produces a thermal-printer receipt. `chrome` prints via the
+ *  browser's print dialog (the default — zero setup, uses the manager's
+ *  Chrome print settings); `network-escpos` streams raw ESC/POS bytes over TCP
+ *  to a thermal printer on the local network (the core-api proxies the print so
+ *  the kiosk never opens a raw socket itself — NFR-SEC-01). The enum stays as
+ *  the wire `value=`; a friendly Indonesian label renders via
+ *  {@link import('../lib/labels').PRINTER_MODE_LABELS} (never the raw enum). */
+export type PrinterMode = 'chrome' | 'network-escpos';
+/** Receipt paper width in mm. Drives `@page` size for chrome printing and the
+ *  ESC/POS column count (58mm → 32 cols, 80mm → 48 cols) for network printing. */
+export type PrinterPaperWidth = 58 | 80;
+/** When the thermal printer cuts the receipt. `full` / `partial` send the
+ *  corresponding ESC/POS cut command; `none` omits it (the paper stays
+ *  connected). Chrome ignores this (the operator tears the paper manually). */
+export type PrinterCutMode = 'full' | 'partial' | 'none';
+
+/**
+ * Printer configuration for the kiosk receipt printer (a top-level config
+ * field, sibling to `tvPanelLayout` / `edgeRoutingLayout` / `nodePositions`).
+ * Mirrors core-api's `PrinterConfiguration` VO field-for-field. The manager
+ * edits it on the dedicated `/printer-config` page; the kiosk reads it at boot
+ * and selects its print provider accordingly. REQUIRED on the PUT
+ * (`REQUIRED_CONFIG_FIELDS` includes it), so every full-save site carries it.
+ *
+ * `host` / `port` are only meaningful in `network-escpos` mode (the kiosk page
+ * hides them when `mode === 'chrome'`); they are still sent on the wire as the
+ * last-entered values so a mode switch back to network is non-destructive.
+ */
+export interface PrinterConfigurationDto {
+  readonly mode: PrinterMode;
+  readonly paperWidth: PrinterPaperWidth;
+  /** Printer host (IP / hostname). `''` when `mode === 'chrome'` (and hidden in
+   *  the editor — chrome needs no host). */
+  readonly host: string;
+  /** TCP port the printer listens on (default 9100, the ESC/POS standard). */
+  readonly port: number;
+  readonly cutMode: PrinterCutMode;
+}
+
 export interface DailyResetPolicyDto {
   readonly mode: DailyResetMode;
   readonly cronExpression: string | null;
@@ -213,6 +252,12 @@ export interface SystemConfigurationDto {
    *  the deterministic autoLayout); `toForm` keeps a defensive `?? {}`
    *  coercion (belt-and-suspenders, same as `edgeRoutingLayout`). */
   readonly nodePositions: NodePositionsDto;
+  /** Printer configuration for the kiosk receipt printer. Always present — the
+   *  backend defaults to {@link DEFAULT_PRINTER_CONFIGURATION} so a store that
+   *  never configures the printer keeps the chrome default (zero behavior
+   *  change). `toForm` keeps a defensive `coercePrinterConfiguration` coercion
+   *  (belt-and-suspenders, same as `serviceThemes` / `tvPanelLayout`). */
+  readonly printerConfiguration: PrinterConfigurationDto;
 }
 
 /**
@@ -261,6 +306,10 @@ export interface SaveSystemConfigurationPayload {
    *  source of truth for positions now and always sends the map, built by
    *  `toNodePositionsDto`; `{}` when the canvas was never customized). */
   readonly nodePositions: NodePositionsDto;
+  /** Printer configuration — REQUIRED on the PUT (the client is the source of
+   *  truth for the printer mode + settings); the dedicated `/printer-config`
+   *  page edits it, every other full-save site passes it through unchanged. */
+  readonly printerConfiguration: PrinterConfigurationDto;
 }
 
 /** Result of `PUT /api/system/config`. */
@@ -278,6 +327,10 @@ export interface SaveSystemConfigurationResult {
    *  ignores the result body and re-GETs, so this is not load-bearing; kept
    *  for contract completeness (mirrors `edgeRoutingLayout`). */
   readonly nodePositions: NodePositionsDto;
+  /** Always echoed by the backend (the save result mirrors the persisted config).
+   *  The save path ignores the result body and re-GETs, so this is not
+   *  load-bearing; kept for contract completeness (mirrors `nodePositions`). */
+  readonly printerConfiguration: PrinterConfigurationDto;
 }
 
 /**
@@ -328,6 +381,22 @@ export const DEFAULT_EDGE_ROUTING_LAYOUT: EdgeRoutingLayoutDto = {};
  * mirroring {@link DEFAULT_EDGE_ROUTING_LAYOUT}).
  */
 export const DEFAULT_NODE_POSITIONS: NodePositionsDto = {};
+
+/**
+ * The default printer configuration — chrome (browser print dialog), 80mm
+ * paper, partial cut. Matches the backend `PrinterConfiguration.DEFAULT` so a
+ * store that never configures the printer keeps the existing chrome behavior
+ * (zero behavior change — the kiosk already prints via the browser). The host
+ * is `''` (chrome needs no host) and the port defaults to 9100 (the ESC/POS
+ * standard, irrelevant until the manager switches to network mode).
+ */
+export const DEFAULT_PRINTER_CONFIGURATION: PrinterConfigurationDto = {
+  mode: 'chrome',
+  paperWidth: 80,
+  host: '',
+  port: 9100,
+  cutMode: 'partial',
+};
 
 /**
  * The shared accent color the four frontends hardcode in `:root` (`--accent:

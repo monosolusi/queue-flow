@@ -6,6 +6,7 @@ import { TicketsApiModule } from './interface-adapters/rest/tickets-api.module';
 import { QueueCommandsApiModule } from './interface-adapters/rest/queue-commands-api.module';
 import { SystemApiModule } from './interface-adapters/rest/system-api.module';
 import { SystemConfigApiModule } from './interface-adapters/rest/system-config-api.module';
+import { PrintingApiModule } from './interface-adapters/rest/printing-api.module';
 import { ReportingApiModule } from './interface-adapters/rest/reporting-api.module';
 import { HealthModule } from './interface-adapters/rest/health.module';
 import { AuthApiModule } from './interface-adapters/auth/auth-api.module';
@@ -41,6 +42,7 @@ import { BootstrapModule } from './infrastructure/bootstrap/bootstrap.module';
     QueueCommandsApiModule,
     SystemApiModule,
     SystemConfigApiModule,
+    PrintingApiModule,
     ReportingApiModule,
     HealthModule,
     AuthApiModule,

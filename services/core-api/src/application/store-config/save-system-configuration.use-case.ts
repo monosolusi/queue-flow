@@ -13,6 +13,7 @@ import { ServiceThemes, type ServiceThemesMap } from '../../domain/store-config'
 import { TvPanelLayout, type TvGridLayout } from '../../domain/store-config';
 import { EdgeRoutingLayout, type EdgeRoutingLayoutDto } from '../../domain/store-config';
 import { NodePositions, type NodePositionsDto } from '../../domain/store-config';
+import { PrinterConfiguration, type PrinterConfigurationDto } from '../../domain/store-config';
 import { type IDailyResetSchedulerPort } from '../../domain/store-config';
 import {
   Identifier,
@@ -105,6 +106,14 @@ export interface SaveSystemConfigurationCommand {
    *  present-but-invalid entry (non-finite x/y). Not change-gated (like
    *  `edgeRoutingLayout`/`brandColor`/`serviceThemes`/`tvPanelLayout`). */
   readonly nodePositions: NodePositionsDto;
+  /** Printer configuration (which printer the kiosk uses — Chrome's default
+   *  dialog, or a network ESC/POS printer proxied through core-api over raw
+   *  TCP). Required on the wire; the VO recovers a null/undefined to the chrome
+   *  default (zero behavior change) and rejects a present-but-invalid value
+   *  (bad mode/paperWidth/cutMode enum, non-integer port, network-escpos with
+   *  no host). Not change-gated (like `nodePositions`/`edgeRoutingLayout`).
+   *  Not audited (operational config, not in the NFR-SEC-02 list). */
+  readonly printerConfiguration: PrinterConfigurationDto;
   readonly actor: string;
 }
 
@@ -116,6 +125,7 @@ export interface SaveSystemConfigurationResult {
   readonly tvPanelLayout: TvGridLayout;
   readonly edgeRoutingLayout: EdgeRoutingLayoutDto;
   readonly nodePositions: NodePositionsDto;
+  readonly printerConfiguration: PrinterConfigurationDto;
 }
 
 /** Minimal projection used only for audit before/after snapshots. */
@@ -247,6 +257,11 @@ export class SaveSystemConfigurationUseCase {
     // no post-commit side-effect. Validated pre-tx so a malformed map (non-object
     // value, non-finite x/y) fails fast.
     const nodePositions = NodePositions.of(command.nodePositions);
+    // Printer configuration — same shape: pure operational config, not
+    // change-gated, no post-commit side-effect. Validated pre-tx so a malformed
+    // printer config (bad mode/paperWidth/cutMode enum, non-integer port,
+    // network-escpos with no host) fails fast.
+    const printerConfiguration = PrinterConfiguration.of(command.printerConfiguration);
     const newCategories = this.buildCategories(command.categories);
     const codeToId = new Map(newCategories.map((c) => [c.code, c.id.value]));
     const newRules = this.buildRoutingRules(command.routingRules, codeToId);
@@ -324,6 +339,7 @@ export class SaveSystemConfigurationUseCase {
         tvPanelLayout,
         edgeRoutingLayout,
         nodePositions,
+        printerConfiguration,
       });
       system.completeInitialSetup(); // idempotent — validates store name, flips the flag
 
@@ -376,6 +392,7 @@ export class SaveSystemConfigurationUseCase {
         tvPanelLayout: system.tvPanelLayout.toDto(),
         edgeRoutingLayout: system.edgeRoutingLayout.toDto(),
         nodePositions: system.nodePositions.toDto(),
+        printerConfiguration: system.printerConfiguration.toDto(),
       };
     });
 

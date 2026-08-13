@@ -9,7 +9,7 @@ import type {
   SystemConfigurationDto,
   TicketStateDto,
 } from '../api/types';
-import { DEFAULT_STATE_MACHINE, DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES, DEFAULT_TV_GRID_LAYOUT } from '../api/types';
+import { DEFAULT_STATE_MACHINE, DEFAULT_BRAND_COLOR, DEFAULT_PRINTER_CONFIGURATION, DEFAULT_SERVICE_THEMES, DEFAULT_TV_GRID_LAYOUT } from '../api/types';
 
 /** A configured store with two categories + two counters. */
 function configuredStore(): SystemConfigurationDto {
@@ -37,6 +37,7 @@ function configuredStore(): SystemConfigurationDto {
     tvPanelLayout: DEFAULT_TV_GRID_LAYOUT,
     edgeRoutingLayout: {},
     nodePositions: {},
+    printerConfiguration: { ...DEFAULT_PRINTER_CONFIGURATION },
   };
 }
 

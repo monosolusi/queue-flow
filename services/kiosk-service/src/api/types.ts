@@ -42,9 +42,26 @@ export interface CreatedTicketDto {
 /** A per-surface light/dark choice (QUE-47). Light is the default. */
 export type ThemeMode = 'light' | 'dark';
 
+/**
+ * The printer mode the manager configured on the store config. `chrome` prints
+ * via the browser's print dialog (Chrome's default printer) at a defined paper
+ * width; `network-escpos` POSTs the ticket to core-api, which proxies the ESC/POS
+ * bytes + cut to a networked thermal printer over TCP (the browser cannot open
+ * raw TCP — NFR-REL-01 keeps all IO server-side). The kiosk only needs the mode
+ * to pick its print provider; host/port/cutMode stay server-side (ISP).
+ */
+export type PrinterMode = 'chrome' | 'network-escpos';
+
+/** Thermal paper width in millimeters — drives the `@page` size for chrome mode. */
+export type PaperWidth = 58 | 80;
+
 export interface StoreProfileSlice {
   readonly storeName: string;
   readonly brandColor: string;
   /** This service's theme (the kiosk surface key from `serviceThemes`). */
   readonly themeMode: ThemeMode;
+  /** Which print provider the kiosk wires (FR-KSK-02, config-driven). */
+  readonly printerMode: PrinterMode;
+  /** Paper width for chrome mode (ignored by the network provider). */
+  readonly printerPaperWidth: PaperWidth;
 }

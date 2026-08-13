@@ -9,6 +9,7 @@ import {
   SystemConfigurationChangedEvent,
   EdgeRoutingLayout,
   NodePositions,
+  PrinterConfiguration,
 } from '../../src/domain/store-config';
 import type { DomainEvent } from '../../src/domain/shared/domain-event';
 import type { IEventDispatcher } from '../../src/domain/shared/event-dispatcher.port';
@@ -73,6 +74,7 @@ describe('SaveSystemConfigurationUseCase — category id preservation (QUE-24)',
       ],
       edgeRoutingLayout: {},
       nodePositions: {},
+      printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial' },
       actor: 'admin',
     };
   }
@@ -194,6 +196,7 @@ describe('SaveSystemConfigurationUseCase — brandColor (QUE-36)', () => {
       ],
       edgeRoutingLayout: {},
       nodePositions: {},
+      printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial' },
       actor: 'admin',
     };
   }
@@ -316,6 +319,7 @@ describe('SaveSystemConfigurationUseCase — SYSTEM_CONFIG_CHANGED broadcast (FR
       ],
       edgeRoutingLayout: {},
       nodePositions: {},
+      printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial' },
       actor: 'admin',
     };
   }
@@ -427,6 +431,7 @@ describe('SaveSystemConfigurationUseCase — edgeRoutingLayout', () => {
       ],
       edgeRoutingLayout: edgeRoutingLayout as SaveSystemConfigurationCommand['edgeRoutingLayout'],
       nodePositions: {},
+      printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial' },
       actor: 'admin',
     };
   }
@@ -573,6 +578,7 @@ describe('SaveSystemConfigurationUseCase — nodePositions', () => {
       ],
       edgeRoutingLayout: {},
       nodePositions: nodePositions as SaveSystemConfigurationCommand['nodePositions'],
+      printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial' },
       actor: 'admin',
     };
   }
@@ -662,5 +668,117 @@ describe('SaveSystemConfigurationUseCase — nodePositions', () => {
     const saved = await repos.config.get();
     expect(saved!.nodePositions.toDto()).toEqual({});
     expect(saved!.nodePositions.equals(NodePositions.DEFAULT)).toBe(true);
+  });
+});
+
+/**
+ * Printer configuration persistence (which printer the kiosk uses — Chrome's
+ * default dialog, or a network ESC/POS printer proxied through core-api).
+ * `printerConfiguration` is a required field on the save command; the use case
+ * validates it pre-tx (fail-fast — a malformed config never acquires a
+ * transaction), and the persisted aggregate carries it through the in-memory
+ * repo round-trip. The result echoes the stored config back to the caller.
+ */
+describe('SaveSystemConfigurationUseCase — printerConfiguration', () => {
+  function buildUseCase() {
+    return {
+      config: new InMemorySystemConfigurationRepository(),
+      categories: new InMemoryCategoryRepository(),
+      routingRules: new InMemoryCounterRoutingRuleRepository(),
+    };
+  }
+
+  function command(printer: Record<string, unknown>): SaveSystemConfigurationCommand {
+    return {
+      storeName: 'Toko Cetak',
+      stateMachine: projectStateMachine(StateMachine.DEFAULT),
+      dailyReset: {
+        mode: DailyResetMode.MANUAL,
+        cronExpression: null,
+        resetTicketNumberTo: 1,
+        archivePreviousDayData: true,
+      },
+      categories: [{ code: 'A', name: 'Customer Service' }],
+      routingRules: [
+        {
+          counterId: 1,
+          counterName: 'Loket 1',
+          assignedCategoryCodes: ['A'],
+          priorityPolicy: PriorityPolicy.FIFO_GLOBAL,
+        },
+      ],
+      brandColor: '#2563eb',
+      serviceThemes: { kiosk: 'light', tv: 'light', caller: 'light', admin: 'light' },
+      tvPanelLayout: [
+        { id: 'nowServing', component: 'nowServing', x: 0, y: 0, w: 12, h: 4 },
+        { id: 'waitingQueue', component: 'waitingQueue', x: 0, y: 4, w: 6, h: 3 },
+        { id: 'callHistory', component: 'callHistory', x: 6, y: 4, w: 6, h: 3 },
+        { id: 'countersServing', component: 'countersServing', x: 0, y: 7, w: 12, h: 3 },
+        { id: 'runningText', component: 'runningText', x: 0, y: 10, w: 12, h: 1 },
+      ],
+      edgeRoutingLayout: {},
+      nodePositions: {},
+      printerConfiguration: printer as unknown as SaveSystemConfigurationCommand['printerConfiguration'],
+      actor: 'admin',
+    };
+  }
+
+  it('persists a network-escpos printer config and echoes it in the result', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    const printer = { mode: 'network-escpos', paperWidth: 58, host: '192.168.1.50', port: 9100, cutMode: 'full' };
+    const result = await useCase.execute(command(printer));
+
+    expect(result.printerConfiguration).toEqual(printer);
+    const saved = await repos.config.get();
+    expect(saved!.printerConfiguration.toDto()).toEqual(printer);
+    expect(saved!.printerConfiguration.equals(PrinterConfiguration.of(printer))).toBe(true);
+  });
+
+  it('round-trips the default chrome config through the in-memory repo', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    await useCase.execute(command({ mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial' }));
+
+    const saved = await repos.config.get();
+    expect(saved!.printerConfiguration.toDto()).toEqual({
+      mode: 'chrome',
+      paperWidth: 80,
+      host: '',
+      port: 9100,
+      cutMode: 'partial',
+    });
+    expect(saved!.printerConfiguration.equals(PrinterConfiguration.DEFAULT)).toBe(true);
+  });
+
+  it('rejects a network-escpos config with no host pre-tx (VO cross-field invariant, NFR-REL-02)', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    await expect(
+      useCase.execute(command({ mode: 'network-escpos', paperWidth: 80, host: '', port: 9100, cutMode: 'partial' })),
+    ).rejects.toThrow(InvalidValueObjectException);
+    // Nothing persisted — fail-fast happened before the tx opened.
+    expect(await repos.config.get()).toBeNull();
   });
 });

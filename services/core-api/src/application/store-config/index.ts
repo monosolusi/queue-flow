@@ -2,4 +2,5 @@ export * from './get-active-state-machine.use-case';
 export * from './get-setup-status.use-case';
 export * from './get-system-configuration.use-case';
 export * from './list-counters.use-case';
+export * from './print-ticket.use-case';
 export * from './save-system-configuration.use-case';

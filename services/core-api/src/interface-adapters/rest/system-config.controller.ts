@@ -39,6 +39,7 @@ const REQUIRED_CONFIG_FIELDS: ReadonlyArray<keyof SaveSystemConfigurationCommand
   'tvPanelLayout',
   'edgeRoutingLayout',
   'nodePositions',
+  'printerConfiguration',
 ];
 
 /**
@@ -66,6 +67,7 @@ const CONFIG_FIELD_SHAPES: ReadonlyArray<{
   { field: 'tvPanelLayout', kind: 'array' },
   { field: 'edgeRoutingLayout', kind: 'object' },
   { field: 'nodePositions', kind: 'object' },
+  { field: 'printerConfiguration', kind: 'object' },
 ];
 
 /** True when `value` does not match the expected `kind` (object = plain object, not array). */
@@ -249,6 +251,37 @@ function configNestedShapeErrors(body: Partial<SaveSystemConfigurationCommand>):
       }
     }
   }
+  // printerConfiguration: the VO throws `InvalidValueObjectException` (→ 400)
+  // on a present-but-invalid field (bad mode/paperWidth/cutMode enum,
+  // non-integer port, network-escpos with no host). This boundary guard catches
+  // the crash class (a present-but-non-string `mode`/`host` would TypeError in
+  // the VO's `isPrinterMode`/`typeof` check before it can throw a clean
+  // InvalidValueObjectException, and a present-but-non-number `port`/`paperWidth`
+  // would reach the `Number.isInteger`/membership check as a non-number) and
+  // gives consistent, field-named error messages. Enum membership (which mode,
+  // which paper width, which cut mode) + the cross-field host invariant stays
+  // in the VO. Unknown extra properties are ignored.
+  const printer = body.printerConfiguration;
+  if (printer != null && typeof printer === 'object' && !Array.isArray(printer)) {
+    // `PrinterConfigurationDto` carries no index signature, so cast through
+    // `unknown` to a plain record for the per-field typeof crash guards.
+    const e = printer as unknown as Record<string, unknown>;
+    if (e.mode != null && typeof e.mode !== 'string') {
+      errs.push('printerConfiguration.mode must be a string');
+    }
+    if (e.paperWidth != null && typeof e.paperWidth !== 'number') {
+      errs.push('printerConfiguration.paperWidth must be a number');
+    }
+    if (e.cutMode != null && typeof e.cutMode !== 'string') {
+      errs.push('printerConfiguration.cutMode must be a string');
+    }
+    if (e.host != null && typeof e.host !== 'string') {
+      errs.push('printerConfiguration.host must be a string');
+    }
+    if (e.port != null && typeof e.port !== 'number') {
+      errs.push('printerConfiguration.port must be a number');
+    }
+  }
   return errs;
 }
 
@@ -338,6 +371,7 @@ export class SystemConfigController {
       tvPanelLayout: body.tvPanelLayout!,
       edgeRoutingLayout: body.edgeRoutingLayout!,
       nodePositions: body.nodePositions!,
+      printerConfiguration: body.printerConfiguration!,
       actor: principal?.username ?? 'system',
     };
     return this.saveConfig.execute(command);

@@ -137,6 +137,11 @@ export function ConfigDraftProvider({
           // dedicated `/tv-layout` page; the full PUT must still carry the field
           // so the required `tvPanelLayout` wire field is never dropped.
           tvPanelLayout: form.tvPanelLayout,
+          // Payload-only passthrough — the printer editor lives on the dedicated
+          // `/printer-config` page; the full PUT must still carry the field so
+          // the required `printerConfiguration` wire field is never dropped
+          // (mirrors `tvPanelLayout`).
+          printerConfiguration: form.printerConfiguration,
           dailyReset: {
             mode: form.dailyReset.mode,
             cronExpression:

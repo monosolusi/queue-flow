@@ -16,6 +16,7 @@ import { AnalyticsPage } from './pages/AnalyticsPage';
 import { AuditLogPage } from './pages/AuditLogPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { LoginPage } from './pages/LoginPage';
+import { PrinterConfigPage } from './pages/PrinterConfigPage';
 import { TvLayoutPage } from './pages/TvLayoutPage';
 import { UsersPage } from './pages/UsersPage';
 import { WizardPage } from './pages/WizardPage';
@@ -198,6 +199,16 @@ function AppRoutes({ api }: { api: IAdminAppApi }) {
               <SetupGuard>
                 <RequireAuth>
                   <TvLayoutPage api={api} />
+                </RequireAuth>
+              </SetupGuard>
+            }
+          />
+          <Route
+            path="/printer-config"
+            element={
+              <SetupGuard>
+                <RequireAuth>
+                  <PrinterConfigPage api={api} />
                 </RequireAuth>
               </SetupGuard>
             }

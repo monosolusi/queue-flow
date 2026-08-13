@@ -100,3 +100,23 @@ export class DuplicateUserException extends DomainError {
     super(`Username '${username}' is already taken.`, 'DUPLICATE_USER');
   }
 }
+
+/**
+ * Thrown by `PrintTicketUseCase` when the persisted `PrinterConfiguration.mode`
+ * is not `'network-escpos'` — i.e. the kiosk called `POST /api/print/ticket`
+ * (a network-printer-only endpoint) while the store is configured for Chrome's
+ * default print dialog. The print controller maps this to 409
+ * `PRINTER_NOT_NETWORK` (the kiosk only calls this endpoint when mode is
+ * network-escpos, so this is a safety guard against a config change between the
+ * kiosk reading the config and posting the payload). Distinct from
+ * `SystemNotConfiguredException` (no config at all): the config exists, it just
+ * does not select the network-printer path.
+ */
+export class PrinterNotNetworkException extends DomainError {
+  constructor() {
+    super(
+      "Printer is not configured for network-escpos (mode is 'chrome').",
+      'PRINTER_NOT_NETWORK',
+    );
+  }
+}

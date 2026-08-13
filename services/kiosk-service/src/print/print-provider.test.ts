@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { BrowserPrintProvider, NoOpPrintProvider } from './print-provider';
+import {
+  BrowserPrintProvider,
+  NetworkEscPosPrintProvider,
+  NoOpPrintProvider,
+} from './print-provider';
 import type { PrintPayload } from './print-provider';
 
 const payload: PrintPayload = {
@@ -49,7 +53,7 @@ describe('BrowserPrintProvider (FR-KSK-02/03)', () => {
     const createIframe = vi.fn(() => iframe);
     const appendSpy = vi.spyOn(document.body, 'appendChild').mockImplementation(() => iframe);
 
-    const provider = new BrowserPrintProvider(createIframe);
+    const provider = new BrowserPrintProvider({ createIframe });
     await provider.print(payload);
 
     expect(createIframe).toHaveBeenCalledTimes(1);
@@ -70,12 +74,38 @@ describe('BrowserPrintProvider (FR-KSK-02/03)', () => {
     appendSpy.mockRestore();
   });
 
+  it('defines the paper size via @page (80mm default)', async () => {
+    const { iframe, state } = makeFakeIframe();
+    const createIframe = vi.fn(() => iframe);
+    vi.spyOn(document.body, 'appendChild').mockImplementation(() => iframe);
+
+    const provider = new BrowserPrintProvider({ createIframe });
+    await provider.print(payload);
+
+    // The @page rule defines the paper size so Chrome prints at 80mm instead of
+    // an undefined default — the fix for "the paper size is not defined".
+    expect(state.written).toContain('@page{size:80mm auto;margin:2mm}');
+    expect(state.written).toContain('body{font-family:monospace;text-align:center;width:80mm');
+  });
+
+  it('honors a 58mm paper width', async () => {
+    const { iframe, state } = makeFakeIframe();
+    const createIframe = vi.fn(() => iframe);
+    vi.spyOn(document.body, 'appendChild').mockImplementation(() => iframe);
+
+    const provider = new BrowserPrintProvider({ paperWidth: 58, createIframe });
+    await provider.print(payload);
+
+    expect(state.written).toContain('@page{size:58mm auto;margin:2mm}');
+    expect(state.written).toContain('width:58mm');
+  });
+
   it('renders without a store name when storeName is omitted', async () => {
     const { iframe, state } = makeFakeIframe();
     const createIframe = vi.fn(() => iframe);
     vi.spyOn(document.body, 'appendChild').mockImplementation(() => iframe);
 
-    const provider = new BrowserPrintProvider(createIframe);
+    const provider = new BrowserPrintProvider({ createIframe });
     await provider.print({
       ticketNumber: 'B-002',
       categoryName: 'Kasir',
@@ -97,7 +127,7 @@ describe('BrowserPrintProvider (FR-KSK-02/03)', () => {
     const createIframe = vi.fn(() => iframe);
     vi.spyOn(document.body, 'appendChild').mockImplementation(() => iframe);
 
-    const provider = new BrowserPrintProvider(createIframe);
+    const provider = new BrowserPrintProvider({ createIframe });
     // A print failure is non-fatal — the result screen is the source of truth.
     await expect(provider.print(payload)).resolves.toBeUndefined();
   });
@@ -107,7 +137,36 @@ describe('BrowserPrintProvider (FR-KSK-02/03)', () => {
     const createIframe = vi.fn(() => iframe);
     vi.spyOn(document.body, 'appendChild').mockImplementation(() => iframe);
 
-    const provider = new BrowserPrintProvider(createIframe);
+    const provider = new BrowserPrintProvider({ createIframe });
+    await expect(provider.print(payload)).resolves.toBeUndefined();
+  });
+});
+
+describe('NetworkEscPosPrintProvider (FR-KSK-02, network ESC/POS)', () => {
+  it('calls the injected printTicket fn with the payload', async () => {
+    const printTicket = vi.fn(() => Promise.resolve());
+    const provider = new NetworkEscPosPrintProvider(printTicket);
+
+    await provider.print(payload);
+
+    expect(printTicket).toHaveBeenCalledTimes(1);
+    expect(printTicket).toHaveBeenCalledWith(payload);
+  });
+
+  it('resolves (does not reject) when printTicket rejects (non-fatal)', async () => {
+    const printTicket = vi.fn(() => Promise.reject(new Error('printer unreachable')));
+    const provider = new NetworkEscPosPrintProvider(printTicket);
+
+    // A print failure is non-fatal — the result screen is the source of truth.
+    await expect(provider.print(payload)).resolves.toBeUndefined();
+  });
+
+  it('resolves when printTicket throws synchronously', async () => {
+    const printTicket = vi.fn(() => {
+      throw new Error('sync blowup');
+    });
+    const provider = new NetworkEscPosPrintProvider(printTicket);
+
     await expect(provider.print(payload)).resolves.toBeUndefined();
   });
 });

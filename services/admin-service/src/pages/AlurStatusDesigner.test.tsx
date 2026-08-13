@@ -11,6 +11,7 @@ import type { IAdminApi } from '../api/admin-api';
 import {
   DEFAULT_STATE_MACHINE,
   DEFAULT_BRAND_COLOR,
+  DEFAULT_PRINTER_CONFIGURATION,
   DEFAULT_SERVICE_THEMES,
   DEFAULT_TV_GRID_LAYOUT,
   type SaveSystemConfigurationPayload,
@@ -47,6 +48,7 @@ function configuredStore(): SystemConfigurationDto {
     tvPanelLayout: DEFAULT_TV_GRID_LAYOUT.map((w) => ({ ...w })),
     edgeRoutingLayout: {},
     nodePositions: {},
+    printerConfiguration: { ...DEFAULT_PRINTER_CONFIGURATION },
   };
 }
 
@@ -60,6 +62,7 @@ function makeApi(config: SystemConfigurationDto = configuredStore()) {
       tvPanelLayout: payload.tvPanelLayout,
       edgeRoutingLayout: {},
       nodePositions: {},
+      printerConfiguration: payload.printerConfiguration,
     }),
   );
   const getConfig = vi.fn(() => Promise.resolve(config));

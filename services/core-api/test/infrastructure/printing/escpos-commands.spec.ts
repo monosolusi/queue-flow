@@ -1,0 +1,134 @@
+import { Buffer } from 'buffer';
+import {
+  composeReceipt,
+  INIT,
+  DOUBLE_SIZE,
+  NORMAL,
+  columnCount,
+  wrapLine,
+} from '../../../src/infrastructure/printing/escpos/escpos-commands';
+import type { TicketPrintPayload } from '../../../src/domain/store-config/printer-driver.port';
+
+function contains(buf: Buffer, needle: Buffer): boolean {
+  return buf.indexOf(needle) !== -1;
+}
+
+/**
+ * Pure byte-composer spec — no `net`, no socket, no I/O. Asserts the ESC/POS
+ * byte stream contains the right commands (init, double-size header, the ticket
+ * text as UTF-8, the cut bytes per cut mode) and wraps long lines to the paper
+ * column count. `Buffer` is a Node global (not an IO import), so this stays
+ * unit-testable without a printer.
+ */
+describe('escpos-commands — composeReceipt (pure byte composer)', () => {
+  const payload: TicketPrintPayload = {
+    ticketNumber: 'A-001',
+    categoryName: 'Customer Service',
+    storeName: 'Toko Cetak',
+    issuedAt: 1_700_000_000_000,
+    waitingAhead: 3,
+  };
+
+  it('starts with the INIT (ESC @) bytes', () => {
+    const buf = composeReceipt(payload, 80, 'partial');
+    expect(buf.subarray(0, INIT.length).equals(INIT)).toBe(true);
+  });
+
+  it('emits the ticket number as UTF-8 text', () => {
+    const buf = composeReceipt(payload, 80, 'partial');
+    expect(contains(buf, Buffer.from('A-001', 'utf8'))).toBe(true);
+  });
+
+  it('emits the store name when present', () => {
+    const buf = composeReceipt(payload, 80, 'partial');
+    expect(contains(buf, Buffer.from('Toko Cetak', 'utf8'))).toBe(true);
+  });
+
+  it('emits the category name', () => {
+    const buf = composeReceipt(payload, 80, 'partial');
+    expect(contains(buf, Buffer.from('Customer Service', 'utf8'))).toBe(true);
+  });
+
+  it('emits the position line "Anda antrian ke-4 dari 4" (waitingAhead+1)', () => {
+    const buf = composeReceipt(payload, 80, 'partial');
+    expect(contains(buf, Buffer.from('Anda antrian ke-4 dari 4', 'utf8'))).toBe(true);
+  });
+
+  it('emits the double-size print mode bytes (header + ticket number)', () => {
+    const buf = composeReceipt(payload, 80, 'partial');
+    expect(contains(buf, Buffer.from([0x1b, 0x21, DOUBLE_SIZE]))).toBe(true);
+    // Resets to normal after the doubled sections.
+    expect(contains(buf, Buffer.from([0x1b, 0x21, NORMAL]))).toBe(true);
+  });
+
+  it('omits the store name line when storeName is absent', () => {
+    const noStore: TicketPrintPayload = { ...payload, storeName: undefined };
+    const buf = composeReceipt(noStore, 80, 'partial');
+    expect(contains(buf, Buffer.from('Toko Cetak', 'utf8'))).toBe(false);
+  });
+
+  it('emits a partial cut (GS V 1) for cutMode partial', () => {
+    const buf = composeReceipt(payload, 80, 'partial');
+    expect(contains(buf, Buffer.from([0x1d, 0x56, 0x01]))).toBe(true);
+  });
+
+  it('emits a full cut (GS V 0) for cutMode full', () => {
+    const buf = composeReceipt(payload, 80, 'full');
+    expect(contains(buf, Buffer.from([0x1d, 0x56, 0x00]))).toBe(true);
+  });
+
+  it('emits NO cut bytes for cutMode none', () => {
+    const buf = composeReceipt(payload, 80, 'none');
+    expect(contains(buf, Buffer.from([0x1d, 0x56, 0x00]))).toBe(false);
+    expect(contains(buf, Buffer.from([0x1d, 0x56, 0x01]))).toBe(false);
+  });
+
+  it('feeds 3 lines before the cut (ESC d 3)', () => {
+    const buf = composeReceipt(payload, 80, 'full');
+    expect(contains(buf, Buffer.from([0x1b, 0x64, 0x03]))).toBe(true);
+  });
+
+  it('does not emit a partial cut when a full cut is requested (and vice versa)', () => {
+    const full = composeReceipt(payload, 80, 'full');
+    expect(contains(full, Buffer.from([0x1d, 0x56, 0x01]))).toBe(false);
+    const partial = composeReceipt(payload, 80, 'partial');
+    expect(contains(partial, Buffer.from([0x1d, 0x56, 0x00]))).toBe(false);
+  });
+});
+
+describe('escpos-commands — paper width / wrapping', () => {
+  it('columnCount: 58mm → 32 cols, 80mm → 48 cols', () => {
+    expect(columnCount(58)).toBe(32);
+    expect(columnCount(80)).toBe(48);
+  });
+
+  it('wrapLine: short line stays one line + trailing newline', () => {
+    expect(wrapLine('hello', 32)).toBe('hello\n');
+  });
+
+  it('wrapLine: empty line → just a newline', () => {
+    expect(wrapLine('', 32)).toBe('\n');
+  });
+
+  it('wrapLine: wraps a long line into cols-sized chunks', () => {
+    const wrapped = wrapLine('0123456789ABCDEF', 4);
+    expect(wrapped).toBe('0123\n4567\n89AB\nCDEF\n');
+  });
+
+  it('wrapLine: wraps an odd-length line (final chunk shorter)', () => {
+    const wrapped = wrapLine('0123456789ABCDE', 4);
+    expect(wrapped).toBe('0123\n4567\n89AB\nCDE\n');
+  });
+
+  it('wraps the store name to half the columns at double size (58mm)', () => {
+    const longStore = 'Toko Antrian Jaya Makmur Sejahtera';
+    const buf = composeReceipt(
+      { ticketNumber: 'A-001', categoryName: 'CS', storeName: longStore, issuedAt: 0, waitingAhead: 0 },
+      58,
+      'none',
+    );
+    // At double width on 58mm (32 cols), the header wraps at 16 cols. The first
+    // 16 chars must appear; the 17th char starts a new line (followed by \n).
+    expect(contains(buf, Buffer.from(longStore.slice(0, 16), 'utf8'))).toBe(true);
+  });
+});

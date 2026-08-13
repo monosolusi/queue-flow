@@ -65,6 +65,7 @@ describe('System-config scheduler re-arm + cron enforcement (integration — QUE
       ],
       edgeRoutingLayout: {},
       nodePositions: {},
+      printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial' },
     };
   }
 

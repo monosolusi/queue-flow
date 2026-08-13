@@ -12,6 +12,7 @@ import {
   InvalidCredentialsException,
   InvalidStateTransitionException,
   InvalidValueObjectException,
+  PrinterNotNetworkException,
   SystemNotConfiguredException,
 } from '../../domain/shared';
 
@@ -53,6 +54,12 @@ export class DomainExceptionFilter implements ExceptionFilter {
       return HttpStatus.CONFLICT;
     }
     if (exception instanceof DuplicateUserException) {
+      return HttpStatus.CONFLICT;
+    }
+    if (exception instanceof PrinterNotNetworkException) {
+      // PrintController maps this itself (bypassing this filter), but register
+      // it here so any future thrower relying on the global filter maps to 409
+      // CONFLICT instead of falling through to 500.
       return HttpStatus.CONFLICT;
     }
     if (exception instanceof InvalidValueObjectException) {
