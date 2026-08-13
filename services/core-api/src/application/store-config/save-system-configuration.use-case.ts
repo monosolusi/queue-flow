@@ -16,6 +16,7 @@ import { EdgeRoutingLayout, type EdgeRoutingLayoutDto } from '../../domain/store
 import { NodePositions, type NodePositionsDto } from '../../domain/store-config';
 import { NodeActions, type NodeActionsDto } from '../../domain/store-config';
 import { TerminalNodes, type TerminalNodesDto } from '../../domain/store-config';
+import { EndSources, type EndSourcesDto } from '../../domain/store-config';
 import { PrinterConfiguration, type PrinterConfigurationDto } from '../../domain/store-config';
 import { type IDailyResetSchedulerPort } from '../../domain/store-config';
 import {
@@ -141,6 +142,19 @@ export interface SaveSystemConfigurationCommand {
    *  `nodeActions`). Not change-gated (like `nodePositions`/`nodeActions`).
    *  Not audited (admin-only config, not in the NFR-SEC-02 list). */
   readonly terminalNodes: TerminalNodesDto;
+  /** Explicit "end sources" for the admin state-machine editor — a flat array
+   *  of state NAMES the manager dragged an explicit arrow from into the End
+   *  terminal marker (`__end`); multiple allowed. Purely visual canvas metadata
+   *  (like `nodePositions`), with NO domain / queue-engine meaning; NOT consumed
+   *  by caller / tv / kiosk (ISP). Required on the wire; the VO recovers a
+   *  null/undefined to the empty default (the End marker falls back to the
+   *  auto-derived sink behavior) and rejects a present-but-malformed value
+   *  (non-array, non-string/empty/duplicate entries). State-membership
+   *  cross-checked pre-tx (every entry ⊆ the active state schema states),
+   *  mirroring `nodePositions`/`nodeActions`. Not change-gated (like
+   *  `nodePositions`/`nodeActions`/`terminalNodes`). Not audited (admin-only
+   *  config, not in the NFR-SEC-02 list). */
+  readonly endSources: EndSourcesDto;
   /** Printer configuration (which printer the kiosk uses — Chrome's default
    *  dialog, or a network ESC/POS printer proxied through core-api over raw
    *  TCP). Required on the wire; the VO recovers a null/undefined to the chrome
@@ -162,6 +176,7 @@ export interface SaveSystemConfigurationResult {
   readonly nodePositions: NodePositionsDto;
   readonly nodeActions: NodeActionsDto;
   readonly terminalNodes: TerminalNodesDto;
+  readonly endSources: EndSourcesDto;
   readonly printerConfiguration: PrinterConfigurationDto;
 }
 
@@ -305,6 +320,12 @@ export class SaveSystemConfigurationUseCase {
     // `__end` are not state names (the whole reason this is a dedicated field,
     // unlike `nodePositions`/`nodeActions` whose keys ARE cross-checked above).
     const terminalNodes = TerminalNodes.of(command.terminalNodes);
+    // Explicit end sources — same shape: pure admin appearance, not
+    // change-gated, no post-commit side-effect. Validated pre-tx so a malformed
+    // array (non-array raw, non-string/empty/duplicate entry) fails fast. NO
+    // state-membership cross-check here — it runs below, mirroring
+    // `nodePositions`/`nodeActions` (the VO stays free of a StateMachine dep).
+    const endSources = EndSources.of(command.endSources);
     // Printer configuration — same shape: pure operational config, not
     // change-gated, no post-commit side-effect. Validated pre-tx so a malformed
     // printer config (bad mode/paperWidth/cutMode enum, non-integer port,
@@ -379,6 +400,21 @@ export class SaveSystemConfigurationUseCase {
         );
       }
     }
+    // State-membership cross-check (anti-corruption): the VO stays free of a
+    // `StateMachine` dependency (DIP), so it cannot validate that an end-source
+    // entry corresponds to a real state. That check belongs here, in the use
+    // case, which already built the state machine. Entries are state names, so
+    // they must be ⊆ the active state-schema STATES. Done pre-tx so an
+    // end-source entry that names no state fails fast (NFR-REL-02 — no illegal
+    // end-sources array burns a write). Mirrors the `nodePositions`/
+    // `nodeActions`/`stateDescriptions` cross-checks.
+    for (const entry of endSources.keys()) {
+      if (!stateNames.has(entry)) {
+        throw new InvalidValueObjectException(
+          `end sources entry '${entry}' is not a state in the active state machine`,
+        );
+      }
+    }
 
     // Whether the daily-reset policy changed (or this is the initial setup).
     // Hoisted out of the tx so the post-commit re-arm (below) can read it
@@ -426,6 +462,7 @@ export class SaveSystemConfigurationUseCase {
         nodePositions,
         nodeActions,
         terminalNodes,
+        endSources,
         printerConfiguration,
       });
       system.completeInitialSetup(); // idempotent — validates store name, flips the flag
@@ -481,6 +518,7 @@ export class SaveSystemConfigurationUseCase {
         nodePositions: system.nodePositions.toDto(),
         nodeActions: system.nodeActions.toDto(),
         terminalNodes: system.terminalNodes.toDto(),
+        endSources: system.endSources.toDto(),
         printerConfiguration: system.printerConfiguration.toDto(),
       };
     });

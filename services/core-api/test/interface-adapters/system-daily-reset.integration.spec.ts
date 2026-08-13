@@ -24,6 +24,7 @@ import {
   ServiceThemes,
   TvPanelLayout,
   EdgeRoutingLayout,
+  EndSources,
   NodeActions,
   NodePositions,
   PrinterConfiguration,
@@ -194,6 +195,7 @@ describe('System daily-reset REST surface (integration — QUE-2)', () => {
         nodePositions: NodePositions.DEFAULT,
         nodeActions: NodeActions.DEFAULT,
         terminalNodes: TerminalNodes.DEFAULT,
+        endSources: EndSources.DEFAULT,
         printerConfiguration: PrinterConfiguration.DEFAULT,
       }),
     );

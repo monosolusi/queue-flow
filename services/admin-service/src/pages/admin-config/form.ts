@@ -119,16 +119,20 @@ export function toForm(config: SystemConfigurationDto): AdminForm {
   // (defaulting to auto/auto); the `?? DEFAULT_TERMINAL_NODES` is belt-and-
   // suspenders (same pattern as `nodeActions ?? {}`).
   const terminalNodes = config.terminalNodes ?? DEFAULT_TERMINAL_NODES;
+  // Explicit End connections — a flat array of state names. Coerce defensively
+  // — the backend always returns `endSources` (defaulting to `[]`); the `?? []`
+  // is belt-and-suspenders (same pattern as `terminalNodes`).
+  const endSources = [...(config.endSources ?? [])];
   return {
     storeName: config.storeName,
     // Build a StateMachineForm with the client-only `mode` preset inferred by
     // deep-equal against the PRD §7 default graph (mirrors the wizard's prefill
     // inference). `mode` is stripped at save (never on the wire). The inference
-    // now passes `positions` + `terminalNodes` so a store with saved positions
-    // or non-auto terminal markers loads editable (`mode: 'custom'`), not
-    // read-only default.
+    // now passes `positions` + `terminalNodes` + `endSources` so a store with
+    // saved positions, non-auto terminal markers, OR explicit End connections
+    // loads editable (`mode: 'custom'`), not read-only default.
     stateMachine: {
-      mode: isDefaultGraph(config.stateMachine.states, mergedTransitions, positions, terminalNodes)
+      mode: isDefaultGraph(config.stateMachine.states, mergedTransitions, positions, terminalNodes, endSources)
         ? 'default'
         : 'custom',
       states: [...config.stateMachine.states],
@@ -137,6 +141,7 @@ export function toForm(config: SystemConfigurationDto): AdminForm {
       nodeActions,
       descriptions,
       terminalNodes,
+      endSources,
     },
     brandColor: config.brandColor || DEFAULT_BRAND_COLOR,
     // Coerce a partial/degraded GET projection into a complete 4-surface map

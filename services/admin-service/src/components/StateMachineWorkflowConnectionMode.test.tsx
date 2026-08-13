@@ -37,9 +37,10 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from '@testing-library/react';
-import { ConnectionMode, type ReactFlowProps } from '@xyflow/react';
+import { ConnectionMode, type Connection, type ReactFlowProps } from '@xyflow/react';
 import type { StateMachineForm } from '../lib/state-machine';
 import { defaultStateMachineForm } from '../lib/state-machine';
+import { END_NODE_ID, START_NODE_ID } from '../lib/state-machine-flow';
 
 // Capture the props the component passes to `<ReactFlow>`. `connectionMode` has
 // no DOM surface, so we record it here. Mocked `ReactFlow` returns nothing — the
@@ -74,5 +75,161 @@ describe('StateMachineWorkflow connection mode (every side accepts a drop)', () 
     // Loose mode is the fix: a source-start drag may land on a `source` handle,
     // so every side accepts a drop (strict mode rejected same-type drops).
     expect(capturedReactFlowProps!.connectionMode).toBe(ConnectionMode.Loose);
+  });
+
+  describe('End marker explicit connections (endSources)', () => {
+    /**
+     * The End marker is a visual sink. Auto-derived edges still appear for
+     * states with no outgoing transitions (the "auto sink" rule), but a manager
+     * may ALSO drag an explicit connection from any state into End, and multiple
+     * are allowed. `endSources` is the persisted wire contract for those explicit
+     * connections (a flat array of state names). These tests cover the
+     * jsdom-observable proxy of that behavior: `isValidConnection` (the gate
+     * that rejects duplicates) and `onConnect` (the stamp path for a new
+     * explicit End connection). The live drag itself needs real pointer
+     * geometry jsdom cannot provide.
+     */
+    function customForm(overrides: Partial<StateMachineForm> = {}): StateMachineForm {
+      return {
+        ...defaultStateMachineForm(),
+        mode: 'custom',
+        states: ['WAITING', 'CALLING', 'SERVING'],
+        transitions: [
+          { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' },
+          { from: 'CALLING', to: 'SERVING', actionLabel: 'Layan' },
+        ],
+        ...overrides,
+      };
+    }
+
+    it('isValidConnection accepts a new explicit End connection from a non-sink state', () => {
+      const form = customForm({ endSources: [] });
+      render(<StateMachineWorkflow value={form} onChange={vi.fn()} errors={[]} />);
+      const isValid = capturedReactFlowProps!.isValidConnection!;
+      // WAITING has an outgoing transition (WAITING→CALLING) so it is NOT an
+      // auto sink, and `endSources: []` means no explicit edge yet — so a drag
+      // from WAITING into End is accepted. (SERVING, the auto sink, is already
+      // connected to End by the auto-derived edge and would be rejected.)
+      const result = isValid({
+        source: 'WAITING',
+        target: END_NODE_ID,
+        sourceHandleId: 's-top',
+        targetHandleId: 't-top',
+      } as unknown as Connection);
+      expect(result).toBe(true);
+    });
+
+    it('isValidConnection rejects a duplicate End connection (state already an endSource)', () => {
+      const form = customForm({ endSources: ['WAITING'] });
+      render(<StateMachineWorkflow value={form} onChange={vi.fn()} errors={[]} />);
+      const isValid = capturedReactFlowProps!.isValidConnection!;
+      // WAITING is not an auto sink, but it IS listed in `endSources`, so the
+      // explicit edge `WAITING→__end#x` is present and a second drag is rejected.
+      const result = isValid({
+        source: 'WAITING',
+        target: END_NODE_ID,
+        sourceHandleId: 's-top',
+        targetHandleId: 't-top',
+      } as unknown as Connection);
+      expect(result).toBe(false);
+    });
+
+    it('isValidConnection rejects an End connection from an auto-sink state (already wired to End)', () => {
+      const form = customForm({ endSources: [] });
+      render(<StateMachineWorkflow value={form} onChange={vi.fn()} errors={[]} />);
+      const isValid = capturedReactFlowProps!.isValidConnection!;
+      // SERVING has no outgoing transition → `formToFlowWithMarkers` emits the
+      // auto-derived `SERVING→__end` edge → `hasEndSource` is true → rejected,
+      // even though `endSources` is empty. The auto-sink rule and the explicit
+      // endSources share the same End target, so a state can never have both.
+      const result = isValid({
+        source: 'SERVING',
+        target: END_NODE_ID,
+        sourceHandleId: 's-top',
+        targetHandleId: 't-top',
+      } as unknown as Connection);
+      expect(result).toBe(false);
+    });
+
+    it('isValidConnection rejects an End connection whose source is a terminal marker', () => {
+      const form = customForm({ endSources: [] });
+      render(<StateMachineWorkflow value={form} onChange={vi.fn()} errors={[]} />);
+      const isValid = capturedReactFlowProps!.isValidConnection!;
+      // The Start marker must never originate an End connection.
+      const result = isValid({
+        source: START_NODE_ID,
+        target: END_NODE_ID,
+        sourceHandleId: 's-top',
+        targetHandleId: 't-top',
+      } as unknown as Connection);
+      expect(result).toBe(false);
+    });
+
+    it('isValidConnection rejects any connection whose target is the Start marker', () => {
+      const form = customForm({ endSources: [] });
+      render(<StateMachineWorkflow value={form} onChange={vi.fn()} errors={[]} />);
+      const isValid = capturedReactFlowProps!.isValidConnection!;
+      const result = isValid({
+        source: 'WAITING',
+        target: START_NODE_ID,
+        sourceHandleId: 's-top',
+        targetHandleId: 't-top',
+      } as unknown as Connection);
+      expect(result).toBe(false);
+    });
+
+    it('onConnect stamps a new explicit End connection via endSources (non-stamping onChange)', () => {
+      const onChange = vi.fn();
+      const form = customForm({ endSources: [] });
+      render(<StateMachineWorkflow value={form} onChange={onChange} errors={[]} />);
+      const onConnect = capturedReactFlowProps!.onConnect!;
+      // WAITING is a non-sink (has WAITING→CALLING), so the auto-derived End
+      // edge is NOT present and onConnect's `hasEndSource` guard passes.
+      onConnect({
+        source: 'WAITING',
+        target: END_NODE_ID,
+        sourceHandleId: 's-top',
+        targetHandleId: 't-top',
+      } as unknown as Connection);
+      expect(onChange).toHaveBeenCalledOnce();
+      const [next] = onChange.mock.calls[0];
+      // Non-stamping: endSources is the only mutated field, no transition added.
+      expect(next.endSources).toEqual(['WAITING']);
+      expect(next.transitions).toEqual(form.transitions);
+    });
+
+    it('onConnect into End ignores a duplicate (no onChange, no double-add)', () => {
+      // Loose mode can fire onConnect for a handle pair that isValidConnection
+      // would have rejected; the component must stay idempotent. A state already
+      // in `endSources` has an explicit End edge → `hasEndSource` is true.
+      const onChange = vi.fn();
+      const form = customForm({ endSources: ['WAITING'] });
+      render(<StateMachineWorkflow value={form} onChange={onChange} errors={[]} />);
+      const onConnect = capturedReactFlowProps!.onConnect!;
+      onConnect({
+        source: 'WAITING',
+        target: END_NODE_ID,
+        sourceHandleId: 's-top',
+        targetHandleId: 't-top',
+      } as unknown as Connection);
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it('onConnect into End ignores an auto-sink source (already auto-wired to End)', () => {
+      const onChange = vi.fn();
+      const form = customForm({ endSources: [] });
+      render(<StateMachineWorkflow value={form} onChange={onChange} errors={[]} />);
+      const onConnect = capturedReactFlowProps!.onConnect!;
+      // SERVING is an auto sink — the auto-derived edge already reaches End,
+      // so `hasEndSource` is true and onConnect no-ops (no double-add to
+      // endSources for a state that already reaches End via the auto rule).
+      onConnect({
+        source: 'SERVING',
+        target: END_NODE_ID,
+        sourceHandleId: 's-top',
+        targetHandleId: 't-top',
+      } as unknown as Connection);
+      expect(onChange).not.toHaveBeenCalled();
+    });
   });
 });

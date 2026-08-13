@@ -188,6 +188,17 @@ export function formToXml(form: StateMachineForm): string {
   // node"). `<start>`/`<end>` after `<transition>`s.
   lines.push(terminalElement('start', form.terminalNodes.start));
   lines.push(terminalElement('end', form.terminalNodes.end));
+  // Explicit End connections — emitted as `<endSources><source name="X"/>…`
+  // ONLY when non-empty (an empty array is the default → omit so a default
+  // graph's XML stays lean, mirroring the sparse `description`/sides rule).
+  // The names are validated against `form.states` at parse (drop unknown).
+  if (form.endSources.length > 0) {
+    lines.push('  <endSources>');
+    for (const s of form.endSources) {
+      lines.push(`    <source name="${escapeXmlAttr(s)}"/>`);
+    }
+    lines.push('  </endSources>');
+  }
   lines.push('</stateMachine>');
   return lines.join('\n');
 }
@@ -376,16 +387,35 @@ export function xmlToForm(xml: string): XmlToFormOk | XmlToFormErr {
   const terminalNodes = parseTerminalNodes(root);
   if ('error' in terminalNodes) return { ok: false, error: terminalNodes.error };
 
+  // Parse the optional <endSources><source name="X"/></endSources> block →
+  // form.endSources. Absent → `[]` (the default — backward-compat with XML
+  // written before this change). Names are validated against the parsed
+  // `states` (drop unknown, mirroring the defensive parse conventions — a
+  // stale entry referencing a removed state never survives the round-trip).
+  const stateSet = new Set(states);
+  const endSources: string[] = [];
+  const endSourcesEl = root.getElementsByTagName('endSources')[0] ?? null;
+  if (endSourcesEl) {
+    for (const sEl of Array.from(endSourcesEl.children).filter((c) => c.tagName === 'source')) {
+      const name = requiredAttr(sEl, 'name');
+      if (name === null) return { ok: false, error: 'Setiap <source> harus memiliki atribut "name".' };
+      if (!name.trim()) return { ok: false, error: 'Atribut "name" pada <source> tidak boleh kosong.' };
+      if (stateSet.has(name)) endSources.push(name);
+    }
+  }
+
   const form: StateMachineForm = {
     mode: 'custom',
     states,
     transitions,
     positions,
-    // nodeActions, descriptions, and terminalNodes are all parsed from the
-    // XML → xmlToForm returns a COMPLETE form (no caller merge-back needed).
+    // nodeActions, descriptions, terminalNodes, and endSources are all parsed
+    // from the XML → xmlToForm returns a COMPLETE form (no caller merge-back
+    // needed).
     nodeActions,
     descriptions,
     terminalNodes,
+    endSources,
   };
   const errors = validateCustomStateMachine(form);
   if (errors.length > 0) {

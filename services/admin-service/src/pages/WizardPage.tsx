@@ -39,6 +39,7 @@ import {
   isDefaultGraph,
   mergeEdgeSides,
   toEdgeRoutingLayoutDto,
+  toEndSourcesDto,
   toNodeActionsDto,
   toNodePositionsDto,
   toStateMachineDto,
@@ -395,6 +396,10 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
         // Terminal markers are payload-only passthrough on the wizard (no
         // marker UI), exactly like `nodeActions`. Coerce defensively.
         const smTerminalNodes = config.terminalNodes ?? DEFAULT_TERMINAL_NODES;
+        // Explicit End connections are payload-only passthrough on the wizard
+        // (no End-connection UI), exactly like `terminalNodes`. Coerce
+        // defensively.
+        const smEndSources = [...(config.endSources ?? [])];
         setForm({
           storeName: config.storeName,
           brandColor: config.brandColor || DEFAULT_BRAND_COLOR,
@@ -418,7 +423,7 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
           // default-structure graph with custom routing loads as custom, and a
           // wizard re-edit preserves the handles on re-save.
           stateMachine: {
-            mode: isDefaultGraph(config.stateMachine.states, smMergedTransitions, smPositions, smTerminalNodes)
+            mode: isDefaultGraph(config.stateMachine.states, smMergedTransitions, smPositions, smTerminalNodes, smEndSources)
               ? 'default'
               : 'custom',
             states: [...config.stateMachine.states],
@@ -427,6 +432,7 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
             nodeActions: smNodeActions,
             descriptions: smDescriptions,
             terminalNodes: smTerminalNodes,
+            endSources: smEndSources,
           },
           dailyReset: {
             mode: config.dailyResetPolicy.mode,
@@ -616,6 +622,10 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
         // Terminal markers — payload-only passthrough on the wizard (no marker
         // UI); `auto/auto` for a first-run store (mirrors `nodeActions`).
         terminalNodes: toTerminalNodesDto(form.stateMachine),
+        // Explicit End connections — payload-only passthrough on the wizard
+        // (no End-connection UI); `[]` for a first-run store (mirrors
+        // `terminalNodes`).
+        endSources: toEndSourcesDto(form.stateMachine),
         dailyReset: {
           mode: form.dailyReset.mode,
           cronExpression: form.dailyReset.mode === 'AUTOMATIC_CRON' ? form.dailyReset.cronExpression : null,

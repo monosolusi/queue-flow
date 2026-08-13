@@ -134,7 +134,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING', 'EXTRA'],
       transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
-      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderWorkflow(customForm, [], onChange);
     // Select the EXTRA node on the canvas → panel renders the node editor.
     selectStateNode('EXTRA');
@@ -177,7 +177,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING', 'EXTRA'],
       transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
-      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderWorkflow(customForm, [], onChange);
     // Select the EXTRA node on the canvas → panel renders the node editor.
     selectStateNode('EXTRA');
@@ -198,7 +198,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING', 'EXTRA'],
       transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
-      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderWorkflow(customForm, [], onChange);
     selectStateNode('EXTRA');
     const panel = screen.getByTestId('sm-properties');
@@ -481,7 +481,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom',
       states: ['WAITING', 'CALLING'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' }],
-      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    });
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    });
     selectEdge('WAITING->CALLING#0');
     const panel = screen.getByTestId('sm-properties');
     expect(within(panel).getByTestId('panel-delete-transition')).toBeDisabled();
@@ -533,7 +533,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
         mode: 'custom',
         states: ['ONHOLD', 'CALLING'],
         transitions: [{ from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut' }],
-        positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,      },
+        positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,      },
       [],
       onChange,
     );
@@ -601,7 +601,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
           ? { ...t, sourceSide: 'bottom' as const, targetSide: 'top' as const }
           : { ...t },
       ),
-      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderWorkflow(form, [], onChange);
     // Select the vertical edge and edit its label — `commit` lifts the
     // `flowToGraph`-captured form (with the sides) to the parent.
@@ -630,7 +630,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
         { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', sourceSide: 'bottom', targetSide: 'top' },
         ...DEFAULT_STATE_MACHINE.transitions.slice(1).map((t) => ({ ...t })),
       ],
-      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderWorkflow(customForm, [], onChange);
     // Select the WAITING node and rename it to PENDING.
     selectStateNode('WAITING');
@@ -702,7 +702,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
         { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' },
         { from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut' },
       ],
-      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderWorkflow(customForm);
     selectStateNode('ONHOLD');
     const panel = screen.getByTestId('sm-properties');
@@ -721,7 +721,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
-      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderWorkflow(customForm, [], onChange);
     selectStateNode('WAITING');
     // Navigate to the "Transisi keluar" sub-view (panel redesign).
@@ -753,7 +753,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
         { from: 'CALLING', to: 'CALLING', actionLabel: 'ulang' },
         { from: 'CALLING', to: 'WAITING', actionLabel: 'kembali' },
       ],
-      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderWorkflow(customForm);
     selectStateNode('CALLING');
     // Navigate to the "Transisi keluar" sub-view (panel redesign).
@@ -787,7 +787,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
-      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderWorkflow(oneTransitionForm);
     selectStateNode('WAITING');
     // Navigate to the "Transisi keluar" sub-view (panel redesign).
@@ -819,7 +819,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING', 'LONELY'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
-      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderWorkflow(customForm);
     selectStateNode('LONELY');
     const panel = screen.getByTestId('sm-properties');
@@ -863,7 +863,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
-      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
     };
     renderWorkflow(customForm, [], onChange);
     selectStateNode('WAITING');
@@ -899,7 +899,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
         WAITING: [{ executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'CALLING' }],
       },
       descriptions: {},
-      terminalNodes: { start: 'auto', end: 'auto' } as const,
+      endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
     };
     renderWorkflow(customForm, [], onChange);
     selectStateNode('WAITING');
@@ -945,7 +945,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
         WAITING: [{ executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'CALLING' }],
       },
       descriptions: {},
-      terminalNodes: { start: 'auto', end: 'auto' } as const,
+      endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
     };
     renderWorkflow(customForm, [], onChange);
     selectStateNode('WAITING');
@@ -994,7 +994,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
         { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' },
         { from: 'WAITING', to: 'COMPLETED', actionLabel: 'Skip' },
       ],
-      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderWorkflow(form, [], onChange);
     selectEdge('WAITING->CALLING#0');
     const toSelect = screen.getByTestId('panel-transition-to') as HTMLSelectElement;
@@ -1125,5 +1125,119 @@ describe('StateMachineWorkflow (Start/End terminal markers)', () => {
     selectMarker('start');
     expect(screen.getByTestId('panel-terminal-info-start')).toHaveTextContent('x=-500');
     expect(screen.getByTestId('panel-terminal-info-start')).toHaveTextContent('y=40');
+  });
+
+  describe('End marker — "Transisi masuk" list (endSources)', () => {
+    /**
+     * Manager feedback: a state should be EXPLICITLY draggable into the End
+     * marker (multiple allowed), persisted as `endSources` on the wire. The End
+     * panel's "Transisi masuk" section lists BOTH the auto-derived sinks (states
+     * with no outgoing transitions — read-only, topology-derived) AND the
+     * explicit `endSources` entries that are NOT auto sinks (each with a "Hapus"
+     * button that lifts via `onRemoveEndSource`, non-stamping). An endSource that
+     * is also an auto sink is de-duped (the auto arrow already represents it).
+     */
+    it('lists auto sinks (read-only) + explicit endSources (with Hapus) and de-dupes overlap', () => {
+      // Default graph: COMPLETED is the only auto sink (no outgoing). WAITING
+      // has an outgoing transition, so adding it to `endSources` makes it an
+      // EXPLICIT End source (not an auto sink) → it gets a "Hapus" button.
+      const form: StateMachineForm = {
+        ...defaultStateMachineForm(),
+        mode: 'custom' as const,
+        endSources: ['WAITING'],
+      };
+      renderWorkflow(form);
+      selectMarker('end');
+      const panel = screen.getByTestId('sm-properties');
+      // The "Transisi masuk" section renders.
+      expect(within(panel).getByTestId('panel-end-incoming')).toBeInTheDocument();
+      expect(within(panel).getByTestId('panel-end-incoming-list')).toBeInTheDocument();
+      // COMPLETED is an auto sink → listed, read-only (no Hapus button).
+      expect(within(panel).getByTestId('panel-end-source-COMPLETED')).toBeInTheDocument();
+      expect(within(panel).queryByTestId('panel-end-source-delete-COMPLETED')).not.toBeInTheDocument();
+      // WAITING is an explicit endSource (not an auto sink) → listed with Hapus.
+      expect(within(panel).getByTestId('panel-end-source-WAITING')).toBeInTheDocument();
+      expect(within(panel).getByTestId('panel-end-source-delete-WAITING')).toBeInTheDocument();
+      // Non-sink, non-endSource states are NOT listed.
+      expect(within(panel).queryByTestId('panel-end-source-CALLING')).not.toBeInTheDocument();
+      expect(within(panel).queryByTestId('panel-end-source-SERVING')).not.toBeInTheDocument();
+      expect(within(panel).queryByTestId('panel-end-source-SKIPPED')).not.toBeInTheDocument();
+    });
+
+    it('an endSource that is also an auto sink is listed ONCE (auto row, no Hapus)', () => {
+      // COMPLETED is an auto sink AND listed in `endSources`. The panel de-dupes:
+      // the auto row wins (the auto arrow already represents the connection), so
+      // no explicit row and no Hapus button renders for COMPLETED.
+      const form: StateMachineForm = {
+        ...defaultStateMachineForm(),
+        mode: 'custom' as const,
+        endSources: ['COMPLETED', 'WAITING'],
+      };
+      renderWorkflow(form);
+      selectMarker('end');
+      const panel = screen.getByTestId('sm-properties');
+      // COMPLETED appears once (auto row), no delete button.
+      expect(within(panel).getByTestId('panel-end-source-COMPLETED')).toBeInTheDocument();
+      expect(within(panel).queryByTestId('panel-end-source-delete-COMPLETED')).not.toBeInTheDocument();
+      // WAITING is explicit (not an auto sink) → Hapus present.
+      expect(within(panel).getByTestId('panel-end-source-delete-WAITING')).toBeInTheDocument();
+    });
+
+    it('Hapus on an explicit endSource calls onChange with endSources filtered (non-stamping)', () => {
+      const onChange = vi.fn();
+      const form: StateMachineForm = {
+        ...defaultStateMachineForm(),
+        mode: 'custom' as const,
+        endSources: ['WAITING', 'SERVING'],
+      };
+      renderWorkflow(form, [], onChange);
+      selectMarker('end');
+      fireEvent.click(screen.getByTestId('panel-end-source-delete-WAITING'));
+      expect(onChange).toHaveBeenCalledTimes(1);
+      const next = onChange.mock.calls[0][0];
+      // Non-stamping: only endSources mutated, transitions untouched.
+      expect(next.endSources).toEqual(['SERVING']);
+      expect(next.transitions).toEqual(form.transitions);
+    });
+
+    it('shows the empty hint when no state is an auto sink and endSources is empty', () => {
+      // A graph where EVERY state has an outgoing transition (no auto sinks)
+      // and no explicit endSources → the "Transisi masuk" list is empty. The
+      // End marker is PINNED so it renders even with no auto sinks and no
+      // endSources (an auto End marker would not emit without a sink/explicit
+      // source — see `formToFlowWithMarkers`'s emit conditions).
+      const form: StateMachineForm = {
+        ...defaultStateMachineForm(),
+        mode: 'custom' as const,
+        states: ['A', 'B'],
+        transitions: [
+          { from: 'A', to: 'B', actionLabel: 'Panggil' },
+          { from: 'B', to: 'A', actionLabel: 'Kembali' },
+        ],
+        endSources: [],
+        terminalNodes: { start: 'auto', end: { x: 500, y: 40 } },
+      };
+      renderWorkflow(form);
+      selectMarker('end');
+      const panel = screen.getByTestId('sm-properties');
+      expect(within(panel).getByTestId('panel-end-incoming-empty')).toBeInTheDocument();
+      expect(within(panel).queryByTestId('panel-end-incoming-list')).not.toBeInTheDocument();
+    });
+
+    it('a stale endSource name not in states is dropped from the panel list', () => {
+      // `endSources` may carry a name that was since deleted from `states` (the
+      // rename/delete cascade lives in the lib, but a malformed form could still
+      // surface one). The panel's `stateSet.has(s)` guard drops it from the list.
+      const form: StateMachineForm = {
+        ...defaultStateMachineForm(),
+        mode: 'custom' as const,
+        endSources: ['GONE', 'WAITING'],
+      };
+      renderWorkflow(form);
+      selectMarker('end');
+      const panel = screen.getByTestId('sm-properties');
+      expect(within(panel).queryByTestId('panel-end-source-GONE')).not.toBeInTheDocument();
+      expect(within(panel).getByTestId('panel-end-source-WAITING')).toBeInTheDocument();
+    });
   });
 });

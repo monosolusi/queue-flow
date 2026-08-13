@@ -133,6 +133,14 @@ export interface WorkflowHandlers {
    * `key` is `'start'` | `'end'`.
    */
   onDropTerminal: (key: 'start' | 'end', position: { x: number; y: number }) => void;
+  /**
+   * Remove an EXPLICIT End connection (a manager-drawn arrow from `source`
+   * into the End marker). Non-stamping (re-seeds the canvas; the explicit
+   * terminal edge disappears). Used by the End-marker panel's "Transisi masuk"
+   * delete button. Auto sink→End arrows are NOT removable here (topology-
+   * derived).
+   */
+  onRemoveEndSource: (source: string) => void;
 }
 
 export const WorkflowContext = createContext<WorkflowHandlers | null>(null);
@@ -307,23 +315,32 @@ export function StartNode({ }: NodeProps): JSX.Element {
  * A canvas-only End terminal marker — a bold-ring "stop" affordance (■ glyph)
  * with a "Selesai" label. Auto-derived for the graph's real exit states
  * (out-degree 0 AND in-degree > 0 — an isolated, not-yet-wired status is NOT an
- * exit point); NOT in the form/wire/XML. ONE `<Handle type="source"
- * position={Position.Left} id={HANDLE_IDS.left} isConnectable={false} />` —
- * the `source`-typed handle on the LEFT is the terminal edge's TARGET (the
- * sink→End edge drops onto this handle). `isConnectable={false}` keeps the
- * manager from dragging a transition from/to the marker; the programmatic
- * terminal edge still attaches (same mechanism as `StartNode`).
+ * exit point) AND a drop target for EXPLICIT manager-drawn End connections
+ * (`form.endSources`, multiple allowed). NOT in the wire `transitions` (the
+ * terminal edges are filtered at `flowToGraph`). ONE `<Handle type="source"
+ * position={Position.Left} id={HANDLE_IDS.left} isConnectable={connectable} />` —
+ * the `source`-typed handle on the LEFT is the terminal edge's TARGET (a
+ * sink→End or an explicit state→End edge drops onto this handle). Under the
+ * parent's `ConnectionMode.Loose` a `source`-typed handle both STARTS and
+ * RECEIVES a connection, so the manager can drag from any state's handle and
+ * drop onto this handle. `isConnectable` is gated on `mode === 'custom'` so
+ * the read-only default-mode canvas stays non-interactive; the programmatic
+ * auto terminal edges still attach regardless of `isConnectable` (same
+ * mechanism as `StartNode`).
  *
  * Inline `<svg>` (no external assets — NFR-REL-01) using `currentColor`.
  */
 export function EndNode({ }: NodeProps): JSX.Element {
+  const ctx = useContext(WorkflowContext);
+  if (!ctx) return <></>;
+  const connectable = ctx.mode === 'custom';
   return (
     <div
       className="terminal-node terminal-node--end"
       data-testid="sm-node-end"
       aria-label="Titik akhir alur"
     >
-      <Handle type="source" position={Position.Left} id={HANDLE_IDS.left} isConnectable={false} />
+      <Handle type="source" position={Position.Left} id={HANDLE_IDS.left} isConnectable={connectable} />
       <span className="terminal-node__glyph" aria-hidden="true">
         <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
           <rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor" />

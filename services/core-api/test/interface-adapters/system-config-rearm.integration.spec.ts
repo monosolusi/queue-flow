@@ -67,6 +67,7 @@ describe('System-config scheduler re-arm + cron enforcement (integration — QUE
       nodePositions: {},
       nodeActions: {},
       terminalNodes: { start: 'auto', end: 'auto' },
+      endSources: [],
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
     };
   }

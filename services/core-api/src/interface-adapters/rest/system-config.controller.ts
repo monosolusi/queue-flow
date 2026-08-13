@@ -41,6 +41,7 @@ const REQUIRED_CONFIG_FIELDS: ReadonlyArray<keyof SaveSystemConfigurationCommand
   'nodePositions',
   'nodeActions',
   'terminalNodes',
+  'endSources',
   'printerConfiguration',
 ];
 
@@ -71,6 +72,7 @@ const CONFIG_FIELD_SHAPES: ReadonlyArray<{
   { field: 'nodePositions', kind: 'object' },
   { field: 'nodeActions', kind: 'object' },
   { field: 'terminalNodes', kind: 'object' },
+  { field: 'endSources', kind: 'array' },
   { field: 'printerConfiguration', kind: 'object' },
 ];
 
@@ -337,6 +339,22 @@ function configNestedShapeErrors(body: Partial<SaveSystemConfigurationCommand>):
       }
     }
   }
+  // endSources: the VO throws `InvalidValueObjectException` (→ 400) on a
+  // present-but-malformed value (non-array raw, a non-string element, an
+  // empty/whitespace-only element, or a duplicate). This boundary guard catches
+  // the crash class and gives consistent, field-named error messages for a
+  // present-but-non-string element (the VO's `typeof element !== 'string'`
+  // check is clean, so this is belt-and-suspenders at the interface-adapters
+  // boundary — it produces a 400 before the use case is entered). Empty-string
+  // / duplicate / state-membership enforcement stays in the VO + use case (SRP).
+  const endSources = body.endSources;
+  if (Array.isArray(endSources)) {
+    (endSources as readonly unknown[]).forEach((s, i) => {
+      if (s != null && typeof s !== 'string') {
+        errs.push(`endSources[${i}] must be a string`);
+      }
+    });
+  }
   // printerConfiguration: the VO throws `InvalidValueObjectException` (→ 400)
   // on a present-but-invalid field (bad mode/paperWidth/cutMode enum,
   // non-integer port, network-escpos with no host). This boundary guard catches
@@ -462,6 +480,7 @@ export class SystemConfigController {
       nodePositions: body.nodePositions!,
       nodeActions: body.nodeActions!,
       terminalNodes: body.terminalNodes!,
+      endSources: body.endSources!,
       printerConfiguration: body.printerConfiguration!,
       actor: principal?.username ?? 'system',
     };

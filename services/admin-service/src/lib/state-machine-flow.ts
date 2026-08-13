@@ -75,9 +75,18 @@ export interface FlowNode {
 
 /** Edge payload: the transition's action label (the Caller UI button text).
  *  Index signature for `Record<string, unknown>` compatibility (see
- *  {@link FlowNodeData}). */
+ *  {@link FlowNodeData}). `explicit` flags a terminal edge as a manager-drawn
+ *  End connection (vs an auto-derived sink→End arrow) — canvas-only, used by
+ *  the End-marker panel to distinguish the two kinds in the "Transisi masuk"
+ *  list. */
 export interface FlowEdgeData {
   actionLabel: string;
+  /** True when this terminal edge is an EXPLICIT End connection (a manager
+   *  drag from a state into the End marker), false/absent for an auto-derived
+   *  sink→End arrow. Canvas-only — `flowToGraph` filters ALL terminal edges
+   *  out (by `type === 'terminal'`), so this never reaches the wire; the
+   *  explicit set is carried in the form's `endSources` array instead. */
+  explicit?: boolean;
   [key: string]: unknown;
 }
 
@@ -484,7 +493,18 @@ export function formToFlowWithMarkers(
   const autoStart = topo.nodes.find((n) => n.id === START_NODE_ID);
   const autoEnd = topo.nodes.find((n) => n.id === END_NODE_ID);
   const startEdges = topo.edges.filter((e) => e.source === START_NODE_ID);
-  const endEdges = topo.edges.filter((e) => e.target === END_NODE_ID);
+  const autoEndEdges = topo.edges.filter((e) => e.target === END_NODE_ID);
+  // The auto sink set — states with out-degree 0 (already drawn by
+  // `autoEndEdges` as `${s}->${END_NODE_ID}`). An explicit endSource that IS a
+  // sink is de-duplicated: the auto arrow already draws, so we do NOT emit a
+  // second `${s}->${END_NODE_ID}#x` edge (a duplicate id would collide and a
+  // duplicate edge would render two arrows on top of each other).
+  const autoSinks = new Set(autoEndEdges.map((e) => e.source));
+  // Real-node bounds fallback for an auto End marker with no autoEnd (the
+  // topology has no sinks but the manager willed End connections — emit the
+  // marker at the rightmost real-node rank, mirroring the auto-derivation
+  // math in `deriveTerminalMarkers`).
+  const real = Object.values(realPositions);
 
   const markerNodes: FlowNode[] = [];
   const markerEdges: FlowEdge[] = [];
@@ -507,20 +527,66 @@ export function formToFlowWithMarkers(
       markerEdges.push(...startEdges);
     }
   }
-  // End marker (mirrors start with sinks).
+  // End marker (mirrors start with sinks, PLUS the explicit endSources path).
+  // The End marker emits when:
+  //  - `end !== 'hidden'` AND
+  //    - pinned `{x,y}` (emit always), OR
+  //    - auto AND topology has sinks (autoEnd), OR
+  //    - auto AND no sinks BUT `value.endSources` has at least one VALID entry
+  //      (the manager willed End connections even though no state is a sink —
+  //      the explicit edges need a marker to attach to). Position falls back to
+  //      the rightmost real-node rank + vertical center (mirroring
+  //      `deriveTerminalMarkers`'s auto math) when `autoEnd` is undefined.
   if (end !== 'hidden') {
     const emitExplicit = typeof end === 'object';
+    const validEndSources = value.endSources.filter((s) => realPositions[s] !== undefined);
+    const hasExplicit = validEndSources.length > 0;
     const emitAuto = end === 'auto' && autoEnd !== undefined;
-    if (emitExplicit || emitAuto) {
+    const emitAutoForExplicit = end === 'auto' && autoEnd === undefined && hasExplicit;
+    if (emitExplicit || emitAuto || emitAutoForExplicit) {
+      let position: { x: number; y: number };
+      if (emitExplicit) {
+        position = { x: end.x, y: end.y };
+      } else if (autoEnd !== undefined) {
+        position = autoEnd.position;
+      } else {
+        // Fallback: rightmost real-node rank + vertical center (mirrors
+        // `deriveTerminalMarkers`'s maxX + TERMINAL_SPACING + yCenter math).
+        const maxX = real.length ? Math.max(...real.map((p) => p.x)) : 0;
+        const minY = real.length ? Math.min(...real.map((p) => p.y)) : 0;
+        const maxY = real.length ? Math.max(...real.map((p) => p.y)) : 0;
+        position = { x: maxX + TERMINAL_SPACING, y: (minY + maxY) / 2 };
+      }
       markerNodes.push({
         id: END_NODE_ID,
         type: END_NODE_TYPE,
-        position: emitExplicit ? { x: end.x, y: end.y } : autoEnd!.position,
+        position,
         data: { name: END_NODE_ID, description: '' },
         selectable: true,
         pinned: emitExplicit,
       });
-      markerEdges.push(...endEdges);
+      // Auto sink→End arrows first (the topology-derived set).
+      markerEdges.push(...autoEndEdges);
+      // EXPLICIT End connections: one edge per endSource entry that is NOT
+      // already a sink (de-duplicated — a sink already has an auto arrow).
+      // Distinct edge id `${s}->${END_NODE_ID}#x` (the `#x` suffix
+      // differentiates from the auto `${s}->${END_NODE_ID}` so the two never
+      // collide). `data.explicit = true` flags the edge for the End panel.
+      // `type: TERMINAL_EDGE_TYPE` so `flowToGraph` filters it out (never
+      // reaches the wire transitions — `__end` is not a real state).
+      for (const s of validEndSources) {
+        if (autoSinks.has(s)) continue;
+        markerEdges.push({
+          id: `${s}->${END_NODE_ID}#x`,
+          source: s,
+          target: END_NODE_ID,
+          type: TERMINAL_EDGE_TYPE,
+          data: { actionLabel: '', explicit: true },
+          sourceHandle: HANDLE_IDS.right,
+          targetHandle: HANDLE_IDS.left,
+          markerEnd: EDGE_ARROW_MARKER,
+        });
+      }
     }
   }
   return { nodes: [...stateNodes, ...markerNodes], edges: [...transEdges, ...markerEdges] };
@@ -655,6 +721,23 @@ export function isDuplicateTransition(
 }
 
 /**
+ * True when an EXPLICIT or AUTO terminal edge already connects `source` to the
+ * End marker (`source → __end`). The single source of truth for the
+ * duplicate-End-connection check shared by `isValidConnection` (live, during
+ * the drag) + `onConnect` (defensive — a real connection that somehow bypassed
+ * the live guard). Covers both the auto sink→End arrow (`${s}->${END_NODE_ID}`,
+ * no `#x` suffix) and the explicit edge (`${s}->${END_NODE_ID}#x`) so a manager
+ * cannot drag a second arrow from a state that already reaches End (auto OR
+ * explicit). Terminal-edge-typed only — a real transition to a state coincidentally
+ * named like a sink is unaffected.
+ */
+export function hasEndSource(edges: readonly FlowEdge[], source: string): boolean {
+  return edges.some(
+    (e) => e.type === TERMINAL_EDGE_TYPE && e.target === END_NODE_ID && e.source === source,
+  );
+}
+
+/**
  * The minimal structural slice of React Flow's `FinalConnectionState` the
  * rejection message needs. Defined locally (NOT a `@xyflow/react` type) so the
  * lib stays framework-free; the component maps the real `connectionState` into
@@ -687,6 +770,13 @@ export function rejectionMessageForConnection(
   if (outcome.isValid !== false || !outcome.toId) return null;
   const from = outcome.fromId;
   const to = outcome.toId;
+  // Dropping onto the End marker is rejected only when the source state is
+  // already connected to End (auto sink OR explicit endSource). Surface a
+  // manager-facing message naming the source so the manager knows why the
+  // drop was refused (mirrors the duplicate-transition message style).
+  if (to === END_NODE_ID && from && hasEndSource(edges, from)) {
+    return `Status ${from} sudah terhubung ke titik akhir.`;
+  }
   if (from && isDuplicateTransition(edges, from, to)) {
     return `Transisi dari ${from} ke ${to} sudah ada.`;
   }

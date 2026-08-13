@@ -15,7 +15,7 @@ function defaultForm(): StateMachineForm {
     mode: 'default',
     states: [...DEFAULT_STATE_MACHINE.states],
     transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
-    positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,  };
+    positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,  };
 }
 
 describe('formToXml', () => {
@@ -44,7 +44,7 @@ describe('formToXml', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
-      positions: { A: { x: 10, y: 20 }, B: { x: 240, y: 0 } }, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: { A: { x: 10, y: 20 }, B: { x: 240, y: 0 } }, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const xml = formToXml(form);
     // States carry a computed `description` attribute (derived from
     // `describeState`), so the element is no longer a bare `x/y` self-closing
@@ -58,7 +58,7 @@ describe('formToXml', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
-      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const xml = formToXml(form);
     // A is the sole source → rank 0 → x=0; B follows A → rank 1 → x=240; both
     // index 0 in their rank → y=0.
@@ -106,7 +106,7 @@ describe('formToXml', () => {
       transitions: [
         { from: 'A', to: 'B', actionLabel: 'go', sourceSide: 'bottom', targetSide: 'top' },
       ],
-      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const xml = formToXml(form);
     expect(xml).toContain('sourceSide="bottom"');
     expect(xml).toContain('targetSide="top"');
@@ -117,7 +117,7 @@ describe('formToXml', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go', sourceSide: 'bottom' }],
-      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const xml = formToXml(form);
     expect(xml).toContain('sourceSide="bottom"');
     // targetSide materialized to the default ('left').
@@ -129,7 +129,7 @@ describe('formToXml', () => {
       mode: 'custom',
       states: ['A&B'],
       transitions: [{ from: 'A&B', to: 'A&B', actionLabel: 'go "there" <now>' }],
-      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const xml = formToXml(form);
     expect(xml).toContain('name="A&amp;B"');
     expect(xml).toContain('from="A&amp;B"');
@@ -143,7 +143,7 @@ describe('formToXml', () => {
       mode: 'custom',
       states: ['A'],
       transitions: [],
-      positions: { A: { x: 10.123456, y: 20.999 } }, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: { A: { x: 10.123456, y: 20.999 } }, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const xml = formToXml(form);
     expect(xml).toContain('x="10.12"');
     expect(xml).toContain('y="21"');
@@ -281,7 +281,7 @@ describe('xmlToForm', () => {
         { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' },
         { from: 'CALLING', to: 'SERVING', actionLabel: 'Mulai Melayani' },
       ],
-      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const result = xmlToForm(formToXml(form));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -301,7 +301,7 @@ describe('xmlToForm', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
-      positions: { A: { x: 10, y: 20 }, B: { x: 240, y: 80 } }, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: { A: { x: 10, y: 20 }, B: { x: 240, y: 80 } }, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const result = xmlToForm(formToXml(form));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -314,7 +314,7 @@ describe('xmlToForm', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'up', sourceSide: 'bottom', targetSide: 'top' }],
-      positions: {}, nodeActions: {}, descriptions: {}, terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const result = xmlToForm(formToXml(form));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -339,7 +339,7 @@ describe('xmlToForm', () => {
       positions: { A: { x: 10, y: 20 }, B: { x: 240, y: 80 } },
       nodeActions: {},
       descriptions: { A: 'Antrian dimulai di sini', B: '' },
-      terminalNodes: { start: 'auto', end: 'auto' } as const,
+      endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
     };
     const xml = formToXml(form);
     // A's non-empty override is serialized as a `description` attribute.
@@ -359,7 +359,7 @@ describe('xmlToForm', () => {
       positions: { A: { x: 10, y: 20 }, B: { x: 240, y: 80 } },
       nodeActions: {},
       descriptions: { A: 'Antrian dimulai di sini' },
-      terminalNodes: { start: 'auto', end: 'auto' } as const,
+      endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
     };
     const result = xmlToForm(formToXml(form));
     expect(result.ok).toBe(true);
@@ -377,7 +377,7 @@ describe('xmlToForm', () => {
       positions: { A: { x: 10, y: 20 }, B: { x: 240, y: 80 } },
       nodeActions: {},
       descriptions: {},
-      terminalNodes: { start: 'auto', end: 'auto' } as const,
+      endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
     };
     const xml = formToXml(form);
     expect(xml).not.toContain('description=');
@@ -423,6 +423,7 @@ describe('formToXml terminal markers + node actions', () => {
       positions: { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
       nodeActions: {},
       descriptions: {},
+      endSources: [],
       terminalNodes: { start: 'hidden', end: { x: 720, y: 30 } },
     };
     const xml = formToXml(form);
@@ -445,6 +446,7 @@ describe('formToXml terminal markers + node actions', () => {
         A: [{ executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'B' }],
       },
       descriptions: {},
+      endSources: [],
       terminalNodes: { start: 'auto', end: 'auto' },
     };
     const xml = formToXml(form);
@@ -466,6 +468,7 @@ describe('xmlToForm round-trips terminalNodes + nodeActions', () => {
       positions: { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
       nodeActions: {},
       descriptions: {},
+      endSources: [],
       terminalNodes: { start: 'hidden', end: { x: 720, y: 30 } },
     };
     const result = xmlToForm(formToXml(form));
@@ -488,6 +491,7 @@ describe('xmlToForm round-trips terminalNodes + nodeActions', () => {
         ],
       },
       descriptions: {},
+      endSources: [],
       terminalNodes: { start: 'auto', end: 'auto' },
     };
     const result = xmlToForm(formToXml(form));
@@ -525,5 +529,77 @@ describe('xmlToForm round-trips terminalNodes + nodeActions', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error).toMatch(/angka/i);
+  });
+});
+
+describe('endSources XML round-trip', () => {
+  it('emits <endSources><source name="X"/></endSources> only when non-empty', () => {
+    // Non-empty → the block is emitted with one <source> per entry.
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+      positions: { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
+      nodeActions: {},
+      descriptions: {},
+      endSources: ['A', 'B'],
+      terminalNodes: { start: 'auto', end: 'auto' },
+    };
+    const xml = formToXml(form);
+    expect(xml).toContain('<endSources>');
+    expect(xml).toContain('<source name="A"/>');
+    expect(xml).toContain('<source name="B"/>');
+    expect(xml).toContain('</endSources>');
+  });
+
+  it('omits the <endSources> block when endSources is empty (default graph stays lean)', () => {
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+      positions: { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
+      nodeActions: {},
+      descriptions: {},
+      endSources: [],
+      terminalNodes: { start: 'auto', end: 'auto' },
+    };
+    const xml = formToXml(form);
+    expect(xml).not.toContain('<endSources>');
+  });
+
+  it('round-trips endSources through formToXml → xmlToForm', () => {
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+      positions: { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
+      nodeActions: {},
+      descriptions: {},
+      endSources: ['A', 'B'],
+      terminalNodes: { start: 'auto', end: 'auto' },
+    };
+    const result = xmlToForm(formToXml(form));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.form.endSources).toEqual(['A', 'B']);
+  });
+
+  it('drops a stale <source> name not in the parsed states (defensive parse)', () => {
+    const xml =
+      '<?xml version="1.0"?><stateMachine><state name="A" x="0" y="0"/><state name="B" x="240" y="0"/><transition from="A" to="B" actionLabel="go"/><start auto="true"/><end auto="true"/><endSources><source name="A"/><source name="GONE"/></endSources></stateMachine>';
+    const result = xmlToForm(xml);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // 'GONE' is not a parsed state → dropped; 'A' survives.
+    expect(result.form.endSources).toEqual(['A']);
+  });
+
+  it('rejects a <source> with a missing name attribute', () => {
+    const xml =
+      '<?xml version="1.0"?><stateMachine><state name="A" x="0" y="0"/><start auto="true"/><end auto="true"/><endSources><source/></endSources></stateMachine>';
+    const result = xmlToForm(xml);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatch(/name/);
   });
 });

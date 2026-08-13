@@ -4,6 +4,7 @@ import {
   DEFAULT_TERMINAL_NODES,
   type EdgeRoutingLayoutDto,
   type EdgeSide,
+  type EndSourcesDto,
   type NodeActionType,
   type NodeActionsDto,
   type NodePositionsDto,
@@ -137,6 +138,19 @@ export interface StateMachineForm {
    * (fixed start/end keys, not state-name-keyed).
    */
   terminalNodes: TerminalNodesDto;
+  /**
+   * Explicit End-marker connections — a flat array of state NAMES the manager
+   * dragged a connection from into the End terminal marker (multiple allowed).
+   * Canvas-rendered (like `terminalNodes`): `formToFlowWithMarkers` emits an
+   * EXPLICIT terminal edge for each entry that is not already a sink, so a
+   * change MUST re-seed the canvas → `graphSignature` INCLUDES `endSources`.
+   * Travels the wire in the separate top-level `endSources` field (built by
+   * {@link toEndSourcesDto}), NOT inside `stateMachine` (the End marker is a
+   * canvas-only affordance, NOT a real state — `__end` never reaches the wire
+   * `transitions`). The `updateState`/`removeState` helpers cascade a rename/
+   * delete to the entry (state-name-keyed by value, mirrors `nodeActions`).
+   */
+  endSources: string[];
 }
 
 /** The PRD §7 default graph prefilled into the editor's default mode. */
@@ -151,6 +165,9 @@ export function defaultStateMachineForm(): StateMachineForm {
     // is the fallback for each of the 5 PRD §7 default statuses.
     descriptions: {},
     terminalNodes: { ...DEFAULT_TERMINAL_NODES },
+    // No explicit End connections — the End marker only shows the auto-derived
+    // sink→End arrows for the default graph's sinks (COMPLETED).
+    endSources: [],
   };
 }
 
@@ -172,12 +189,17 @@ export function isDefaultGraph(
   transitions: readonly Transition[],
   positions: Record<string, { x: number; y: number }> = {},
   terminalNodes: TerminalNodesDto = DEFAULT_TERMINAL_NODES,
+  endSources: readonly string[] = [],
 ): boolean {
   if (Object.keys(positions).length > 0) return false;
   // A manager-pinned or hidden terminal marker is a customization (auto/auto
   // is the default-derived UX), so a store with non-auto terminals loads as
   // `mode: 'custom'` (editable), not read-only default.
   if (terminalNodes.start !== 'auto' || terminalNodes.end !== 'auto') return false;
+  // An explicit End connection is a customization (the default graph has none
+  // — the manager dragged a new arrow into End), so a store with a non-empty
+  // `endSources` loads as `mode: 'custom'` (editable), not read-only default.
+  if (endSources.length > 0) return false;
   if (states.length !== DEFAULT_STATE_MACHINE.states.length) return false;
   if (transitions.length !== DEFAULT_STATE_MACHINE.transitions.length) return false;
   const sameStates = states.every((s, i) => s === DEFAULT_STATE_MACHINE.states[i]);
@@ -340,6 +362,21 @@ export function toTerminalNodesDto(form: StateMachineForm): TerminalNodesDto {
   const copyPos = (v: TerminalNodesDto['start']): TerminalNodesDto['start'] =>
     typeof v === 'object' && v !== null ? { x: v.x, y: v.y } : v;
   return { start: copyPos(start), end: copyPos(end) };
+}
+
+/**
+ * Builds the explicit End-connections wire array from the form. A shallow copy
+ * of `form.endSources` (the form is the source of truth — built by the
+ * `onConnect`-to-End path + the panel "Transisi masuk" delete, or by
+ * `xmlToForm` on a Source edit). `[]` means "no explicit End connections —
+ * only the auto-derived sink→End arrows". Mirrors `toTerminalNodesDto`'s doc
+ * style: read `form.endSources` directly, do not special-case mode (default
+ * mode force-resets the graph in `toStateMachineDto` and the default canvas
+ * carries no explicit End connections, so the array is `[]` regardless —
+ * `defaultStateMachineForm` seeds `[]` and the default radio calls it).
+ */
+export function toEndSourcesDto(form: StateMachineForm): EndSourcesDto {
+  return [...form.endSources];
 }
 
 /** Horizontal gap between ranks (left-to-right flow). */
@@ -723,7 +760,12 @@ export function updateState(form: StateMachineForm, i: number, value: string): S
     descriptions[value] = descriptions[oldName];
     delete descriptions[oldName];
   }
-  return { ...form, states, transitions, positions, nodeActions, descriptions };
+  // The explicit End-connections array carries state names (not a map, but the
+  // same rename-cascade applies): a renamed source must update its entry so the
+  // explicit End edge follows the renamed status (mirrors the nodeActions/
+  // positions rename propagation).
+  const endSources = form.endSources.map((s) => (s === oldName ? value : s));
+  return { ...form, states, transitions, positions, nodeActions, descriptions, endSources };
 }
 
 export function addState(form: StateMachineForm): StateMachineForm {
@@ -749,12 +791,18 @@ export function removeState(form: StateMachineForm, i: number): StateMachineForm
   // re-add and silently re-attach to a re-created status under the same name.
   const descriptions = { ...(form.descriptions ?? {}) };
   delete descriptions[removedName];
+  // Drop the explicit End-connections entry too (the array carries state names,
+  // mirrors the descriptions rename/delete cascade), or the stale connection
+  // would survive a re-add and silently re-attach to a re-created status under
+  // the same name — and the canvas would render an End edge to a removed state.
+  const endSources = form.endSources.filter((s) => s !== removedName);
   return {
     ...form,
     states: form.states.filter((_, idx) => idx !== i),
     positions,
     nodeActions,
     descriptions,
+    endSources,
   };
 }
 
@@ -803,6 +851,15 @@ export function removeState(form: StateMachineForm, i: number): StateMachineForm
  * drag does NOT re-seed (the marker stays where dropped). Each terminal is
  * canonicalized to `'auto'` | `'hidden'` | `x,y` so the signature is stable
  * across equivalent serializations.
+ *
+ * INCLUDES `endSources` (canvas-rendered, like `terminalNodes`): an explicit
+ * End connection add/delete is a structural canvas change the guards must
+ * detect — a source-view endSources edit re-seeds the canvas, and the
+ * `onConnect`-to-End / panel-delete paths (non-stamping — raw `onChange` → the
+ * sync effect re-seeds) show up as an external signature change. The array is
+ * canonicalized (sorted) so the signature is order-insensitive (the wire array
+ * has no inherent order; a re-GET may echo a different order than the client
+ * sent — the sorted signature stays stable across the round-trip).
  */
 export function graphSignature(form: StateMachineForm): string {
   const canonTerminal = (v: TerminalNodesDto['start']): string =>
@@ -820,5 +877,6 @@ export function graphSignature(form: StateMachineForm): string {
       .map(([k, v]) => `${k}:${v.x},${v.y}`)
       .sort(),
     tn: { start: canonTerminal(form.terminalNodes.start), end: canonTerminal(form.terminalNodes.end) },
+    e: [...form.endSources].sort(),
   });
 }

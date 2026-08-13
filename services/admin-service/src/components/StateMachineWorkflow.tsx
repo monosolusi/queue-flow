@@ -75,12 +75,15 @@ import {
 import {
   flowToGraph,
   formToFlowWithMarkers,
+  hasEndSource,
   isTerminalNodeId,
   nextStateName,
   withDescriptions,
   DEFAULT_SOURCE_HANDLE,
   DEFAULT_TARGET_HANDLE,
   EDGE_ARROW_MARKER,
+  END_NODE_ID,
+  START_NODE_ID,
   TERMINAL_EDGE_TYPE,
   isDuplicateTransition,
   rejectionMessageForConnection,
@@ -256,6 +259,13 @@ export function StateMachineWorkflow({
         nodeActions: value.nodeActions,
         descriptions: value.descriptions,
         terminalNodes,
+        // `endSources` is canvas-rendered (the explicit End edges re-derive
+        // from it in `formToFlowWithMarkers`) but NOT captured by `flowToGraph`
+        // (terminal edges are filtered, so the form's `endSources` is the sole
+        // source of truth). Carry it from `value` so a canvas commit preserves
+        // the explicit End connections across the `flowToGraph` round-trip
+        // (mirrors `nodeActions`/`descriptions`).
+        endSources: value.endSources,
       };
       // REBUILD the marker nodes from the form so auto markers re-attach to the
       // (possibly moved) state bounds after a state drag — an auto marker's
@@ -281,7 +291,7 @@ export function StateMachineWorkflow({
       lastEmitted.current = graphSignature(form);
       onChange(form);
     },
-    [value.mode, value.nodeActions, value.descriptions, value.terminalNodes, onChange],
+    [value.mode, value.nodeActions, value.descriptions, value.terminalNodes, value.endSources, onChange],
   );
 
   // Lift a FORM-ONLY edit (a node-action add/delete/edit touches no nodes/edges,
@@ -359,6 +369,23 @@ export function StateMachineWorkflow({
       const from = connection.source;
       const to = connection.target;
       if (!from || !to) return;
+      // Dropping a connection onto the End marker is a SPECIAL CASE: it does
+      // NOT create a real transition edge (the End marker is canvas-only, NOT
+      // a state — `__end` must never reach the wire `transitions`). Instead it
+      // appends `from` to `form.endSources` (NON-stamping raw `onChange`), and
+      // the sync effect sees `graphSignature` changed (endSources included) →
+      // re-seeds → `formToFlowWithMarkers` emits the explicit terminal edge.
+      // Mirrors the non-stamping terminal handlers `onDropTerminal` etc.
+      if (to === END_NODE_ID) {
+        if (isTerminalNodeId(from)) return; // End has no incoming from markers.
+        // Defensive duplicate guard: the live `isValidConnection` below already
+        // rejects a duplicate (auto sink OR existing endSource), but keep the
+        // check so a real connection that bypassed the live guard never seeds
+        // a second explicit edge from the same source.
+        if (hasEndSource(edges, from)) return;
+        onChange({ ...value, endSources: [...value.endSources, from] });
+        return;
+      }
       // Defensive duplicate guard: the live `isValidConnection` below already
       // rejects a duplicate during the drag, but keep the check so a real
       // connection that somehow bypassed the live guard (e.g. a future RF
@@ -383,7 +410,7 @@ export function StateMachineWorkflow({
       };
       commit(nodes, [...edges, newEdge]);
     },
-    [edges, nodes, commit, mintEdgeId],
+    [edges, nodes, value, commit, mintEdgeId, onChange],
   );
 
   // Live connection validation (during the drag): reject a duplicate edge so
@@ -401,11 +428,25 @@ export function StateMachineWorkflow({
       const from = connection.source;
       const to = connection.target;
       if (!from || !to) return true;
-      // Defensive: the Start/End marker handles are `isConnectable={false}` so a
-      // drag can never start/end on them, but guard anyway so a future RF
-      // internals change (or a programmatic connection) can never seed a real
-      // transition edge onto a terminal marker — the markers are canvas-only
-      // and never reach the form/wire.
+      // End marker: the manager MAY drag a connection from a real state into
+      // the End marker (multiple explicit End connections allowed). Reject a
+      // duplicate (the source is already connected to End — auto sink OR an
+      // existing explicit endSource). End itself has no outgoing, and no
+      // other terminal marker may be the source of an End connection.
+      if (to === END_NODE_ID) {
+        if (isTerminalNodeId(from)) return false;
+        return !hasEndSource(edges, from);
+      }
+      // Start marker: no incoming connections (it is an entry cue only).
+      if (to === START_NODE_ID) return false;
+      // End has no outgoing; Start has no outgoing (entry marker only).
+      if (from === END_NODE_ID || from === START_NODE_ID) return false;
+      // Any other terminal-marker combo (marker→marker, marker→state other
+      // than End) is rejected — the markers are canvas-only and never reach
+      // the form/wire. Defensive (the handles are `isConnectable={false}` in
+      // default mode and `isConnectable`-gated in custom mode, but guard so a
+      // future RF internals change can never seed a real transition edge onto
+      // a terminal marker).
       if (isTerminalNodeId(from) || isTerminalNodeId(to)) return false;
       return !isDuplicateTransition(edges, from, to);
     },
@@ -635,6 +676,16 @@ export function StateMachineWorkflow({
       },
       onDropTerminal: (key, position) => {
         onChange({ ...value, terminalNodes: { ...value.terminalNodes, [key]: { x: position.x, y: position.y } } });
+      },
+      // Remove an EXPLICIT End connection (a manager-drawn arrow into the End
+      // marker). Non-stamping (raw `onChange`, no `lastEmitted` stamp) so the
+      // sync effect sees `graphSignature` changed (endSources included) →
+      // re-seeds → the explicit terminal edge disappears from the canvas.
+      // Mirrors the non-stamping terminal handlers above. Auto sink→End arrows
+      // are NOT removable here (they derive from topology — delete the state's
+      // outgoing transitions or the state itself to remove one).
+      onRemoveEndSource: (source) => {
+        onChange({ ...value, endSources: value.endSources.filter((s) => s !== source) });
       },
     }),
     [value, nodes, edges, commit, lift, selectedNodeId, selectedEdgeId, toast, mintEdgeId],

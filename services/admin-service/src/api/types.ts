@@ -231,6 +231,29 @@ export interface TerminalNodesDto {
   readonly end: TerminalNodeStateDto;
 }
 
+/**
+ * Persisted explicit End-marker connections — a flat array of state NAMES the
+ * manager dragged a connection from into the End terminal marker (multiple
+ * allowed). Purely visual metadata, like {@link NodePositionsDto} /
+ * {@link TerminalNodesDto}: the End marker is a canvas-only affordance, NOT a
+ * real state, so `__end` never reaches the wire `transitions` (the diagram
+ * filters terminal edges at `flowToGraph`). Mirrors core-api's `endSources`
+ * field-for-field. Not change-gated for audit (an appearance concern, like
+ * {@link TerminalNodesDto}). `[]` means "no explicit End connections — only
+ * the auto-derived sink→End arrows" (the default). An entry that is also a
+ * sink (out-degree 0) is de-duplicated on the canvas (the auto arrow already
+ * draws), so `endSources` only records the EXPLICIT additions.
+ */
+export type EndSourcesDto = readonly string[];
+
+/**
+ * Empty end-sources list — "no explicit End connections". Matches the backend
+ * `EndSources.DEFAULT` so a store that never drags into End keeps the existing
+ * auto-derived sink→End arrows only (zero visual regression, mirroring
+ * {@link DEFAULT_TERMINAL_NODES}).
+ */
+export const DEFAULT_END_SOURCES: EndSourcesDto = [];
+
 /** How the kiosk produces a thermal-printer receipt. `chrome` prints via the
  *  browser's print dialog (the default — zero setup, uses the manager's
  *  Chrome print settings); `network-escpos` streams raw ESC/POS bytes over TCP
@@ -341,6 +364,13 @@ export interface SystemConfigurationDto {
    *  keeps a defensive `?? DEFAULT_TERMINAL_NODES` coercion (belt-and-suspenders,
    *  same as `nodeActions`). */
   readonly terminalNodes: TerminalNodesDto;
+  /** Explicit End-marker connections (a flat array of state names the manager
+   *  dragged into the End terminal marker). Always present — the backend
+   *  defaults to {@link DEFAULT_END_SOURCES} so a store that never drags into
+   *  End keeps the auto-derived sink→End arrows only (zero visual regression);
+   *  `toForm` keeps a defensive `?? []` coercion (belt-and-suspenders, same as
+   *  `terminalNodes`). */
+  readonly endSources: EndSourcesDto;
   /** Printer configuration for the kiosk receipt printer. Always present — the
    *  backend defaults to {@link DEFAULT_PRINTER_CONFIGURATION} so a store that
    *  never configures the printer keeps the chrome default (zero behavior
@@ -404,6 +434,11 @@ export interface SaveSystemConfigurationPayload {
    *  by `toTerminalNodesDto`; `auto/auto` when the canvas was never
    *  customized). */
   readonly terminalNodes: TerminalNodesDto;
+  /** Explicit End-marker connections — REQUIRED on the PUT (the client is the
+   *  source of truth for explicit End connections now and always sends the
+   *  array, built by `toEndSourcesDto`; `[]` when the manager never dragged into
+   *  End). */
+  readonly endSources: EndSourcesDto;
   /** Printer configuration — REQUIRED on the PUT (the client is the source of
    *  truth for the printer mode + settings); the dedicated `/printer-config`
    *  page edits it, every other full-save site passes it through unchanged. */
@@ -433,6 +468,10 @@ export interface SaveSystemConfigurationResult {
    *  ignores the result body and re-GETs, so this is not load-bearing; kept for
    *  contract completeness (mirrors `nodeActions`). */
   readonly terminalNodes: TerminalNodesDto;
+  /** Always echoed by the backend (mirrors the persisted array). The save path
+   *  ignores the result body and re-GETs, so this is not load-bearing; kept for
+   *  contract completeness (mirrors `terminalNodes`). */
+  readonly endSources: EndSourcesDto;
   /** Always echoed by the backend (the save result mirrors the persisted config).
    *  The save path ignores the result body and re-GETs, so this is not
    *  load-bearing; kept for contract completeness (mirrors `nodePositions`). */
@@ -506,6 +545,36 @@ export const DEFAULT_NODE_ACTIONS: NodeActionsDto = {};
  * (zero visual regression, mirroring {@link DEFAULT_NODE_ACTIONS}).
  */
 export const DEFAULT_TERMINAL_NODES: TerminalNodesDto = { start: 'auto', end: 'auto' };
+
+/**
+ * Required top-level fields on a `PUT /api/system/config` payload, mirroring
+ * the backend's `REQUIRED_CONFIG_FIELDS` guard (`system-config.controller`).
+ * The backend validates *presence* at the transport boundary and 400s on a
+ * missing field (a missing top-level field would otherwise dereference
+ * `undefined` and surface as a 500). The admin client is the source of truth
+ * for every field here and always sends them — this constant is the
+ * documentation surface that lists every field a full-save site MUST carry,
+ * so a new required field (like `endSources`) has one place to be registered.
+ * `actor` is NOT listed (server-derived from the bearer token, QUE-43);
+ * `descriptions` is NOT listed (it travels INSIDE `stateMachine`, so no new
+ * top-level entry — see {@link StateMachineDto.descriptions}).
+ */
+export const REQUIRED_CONFIG_FIELDS: readonly (keyof SaveSystemConfigurationPayload)[] = [
+  'storeName',
+  'stateMachine',
+  'dailyReset',
+  'categories',
+  'routingRules',
+  'brandColor',
+  'serviceThemes',
+  'tvPanelLayout',
+  'edgeRoutingLayout',
+  'nodePositions',
+  'nodeActions',
+  'terminalNodes',
+  'endSources',
+  'printerConfiguration',
+];
 
 /**
  * The default printer configuration — chrome (browser print dialog), 80mm
