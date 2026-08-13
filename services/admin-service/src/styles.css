@@ -1686,6 +1686,41 @@ fieldset {
   color: var(--text-muted);
 }
 
+/* --- Alur Status Tiket designer: canvas fills the viewport (no page scroll) ---
+   Manager feedback: the editor canvas was smaller than the right properties
+   panel AND the page scrolled. The canvas height was a hand-tuned
+   `calc(100vh - 16rem)` (see state-machine-workflow.css) — an approximation
+   that left the page scrolling whenever the chrome above the canvas summed to
+   more than 16rem, and never gave the canvas the FULL remaining height.
+
+   Instead of guessing that sum, make the app-shell main column a fixed-viewport
+   flex column ON the designer route only (scoped via `:has(.alur-status-
+   designer)` so every other admin page keeps its natural document flow + scroll).
+   The sticky topbar takes its measured height; `<main>` flexes to fill the rest;
+   the designer + its workflow layout flex to fill `<main>`; the canvas stretches
+   to the workflow row's height. The canvas then gets the EXACT remaining height
+   — no scroll, and as tall as possible (the biggest size the viewport allows
+   below the page chrome). Scoped to ≥48rem (desktop) — narrower viewports keep
+   the prior scrolling layout (the designer is a desktop tool; a stacked panel
+   would collapse a flex-stretched canvas). */
+@media (min-width: 48rem) {
+  .app-shell:has(.alur-status-designer) .app-shell__main {
+    height: 100vh;
+    overflow: hidden;
+  }
+  .app-shell:has(.alur-status-designer) #main-content {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .alur-status-designer {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+}
+
 /* Primary navigation — NavLink renders aria-current="page" on the active link.
    QUE-45 — the nav is grouped (Operasional / Analitik / Konfigurasi Sistem /
    Audit / Pengguna) with a decorative icon slot per item. */

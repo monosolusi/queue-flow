@@ -50,6 +50,59 @@ import { formToXml, xmlToForm } from '../lib/state-machine-xml';
 export function AlurStatusDesigner(): JSX.Element {
   const { state, setState, save, submitting, retry } = useConfigDraft();
   const [view, setView] = useState<'diagram' | 'source'>('diagram');
+  // Full-screen editor overlay (manager feedback: "add option to make it full
+  // screen"). A CSS `position: fixed` overlay scoped to the designer root — NOT
+  // the browser Fullscreen API — so it is reliable on the offline LAN browser
+  // (no permission prompt, no `:fullscreen` pseudo-class cross-browser drift),
+  // and so the save toast (z-index 60, rendered as a sibling of AppShell) still
+  // renders above it (z-index 40). The overlay hides the app shell chrome
+  // (sidebar + topbar) and the page caution so the canvas gets the whole
+  // viewport; the Diagram/Sumber toggle + Simpan button stay so the manager can
+  // still switch views + save while full-screen.
+  const [fullscreen, setFullscreen] = useState(false);
+  // A11y (WCAG 2.4.3): the overlay is a modal dialog — mirrors the established
+  // `TvLayoutEditOverlay` shape (`role="dialog" aria-modal="true"` + a
+  // `tabindex={-1}` container that receives focus on open). The trigger (the
+  // "Layar Penuh" button) is captured at click time as `returnFocusTo`; on close
+  // (the exit button / Esc) focus restores to it. `dialogRef` is always attached
+  // to the root so the focus effect can resolve it the moment `fullscreen` flips.
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+
+  function enterFullscreen(trigger: HTMLElement): void {
+    returnFocusRef.current = trigger;
+    setFullscreen(true);
+  }
+  function exitFullscreen(): void {
+    setFullscreen(false);
+  }
+
+  // Move focus into the dialog on open; restore it to the trigger on close. Deps
+  // `[fullscreen]` ONLY — this effect must NOT re-run when `submitting` flips
+  // mid-save (that would yank focus out of the dialog). The cleanup restores
+  // focus when `fullscreen` toggles back to false (Esc / the exit button).
+  useEffect(() => {
+    if (!fullscreen) return;
+    dialogRef.current?.focus();
+    return () => {
+      returnFocusRef.current?.focus?.();
+      returnFocusRef.current = null;
+    };
+  }, [fullscreen]);
+
+  // Esc exits the overlay (mirrors a modal's Escape close), guarded while
+  // submitting so a mid-save Escape does not yank the manager out before the
+  // toast lands. Re-subscribes when `submitting` flips so the guard reads the
+  // live value; the focus effect above is separate so this re-subscription
+  // never moves focus.
+  useEffect(() => {
+    if (!fullscreen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape' && !submitting) exitFullscreen();
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [fullscreen, submitting]);
   // The source-view mirror of the draft's state machine. Kept in sync with the
   // draft by the effect below; the textarea is controlled over this, NOT over
   // `formToXml(draft)` directly (so the manager's in-progress, possibly-invalid
@@ -166,12 +219,48 @@ export function AlurStatusDesigner(): JSX.Element {
     </button>
   );
 
+  // The full-screen toggle (aria-pressed: a two-state button, not a role=switch
+  // — it toggles a presentational overlay, not a setting). Sits next to Simpan
+  // in the header actions. Label flips with the state so the affordance reads as
+  // the action available, not the current state. The click captures itself as
+  // the `returnFocusTo` target BEFORE entering the overlay (mirrors
+  // `TvLayoutEditOverlay`'s trigger capture).
+  const fullscreenButton = (
+    <button
+      type="button"
+      className="btn"
+      aria-pressed={fullscreen}
+      onClick={(e) => (fullscreen ? exitFullscreen() : enterFullscreen(e.currentTarget))}
+      data-testid="designer-toggle-fullscreen"
+    >
+      {fullscreen ? 'Keluar dari Layar Penuh' : 'Layar Penuh'}
+    </button>
+  );
+
   return (
-    <div className="alur-status-designer">
+    <div
+      className={`alur-status-designer${fullscreen ? ' alur-status-designer--fullscreen' : ''}`}
+      // The overlay is a modal dialog only while full-screen (mirrors
+      // `TvLayoutEditOverlay`: `role="dialog" aria-modal="true"` + a
+      // `tabindex={-1}` container that receives focus on open). `aria-modal`
+      // marks the AppShell chrome (sidebar + topbar, siblings of `<main>`) as
+      // non-interactive to AT — the same way `TvLayoutEditOverlay` covers them.
+      // Undefined when not full-screen so the page reads as a normal document.
+      role={fullscreen ? 'dialog' : undefined}
+      aria-modal={fullscreen ? true : undefined}
+      aria-label={fullscreen ? 'Editor Alur Status Tiket — Layar Penuh' : undefined}
+      tabIndex={fullscreen ? -1 : undefined}
+      ref={dialogRef}
+    >
       <PageHeader
         title="Alur Status Tiket"
         subtitle="Konfigurasi Operasional"
-        actions={saveButton}
+        actions={
+          <>
+            {fullscreenButton}
+            {saveButton}
+          </>
+        }
       />
 
       {/* Live-ticket strand caution — the designer is now the decision point
