@@ -115,7 +115,7 @@ export class DuplicateUserException extends DomainError {
 export class PrinterNotNetworkException extends DomainError {
   constructor() {
     super(
-      "Printer is not configured for network-escpos (mode is 'chrome').",
+      'Printer is not configured for network-escpos (mode is not the network path).',
       'PRINTER_NOT_NETWORK',
     );
   }

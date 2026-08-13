@@ -178,6 +178,7 @@ describe('PrinterConfigPage', () => {
       host: '10.0.0.20',
       port: 9200,
       cutMode: 'full',
+      baudRate: 9600,
     });
     // Passthrough fields unchanged from the config.
     expect(payload.storeName).toBe('Apotek Sehat');
@@ -256,6 +257,37 @@ describe('PrinterConfigPage', () => {
     expect(screen.getByTestId('printer-save')).not.toBeDisabled();
   });
 
+  it('toggling to usb-serial reveals the baud-rate field + cut mode (no host required)', async () => {
+    const { api, save, providerApi } = makeApi();
+    renderPage(api, providerApi);
+    await screen.findByTestId('printer-mode--chrome');
+    fireEvent.click(screen.getByTestId('printer-mode--usb-serial'));
+    // The USB section renders; the network section does NOT (no host/port).
+    expect(screen.getByTestId('printer-usb-section')).toBeInTheDocument();
+    expect(screen.getByTestId('printer-baud-rate')).toBeInTheDocument();
+    expect(screen.getByTestId('printer-usb-note')).toBeInTheDocument();
+    expect(screen.queryByTestId('printer-network-section')).toBeNull();
+    expect(screen.queryByTestId('printer-host')).toBeNull();
+    // Cut mode renders for usb-serial too (it is an ESC/POS mode).
+    expect(screen.getByTestId('printer-cut-mode')).toBeInTheDocument();
+    // usb-serial needs no host → save is enabled immediately.
+    expect(screen.getByTestId('printer-save')).not.toBeDisabled();
+    // Change baud rate to 19200 + cut to full + save.
+    fireEvent.change(screen.getByTestId('printer-baud-rate'), { target: { value: '19200' } });
+    fireEvent.click(screen.getByTestId('printer-cut-mode--full'));
+    fireEvent.click(screen.getByTestId('printer-save'));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    const payload = save.mock.calls[0][0] as SaveSystemConfigurationPayload;
+    expect(payload.printerConfiguration).toEqual({
+      mode: 'usb-serial',
+      paperWidth: 80,
+      host: '',
+      port: 9100,
+      cutMode: 'full',
+      baudRate: 19200,
+    });
+  });
+
   it('prefills an existing network-escpos config into the fields', async () => {
     const networkStore = configuredStore({
       printerConfiguration: {
@@ -264,6 +296,7 @@ describe('PrinterConfigPage', () => {
         host: '192.168.10.5',
         port: 9100,
         cutMode: 'full',
+        baudRate: 9600,
       },
     });
     const { api, providerApi } = makeApi(networkStore);

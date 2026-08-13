@@ -39,6 +39,8 @@ function makeApi(profile: Partial<StoreProfileSlice> = {}): { api: IKioskApi; pr
     themeMode: 'light',
     printerMode: 'chrome',
     printerPaperWidth: 80,
+    printerCutMode: 'partial',
+    printerBaudRate: 9600,
     ...profile,
   };
   const api: IKioskApi = {
@@ -76,6 +78,21 @@ describe('App (config-driven print provider — FR-KSK-02)', () => {
     await userEvent.click(screen.getByText('Customer Service'));
 
     // chrome mode wires BrowserPrintProvider, which never calls printTicket.
+    expect(printTicket).not.toHaveBeenCalled();
+  });
+
+  it('wires a USB Serial provider when the mode is usb-serial (not the network proxy)', async () => {
+    const { api, printTicket } = makeApi({ printerMode: 'usb-serial' });
+    renderApp(api);
+
+    await screen.findByText('Customer Service');
+    await userEvent.click(screen.getByText('Customer Service'));
+
+    // usb-serial composes ESC/POS client-side and writes to the USB printer
+    // directly over Web Serial — it does NOT POST to core-api's print proxy
+    // (USB is kiosk-local; core-api cannot reach it). Proving printTicket was
+    // NOT called rules out the network provider; in jsdom navigator.serial is
+    // absent so the provider resolves non-fatal and the flow completes.
     expect(printTicket).not.toHaveBeenCalled();
   });
 

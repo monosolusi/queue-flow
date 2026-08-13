@@ -2,7 +2,7 @@ import { InvalidValueObjectException } from '../../shared/errors';
 import { ValueObject } from '../../shared/value-object';
 
 /**
- * How the kiosk produces a physical ticket. Two modes:
+ * How the kiosk produces a physical ticket. Three modes:
  * - `'chrome'` — the kiosk's browser print dialog (Chrome's default printer).
  *   No network host is involved; the kiosk renders the receipt HTML and the
  *   operator picks a paper size in the dialog. This is the zero-behavior-change
@@ -13,10 +13,19 @@ import { ValueObject } from '../../shared/value-object';
  *   command) and streams them over a raw TCP socket to `host:port`. A browser
  *   PWA cannot open raw TCP sockets, so the LAN-attached printer is proxied
  *   through core-api (the only process that may use Node's `net`).
+ * - `'usb-serial'` — a USB thermal printer cabled to the kiosk box. core-api
+ *   cannot proxy it (USB is local to the kiosk device, not the server), so the
+ *   kiosk composes the same ESC/POS bytes and writes them directly over the
+ *   Web Serial API (`navigator.serial`) at `baudRate`. The browser-stored port
+ *   permission is the one-time operator pairing (a kiosk setup overlay calls
+ *   `requestPort()`); this VO only carries the serial speed. core-api's print
+ *   proxy stays network-escpos-only — `usb-serial` throws
+ *   `PrinterNotNetworkException` at `POST /api/print/ticket` (the kiosk never
+ *   calls that endpoint for this mode).
  */
-export type PrinterMode = 'chrome' | 'network-escpos';
+export type PrinterMode = 'chrome' | 'network-escpos' | 'usb-serial';
 
-export const PRINTER_MODES: readonly PrinterMode[] = ['chrome', 'network-escpos'];
+export const PRINTER_MODES: readonly PrinterMode[] = ['chrome', 'network-escpos', 'usb-serial'];
 
 function isPrinterMode(value: unknown): value is PrinterMode {
   return typeof value === 'string' && (PRINTER_MODES as readonly string[]).includes(value);
@@ -49,6 +58,10 @@ export interface PrinterConfigurationProps {
   readonly host: string;
   readonly port: number;
   readonly cutMode: CutMode;
+  /** Serial baud rate for `usb-serial` mode (Web Serial `port.open({ baudRate })`).
+   *  Ignored by `chrome`/`network-escpos`; carried on all modes so a mode toggle
+   *  never loses the value. Default 9600. */
+  readonly baudRate: number;
 }
 
 /** Wire DTO (the shape returned by `toDto()` and carried on the config
@@ -60,6 +73,7 @@ export interface PrinterConfigurationDto {
   host: string;
   port: number;
   cutMode: CutMode;
+  baudRate: number;
 }
 
 /**
@@ -69,9 +83,9 @@ export interface PrinterConfigurationDto {
  * value object). The admin/wizard client reads `GET /api/system/config`, edits
  * the printer section, and writes the whole object back on save. The default
  * is `{ mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode:
- * 'partial' }` — `chrome` mode = zero behavior change (the kiosk keeps using
- * Chrome's print dialog), so a store that never configures this prints exactly
- * as before.
+ * 'partial', baudRate: 9600 }` — `chrome` mode = zero behavior change (the
+ * kiosk keeps using Chrome's print dialog), so a store that never configures
+ * this prints exactly as before.
  *
  * `of()` is permissive on *missing* (a `undefined`/`null` raw from the
  * pre-migration boot window or a JSON `null`) so a reconstituted row from before
@@ -192,8 +206,31 @@ export class PrinterConfiguration extends ValueObject<PrinterConfigurationProps>
       );
     }
 
+    // baudRate: optional → 9600 default; present-but-not-a-positive-integer →
+    // reject. Used by `usb-serial` (Web Serial `port.open({ baudRate })`);
+    // carried on all modes so toggling mode never loses the value. Validated
+    // for every mode (a harmless default for chrome/network-escpos, like `port`
+    // is for chrome).
+    const baudRateRaw = incoming.baudRate;
+    let baudRate: number;
+    if (baudRateRaw === undefined) {
+      baudRate = 9600;
+    } else if (
+      typeof baudRateRaw === 'number' &&
+      Number.isFinite(baudRateRaw) &&
+      Number.isInteger(baudRateRaw) &&
+      baudRateRaw > 0
+    ) {
+      baudRate = baudRateRaw;
+    } else {
+      throw new InvalidValueObjectException(
+        `printer configuration.baudRate must be a positive integer, got '${String(baudRateRaw)}'`,
+      );
+    }
+
     // Cross-field invariant: network-escpos requires a non-empty host; chrome
-    // mode has no host (normalize to '' so a stray host is a clean no-op).
+    // and usb-serial have no network host (normalize to '' so a stray host is a
+    // clean no-op rather than a 400 on a mode toggle).
     if (mode === 'network-escpos') {
       if (host.trim() === '') {
         throw new InvalidValueObjectException(
@@ -204,17 +241,19 @@ export class PrinterConfiguration extends ValueObject<PrinterConfigurationProps>
       host = '';
     }
 
-    return new PrinterConfiguration({ mode, paperWidth, host, port, cutMode });
+    return new PrinterConfiguration({ mode, paperWidth, host, port, cutMode, baudRate });
   }
 
-  /** Chrome mode, 80mm paper, empty host, default port 9100, partial cut —
-   *  zero behavior change (the kiosk keeps using Chrome's print dialog). */
+  /** Chrome mode, 80mm paper, empty host, default port 9100, partial cut,
+   *  baudRate 9600 — zero behavior change (the kiosk keeps using Chrome's
+   *  print dialog). */
   public static DEFAULT: PrinterConfiguration = PrinterConfiguration.of({
     mode: 'chrome',
     paperWidth: 80,
     host: '',
     port: 9100,
     cutMode: 'partial',
+    baudRate: 9600,
   });
 
   public get mode(): PrinterMode {
@@ -237,6 +276,10 @@ export class PrinterConfiguration extends ValueObject<PrinterConfigurationProps>
     return this.props.cutMode;
   }
 
+  public get baudRate(): number {
+    return this.props.baudRate;
+  }
+
   /** Returns a plain object copy so callers can mutate the DTO without
    *  affecting the VO (all props are primitives, so a shallow copy suffices). */
   public toDto(): PrinterConfigurationDto {
@@ -246,6 +289,7 @@ export class PrinterConfiguration extends ValueObject<PrinterConfigurationProps>
       host: this.props.host,
       port: this.props.port,
       cutMode: this.props.cutMode,
+      baudRate: this.props.baudRate,
     };
   }
 

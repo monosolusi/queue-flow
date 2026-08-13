@@ -168,7 +168,7 @@ export type NodePositionsDto = Record<string, NodePosition>;
  *  the kiosk never opens a raw socket itself — NFR-SEC-01). The enum stays as
  *  the wire `value=`; a friendly Indonesian label renders via
  *  {@link import('../lib/labels').PRINTER_MODE_LABELS} (never the raw enum). */
-export type PrinterMode = 'chrome' | 'network-escpos';
+export type PrinterMode = 'chrome' | 'network-escpos' | 'usb-serial';
 /** Receipt paper width in mm. Drives `@page` size for chrome printing and the
  *  ESC/POS column count (58mm → 32 cols, 80mm → 48 cols) for network printing. */
 export type PrinterPaperWidth = 58 | 80;
@@ -185,9 +185,13 @@ export type PrinterCutMode = 'full' | 'partial' | 'none';
  * and selects its print provider accordingly. REQUIRED on the PUT
  * (`REQUIRED_CONFIG_FIELDS` includes it), so every full-save site carries it.
  *
- * `host` / `port` are only meaningful in `network-escpos` mode (the kiosk page
- * hides them when `mode === 'chrome'`); they are still sent on the wire as the
- * last-entered values so a mode switch back to network is non-destructive.
+ * `host` / `port` are only meaningful in `network-escpos` mode (the editor
+ * hides them when `mode !== 'network-escpos'`); they are still sent on the wire
+ * as the last-entered values so a mode switch back to network is
+ * non-destructive. `baudRate` is only meaningful in `usb-serial` mode (the Web
+ * Serial speed); it is carried on all modes for the same non-destructive
+ * reason. The kiosk pairs the USB printer once on-device (a kiosk setup
+ * overlay); the admin only sets the serial speed here.
  */
 export interface PrinterConfigurationDto {
   readonly mode: PrinterMode;
@@ -198,6 +202,9 @@ export interface PrinterConfigurationDto {
   /** TCP port the printer listens on (default 9100, the ESC/POS standard). */
   readonly port: number;
   readonly cutMode: PrinterCutMode;
+  /** Serial baud rate for `usb-serial` (Web Serial `port.open({ baudRate })`).
+   *  Default 9600; ignored by chrome/network-escpos but carried on the wire. */
+  readonly baudRate: number;
 }
 
 export interface DailyResetPolicyDto {
@@ -396,6 +403,7 @@ export const DEFAULT_PRINTER_CONFIGURATION: PrinterConfigurationDto = {
   host: '',
   port: 9100,
   cutMode: 'partial',
+  baudRate: 9600,
 };
 
 /**

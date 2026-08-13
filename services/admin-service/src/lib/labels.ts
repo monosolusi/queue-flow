@@ -62,7 +62,16 @@ export const DAILY_RESET_MODE_LABELS: Record<DailyResetMode, string> = {
 export const PRINTER_MODE_LABELS: Record<PrinterMode, string> = {
   chrome: 'Printer Browser (Chrome)',
   'network-escpos': 'Printer Thermal ESC/POS (Jaringan)',
+  'usb-serial': 'Printer Thermal ESC/POS (USB)',
 };
+
+/**
+ * The selectable serial baud rates for `usb-serial` mode, in stable display
+ * order (matches the `/printer-config` baud-rate select). Common thermal
+ * printer speeds; 9600 is the default (mirrors core-api's
+ * `PrinterConfiguration.DEFAULT`).
+ */
+export const PRINTER_BAUD_RATES: readonly number[] = [9600, 19200, 38400, 57600, 115200];
 
 /**
  * Friendly labels for the receipt paper-width radio. The mm width stays in the
@@ -75,9 +84,10 @@ export const PRINTER_PAPER_WIDTH_LABELS: Record<PrinterPaperWidth, string> = {
 };
 
 /**
- * Friendly labels for the thermal-printer cut-mode radio (network mode only).
- * The enum stays as the wire `value=` (`full` / `partial` / `none`); the
- * Indonesian "Gunting …" copy is the manager-facing term for the cut command.
+ * Friendly labels for the thermal-printer cut-mode radio (network-escpos +
+ * usb-serial modes — both compose ESC/POS, so both send a cut command). The
+ * enum stays as the wire `value=` (`full` / `partial` / `none`); the Indonesian
+ * "Gunting …" copy is the manager-facing term for the cut command.
  */
 export const PRINTER_CUT_MODE_LABELS: Record<PrinterCutMode, string> = {
   full: 'Gunting Penuh',

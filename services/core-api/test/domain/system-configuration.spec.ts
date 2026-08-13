@@ -236,6 +236,7 @@ describe('SystemConfiguration aggregate', () => {
       host: '',
       port: 9100,
       cutMode: 'partial',
+      baudRate: 9600,
     });
   });
 
@@ -371,6 +372,7 @@ describe('SystemConfiguration aggregate', () => {
       host: '192.168.1.50',
       port: 9100,
       cutMode: 'full',
+      baudRate: 9600,
     });
   });
 

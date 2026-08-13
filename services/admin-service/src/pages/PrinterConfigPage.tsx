@@ -9,7 +9,7 @@ import {
   validatePrinterConfiguration,
 } from '../lib/printer';
 import type { PrinterCutMode, PrinterPaperWidth, PrinterConfigurationDto } from '../api/types';
-import { PRINTER_CUT_MODE_LABELS, PRINTER_MODE_LABELS, PRINTER_PAPER_WIDTH_LABELS } from '../lib/labels';
+import { PRINTER_BAUD_RATES, PRINTER_CUT_MODE_LABELS, PRINTER_MODE_LABELS, PRINTER_PAPER_WIDTH_LABELS } from '../lib/labels';
 import { useSystemConfigContext } from '../config/system-config-context';
 import { PageHeader } from '../components/PageHeader';
 import { useToast } from '../toast/useToast';
@@ -35,7 +35,7 @@ function describedBy(
  * (sibling to `/tv-layout`) where the manager chooses how the kiosk produces a
  * thermal-printer receipt.
  *
- * Two modes (FR feedback: "pilih printer mana yang dipakai (default Chrome)
+ * Three modes (FR feedback: "pilih printer mana yang dipakai (default Chrome)
  * atau printer ESC/POS jaringan"):
  *  - **`chrome`** (default) — the kiosk prints via the browser's print dialog.
  *    Zero setup; uses the operator's Chrome print settings (paper size, etc.).
@@ -45,9 +45,16 @@ function describedBy(
  *    thermal printer on the local network. The core-api proxies the print so
  *    the kiosk never opens a raw socket itself (NFR-SEC-01). Requires a
  *    non-empty `host` (no whitespace) + an integer `port` 1..65535.
+ *  - **`usb-serial`** — a USB thermal printer cabled to the kiosk box. USB is
+ *    kiosk-local, so core-api cannot proxy it (unlike network-escpos): the
+ *    kiosk composes ESC/POS client-side and writes it directly over Web Serial
+ *    (`navigator.serial`). Pairing is a one-time operator action on the kiosk
+ *    (`/sambung-printer` — `requestPort()` needs a user gesture). The manager
+ *    sets the serial `baudRate` here; no `host`/`port`.
  *
- * `paperWidth` (58 / 80mm) applies to BOTH modes: chrome uses it for the
- * `@page` size, the network provider uses it for the ESC/POS column count.
+ * `paperWidth` (58 / 80mm) applies to all three modes: chrome uses it for the
+ * `@page` size, the ESC/POS providers (network + usb) use it for the column
+ * count. `cutMode` applies to both ESC/POS modes (network + usb).
  *
  * The page is a thin editor over the existing config save surface (mirrors
  * `/tv-layout`): it reads the full config (`GET /api/system/config` via the
@@ -162,8 +169,14 @@ export function PrinterConfigPage({ api }: { api: IAdminApi }) {
   }
 
   const isNetwork = draft.mode === 'network-escpos';
+  const isUsb = draft.mode === 'usb-serial';
+  // Both network-escpos and usb-serial send ESC/POS bytes (over TCP vs. Web
+  // Serial), so the cut command applies to either; chrome prints HTML and the
+  // operator tears the paper (no cut command).
+  const isEscpos = isNetwork || isUsb;
   const hostError = errors.find((e) => e.includes('Host'));
   const portError = errors.find((e) => e.includes('Port'));
+  const baudError = errors.find((e) => e.includes('Baud'));
 
   return (
     <div className="page printer-config-page">
@@ -213,6 +226,13 @@ export function PrinterConfigPage({ api }: { api: IAdminApi }) {
           <p className="admin-panel__hint">
             Tiket dikirim langsung ke printer thermal melalui jaringan lokal (ESC/POS atas TCP).
             core-api memproksi pencetakan agar kiosk tidak membuka soket sendiri.
+          </p>
+        )}
+        {draft.mode === 'usb-serial' && (
+          <p className="admin-panel__hint">
+            Tiket dikirim langsung ke printer thermal USB yang dicolokkan ke perangkat kiosk (ESC/POS
+            atas Web Serial). Sambungkan printer di perangkat kiosk melalui halaman pemasangan —
+            core-api tidak memproksi USB.
           </p>
         )}
       </section>
@@ -297,8 +317,23 @@ export function PrinterConfigPage({ api }: { api: IAdminApi }) {
             </label>
           </div>
 
+          <p className="admin-panel__warning" data-testid="printer-network-note">
+            Pastikan printer thermal berada di jaringan lokal yang sama dengan server. core-api
+            memproksi pencetakan atas TCP — kiosk tidak perlu mengakses printer secara langsung.
+          </p>
+        </section>
+      )}
+
+      {/* Cut mode — applies to every ESC/POS mode (network-escpos over TCP and
+          usb-serial over Web Serial both send the cut command). Chrome prints
+          HTML and the operator tears the paper, so the cut radios are absent
+          for chrome (real conditional render — AT never reaches an irrelevant
+          field). Kept as its own section so it is not duplicated per transport. */}
+      {isEscpos && (
+        <section className="config-card" data-testid="printer-cut-section">
+          <h2 className="config-card__title">Mode Gunting</h2>
           <fieldset className="radio-group" data-testid="printer-cut-mode">
-            <legend>Mode Gunting</legend>
+            <legend className="sr-only">Mode gunting</legend>
             {PRINTER_CUT_MODES.map((cut) => (
               <label className="radio-group__item" key={cut}>
                 <input
@@ -313,10 +348,42 @@ export function PrinterConfigPage({ api }: { api: IAdminApi }) {
               </label>
             ))}
           </fieldset>
+        </section>
+      )}
 
-          <p className="admin-panel__warning" data-testid="printer-network-note">
-            Pastikan printer thermal berada di jaringan lokal yang sama dengan server. core-api
-            memproksi pencetakan atas TCP — kiosk tidak perlu mengakses printer secara langsung.
+      {/* USB Serial settings — only when mode is usb-serial (the printer is
+          cabled to the kiosk box; the kiosk pairs it once on-device via a setup
+          overlay — the admin only sets the serial speed here). */}
+      {isUsb && (
+        <section className="config-card" data-testid="printer-usb-section">
+          <h2 className="config-card__title">Pengaturan USB Serial</h2>
+          <div className="printer-config-page__network" role="group" aria-label="Pengaturan USB serial">
+            <label className="field" htmlFor="printer-baud-rate">
+              <span className="field__label">Baud rate</span>
+              <select
+                id="printer-baud-rate"
+                className="field__input"
+                value={draft.baudRate}
+                onChange={(e) => setDraft({ ...draft, baudRate: Number(e.target.value) })}
+                data-testid="printer-baud-rate"
+                {...describedBy('printer-baud-rate-error', baudError !== undefined)}
+              >
+                {PRINTER_BAUD_RATES.map((rate) => (
+                  <option key={rate} value={rate}>
+                    {rate}
+                  </option>
+                ))}
+              </select>
+              {baudError !== undefined && (
+                <span className="field__error" id="printer-baud-rate-error" data-testid="printer-baud-rate-error">
+                  {baudError}
+                </span>
+              )}
+            </label>
+          </div>
+          <p className="admin-panel__warning" data-testid="printer-usb-note">
+            Printer USB dicolokkan langsung ke perangkat kiosk. Sambungkan printer di kiosk melalui
+            halaman pemasangan — core-api tidak memproksi pencetakan USB.
           </p>
         </section>
       )}

@@ -74,7 +74,7 @@ describe('SaveSystemConfigurationUseCase — category id preservation (QUE-24)',
       ],
       edgeRoutingLayout: {},
       nodePositions: {},
-      printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial' },
+      printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
       actor: 'admin',
     };
   }
@@ -196,7 +196,7 @@ describe('SaveSystemConfigurationUseCase — brandColor (QUE-36)', () => {
       ],
       edgeRoutingLayout: {},
       nodePositions: {},
-      printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial' },
+      printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
       actor: 'admin',
     };
   }
@@ -319,7 +319,7 @@ describe('SaveSystemConfigurationUseCase — SYSTEM_CONFIG_CHANGED broadcast (FR
       ],
       edgeRoutingLayout: {},
       nodePositions: {},
-      printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial' },
+      printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
       actor: 'admin',
     };
   }
@@ -431,7 +431,7 @@ describe('SaveSystemConfigurationUseCase — edgeRoutingLayout', () => {
       ],
       edgeRoutingLayout: edgeRoutingLayout as SaveSystemConfigurationCommand['edgeRoutingLayout'],
       nodePositions: {},
-      printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial' },
+      printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
       actor: 'admin',
     };
   }
@@ -578,7 +578,7 @@ describe('SaveSystemConfigurationUseCase — nodePositions', () => {
       ],
       edgeRoutingLayout: {},
       nodePositions: nodePositions as SaveSystemConfigurationCommand['nodePositions'],
-      printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial' },
+      printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
       actor: 'admin',
     };
   }
@@ -733,7 +733,7 @@ describe('SaveSystemConfigurationUseCase — printerConfiguration', () => {
       null,
     );
 
-    const printer = { mode: 'network-escpos', paperWidth: 58, host: '192.168.1.50', port: 9100, cutMode: 'full' };
+    const printer = { mode: 'network-escpos', paperWidth: 58, host: '192.168.1.50', port: 9100, cutMode: 'full', baudRate: 19200 };
     const result = await useCase.execute(command(printer));
 
     expect(result.printerConfiguration).toEqual(printer);
@@ -761,6 +761,7 @@ describe('SaveSystemConfigurationUseCase — printerConfiguration', () => {
       host: '',
       port: 9100,
       cutMode: 'partial',
+      baudRate: 9600,
     });
     expect(saved!.printerConfiguration.equals(PrinterConfiguration.DEFAULT)).toBe(true);
   });
