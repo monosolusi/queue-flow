@@ -69,6 +69,7 @@ import '@xyflow/react/dist/style.css';
 import {
   autoLayout,
   type StateMachineForm,
+  availableCanonicalStatuses,
   defaultStateMachineForm,
   graphSignature,
   missingCanonicalStates,
@@ -360,23 +361,34 @@ export function StateMachineWorkflow({
     [edges, toast],
   );
 
-  // Add a new state node (drag-drop + button share this). The name is generated
-  // via `nextStateName` (non-colliding with existing + canonical names) so the
-  // manager never lands on a duplicate the validation would reject. The
-  // `description` placeholder is refreshed by `commit` (via `withDescriptions`
-  // from the next form) before it reaches `setNodes`, so it never renders.
+  // Add a new state node (drag-drop + button share this). When `name` is
+  // omitted the name is generated via `nextStateName` (non-colliding with
+  // existing + canonical names) so the manager never lands on a duplicate the
+  // validation would reject; when `name` is supplied (a canonical status add
+  // from the calibrated picker) it is used verbatim — the canonical names ARE
+  // the load-bearing system identities, so the node is added under that exact
+  // name. A supplied name already on the canvas is a no-op (the picker only
+  // offers statuses NOT yet present, but guard anyway so a race or a stale
+  // click can never seed a duplicate node id). The `description` placeholder is
+  // refreshed by `commit` (via `withDescriptions` from the next form) before it
+  // reaches `setNodes`, so it never renders.
   const addStateAt = useCallback(
-    (position: { x: number; y: number }) => {
-      const newName = nextStateName(value.states);
+    (position: { x: number; y: number }, name?: string) => {
+      const newName = name ?? nextStateName(value.states);
+      // Trim-aware duplicate guard mirroring `availableCanonicalStatuses`'s
+      // trimmed comparison, so a state stored with stray whitespace cannot slip
+      // the guard and seed a second node under the same canonical name.
+      if (name && value.states.some((s) => s.trim() === name)) return;
       const newNode: FlowNode = { id: newName, type: 'state', position, data: { name: newName, description: '' } };
       commit([...nodes, newNode], edges);
     },
     [nodes, edges, value.states, commit],
   );
 
-  // Accessible, touch-friendly fallback for the palette drag: add a state at a
-  // visible offset from the last node. The double-tap ref guard (m3) absorbs a
-  // second same-tick tap; reset in the value-sync effect after the round-trip.
+  // Accessible, touch-friendly fallback for the palette drag: add a CUSTOM
+  // state at a visible offset from the last node. The double-tap ref guard
+  // (m3) absorbs a second same-tick tap; reset in the value-sync effect after
+  // the round-trip.
   const addStateButton = useCallback(() => {
     if (addPendingRef.current) return;
     addPendingRef.current = true;
@@ -386,6 +398,25 @@ export function StateMachineWorkflow({
       : { x: 0, y: 0 };
     addStateAt(position);
   }, [nodes, addStateAt]);
+
+  // Add a canonical (PRD §7 "status standar") status under its load-bearing
+  // name. The calibrated picker (manager feedback: "pilihan status ada banyak,
+  // tidak jelas itu apa aja — kalibrasi dan cek ulang") offers exactly the
+  // canonical statuses NOT yet on the canvas, each with its sub-description, so
+  // the manager knows what each is before adding. Shares the same double-tap
+  // guard as the custom add so a fast double-click can't seed two nodes.
+  const addCanonicalStateButton = useCallback(
+    (canonicalName: string) => {
+      if (addPendingRef.current) return;
+      addPendingRef.current = true;
+      const lastNode = nodes[nodes.length - 1];
+      const position = lastNode
+        ? { x: lastNode.position.x + 120, y: lastNode.position.y + 120 }
+        : { x: 0, y: 0 };
+      addStateAt(position, canonicalName);
+    },
+    [nodes, addStateAt],
+  );
 
   // Accessible fallback for drawing edges: add a self-edge on the first state
   // (mirrors `addTransition`), which the manager then re-routes by dragging a
@@ -424,6 +455,14 @@ export function StateMachineWorkflow({
       transitionsCount: value.transitions.length,
       onRenameState: (oldName, newName) => {
         if (newName === oldName) return;
+        // Empty/whitespace name fallback (manager feedback: "ketika nama status
+        // node dihapus, error"). Clearing the name input used to commit a node
+        // with an empty id (`''`), which then tripped
+        // `validateCustomStateMachine` → "Nama status tidak boleh kosong" and
+        // blocked the save — a degenerate empty node the manager never wanted.
+        // No-op instead: the controlled input reverts to the prior name on
+        // re-render (no state change commits), so the name can never be blank.
+        if (!newName.trim()) return;
         // Guard a rename onto an existing state name — the node id IS the state
         // name, so a rename to an in-use id would produce two nodes with the
         // same React key + a duplicate state in the form. No-op (the controlled
@@ -550,6 +589,11 @@ export function StateMachineWorkflow({
   );
 
   const missingStandardStates = useMemo(() => missingCanonicalStates(value), [value]);
+  // The calibrated "status standar" picker choices — the canonical statuses NOT
+  // yet on the canvas, each with its sub-description (manager feedback:
+  // "pilihan status ada banyak, tidak jelas itu apa aja — kalibrasi dan cek
+  // ulang"). Empty when the graph already has all five (the default graph does).
+  const availableCanonical = useMemo(() => availableCanonicalStatuses(value.states), [value.states]);
   const editorDescribedBy =
     [errors.length > 0 ? 'sm-errors' : null, missingStandardStates.length > 0 ? 'sm-standard-warning' : null]
       .filter((id): id is string => id !== null)
@@ -639,8 +683,41 @@ export function StateMachineWorkflow({
               onClick={addStateButton}
             >
               <StateIcon size={16} />
-              Tambah Status
+              Tambah Status Kustom
             </button>
+            {/* Calibrated "status standar" picker (manager feedback: "pilihan
+                status ada banyak, tidak jelas itu apa aja"). The 5 PRD §7
+                canonical statuses are the hardcoded system identities the queue
+                engine keys off — listed here with their sub-descriptions so the
+                manager knows exactly what each is before adding it under its
+                load-bearing name. Custom statuses stay a free name (the button
+                above); this section offers only the canonical set NOT yet on the
+                canvas, so it is empty (the "semua sudah ada" note) once all five
+                are present (the default graph always is). */}
+            <div className="sm-palette__standard" data-testid="sm-palette-standard">
+              <p className="sm-properties__label">Status standar (sistem)</p>
+              {availableCanonical.length === 0 ? (
+                <p className="sm-palette__all-standard" data-testid="sm-palette-all-standard">
+                  Semua status standar sudah ada di kanvas.
+                </p>
+              ) : (
+                <ul className="sm-palette__standard-list">
+                  {availableCanonical.map((s) => (
+                    <li key={s.name}>
+                      <button
+                        type="button"
+                        className="sm-palette__standard-item"
+                        data-testid={`sm-add-standard-${s.name}`}
+                        onClick={() => addCanonicalStateButton(s.name)}
+                      >
+                        <span className="sm-palette__standard-name">{s.name}</span>
+                        <span className="sm-palette__standard-desc">{s.description}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
             <button
               type="button"
               className="btn btn--secondary"

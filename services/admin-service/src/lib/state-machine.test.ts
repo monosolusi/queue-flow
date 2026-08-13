@@ -5,6 +5,8 @@ import {
   DEFAULT_SOURCE_SIDE,
   DEFAULT_TARGET_SIDE,
   addTransition,
+  availableCanonicalStatuses,
+  canonicalStatusOf,
   defaultStateMachineForm,
   describeState,
   graphSignature,
@@ -219,6 +221,62 @@ describe('describeState (client-side description derivation)', () => {
     const dto = toStateMachineDto(form);
     expect((dto as unknown as Record<string, unknown>).description).toBeUndefined();
     expect(Object.keys(dto).sort()).toEqual(['states', 'transitions']);
+  });
+});
+
+describe('canonicalStatusOf (status the node IS, derived from its name)', () => {
+  it('returns the canonical record for each of the 5 PRD §7 default state names', () => {
+    // The status is DERIVED from the name (the name IS the system identity),
+    // not stored as a separate field — a true free-name vs. hardcoded-status
+    // decoupling is out of scope (would need a domain rewrite). The properties
+    // panel reads this to surface "what status is this node" (manager feedback:
+    // "status node itu apa? masukn d properties").
+    const waiting = canonicalStatusOf('WAITING');
+    expect(waiting).not.toBeNull();
+    expect(waiting?.name).toBe('WAITING');
+    expect(waiting?.description).toBe(CANONICAL_STATE_DESCRIPTIONS.WAITING);
+    expect(waiting?.consequence).toMatch(/tiket baru dari kiosk/);
+    for (const name of DEFAULT_STATE_MACHINE.states) {
+      expect(canonicalStatusOf(name)).not.toBeNull();
+    }
+  });
+
+  it('returns null for a custom (non-canonical) name', () => {
+    expect(canonicalStatusOf('ONHOLD')).toBeNull();
+    expect(canonicalStatusOf('PREPARING')).toBeNull();
+  });
+
+  it('is case-sensitive — the canonical names are load-bearing identities', () => {
+    expect(canonicalStatusOf('waiting')).toBeNull();
+    expect(canonicalStatusOf('Waiting')).toBeNull();
+  });
+});
+
+describe('availableCanonicalStatuses (calibrated "status standar" picker)', () => {
+  it('returns the canonical statuses NOT yet on the canvas, each with its sub-description', () => {
+    // Manager feedback: "pilihan status ada banyak, tidak jelas itu apa aja —
+    // kalibrasi dan cek ulang". The picker lists the missing canonical statuses
+    // with descriptions so the manager knows exactly what each is before adding.
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['WAITING', 'CALLING'],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
+      positions: {},
+    };
+    const missing = availableCanonicalStatuses(form.states);
+    expect(missing.map((s) => s.name)).toEqual(['SERVING', 'SKIPPED', 'COMPLETED']);
+    expect(missing[0].description).toBe('Sedang dilayani');
+  });
+
+  it('is empty when the graph already has all five canonical statuses', () => {
+    expect(availableCanonicalStatuses(DEFAULT_STATE_MACHINE.states)).toEqual([]);
+  });
+
+  it('trims state names before comparing so stray whitespace does not mask a presence', () => {
+    // Mirrors the validation trim — a state stored with surrounding spaces is
+    // still "present" for the picker, so it is not offered twice.
+    const missing = availableCanonicalStatuses(['WAITING', 'CALLING', '  SERVING  ']);
+    expect(missing.map((s) => s.name)).toEqual(['SKIPPED', 'COMPLETED']);
   });
 });
 

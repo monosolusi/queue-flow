@@ -841,6 +841,40 @@ describe('Alur Status Tiket designer — warning relocation + dedicated full-pag
     expect(restBlock![1]).toContain('opacity: 0.5');
     expect(restBlock!.index!).toBeLessThan(fullIdx);
   });
+
+  // --- Calibrated "status standar" picker + read-only "Status" property -------
+  //   Manager feedback: "pilihan status ada banyak, tidak jelas itu apa aja —
+  //   kalibrasi dan cek ulang" + "status node itu apa? masukn d properties" +
+  //   "tambahkan properties untuk status, dan sub description juga". The new
+  //   palette + properties-panel rules are token-only (no hardcoded hex).
+  it('the calibrated "status standar" picker items are 44px-touch token buttons (no hardcoded color)', () => {
+    expect(wfCss).toContain('.sm-palette__standard-item');
+    const item = wfRule('.sm-palette__standard-item');
+    expect(item).toContain('min-height: 44px');
+    expect(item).toContain('color: var(--text)');
+    expect(item).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+  });
+
+  it('the picker "semua sudah ada" note + status name/desc use text tokens (no hardcoded color)', () => {
+    expect(wfRule('.sm-palette__all-standard')).toContain('color: var(--text-muted)');
+    expect(wfRule('.sm-palette__standard-name')).toContain('font-weight: 700');
+    expect(wfRule('.sm-palette__standard-desc')).toContain('color: var(--text-muted)');
+  });
+
+  it('the read-only "Status" badge is an accent-tinted pill (no hardcoded color)', () => {
+    expect(wfCss).toContain('.sm-properties__badge');
+    const badge = wfRule('.sm-properties__badge');
+    expect(badge).toContain('color: var(--accent-on-surface)');
+    expect(badge).toContain('background: color-mix(in srgb, var(--accent)');
+    expect(badge).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+  });
+
+  it('the status sub-description + consequence use text tokens (no hardcoded color)', () => {
+    expect(wfRule('.sm-properties__subdescription')).toContain('color: var(--text)');
+    expect(wfRule('.sm-properties__consequence')).toContain('color: var(--text-muted)');
+    expect(wfRule('.sm-properties__subdescription')).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    expect(wfRule('.sm-properties__consequence')).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+  });
 });
 
 describe('shared .btn baseline is element-agnostic (manager feedback: Link-as-btn overlapped + underlined)', () => {

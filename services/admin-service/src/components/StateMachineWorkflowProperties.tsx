@@ -21,7 +21,7 @@
  * (preserves the existing guard). The panel renders only in custom mode
  * (default mode is read-only canvas only).
  */
-import { describeState, stateActions, type StateMachineForm } from '../lib/state-machine';
+import { canonicalStatusOf, describeState, stateActions, type StateMachineForm } from '../lib/state-machine';
 import type { FlowEdge, FlowNode } from '../lib/state-machine-flow';
 import type { WorkflowHandlers } from './StateMachineWorkflowNodes';
 
@@ -98,6 +98,24 @@ export function StateMachineWorkflowProperties({
   if (selectedNode) {
     const name = selectedNode.data.name;
     const description = describeState(form, name);
+    // The status the node IS, derived from its name (manager feedback: "nama
+    // status boleh, tapi status itu state yang harus d hardcode — masukn d
+    // properties"). The name is free-editable, but the STATUS is one of the 5
+    // hardcoded PRD §7 system identities the queue engine keys off as literals
+    // (QueueTicket.create() writes WAITING, complete() writes COMPLETED, …).
+    // A true free-name vs. hardcoded-status decoupling would require a domain
+    // rewrite (aggregate + repos + DB + wire DTO + all frontends — the engine
+    // hardcodes TicketStatus.WAITING/CALLING/SERVING/SKIPPED/COMPLETED with
+    // lifecycle timestamps coupled to the literal names), out of scope for this
+    // manager-feedback fix. So the status is DERIVED from the name and surfaced
+    // READ-ONLY here: a canonical name → "Status standar" badge + the status's
+    // sub-description + the consequence (what stops working without it); a
+    // custom name → "Status kustom" badge + the derived summary. The manager
+    // sees exactly "what status is this node" without the name carrying the
+    // burden of being both the display label and the system identity.
+    const canonical = canonicalStatusOf(name);
+    const statusLabel = canonical ? 'Status standar' : 'Status kustom';
+    const subDescription = canonical ? canonical.description : description;
     // The state's "actions" (manager feedback: a state is just a status label;
     // the caller-panel buttons live on the transitions that enter/leave it).
     // The panel lists both directions so the manager can SEE the state's
@@ -126,6 +144,26 @@ export function StateMachineWorkflowProperties({
           <p id="panel-state-name-hint" className="sm-properties__hint">
             {description}
           </p>
+        </div>
+        {/* Read-only "Status" property — the hardcoded system role the node
+            represents (derived from the name). NOT editable: the status is a
+            load-bearing system identity, not a free label. The badge names the
+            role (standar/kustom), the sub-description says what the status IS,
+            and the consequence (canonical only) says what stops working without
+            it — so the manager understands the status before editing/dropping. */}
+        <div className="sm-properties__field" data-testid="panel-state-status">
+          <p className="sm-properties__label">Status</p>
+          <p className="sm-properties__badge" data-testid="panel-state-badge">
+            {statusLabel}
+          </p>
+          <p className="sm-properties__subdescription" data-testid="panel-state-subdescription">
+            {subDescription}
+          </p>
+          {canonical && (
+            <p className="sm-properties__consequence" data-testid="panel-state-consequence">
+              Tanpa status ini, {canonical.consequence}.
+            </p>
+          )}
         </div>
         <div className="sm-properties__field">
           <p className="sm-properties__label" id="panel-state-actions-label">
