@@ -66,13 +66,13 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import {
+  autoLayout,
   type StateMachineForm,
   defaultStateMachineForm,
   graphSignature,
   missingCanonicalStates,
 } from '../lib/state-machine';
 import {
-  autoLayout,
   flowToGraph,
   formToFlow,
   nextStateName,

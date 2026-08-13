@@ -18,6 +18,14 @@
  * </stateMachine>
  * ```
  *
+ * Positions are the single source of truth shared with the Diagram view: an
+ * absent position (empty `positions` map, i.e. an un-customized graph) is
+ * materialized from the shared `autoLayout` (the canonical default-positions
+ * derivation in `state-machine.ts`), so the XML Source always carries the
+ * coordinates the canvas renders and the two views of the same
+ * {@link StateMachineForm} can never diverge — the XML is the human-editable
+ * source the diagram arranges from.
+ *
  * This module is the ONE DOM-dependent module in the state-machine lib surface
  * (`DOMParser`/`XMLSerializer` are browser + jsdom built-ins — no external
  * dependency, NFR-REL-01 safe). It imports from the pure `state-machine.ts`
@@ -26,6 +34,7 @@
  * `state-machine-flow.ts` remain framework-free.
  */
 import {
+  autoLayout,
   DEFAULT_SOURCE_SIDE,
   DEFAULT_TARGET_SIDE,
   EDGE_SIDES,
@@ -77,8 +86,15 @@ function coord(n: number): string {
  * `<transition>` elements, so the output is deterministic and stable across
  * re-serializations (a flickering diff while the manager types would be noise).
  *
- * Each `<state>` carries its `name` + canvas `x`/`y` (from `form.positions`,
- * so a manager-moved node's position round-trips through the source).
+ * Each `<state>` carries its `name` + canvas `x`/`y`. An absent position (an
+ * entry missing from `form.positions`, which is `{}` for an un-customized graph)
+ * is materialized from the shared {@link autoLayout} — the SAME default-
+ * positions derivation the Diagram's `formToFlow` (in `state-machine-flow.ts`)
+ * uses — so the Source XML is the single source of truth and the diagram
+ * arranges from it: the two views of the same {@link StateMachineForm} cannot
+ * diverge, and an un-customized graph serializes the spread the canvas renders
+ * rather than `0,0` for every state. A manager-moved node's position (a
+ * `form.positions` entry) round-trips through the source unchanged.
  * Connection sides are included on a `<transition>` ONLY when non-default
  * (`!isDefaultSides`): a default edge → `from/to/actionLabel` only; a vertical
  * edge → `... sourceSide="bottom" targetSide="top"`. Both sides are emitted
@@ -89,8 +105,15 @@ function coord(n: number): string {
  */
 export function formToXml(form: StateMachineForm): string {
   const lines: string[] = ['<?xml version="1.0" encoding="UTF-8"?>', '<stateMachine>'];
+  // The SAME default-positions derivation the Diagram uses (`formToFlow` in
+  // state-machine-flow.ts), so the Source XML always carries the coordinates
+  // the canvas renders. `form.positions` is the source of truth; an empty map
+  // (`{}` = "use autoLayout") is materialized here so the XML — the human-
+  // editable single source of truth — never shows 0,0 while the diagram shows
+  // a spread.
+  const auto = autoLayout(form.states, form.transitions);
   for (const name of form.states) {
-    const pos = form.positions[name] ?? { x: 0, y: 0 };
+    const pos = form.positions[name] ?? auto[name] ?? { x: 0, y: 0 };
     lines.push(
       `  <state name="${escapeXmlAttr(name)}" x="${coord(pos.x)}" y="${coord(pos.y)}"/>`,
     );

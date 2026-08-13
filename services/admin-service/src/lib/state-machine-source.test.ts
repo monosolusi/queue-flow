@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_STATE_MACHINE } from '../api/types';
 import {
   addTransition,
+  autoLayout,
   toStateMachineDto,
   validateCustomStateMachine,
   type StateMachineForm,
@@ -39,7 +40,7 @@ describe('formToXml', () => {
     expect(xml).not.toContain('mode');
   });
 
-  it('each state carries x/y from form.positions (0,0 when absent)', () => {
+  it('each state carries x/y from form.positions', () => {
     const form: StateMachineForm = {
       mode: 'custom',
       states: ['A', 'B'],
@@ -51,14 +52,42 @@ describe('formToXml', () => {
     expect(xml).toContain('<state name="B" x="240" y="0"/>');
   });
 
-  it('defaults absent positions to 0,0', () => {
+  it('defaults absent positions to the deterministic autoLayout (matching the diagram)', () => {
     const form: StateMachineForm = {
       mode: 'custom',
-      states: ['A'],
-      transitions: [],
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
       positions: {},
     };
-    expect(formToXml(form)).toContain('<state name="A" x="0" y="0"/>');
+    const xml = formToXml(form);
+    // A is the sole source → rank 0 → x=0; B follows A → rank 1 → x=240; both
+    // index 0 in their rank → y=0.
+    expect(xml).toContain('<state name="A" x="0" y="0"/>');
+    expect(xml).toContain('<state name="B" x="240" y="0"/>');
+    // The serialized coordinates MUST equal the autoLayout derivation the
+    // Diagram's `formToFlow` uses (XML == diagram derivation, single source
+    // of truth).
+    const auto = autoLayout(['A', 'B'], [{ from: 'A', to: 'B', actionLabel: 'go' }]);
+    expect(auto.A).toEqual({ x: 0, y: 0 });
+    expect(auto.B).toEqual({ x: 240, y: 0 });
+  });
+
+  it('the XML positions match the Diagram autoLayout for the default graph (single source of truth)', () => {
+    const form = defaultForm();
+    expect(form.positions).toEqual({}); // un-customized → autoLayout fallback
+    const xml = formToXml(form);
+    const auto = autoLayout(DEFAULT_STATE_MACHINE.states, DEFAULT_STATE_MACHINE.transitions);
+    // Parse each <state name="X" x=".." y=".."/> coordinate out of the XML and
+    // assert it equals autoLayout[...] for the same graph — the regression
+    // guard proving the XML and the Diagram cannot diverge.
+    for (const s of DEFAULT_STATE_MACHINE.states) {
+      const re = new RegExp(`<state name="${s}" x="(-?[0-9.]+)" y="(-?[0-9.]+)"/>`);
+      const m = xml.match(re);
+      expect(m).not.toBeNull();
+      const [xStr, yStr] = [m![1], m![2]];
+      expect(Number(xStr)).toBe(auto[s].x);
+      expect(Number(yStr)).toBe(auto[s].y);
+    }
   });
 
   it('omits sourceSide/targetSide on default-routed transitions', () => {

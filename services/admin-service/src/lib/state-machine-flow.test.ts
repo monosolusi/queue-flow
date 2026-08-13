@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  autoLayout,
   flowToGraph,
   formToFlow,
   handleToSide,
@@ -16,7 +15,7 @@ import {
   EDGE_ARROW_MARKER,
   type FlowEdge,
 } from './state-machine-flow';
-import { defaultStateMachineForm, type StateMachineForm } from './state-machine';
+import { autoLayout, defaultStateMachineForm, type StateMachineForm } from './state-machine';
 import { DEFAULT_STATE_MACHINE } from '../api/types';
 // Type-only: verifies the framework-free marker trick in the guard at the
 // bottom of this file (tests may depend on `@xyflow/react`; the lib cannot).
