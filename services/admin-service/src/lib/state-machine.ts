@@ -219,6 +219,129 @@ export function toNodePositionsDto(form: StateMachineForm): NodePositionsDto {
   return { ...form.positions };
 }
 
+/** Horizontal gap between ranks (left-to-right flow). */
+const X_SPACING = 240;
+/** Vertical gap between nodes stacked within a rank. */
+const Y_SPACING = 120;
+
+/**
+ * The SINGLE canonical "default positions for an empty `positions` map"
+ * derivation, shared by BOTH views of the same {@link StateMachineForm}: the
+ * React Flow canvas (`formToFlow` in `state-machine-flow.ts`) AND the editable
+ * XML Source view (`formToXml` in `state-machine-xml.ts`). Both import this one
+ * function, so the diagram the manager sees and the XML they edit can never
+ * diverge in node positions — an un-customized graph (`form.positions = {}`)
+ * serializes the SAME coordinates the canvas renders, and the XML is the
+ * human-editable single source of truth the diagram arranges from.
+ *
+ * `rank` = longest path from source nodes (nodes with no incoming edge) in the
+ * graph with back-edges removed; `x = rank * X_SPACING` (240). Within a rank,
+ * nodes stack vertically by appearance order in `states`, `y = indexInRank *
+ * Y_SPACING` (120). Nodes unreachable from any source (pure cycles, or anything
+ * downstream of one) keep rank 0.
+ *
+ * Back-edges (edges to a node on the DFS stack — the cycle-closing edges, e.g.
+ * the default graph's `SKIPPED → CALLING`) are removed for ranking so a cycle
+ * never inflates a node's rank; they remain as visual back-arrows on the
+ * canvas. Pure cycles (no node with zero in-degree) have no source to seed
+ * relaxation from, so every node in them keeps rank 0.
+ *
+ * Pure + stable: same input ⇒ same output (no `Math.random` / `Date.now`). It
+ * lives here in the form-model lib (not in `state-machine-flow.ts`, the React
+ * Flow layer) because "the canonical default positions for an empty positions
+ * map" is a form-model concern, not a canvas concern — the DOM-dependent XML
+ * codec imports it from here so dependency direction stays clean (DOM layer →
+ * pure layer, never the reverse).
+ */
+export function autoLayout(
+  states: readonly string[],
+  transitions: readonly { from: string; to: string; actionLabel: string }[],
+): Record<string, { x: number; y: number }> {
+  const stateSet = new Set(states);
+  const adj = new Map<string, string[]>();
+  const originalIndeg = new Map<string, number>();
+  for (const s of states) {
+    adj.set(s, []);
+    originalIndeg.set(s, 0);
+  }
+  for (const t of transitions) {
+    // Ignore edges that reference a state not in the schema (defensive — the
+    // editor never produces these, but a corrupt prefill could).
+    if (!stateSet.has(t.from) || !stateSet.has(t.to)) continue;
+    adj.get(t.from)!.push(t.to);
+    originalIndeg.set(t.to, (originalIndeg.get(t.to) ?? 0) + 1);
+  }
+
+  // DFS classifies back-edges (target on the recursion stack) and builds the
+  // acyclic ranking graph `dagAdj` (tree + cross + forward edges; back-edges
+  // dropped). Iterative DFS so a degenerate deep chain can't blow the stack.
+  const visited = new Set<string>();
+  const dagAdj = new Map<string, string[]>();
+  for (const s of states) dagAdj.set(s, []);
+  for (const root of states) {
+    if (visited.has(root)) continue;
+    const stack: { node: string; edgeIdx: number }[] = [{ node: root, edgeIdx: 0 }];
+    const onStack = new Set<string>([root]);
+    visited.add(root);
+    while (stack.length > 0) {
+      const top = stack[stack.length - 1];
+      const outs = adj.get(top.node) ?? [];
+      if (top.edgeIdx < outs.length) {
+        const v = outs[top.edgeIdx++];
+        if (!visited.has(v)) {
+          visited.add(v);
+          onStack.add(v);
+          stack.push({ node: v, edgeIdx: 0 });
+          dagAdj.get(top.node)!.push(v); // tree edge
+        } else if (!onStack.has(v)) {
+          dagAdj.get(top.node)!.push(v); // cross / forward edge (not a back-edge)
+        }
+        // else: back-edge (v on stack) — dropped for ranking.
+      } else {
+        onStack.delete(top.node);
+        stack.pop();
+      }
+    }
+  }
+
+  // Longest-path rank via Kahn's relaxation on the DAG, seeded ONLY with
+  // original sources (in-degree 0 in the original graph). A node not reachable
+  // from any original source (pure cycle, or downstream of one) is never
+  // enqueued and keeps its initialized rank 0.
+  const dagIndeg = new Map<string, number>();
+  for (const s of states) dagIndeg.set(s, 0);
+  for (const outs of dagAdj.values()) for (const v of outs) dagIndeg.set(v, (dagIndeg.get(v) ?? 0) + 1);
+  const rank = new Map<string, number>();
+  for (const s of states) rank.set(s, 0);
+  const remaining = new Map(dagIndeg);
+  const queue: string[] = states.filter((s) => (originalIndeg.get(s) ?? 0) === 0);
+  let head = 0;
+  while (head < queue.length) {
+    const u = queue[head++];
+    for (const v of dagAdj.get(u) ?? []) {
+      rank.set(v, Math.max(rank.get(v) ?? 0, (rank.get(u) ?? 0) + 1));
+      remaining.set(v, (remaining.get(v) ?? 0) - 1);
+      if ((remaining.get(v) ?? 0) === 0) queue.push(v);
+    }
+  }
+
+  // Group by rank preserving `states` appearance order, then assign positions.
+  const byRank = new Map<number, string[]>();
+  for (const s of states) {
+    const r = rank.get(s) ?? 0;
+    const bucket = byRank.get(r) ?? [];
+    bucket.push(s);
+    byRank.set(r, bucket);
+  }
+  const positions: Record<string, { x: number; y: number }> = {};
+  for (const [r, names] of byRank) {
+    names.forEach((name, i) => {
+      positions[name] = { x: r * X_SPACING, y: i * Y_SPACING };
+    });
+  }
+  return positions;
+}
+
 /**
  * Validate a custom state machine, mirroring the backend invariants
  * (`StateMachine` / `StateSchema` in `core-api`) so the editor never submits a
