@@ -755,6 +755,64 @@ describe('Alur Status Tiket designer — warning relocation + dedicated full-pag
     expect(label).toContain('color: var(--text-muted)');
     expect(label).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
   });
+
+  it('connection handles are discoverable + touch-grabbable + reveal drop targets during a drag (manager feedback: "selalu tidak bisa menghubungkan")', () => {
+    // Root cause of "always can't connect": the handles were fully hidden until
+    // hover/selection. React Flow stamps `connectionindicator` on every valid
+    // drop-target handle DURING a drag, but the CSS kept them at `opacity: 0`, so
+    // the manager dragged blind and could not see where to drop; on touch the 7px
+    // dot was additionally un-hittable. The fix is a three-tier opacity keyed on
+    // React Flow's own handle classes. Guarded statically (jsdom runs css:false).
+    //
+    // 1. An enlarged transparent hit area so a 7px dot is grabbable on touch. The
+    //    pseudo-element inherits the handle's pointer-events, so it is interactive
+    //    only when the handle is connectable.
+    expect(wfCss).toContain('.react-flow__handle::before');
+    const hit = wfRule('.sm-canvas .react-flow__handle::before');
+    expect(hit).toContain('inset: -14px');
+    expect(hit).toContain('border-radius: 50%');
+    // 2. At rest, connectable SOURCE handles (drag-from points) are subtly visible
+    //    so the manager can find where to START a transition. Target handles stay
+    //    hidden (no `connectablestart`) — they are drop points, lit up at #3 only.
+    const rest = wfRule('.sm-canvas .react-flow__handle.connectable.connectablestart');
+    expect(rest).toContain('opacity: 0.5');
+    // 3. During an active connection the dragged handle + every valid drop-target
+    //    handle light up full so the manager SEES where to drop. The four selectors
+    //    share ONE declaration block (a comma list); the last sub-selector
+    //    (`connectionindicator:not(.connectablestart)`) directly precedes the `{`,
+    //    so its block is extractable. Assert the shared block carries `opacity: 1`
+    //    AND that every active selector — including the dragged-from
+    //    `.connectingfrom` — shares it (so none can be silently split off to a
+    //    lower-opacity rule). NB: match the RULE (regex requires `{` after), not
+    //    `indexOf` — the header comment also mentions the selector verbatim.
+    const fullBlock = wfCss.match(
+      /\.connectionindicator:not\(\.connectablestart\)\s*\{([^}]*)\}/,
+    );
+    expect(fullBlock).not.toBeNull();
+    expect(fullBlock![1]).toContain('opacity: 1');
+    const fullIdx = fullBlock!.index!;
+    // The selector list for that block spans from the previous rule's closing
+    // `}` to this rule's opening `{` — i.e. every comma-joined selector that
+    // shares the `opacity: 1` block.
+    const thisOpen = wfCss.indexOf('{', fullIdx);
+    const prevClose = wfCss.lastIndexOf('}', fullIdx);
+    const selectorList = wfCss.slice(prevClose + 1, thisOpen);
+    expect(selectorList).toContain('.connectable.connectingfrom');
+    expect(selectorList).toContain('.react-flow__node:hover');
+    expect(selectorList).toContain('.react-flow__node.selected');
+    expect(selectorList).toContain('.react-flow__handle.connectable');
+    // 4. Source order is load-bearing: the at-rest 0.5 rule MUST textually precede
+    //    the full-opacity rule, or an equal-specificity tie would silently revert
+    //    the dragged-from / selected / drop-target handles to 0.5. Match the RULE
+    //    (regex requires `{` + `opacity: 0.5`), not `indexOf` — the header comment
+    //    also mentions the selector verbatim, which would mask a real reorder.
+    const restBlock = wfCss.match(
+      /\.react-flow__handle\.connectable\.connectablestart\s*\{([^}]*)\}/,
+    );
+    expect(restBlock).not.toBeNull();
+    expect(restBlock![1]).toContain('opacity: 0.5');
+    expect(restBlock!.index!).toBeLessThan(fullIdx);
+  });
 });
 
 describe('shared .btn baseline is element-agnostic (manager feedback: Link-as-btn overlapped + underlined)', () => {

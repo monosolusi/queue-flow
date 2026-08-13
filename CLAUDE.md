@@ -239,6 +239,24 @@ in that area). Each area's load-bearing essence:
   `isPrimary`/`button` and the global `PointerEvent` ctor is absent, so the bug
   is jsdom-undetectable; mirror the existing resize-handle stopPropagation).
   → memory `frontend-conventions-gotchas`
+- **React Flow v12 (admin Alur Status Tiket designer)** — `onNodeClick` always
+  fires (selection SOT via `onSelectionChange`); canvas-only derived fields on
+  `FlowNodeData` (ISP); `markerEnd` object→string resolution + framework-free-lib
+  `${MarkerType}` trick; `isValidConnection`↔`onConnectEnd` duplicate-feedback
+  pairing; edge direction = START handle's TYPE not drag direction →
+  `isConnectableStart={false}` on target handles (drop-only), and
+  `ConnectionMode` is an enum not a literal union; **connection-handle
+  discoverability is a three-tier opacity system, NOT hide-until-hover**
+  (manager feedback "selalu tidak bisa menghubungkan"): RF stamps
+  `connectionindicator` on valid drop-targets during a drag and `connectablestart`
+  on source handles even in default mode — at-rest source handles `opacity:0.5`
+  (gated on `.connectable` so read-only mode stays clean), full `opacity:1` on
+  `:hover`/`.selected`/`.connectingfrom`/`.connectionindicator:not(.connectablestart)`
+  (the drop-target reveal is the core fix), with an enlarged transparent
+  `::before` hit area (inherits the handle's `pointer-events`); mind the
+  specificity — hover/selected must be gated on `.connectable` to tie (0,4,0)
+  the at-rest rule and win by source order, and the drop-target reveal's `:not()`
+  lifts it to (0,5,0). → memory `frontend-conventions-gotchas`
 - **TV board** — `QueuedAudioProvider` decorator over `SequencerAudioProvider`
   (drain single-flight guard is load-bearing, FIFO not interrupt); history
   retains on `COMPLETED` only (never `SKIPPED`/`WAITING`); idle = empty
