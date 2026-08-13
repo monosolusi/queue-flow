@@ -104,6 +104,18 @@ export function StateIcon({ size = 22 }: { size?: number }): JSX.Element {
  * drawn) and React Flow's own hidden-when-not-connectable rule keeps the
  * read-only board clean.
  *
+ * **Arrow direction = drag direction (manager feedback "panah sesuai arah
+ * tarikan").** React Flow assigns an edge's `source` from the handle the drag
+ * STARTS at and `target` from the handle it ENDS at — but keyed on the START
+ * handle's TYPE: start at a `source` handle → source=startNode, target=dropNode
+ * (arrow at the drop node); start at a `target` handle → the two are swapped so
+ * the arrow points back at the start node. Because every side carries a `target`
+ * handle, grabbing one reversed the arrow. The four `target` handles are
+ * therefore made DROP-ONLY (`isConnectableStart={false}`): a `target` handle
+ * may RECEIVE a dropped connection but may never START one, so every drag begins
+ * at a `source` handle and the arrow always points where the manager dropped.
+ * (Receiving stays gated by `isConnectableEnd`, which defaults to `true`.)
+ *
  * The handle `id`s match {@link HANDLE_IDS} exactly; an edge's
  * `sourceHandle`/`targetHandle` reference them, and React Flow derives the
  * bezier's exit/entry direction from the handle's `Position` — so a vertical
@@ -133,12 +145,12 @@ export function StateNode({ data }: NodeProps): JSX.Element {
       aria-label={`Status ${name}`}
     >
       <Handle type="source" position={Position.Top} id={HANDLE_IDS.topSource} isConnectable={connectable} style={H_TOPBOT_START} />
-      <Handle type="target" position={Position.Top} id={HANDLE_IDS.topTarget} isConnectable={connectable} style={H_TOPBOT_END} />
+      <Handle type="target" position={Position.Top} id={HANDLE_IDS.topTarget} isConnectable={connectable} isConnectableStart={false} style={H_TOPBOT_END} />
       <Handle type="source" position={Position.Right} id={HANDLE_IDS.rightSource} isConnectable={connectable} style={H_LEFTRT_START} />
-      <Handle type="target" position={Position.Right} id={HANDLE_IDS.rightTarget} isConnectable={connectable} style={H_LEFTRT_END} />
+      <Handle type="target" position={Position.Right} id={HANDLE_IDS.rightTarget} isConnectable={connectable} isConnectableStart={false} style={H_LEFTRT_END} />
       <Handle type="source" position={Position.Bottom} id={HANDLE_IDS.bottomSource} isConnectable={connectable} style={H_TOPBOT_START} />
-      <Handle type="target" position={Position.Bottom} id={HANDLE_IDS.bottomTarget} isConnectable={connectable} style={H_TOPBOT_END} />
-      <Handle type="target" position={Position.Left} id={HANDLE_IDS.leftTarget} isConnectable={connectable} style={H_LEFTRT_START} />
+      <Handle type="target" position={Position.Bottom} id={HANDLE_IDS.bottomTarget} isConnectable={connectable} isConnectableStart={false} style={H_TOPBOT_END} />
+      <Handle type="target" position={Position.Left} id={HANDLE_IDS.leftTarget} isConnectable={connectable} isConnectableStart={false} style={H_LEFTRT_START} />
       <Handle type="source" position={Position.Left} id={HANDLE_IDS.leftSource} isConnectable={connectable} style={H_LEFTRT_END} />
       <span className="state-node__icon" aria-hidden="true">
         <StateIcon />

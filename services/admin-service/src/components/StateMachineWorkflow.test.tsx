@@ -289,6 +289,42 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     expect(handleIds.has('left-target')).toBe(true);
   });
 
+  it('makes target handles drop-only so the arrow follows the drag (connectablestart)', () => {
+    // Manager feedback: "narik dari calling ke skipped, panahnya malah dari
+    // skipped ke calling" — fix: "Benarkan arah panah sesuai dengan arah
+    // tarikan." React Flow assigns an edge's source from the handle the drag
+    // STARTS at and target from the handle it ENDS at, BUT keyed on the START
+    // handle's TYPE: start at a `source` handle → source=startNode, target=dropNode
+    // (arrow at the drop node); start at a `target` handle → the two are SWAPPED so
+    // the arrow points back at the start node. Because every node side carries a
+    // `target` handle, grabbing one reversed the arrow. The fix: the four `target`
+    // handles are made DROP-ONLY via `isConnectableStart={false}`, so every drag
+    // starts at a `source` handle and the arrow always points where the manager
+    // dropped. React Flow stamps `connectablestart: isConnectableStart` as a CSS
+    // class on each handle div (verified in @xyflow/react source) — the only
+    // jsdom-observable regression surface for this (jsdom cannot simulate a real
+    // pointer-geometry drag — see CLAUDE.md frontend-RTL gotchas). Pin it: target
+    // handles must NOT carry `connectablestart`; source handles MUST.
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
+    const targetHandles = document.querySelectorAll(
+      '.react-flow__handle[data-handleid$="-target"]',
+    );
+    const sourceHandles = document.querySelectorAll(
+      '.react-flow__handle[data-handleid$="-source"]',
+    );
+    expect(targetHandles.length).toBeGreaterThan(0);
+    expect(sourceHandles.length).toBeGreaterThan(0);
+    for (const handle of targetHandles) {
+      expect(handle).not.toHaveClass('connectablestart');
+      // Receiving a dropped connection stays enabled (isConnectableEnd defaults
+      // true) so a source-start drag can still land on a target handle.
+      expect(handle).toHaveClass('connectableend');
+    }
+    for (const handle of sourceHandles) {
+      expect(handle).toHaveClass('connectablestart');
+    }
+  });
+
   it('mints opaque `sm-edge-N` ids for newly added edges (M1: disjoint id space)', () => {
     // Newly minted edges (onConnect / "Tambah Transisi") use an opaque
     // `sm-edge-N` id from a per-instance monotonic counter — a DISTINCT prefix
