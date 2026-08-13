@@ -4,11 +4,15 @@
  * The kiosk prints a physical ticket immediately after issuing one. The print
  * mechanism is an OCP extension point: {@link IPrintProvider} is the interface;
  * {@link BrowserPrintProvider} (hidden iframe + `window.print`) is the default
- * for a browser-attached kiosk, and a future ESC/POS-over-Serial provider can
- * be swapped in without touching the page (OCP — add a provider, don't modify
- * the page). The latency budget is < 1.5 s from touch to print trigger
- * (NFR-PERF-03); the page fires print immediately after the ticket is issued.
+ * for a browser-attached kiosk,
+ * {@link NetworkEscPosPrintProvider} proxies a network printer through core-api,
+ * and {@link UsbSerialPrintProvider} drives a USB thermal printer directly over
+ * Web Serial. A provider can be swapped in without touching the page (OCP — add
+ * a provider, don't modify the page). The latency budget is < 1.5 s from touch
+ * to print trigger (NFR-PERF-03); the page fires print immediately after the
+ * ticket is issued.
  */
+import { composeReceipt } from './escpos-commands';
 
 /** The data printed on the physical ticket. `storeName` is optional (the kiosk
  * may not have fetched the store config when it prints). `waitingAhead` is the
@@ -46,6 +50,9 @@ function defaultCreateIframe(): HTMLIFrameElement {
 
 /** Thermal paper width in millimeters — drives the `@page` size rule. */
 export type PaperWidth = 58 | 80;
+
+/** When the ESC/POS cut command fires after the receipt (mirrors core-api). */
+export type CutMode = 'full' | 'partial' | 'none';
 
 /** Options for {@link BrowserPrintProvider} (all optional, sensible defaults). */
 export interface BrowserPrintProviderOptions {
@@ -120,6 +127,110 @@ export class NetworkEscPosPrintProvider implements IPrintProvider {
   async print(payload: PrintPayload): Promise<void> {
     try {
       await this.printTicket(payload);
+    } catch {
+      // Print failure is non-fatal; the result screen still shows the ticket.
+    }
+  }
+}
+
+/**
+ * The injectable Web Serial API surface — the test seam for
+ * {@link UsbSerialPrintProvider}. jsdom has no `navigator.serial`, so the
+ * provider takes a `serial` option (mirror of the `WebSocketCtor`/`AudioCtor`
+ * convention: providers own the resource options, never a pre-built instance).
+ * Production wires `navigator.serial`; tests pass a fake.
+ */
+export interface SerialLike {
+  /** Returns the ports the operator already granted (persists per origin). */
+  getPorts(): Promise<readonly SerialPortLike[]>;
+}
+
+/** The subset of `SerialPort` the provider uses (open → write → close). */
+export interface SerialPortLike {
+  open(options: { baudRate: number }): Promise<void>;
+  writable: { getWriter(): { write(data: Uint8Array): Promise<void>; releaseLock(): void } } | null;
+  close(): Promise<void>;
+}
+
+/** The default serial surface — the browser's `navigator.serial` (or null when
+ *  unavailable, e.g. a non-Web-Serial browser). The provider treats null as
+ *  "no printer paired" and resolves non-fatal. */
+function defaultSerial(): SerialLike | null {
+  if (typeof navigator === 'undefined') return null;
+  const s = (navigator as unknown as { serial?: SerialLike }).serial;
+  return s ?? null;
+}
+
+/** Options for {@link UsbSerialPrintProvider}. `serial` is the test seam. */
+export interface UsbSerialPrintProviderOptions {
+  /** Paper width — drives the ESC/POS column wrap (58 → 32, 80 → 48 cols). */
+  readonly paperWidth: PaperWidth;
+  /** Cut command after the receipt. */
+  readonly cutMode: CutMode;
+  /** Serial speed for `port.open({ baudRate })` (default 9600). */
+  readonly baudRate: number;
+  /** Injectable Web Serial surface (defaults to `navigator.serial`). */
+  readonly serial?: SerialLike | null;
+}
+
+/**
+ * Prints via a USB thermal printer cabled to the kiosk box, using the Web Serial
+ * API (`navigator.serial`) — OCP's third provider (the page is untouched). A USB
+ * printer is kiosk-local: core-api cannot proxy it (USB is not on the server), so
+ * this provider composes the ESC/POS bytes itself (via {@link composeReceipt},
+ * the kiosk copy of the core-api composer) and writes them directly to the port.
+ *
+ * Pairing is a one-time operator action: the kiosk setup overlay calls
+ * `requestPort()` under a user gesture, and the browser persists the grant. This
+ * provider then reads the granted ports via `getPorts()` — if none are granted
+ * (the printer was never paired, or the permission was cleared), `print()`
+ * resolves non-fatal (the result screen still shows the ticket); it does NOT call
+ * `requestPort()` itself (that needs a user gesture the unattended print path
+ * cannot provide). Print failures (port open/write error) are also non-fatal —
+ * the same contract as {@link BrowserPrintProvider}/{@link NetworkEscPosPrintProvider}.
+ */
+export class UsbSerialPrintProvider implements IPrintProvider {
+  private readonly paperWidth: PaperWidth;
+  private readonly cutMode: CutMode;
+  private readonly baudRate: number;
+  private readonly serial: SerialLike | null;
+
+  constructor(opts: UsbSerialPrintProviderOptions) {
+    this.paperWidth = opts.paperWidth;
+    this.cutMode = opts.cutMode;
+    this.baudRate = opts.baudRate;
+    this.serial = opts.serial === undefined ? defaultSerial() : opts.serial;
+  }
+
+  async print(payload: PrintPayload): Promise<void> {
+    try {
+      if (!this.serial) return; // Web Serial unavailable — non-fatal.
+      const ports = await this.serial.getPorts();
+      if (ports.length === 0) return; // Not paired yet — non-fatal.
+      const port = ports[0];
+      await port.open({ baudRate: this.baudRate });
+      // `port.close()` MUST run once open() succeeds, on EVERY path (success,
+      // a null writable stream, or a write throw). Web Serial's getPorts()
+      // returns persistent per-origin port handles, so an already-open port
+      // makes the NEXT print's open() reject with InvalidStateError — silently
+      // no-op'ing every later USB print until the page reloads. Closing in a
+      // finally keeps the non-fatal contract self-healing per print, not just
+      // "promise resolves". (close() itself can reject if the port was never
+      // fully opened — swallow that too.)
+      try {
+        const writer = port.writable?.getWriter();
+        if (!writer) return;
+        try {
+          const bytes = composeReceipt(payload, this.paperWidth, this.cutMode);
+          await writer.write(bytes);
+        } finally {
+          writer.releaseLock();
+        }
+      } finally {
+        await port.close().catch(() => {
+          /* already-closed / open-incomplete — non-fatal */
+        });
+      }
     } catch {
       // Print failure is non-fatal; the result screen still shows the ticket.
     }

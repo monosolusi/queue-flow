@@ -3,8 +3,9 @@ import {
   BrowserPrintProvider,
   NetworkEscPosPrintProvider,
   NoOpPrintProvider,
+  UsbSerialPrintProvider,
 } from './print-provider';
-import type { PrintPayload } from './print-provider';
+import type { PrintPayload, SerialLike, SerialPortLike } from './print-provider';
 
 const payload: PrintPayload = {
   ticketNumber: 'A-001',
@@ -166,6 +167,198 @@ describe('NetworkEscPosPrintProvider (FR-KSK-02, network ESC/POS)', () => {
       throw new Error('sync blowup');
     });
     const provider = new NetworkEscPosPrintProvider(printTicket);
+
+    await expect(provider.print(payload)).resolves.toBeUndefined();
+  });
+});
+
+describe('UsbSerialPrintProvider (FR-KSK-02, USB thermal over Web Serial)', () => {
+  /**
+   * Subsequence search — `Uint8Array.prototype.indexOf` only finds a single
+   * element (unlike Node `Buffer.indexOf`), and `.equals` is not available
+   * pre-ES2025. Mirrors the helper in `escpos-commands.test.ts`.
+   */
+  function indexOfSubarray(buf: Uint8Array, needle: Uint8Array): number {
+    if (needle.length === 0) return 0;
+    for (let i = 0; i <= buf.length - needle.length; i++) {
+      let match = true;
+      for (let j = 0; j < needle.length; j++) {
+        if (buf[i + j] !== needle[j]) {
+          match = false;
+          break;
+        }
+      }
+      if (match) return i;
+    }
+    return -1;
+  }
+
+  /** A fake port recording the bytes written + the open baudRate. */
+  function makeFakePort(shouldThrow = false): { port: SerialPortLike; written: Uint8Array[]; openArgs: { baudRate: number }[] } {
+    const written: Uint8Array[] = [];
+    const openArgs: { baudRate: number }[] = [];
+    const writer = {
+      write: vi.fn(async (data: Uint8Array) => {
+        written.push(data);
+      }),
+      releaseLock: vi.fn(),
+    };
+    // `writable` is a WritableStream-like: getWriter() returns the writer. The
+    // provider does `port.writable?.getWriter()` then `writer.write(bytes)`.
+    let writable: { getWriter(): typeof writer } | null = { getWriter: () => writer };
+    const port: SerialPortLike = {
+      open: vi.fn(async (opts: { baudRate: number }) => {
+        openArgs.push(opts);
+        if (shouldThrow) throw new Error('open failed');
+      }),
+      get writable() {
+        return writable;
+      },
+      close: vi.fn(async () => {
+        writable = null;
+      }),
+    };
+    return { port, written, openArgs };
+  }
+
+  /** A fake serial surface returning `ports` from getPorts. */
+  function makeFakeSerial(ports: SerialPortLike[]): SerialLike {
+    return { getPorts: vi.fn(async () => ports) };
+  }
+
+  it('composes ESC/POS bytes and writes them to the first granted port', async () => {
+    const { port, written, openArgs } = makeFakePort();
+    const serial = makeFakeSerial([port]);
+    const provider = new UsbSerialPrintProvider({
+      paperWidth: 80,
+      cutMode: 'partial',
+      baudRate: 9600,
+      serial,
+    });
+
+    await provider.print(payload);
+
+    // Opened the port at the configured baudRate.
+    expect(openArgs).toEqual([{ baudRate: 9600 }]);
+    // Exactly one write — the composed receipt (starts with INIT ESC @ then align).
+    expect(written.length).toBe(1);
+    expect(indexOfSubarray(written[0], Uint8Array.of(0x1b, 0x40, 0x1b))).toBe(0);
+    // The ticket number is in the byte stream (UTF-8).
+    const encoder = new TextEncoder();
+    expect(indexOfSubarray(written[0], encoder.encode('A-001'))).not.toBe(-1);
+    // The port is closed after writing.
+    expect(port.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('honors the configured cut mode (full cut bytes present)', async () => {
+    const { port, written } = makeFakePort();
+    const provider = new UsbSerialPrintProvider({
+      paperWidth: 80,
+      cutMode: 'full',
+      baudRate: 9600,
+      serial: makeFakeSerial([port]),
+    });
+
+    await provider.print(payload);
+
+    expect(indexOfSubarray(written[0], Uint8Array.of(0x1d, 0x56, 0x00))).not.toBe(-1);
+  });
+
+  it('closes the port when writer.write rejects (no leaked-open port)', async () => {
+    // A write throw must still close the port — Web Serial's getPorts() returns
+    // persistent per-origin handles, so an already-open port makes the NEXT
+    // print's open() reject with InvalidStateError and silently no-op every
+    // later USB print until the page reloads. The non-fatal contract is
+    // self-healing per print, not just "promise resolves".
+    const closeCall = vi.fn(async () => {});
+    const writer = {
+      write: vi.fn(async () => {
+        throw new Error('write aborted');
+      }),
+      releaseLock: vi.fn(),
+    };
+    const port: SerialPortLike = {
+      open: vi.fn(async () => {}),
+      writable: { getWriter: () => writer },
+      close: closeCall,
+    };
+    const provider = new UsbSerialPrintProvider({
+      paperWidth: 80,
+      cutMode: 'partial',
+      baudRate: 9600,
+      serial: makeFakeSerial([port]),
+    });
+
+    await expect(provider.print(payload)).resolves.toBeUndefined();
+    // The port was closed despite the write throw — no leak.
+    expect(closeCall).toHaveBeenCalledTimes(1);
+    // The writer lock was released too.
+    expect(writer.releaseLock).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes the port when writable is null (no getWriter)', async () => {
+    // open() succeeds but the writable stream is absent — the provider bails
+    // out, but must STILL close the port it opened.
+    const closeCall = vi.fn(async () => {});
+    const port: SerialPortLike = {
+      open: vi.fn(async () => {}),
+      writable: null,
+      close: closeCall,
+    };
+    const provider = new UsbSerialPrintProvider({
+      paperWidth: 80,
+      cutMode: 'partial',
+      baudRate: 9600,
+      serial: makeFakeSerial([port]),
+    });
+
+    await expect(provider.print(payload)).resolves.toBeUndefined();
+    expect(closeCall).toHaveBeenCalledTimes(1);
+  });
+
+  it('resolves non-fatal when no port is paired yet (getPorts empty)', async () => {
+    const serial = makeFakeSerial([]);
+    const provider = new UsbSerialPrintProvider({
+      paperWidth: 80,
+      cutMode: 'partial',
+      baudRate: 9600,
+      serial,
+    });
+
+    // Not paired — non-fatal (the result screen still shows the ticket).
+    await expect(provider.print(payload)).resolves.toBeUndefined();
+  });
+
+  it('resolves non-fatal when Web Serial is unavailable (serial null)', async () => {
+    const provider = new UsbSerialPrintProvider({
+      paperWidth: 80,
+      cutMode: 'partial',
+      baudRate: 9600,
+      serial: null,
+    });
+
+    await expect(provider.print(payload)).resolves.toBeUndefined();
+  });
+
+  it('resolves non-fatal when opening the port throws (printer error)', async () => {
+    const { port } = makeFakePort(true);
+    const provider = new UsbSerialPrintProvider({
+      paperWidth: 80,
+      cutMode: 'partial',
+      baudRate: 9600,
+      serial: makeFakeSerial([port]),
+    });
+
+    await expect(provider.print(payload)).resolves.toBeUndefined();
+  });
+
+  it('defaults to navigator.serial when serial is omitted (null here → non-fatal)', async () => {
+    // jsdom has no navigator.serial → defaultSerial() returns null → non-fatal.
+    const provider = new UsbSerialPrintProvider({
+      paperWidth: 80,
+      cutMode: 'partial',
+      baudRate: 9600,
+    });
 
     await expect(provider.print(payload)).resolves.toBeUndefined();
   });

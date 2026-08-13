@@ -38,6 +38,8 @@ function makeApi(
         themeMode: 'light' as const,
         printerMode: 'chrome',
         printerPaperWidth: 80,
+        printerCutMode: 'partial',
+        printerBaudRate: 9600,
       }),
     printTicket: () => Promise.resolve(),
   };
@@ -82,6 +84,8 @@ describe('CategorySelectPage (kiosk — FR-KSK-01 / QUE-17)', () => {
           themeMode: 'light' as const,
           printerMode: 'chrome',
           printerPaperWidth: 80,
+          printerCutMode: 'partial',
+          printerBaudRate: 9600,
         }),
       printTicket: () => Promise.resolve(),
     });
@@ -99,6 +103,8 @@ describe('CategorySelectPage (kiosk — FR-KSK-01 / QUE-17)', () => {
           themeMode: 'light' as const,
           printerMode: 'chrome',
           printerPaperWidth: 80,
+          printerCutMode: 'partial',
+          printerBaudRate: 9600,
         }),
       printTicket: () => Promise.resolve(),
     });
@@ -120,6 +126,8 @@ describe('CategorySelectPage (kiosk — FR-KSK-01 / QUE-17)', () => {
           themeMode: 'light' as const,
           printerMode: 'chrome',
           printerPaperWidth: 80,
+          printerCutMode: 'partial',
+          printerBaudRate: 9600,
         }),
       printTicket: () => Promise.resolve(),
     });
@@ -319,6 +327,8 @@ describe('CategorySelectPage (kiosk — FR-KSK-01 / QUE-17)', () => {
       themeMode: 'light' as const,
       printerMode: 'chrome',
       printerPaperWidth: 80,
+      printerCutMode: 'partial',
+      printerBaudRate: 9600,
     });
     expect(await screen.findByText('Customer Service')).toBeInTheDocument();
 

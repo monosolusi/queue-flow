@@ -101,6 +101,19 @@ describe('PrintTicketUseCase', () => {
     expect(calls).toHaveLength(0);
   });
 
+  it('throws PrinterNotNetworkException when mode is usb-serial (core-api does NOT proxy USB)', async () => {
+    // USB prints are kiosk-side (Web Serial); core-api's print proxy stays
+    // network-escpos-only, so a usb-serial config here is a safety guard
+    // (the kiosk should not call POST /api/print/ticket for this mode).
+    const repo = new InMemorySystemConfigurationRepository();
+    seedConfig(repo, PrinterConfiguration.of({ mode: 'usb-serial', baudRate: 9600 }));
+    const { driver, calls } = fakeDriver();
+    const useCase = new PrintTicketUseCase(repo, driver);
+
+    await expect(useCase.execute(payload)).rejects.toThrow(PrinterNotNetworkException);
+    expect(calls).toHaveLength(0);
+  });
+
   it('throws SystemNotConfiguredException when no config exists (clean store)', async () => {
     const repo = new InMemorySystemConfigurationRepository();
     const { driver, calls } = fakeDriver();

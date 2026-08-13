@@ -1,5 +1,5 @@
 import type { PrintPayload } from '../print/print-provider';
-import type { CategoryDto, CreatedTicketDto, PaperWidth, PrinterMode, StoreProfileSlice } from './types';
+import type { CategoryDto, CreatedTicketDto, CutMode, PaperWidth, PrinterMode, StoreProfileSlice } from './types';
 
 /**
  * The slice of the core-api the kiosk consumes (ISP — only category listing,
@@ -112,18 +112,34 @@ export class KioskApi implements IKioskApi {
       storeName: string;
       brandColor: string;
       serviceThemes?: { kiosk?: string };
-      printerConfiguration?: { mode?: unknown; paperWidth?: unknown };
+      printerConfiguration?: {
+        mode?: unknown;
+        paperWidth?: unknown;
+        cutMode?: unknown;
+        baudRate?: unknown;
+      };
     }>('/system/config').then((c) => {
       const mode = c.printerConfiguration?.mode;
       const width = c.printerConfiguration?.paperWidth;
-      const printerMode: PrinterMode = mode === 'network-escpos' ? 'network-escpos' : 'chrome';
+      const cut = c.printerConfiguration?.cutMode;
+      const baud = c.printerConfiguration?.baudRate;
+      // Allowlist map: an explicit `usb-serial` arm keeps it from silently
+      // degrading to chrome; any other unknown mode still falls back to chrome.
+      const printerMode: PrinterMode =
+        mode === 'network-escpos' ? 'network-escpos' : mode === 'usb-serial' ? 'usb-serial' : 'chrome';
       const printerPaperWidth: PaperWidth = width === 58 ? 58 : 80;
+      const printerCutMode: CutMode =
+        cut === 'full' || cut === 'none' ? cut : 'partial';
+      const printerBaudRate: number =
+        typeof baud === 'number' && Number.isInteger(baud) && baud > 0 ? baud : 9600;
       return {
         storeName: c.storeName,
         brandColor: c.brandColor,
         themeMode: c.serviceThemes?.kiosk === 'dark' ? 'dark' : 'light',
         printerMode,
         printerPaperWidth,
+        printerCutMode,
+        printerBaudRate,
       };
     });
   }

@@ -66,7 +66,7 @@ function wizardPayload() {
     ],
     edgeRoutingLayout: {},
     nodePositions: {},
-    printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial' },
+    printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
   };
 }
 

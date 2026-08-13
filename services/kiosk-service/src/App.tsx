@@ -4,25 +4,36 @@ import { KioskApi } from './api/kiosk-api';
 import type { IKioskApi } from './api/kiosk-api';
 import type { StoreProfileSlice } from './api/types';
 import { CategorySelectPage } from './pages/CategorySelectPage';
+import { PrinterSetupPage } from './pages/PrinterSetupPage';
 import { TicketResultPage } from './pages/TicketResultPage';
 import {
   BrowserPrintProvider,
   NetworkEscPosPrintProvider,
+  UsbSerialPrintProvider,
 } from './print/print-provider';
 import type { IPrintProvider } from './print/print-provider';
 
 /**
  * Builds the print provider from the loaded store profile (FR-KSK-02).
- * `network-escpos` POSTs the ticket to core-api's ESC/POS proxy; `chrome`
- * (default) renders the receipt in a hidden iframe and opens Chrome's print
- * dialog at the configured paper width. The provider switch happens once on
- * mount — the kiosk is REST-only by design (no WS config subscription), so a
- * manager config change takes effect on the next kiosk reload (acceptable for
- * v1; the kiosk is a transient surface, not long-lived).
+ * `network-escpos` POSTs the ticket to core-api's ESC/POS proxy; `usb-serial`
+ * composes ESC/POS bytes client-side and writes them to a USB thermal printer
+ * cabled to the kiosk box over Web Serial (core-api cannot proxy USB — it is
+ * kiosk-local); `chrome` (default) renders the receipt in a hidden iframe and
+ * opens Chrome's print dialog at the configured paper width. The provider
+ * switch happens once on mount — the kiosk is REST-only by design (no WS
+ * config subscription), so a manager config change takes effect on the next
+ * kiosk reload (acceptable for v1; the kiosk is a transient surface).
  */
 function buildPrintProvider(profile: StoreProfileSlice, api: IKioskApi): IPrintProvider {
   if (profile.printerMode === 'network-escpos') {
     return new NetworkEscPosPrintProvider((payload) => api.printTicket(payload));
+  }
+  if (profile.printerMode === 'usb-serial') {
+    return new UsbSerialPrintProvider({
+      paperWidth: profile.printerPaperWidth,
+      cutMode: profile.printerCutMode,
+      baudRate: profile.printerBaudRate,
+    });
   }
   return new BrowserPrintProvider({ paperWidth: profile.printerPaperWidth });
 }
@@ -74,6 +85,10 @@ export function App({
     <Routes>
       <Route path="/" element={<CategorySelectPage api={kioskApi} printProvider={printer} />} />
       <Route path="/tiket" element={<TicketResultPage />} />
+      {/* Operator-only one-time USB printer pairing (Web Serial requestPort
+          needs a user gesture). NOT linked from the visitor UI — reached by
+          navigating to /sambung-printer directly on the kiosk device. */}
+      <Route path="/sambung-printer" element={<PrinterSetupPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

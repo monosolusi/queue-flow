@@ -2,7 +2,7 @@ import { DEFAULT_PRINTER_CONFIGURATION, type PrinterCutMode, type PrinterMode, t
 
 /** The selectable printer modes, in stable display order (matches the
  *  `/printer-config` mode radio group). */
-export const PRINTER_MODES: readonly PrinterMode[] = ['chrome', 'network-escpos'];
+export const PRINTER_MODES: readonly PrinterMode[] = ['chrome', 'network-escpos', 'usb-serial'];
 /** The selectable paper widths, in stable display order. */
 export const PRINTER_PAPER_WIDTHS: readonly PrinterPaperWidth[] = [58, 80];
 /** The selectable cut modes, in stable display order (matches the radio group). */
@@ -30,7 +30,7 @@ export const DEFAULT_PRINTER_PORT = 9100;
  */
 export function validatePrinterConfiguration(config: PrinterConfigurationDto): string[] {
   const errors: string[] = [];
-  if (config.mode !== 'chrome' && config.mode !== 'network-escpos') {
+  if (config.mode !== 'chrome' && config.mode !== 'network-escpos' && config.mode !== 'usb-serial') {
     errors.push('Mode printer tidak valid.');
   }
   if (config.paperWidth !== 58 && config.paperWidth !== 80) {
@@ -45,6 +45,9 @@ export function validatePrinterConfiguration(config: PrinterConfigurationDto): s
   if (!Number.isInteger(config.port) || config.port < 1 || config.port > 65535) {
     errors.push('Port harus bilangan bulat 1–65535.');
   }
+  if (!Number.isInteger(config.baudRate) || config.baudRate <= 0) {
+    errors.push('Baud rate harus bilangan bulat positif.');
+  }
   if (config.mode === 'network-escpos') {
     if (config.host.trim() === '') {
       errors.push('Host printer wajib diisi untuk mode jaringan.');
@@ -52,6 +55,9 @@ export function validatePrinterConfiguration(config: PrinterConfigurationDto): s
       errors.push('Host tidak boleh mengandung spasi.');
     }
   }
+  // usb-serial mode: no host required (the printer is cabled to the kiosk box
+  // and paired on-device); baudRate is the only serial-specific field, checked
+  // above for every mode.
   return errors;
 }
 
@@ -72,7 +78,10 @@ export function coercePrinterConfiguration(
   raw: Partial<PrinterConfigurationDto> | undefined | null,
 ): PrinterConfigurationDto {
   if (!raw || typeof raw !== 'object') return { ...DEFAULT_PRINTER_CONFIGURATION };
-  const mode: PrinterMode = raw.mode === 'network-escpos' ? 'network-escpos' : 'chrome';
+  // Allowlist map: an explicit `usb-serial` arm keeps it from silently degrading
+  // to chrome (any other unknown mode still falls back to chrome).
+  const mode: PrinterMode =
+    raw.mode === 'network-escpos' ? 'network-escpos' : raw.mode === 'usb-serial' ? 'usb-serial' : 'chrome';
   const paperWidth: PrinterPaperWidth = raw.paperWidth === 58 ? 58 : 80;
   const cutMode: PrinterCutMode =
     raw.cutMode === 'full' || raw.cutMode === 'none' ? raw.cutMode : 'partial';
@@ -80,6 +89,10 @@ export function coercePrinterConfiguration(
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     port = DEFAULT_PRINTER_CONFIGURATION.port;
   }
+  let baudRate = typeof raw.baudRate === 'number' ? raw.baudRate : DEFAULT_PRINTER_CONFIGURATION.baudRate;
+  if (!Number.isInteger(baudRate) || baudRate <= 0) {
+    baudRate = DEFAULT_PRINTER_CONFIGURATION.baudRate;
+  }
   const host = typeof raw.host === 'string' ? raw.host : '';
-  return { mode, paperWidth, host, port, cutMode };
+  return { mode, paperWidth, host, port, cutMode, baudRate };
 }

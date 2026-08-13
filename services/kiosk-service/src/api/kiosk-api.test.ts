@@ -113,6 +113,8 @@ describe('KioskApi (wire contract — FR-ENG-01 / QUE-9)', () => {
       themeMode: 'light',
       printerMode: 'chrome',
       printerPaperWidth: 80,
+      printerCutMode: 'partial',
+      printerBaudRate: 9600,
     };
     const fetchMock = fetchReturning(rawConfig);
     vi.stubGlobal('fetch', fetchMock);
@@ -143,6 +145,42 @@ describe('KioskApi (wire contract — FR-ENG-01 / QUE-9)', () => {
     expect(result.printerMode).toBe('network-escpos');
     expect(result.printerPaperWidth).toBe(58);
     expect(result.themeMode).toBe('dark');
+  });
+
+  it('getStoreProfile maps usb-serial mode + cutMode/baudRate (USB needs both client-side)', async () => {
+    const rawConfig = {
+      storeName: 'Toko USB',
+      brandColor: '',
+      serviceThemes: { kiosk: 'light' },
+      printerConfiguration: { mode: 'usb-serial', paperWidth: 80, cutMode: 'full', baudRate: 19200 },
+    };
+    const fetchMock = fetchReturning(rawConfig);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await api.getStoreProfile();
+
+    // usb-serial composes ESC/POS client-side, so the kiosk carries cutMode +
+    // baudRate (unlike network-escpos, where they stay server-side). The
+    // explicit usb-serial arm keeps it from silently degrading to chrome.
+    expect(result.printerMode).toBe('usb-serial');
+    expect(result.printerPaperWidth).toBe(80);
+    expect(result.printerCutMode).toBe('full');
+    expect(result.printerBaudRate).toBe(19200);
+  });
+
+  it('getStoreProfile defaults cutMode/baudRate when usb-serial omits them', async () => {
+    const rawConfig = {
+      storeName: '',
+      brandColor: '',
+      printerConfiguration: { mode: 'usb-serial', paperWidth: 58 },
+    };
+    vi.stubGlobal('fetch', fetchReturning(rawConfig));
+
+    const result = await api.getStoreProfile();
+
+    expect(result.printerMode).toBe('usb-serial');
+    expect(result.printerCutMode).toBe('partial');
+    expect(result.printerBaudRate).toBe(9600);
   });
 
   it('getStoreProfile defaults to chrome/80mm when printerConfiguration is absent (prior behavior)', async () => {

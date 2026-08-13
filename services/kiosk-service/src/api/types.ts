@@ -47,13 +47,20 @@ export type ThemeMode = 'light' | 'dark';
  * via the browser's print dialog (Chrome's default printer) at a defined paper
  * width; `network-escpos` POSTs the ticket to core-api, which proxies the ESC/POS
  * bytes + cut to a networked thermal printer over TCP (the browser cannot open
- * raw TCP — NFR-REL-01 keeps all IO server-side). The kiosk only needs the mode
- * to pick its print provider; host/port/cutMode stay server-side (ISP).
+ * raw TCP — NFR-REL-01 keeps all IO server-side); `usb-serial` drives a USB
+ * thermal printer cabled to the kiosk directly over Web Serial (core-api cannot
+ * proxy USB — it is kiosk-local). The kiosk only needs the mode to pick its print
+ * provider; host/port stay server-side (ISP). `usb-serial` composes ESC/POS
+ * client-side, so it also needs `printerCutMode` + `printerBaudRate`.
  */
-export type PrinterMode = 'chrome' | 'network-escpos';
+export type PrinterMode = 'chrome' | 'network-escpos' | 'usb-serial';
 
-/** Thermal paper width in millimeters — drives the `@page` size for chrome mode. */
+/** Thermal paper width in millimeters — drives the `@page` size for chrome mode
+ *  and the ESC/POS column count for usb-serial mode. */
 export type PaperWidth = 58 | 80;
+
+/** When the ESC/POS cut command fires (usb-serial mode only). */
+export type CutMode = 'full' | 'partial' | 'none';
 
 export interface StoreProfileSlice {
   readonly storeName: string;
@@ -62,6 +69,12 @@ export interface StoreProfileSlice {
   readonly themeMode: ThemeMode;
   /** Which print provider the kiosk wires (FR-KSK-02, config-driven). */
   readonly printerMode: PrinterMode;
-  /** Paper width for chrome mode (ignored by the network provider). */
+  /** Paper width for chrome + usb-serial mode (ignored by the network provider). */
   readonly printerPaperWidth: PaperWidth;
+  /** Cut command for usb-serial mode (the kiosk composes ESC/POS client-side).
+   *  Ignored by chrome/network-escpos. Defaults to 'partial'. */
+  readonly printerCutMode: CutMode;
+  /** Serial baud rate for usb-serial mode (`port.open({ baudRate })`). Ignored by
+   *  chrome/network-escpos. Defaults to 9600. */
+  readonly printerBaudRate: number;
 }

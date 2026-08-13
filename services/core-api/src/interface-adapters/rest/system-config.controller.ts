@@ -281,6 +281,9 @@ function configNestedShapeErrors(body: Partial<SaveSystemConfigurationCommand>):
     if (e.port != null && typeof e.port !== 'number') {
       errs.push('printerConfiguration.port must be a number');
     }
+    if (e.baudRate != null && typeof e.baudRate !== 'number') {
+      errs.push('printerConfiguration.baudRate must be a number');
+    }
   }
   return errs;
 }
