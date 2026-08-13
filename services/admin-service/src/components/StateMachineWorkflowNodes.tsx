@@ -271,7 +271,8 @@ export function TransitionEdge(props: EdgeProps): JSX.Element {
 /**
  * A canvas-only Start terminal marker — a compact BPMN-style "play" affordance
  * (▶ glyph) with a "Mulai" label. Auto-derived by `deriveTerminalMarkers` for
- * the graph's in-degree-0 source states; NOT in the form/wire/XML. ONE
+ * the graph's real entry states (in-degree 0 AND out-degree > 0 — an isolated,
+ * not-yet-wired status is NOT an entry point); NOT in the form/wire/XML. ONE
  * `<Handle type="source" position={Position.Right} id={HANDLE_IDS.right}
  * isConnectable={false} />` — non-interactive (the manager cannot drag a
  * transition from a marker; the marker is a visual entry cue, not a state).
@@ -304,8 +305,9 @@ export function StartNode({ }: NodeProps): JSX.Element {
 
 /**
  * A canvas-only End terminal marker — a bold-ring "stop" affordance (■ glyph)
- * with a "Selesai" label. Auto-derived for the graph's out-degree-0 sink
- * states; NOT in the form/wire/XML. ONE `<Handle type="source"
+ * with a "Selesai" label. Auto-derived for the graph's real exit states
+ * (out-degree 0 AND in-degree > 0 — an isolated, not-yet-wired status is NOT an
+ * exit point); NOT in the form/wire/XML. ONE `<Handle type="source"
  * position={Position.Left} id={HANDLE_IDS.left} isConnectable={false} />` —
  * the `source`-typed handle on the LEFT is the terminal edge's TARGET (the
  * sink→End edge drops onto this handle). `isConnectable={false}` keeps the
