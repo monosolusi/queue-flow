@@ -4,6 +4,7 @@ import { InvalidValueObjectException } from '../shared/errors';
 import { BrandColor } from './value-objects/brand-color';
 import { DailyResetPolicy } from './value-objects/daily-reset-policy';
 import { EdgeRoutingLayout } from './value-objects/edge-routing-layout';
+import { NodePositions } from './value-objects/node-positions';
 import { ServiceThemes } from './value-objects/service-themes';
 import { TvPanelLayout } from './value-objects/tv-panel-layout';
 import { StateMachine } from './state-machine';
@@ -23,6 +24,7 @@ export class SystemConfiguration extends AggregateRoot {
   private _serviceThemes: ServiceThemes;
   private _tvPanelLayout: TvPanelLayout;
   private _edgeRoutingLayout: EdgeRoutingLayout;
+  private _nodePositions: NodePositions;
 
   private constructor(
     id: Identifier,
@@ -34,6 +36,7 @@ export class SystemConfiguration extends AggregateRoot {
     serviceThemes: ServiceThemes,
     tvPanelLayout: TvPanelLayout,
     edgeRoutingLayout: EdgeRoutingLayout,
+    nodePositions: NodePositions,
   ) {
     super(id);
     this._storeName = storeName;
@@ -44,13 +47,14 @@ export class SystemConfiguration extends AggregateRoot {
     this._serviceThemes = serviceThemes;
     this._tvPanelLayout = tvPanelLayout;
     this._edgeRoutingLayout = edgeRoutingLayout;
+    this._nodePositions = nodePositions;
   }
 
   /** Creates a fresh, not-yet-configured instance with the default state machine,
-   * brand color, service themes, TV panel layout, and edge routing layout.
-   * `brandColor` + `serviceThemes` + `tvPanelLayout` + `edgeRoutingLayout`
-   * default so the dev seed and acceptance `seedPrdConfig` (2-arg calls) need no
-   * change. */
+   * brand color, service themes, TV panel layout, edge routing layout, and node
+   * positions. `brandColor` + `serviceThemes` + `tvPanelLayout` +
+   * `edgeRoutingLayout` + `nodePositions` default so the dev seed and acceptance
+   * `seedPrdConfig` (2-arg calls) need no change. */
   public static create(
     id: Identifier,
     storeName = '',
@@ -58,6 +62,7 @@ export class SystemConfiguration extends AggregateRoot {
     serviceThemes: ServiceThemes = ServiceThemes.DEFAULT,
     tvPanelLayout: TvPanelLayout = TvPanelLayout.DEFAULT,
     edgeRoutingLayout: EdgeRoutingLayout = EdgeRoutingLayout.DEFAULT,
+    nodePositions: NodePositions = NodePositions.DEFAULT,
   ): SystemConfiguration {
     return new SystemConfiguration(
       id,
@@ -69,6 +74,7 @@ export class SystemConfiguration extends AggregateRoot {
       serviceThemes,
       tvPanelLayout,
       edgeRoutingLayout,
+      nodePositions,
     );
   }
 
@@ -82,6 +88,7 @@ export class SystemConfiguration extends AggregateRoot {
     serviceThemes: ServiceThemes;
     tvPanelLayout: TvPanelLayout;
     edgeRoutingLayout: EdgeRoutingLayout;
+    nodePositions: NodePositions;
   }): SystemConfiguration {
     return new SystemConfiguration(
       params.id,
@@ -93,6 +100,7 @@ export class SystemConfiguration extends AggregateRoot {
       params.serviceThemes,
       params.tvPanelLayout,
       params.edgeRoutingLayout,
+      params.nodePositions,
     );
   }
 
@@ -126,6 +134,10 @@ export class SystemConfiguration extends AggregateRoot {
 
   public get edgeRoutingLayout(): EdgeRoutingLayout {
     return this._edgeRoutingLayout;
+  }
+
+  public get nodePositions(): NodePositions {
+    return this._nodePositions;
   }
 
   public setStoreName(name: string): void {

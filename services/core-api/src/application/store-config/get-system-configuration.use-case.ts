@@ -7,6 +7,7 @@ import { DailyResetPolicy, DailyResetMode } from '../../domain/store-config';
 import { ServiceThemes, type ServiceThemesMap } from '../../domain/store-config';
 import { TvPanelLayout, type TvGridLayout } from '../../domain/store-config';
 import { EdgeRoutingLayout, type EdgeRoutingLayoutDto } from '../../domain/store-config';
+import { NodePositions, type NodePositionsDto } from '../../domain/store-config';
 import type { PriorityPolicy } from '../../domain/shared';
 
 /**
@@ -68,6 +69,9 @@ export interface SystemConfigurationDto {
   /** Per-edge connection-point (handle) layout for the admin state-machine
    *  visual editor (sparse keyed map "from->to" -> { sourceSide, targetSide }). */
   readonly edgeRoutingLayout: EdgeRoutingLayoutDto;
+  /** Per-state node x/y positions for the admin state-machine visual editor
+   *  (keyed map "stateName" -> { x, y }). */
+  readonly nodePositions: NodePositionsDto;
 }
 
 /** Projects the domain `StateMachine` into the flat {@link StateMachineDto}. */
@@ -145,6 +149,10 @@ export class GetSystemConfigurationUseCase {
         // left->right routing, so a clean store prefills the admin state-machine
         // editor with no per-edge handle overrides.
         edgeRoutingLayout: EdgeRoutingLayout.DEFAULT.toDto(),
+        // Default node positions — empty map = use the deterministic autoLayout,
+        // so a clean store prefills the admin state-machine editor with the
+        // auto-laid-out canvas (no saved positions).
+        nodePositions: NodePositions.DEFAULT.toDto(),
       };
     }
 
@@ -163,6 +171,7 @@ export class GetSystemConfigurationUseCase {
       serviceThemes: system.serviceThemes.toDto(),
       tvPanelLayout: system.tvPanelLayout.toDto(),
       edgeRoutingLayout: system.edgeRoutingLayout.toDto(),
+      nodePositions: system.nodePositions.toDto(),
       categories: allCategories
         .slice()
         .sort((a, b) => a.code.localeCompare(b.code))

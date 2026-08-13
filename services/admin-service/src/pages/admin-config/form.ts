@@ -92,15 +92,23 @@ export function toForm(config: SystemConfigurationDto): AdminForm {
     config.stateMachine.transitions,
     config.edgeRoutingLayout,
   );
+  // Positions are keyed by state name (no per-transition merge needed, unlike
+  // `edgeRoutingLayout`). Coerce defensively — the backend always returns
+  // `nodePositions` (defaulting to `{}`); the `?? {}` is belt-and-suspenders
+  // (same pattern as `edgeRoutingLayout ?? {}`).
+  const positions = config.nodePositions ?? {};
   return {
     storeName: config.storeName,
     // Build a StateMachineForm with the client-only `mode` preset inferred by
     // deep-equal against the PRD §7 default graph (mirrors the wizard's prefill
-    // inference). `mode` is stripped at save (never on the wire).
+    // inference). `mode` is stripped at save (never on the wire). The inference
+    // now passes `positions` so a store with saved positions loads editable
+    // (`mode: 'custom'`), not read-only default.
     stateMachine: {
-      mode: isDefaultGraph(config.stateMachine.states, mergedTransitions) ? 'default' : 'custom',
+      mode: isDefaultGraph(config.stateMachine.states, mergedTransitions, positions) ? 'default' : 'custom',
       states: [...config.stateMachine.states],
       transitions: mergedTransitions,
+      positions,
     },
     brandColor: config.brandColor || DEFAULT_BRAND_COLOR,
     // Coerce a partial/degraded GET projection into a complete 4-surface map

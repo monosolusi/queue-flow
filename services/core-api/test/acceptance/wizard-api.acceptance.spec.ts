@@ -300,4 +300,81 @@ describe('DoD-2 — First-Run Wizard API (FR-WZD-01..06)', () => {
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('INVALID_VALUE_OBJECT');
   });
+
+  it('persists custom nodePositions and returns them on GET (round-trip)', async () => {
+    const payload = prdWizardPayload();
+    payload.nodePositions = {
+      WAITING: { x: 0, y: 0 },
+      CALLING: { x: 240, y: 0 },
+    };
+    const res = await http(booted.app)
+      .put('/api/system/config')
+      .send(payload)
+      .expect(200);
+    expect(res.body.nodePositions).toEqual({
+      WAITING: { x: 0, y: 0 },
+      CALLING: { x: 240, y: 0 },
+    });
+    const cfg = await http(booted.app).get('/api/system/config').expect(200);
+    expect(cfg.body.nodePositions).toEqual({
+      WAITING: { x: 0, y: 0 },
+      CALLING: { x: 240, y: 0 },
+    });
+  });
+
+  it('a clean store prefills nodePositions with {} (autoLayout)', async () => {
+    const res = await http(booted.app).get('/api/system/config').expect(200);
+    expect(res.body.nodePositions).toEqual({});
+  });
+
+  it('rejects a malformed nodePositions (non-object) at the transport boundary with 400', async () => {
+    const bad = prdWizardPayload();
+    (bad as { nodePositions: unknown }).nodePositions = 'not-an-object';
+    const res = await http(booted.app).put('/api/system/config').send(bad);
+    expect(res.status).toBe(400);
+    const cfg = await http(booted.app).get('/api/system/config').expect(200);
+    expect(cfg.body.isInitialSetupCompleted).toBe(false);
+  });
+
+  it('rejects a malformed nodePositions (array) at the transport boundary with 400', async () => {
+    const bad = prdWizardPayload();
+    (bad as { nodePositions: unknown }).nodePositions = [
+      { WAITING: { x: 0, y: 0 } },
+    ];
+    const res = await http(booted.app).put('/api/system/config').send(bad);
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a non-number x in nodePositions at the transport boundary with 400', async () => {
+    const bad = prdWizardPayload();
+    (bad as { nodePositions: unknown }).nodePositions = {
+      WAITING: { x: 'five', y: 0 },
+    };
+    const res = await http(booted.app).put('/api/system/config').send(bad);
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a node positions key that is not a state (cross-check) with 400', async () => {
+    // NOPE is not a state in the default state machine — the use-case
+    // cross-check throws InvalidValueObjectException → 400 (not a 500).
+    const bad = prdWizardPayload();
+    (bad as { nodePositions: unknown }).nodePositions = {
+      NOPE: { x: 0, y: 0 },
+    };
+    const res = await http(booted.app).put('/api/system/config').send(bad);
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_VALUE_OBJECT');
+    const cfg = await http(booted.app).get('/api/system/config').expect(200);
+    expect(cfg.body.isInitialSetupCompleted).toBe(false);
+  });
+
+  it('rejects a non-finite x in nodePositions with 400 (VO of())', async () => {
+    const bad = prdWizardPayload();
+    (bad as { nodePositions: unknown }).nodePositions = {
+      WAITING: { x: NaN, y: 0 },
+    };
+    const res = await http(booted.app).put('/api/system/config').send(bad);
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_VALUE_OBJECT');
+  });
 });

@@ -13,11 +13,13 @@
  * {@link StateMachineForm} + same `lib/state-machine` helpers: it lifts
  * graph-structure changes to the parent via `onChange(next: StateMachineForm)`,
  * and AdminPanel's existing save path calls `toStateMachineDto` (the single
- * wire-boundary mapper). Positions live only in internal node state — they
- * never reach the wire form. `validateCustomStateMachine` stays the validation
- * authority; the component structurally prevents what it can (duplicate edges
- * in `onConnect`, the ≥1-transition delete guard) and surfaces the rest via the
- * `errors` list.
+ * wire-boundary mapper). Positions are now sourced from the form
+ * (`value.positions`) and lifted back on a drag-stop via `commit` →
+ * `flowToGraph` → `onChange`; they travel the wire in the separate
+ * `nodePositions` map (built by `toNodePositionsDto`). `validateCustomStateMachine`
+ * stays the validation authority; the component structurally prevents what it
+ * can (duplicate edges in `onConnect`, the ≥1-transition delete guard) and
+ * surfaces the rest via the `errors` list.
  *
  * **Controlled-with-internal-state pattern.** The component owns React Flow
  * `nodes`/`edges` in `useState` (initialized from `formToFlow(value, autoLayout)`)
@@ -27,6 +29,22 @@
  * positions for surviving state names — and skips our own changes (we update
  * the ref when we emit) so a self-driven `onChange` never round-trips into a
  * position reset.
+ *
+ * **Position lift trace (load-bearing).** A node drag updates internal node
+ * state only (`onNodesChange` never calls `onChange`); positions reach the
+ * parent form ONLY on `onNodeDragStop` → `commit` → `onChange`. The round-trip
+ * is: (a) drag a node — `onNodesChange` updates local `nodes` (no lift); (b)
+ * drop — `onNodeDragStop` rebuilds `nextNodes` from the callback arg's final
+ * positions (NOT `nodesRef`, which may lag the batched `setNodes`) and calls
+ * `commit`; (c) `commit` → `flowToGraph` captures `positions` → builds a form
+ * WITH positions → stamps `lastEmitted.current = graphSignature(form)` (which
+ * now includes positions) BEFORE `onChange`; (d) the parent re-renders with the
+ * new `value`, the sync effect compares `graphSignature(value)` against
+ * `lastEmitted.current` → EQUAL → skip the re-seed → no snap. A source-driven
+ * position edit, by contrast, comes in as a `value` whose signature differs
+ * (positions changed, not stamped by us) → the effect re-seeds the canvas to
+ * the source positions via `formToFlow(value, oldPositions)` (correct: the
+ * source is the new source of truth).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -124,6 +142,17 @@ export function StateMachineWorkflow({
   // the `onConnectEnd` call is a safe no-op in every existing test.
   const toast = useToast();
 
+  // Latest nodes/edges held in refs so `onNodeDragStop` can read the current
+  // committed state without being recreated every render (avoids stale-closure
+  // reads). Updated each render (no effect needed — the ref is a mutable
+  // container). `onNodeDragStop` does NOT read these for the dragged node's
+  // final position: it uses the callback arg `draggedNodes` for that (see the
+  // comment on `onNodeDragStop` for the stale-closure race that avoids).
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
+  const edgesRef = useRef(edges);
+  edgesRef.current = edges;
+
   // Selection state for the right-side properties panel. Single-select: when
   // the manager clicks a node/edge, we mark that one selected in local node/edge
   // state (so React Flow's `.selected` class applies + `onSelectionChange`
@@ -201,8 +230,8 @@ export function StateMachineWorkflow({
   // the wire form.
   const commit = useCallback(
     (nextNodes: FlowNode[], nextEdges: FlowEdge[]) => {
-      const { states, transitions } = flowToGraph(nextNodes, nextEdges);
-      const form: StateMachineForm = { mode: value.mode, states, transitions };
+      const { states, transitions, positions } = flowToGraph(nextNodes, nextEdges);
+      const form: StateMachineForm = { mode: value.mode, states, transitions, positions };
       const refreshed = withDescriptions(nextNodes, form);
       setNodes(refreshed);
       setEdges(nextEdges);
@@ -213,15 +242,16 @@ export function StateMachineWorkflow({
   );
 
   // Apply React Flow's internal change stream (drag position, selection) to the
-  // local node/edge state. Positions are NOT lifted to the parent (they are not
-  // part of the wire form), so a node drag never calls `onChange`. `remove`
-  // changes are dropped here — deletion is owned exclusively by the "Hapus"
-  // buttons (which `commit` → lift to the parent form), so React Flow's own
-  // remove path (already disabled via `deleteKeyCode={null}`) can never desync
-  // the internal canvas state from the parent's form. The cast is load-bearing:
-  // `applyNodeChanges` is generic over `Node` (wide `data`), so it returns
-  // `Node[]`; we narrow back to our `FlowNode` (the runtime shape is unchanged —
-  // it only spreads our objects).
+  // local node/edge state. Positions are NOT lifted here — a node drag updates
+  // internal state only (so the live drag is smooth and does not call `onChange`
+  // on every pixel); positions reach the parent form ONLY on `onNodeDragStop`
+  // below. `remove` changes are dropped here — deletion is owned exclusively by
+  // the "Hapus" buttons (which `commit` → lift to the parent form), so React
+  // Flow's own remove path (already disabled via `deleteKeyCode={null}`) can
+  // never desync the internal canvas state from the parent's form. The cast is
+  // load-bearing: `applyNodeChanges` is generic over `Node` (wide `data`), so it
+  // returns `Node[]`; we narrow back to our `FlowNode` (the runtime shape is
+  // unchanged — it only spreads our objects).
   const onNodesChange = useCallback((changes: NodeChange[]) => {
     const safe = changes.filter((c) => c.type !== 'remove');
     setNodes((prev) => applyNodeChanges(safe, prev) as FlowNode[]);
@@ -230,6 +260,25 @@ export function StateMachineWorkflow({
     const safe = changes.filter((c) => c.type !== 'remove');
     setEdges((prev) => applyEdgeChanges(safe, prev) as FlowEdge[]);
   }, []);
+
+  // Lift positions to the parent form on drag-stop (load-bearing — positions
+  // must reach the form to persist; `onNodesChange` deliberately does not lift
+  // on every move). Uses the callback arg's `draggedNodes` final positions
+  // (NOT `nodesRef.current`) to avoid a stale-closure race: `onNodesChange`'s
+  // `setNodes` is batched, so `nodesRef.current` may not yet reflect the final
+  // drag position at dragStop time. The callback arg carries the authoritative
+  // final positions, so we merge those into the ref's node array and `commit`.
+  const onNodeDragStop = useCallback(
+    (_e: unknown, _node: Node, draggedNodes: Node[]) => {
+      if (draggedNodes.length === 0) return;
+      const moved = new Map(draggedNodes.map((n) => [n.id, n.position]));
+      const nextNodes = nodesRef.current.map((n) =>
+        moved.has(n.id) ? { ...n, position: moved.get(n.id)! } : n,
+      );
+      commit(nextNodes, edgesRef.current);
+    },
+    [commit],
+  );
 
   // Draw a transition edge by connecting a source handle to a target handle.
   // Guard: skip a duplicate edge (same source/target) — the structural
@@ -509,6 +558,7 @@ export function StateMachineWorkflow({
             onConnectEnd={onConnectEnd}
             onNodeClick={onNodeClick}
             onEdgeClick={onEdgeClick}
+            onNodeDragStop={onNodeDragStop}
             onSelectionChange={onSelectionChange}
             onDropPosition={addStateAt}
             handlers={handlers}
@@ -614,6 +664,7 @@ function FlowCanvas({
   onConnectEnd,
   onNodeClick,
   onEdgeClick,
+  onNodeDragStop,
   onSelectionChange,
   onDropPosition,
   handlers,
@@ -628,6 +679,8 @@ function FlowCanvas({
   onConnectEnd: OnConnectEnd;
   onNodeClick: (event: unknown, node: Node) => void;
   onEdgeClick: (event: unknown, edge: Edge) => void;
+  /** Lifts positions to the parent on drag-stop (see `onNodeDragStop` above). */
+  onNodeDragStop: (event: unknown, node: Node, draggedNodes: Node[]) => void;
   onSelectionChange: (params: OnSelectionChangeParams) => void;
   onDropPosition: (position: { x: number; y: number }) => void;
   handlers: WorkflowHandlers;
@@ -662,6 +715,7 @@ function FlowCanvas({
           onConnectEnd={onConnectEnd}
           onNodeClick={onNodeClick}
           onEdgeClick={onEdgeClick}
+          onNodeDragStop={onNodeDragStop}
           onSelectionChange={onSelectionChange}
           nodesDraggable={isCustom}
           nodesConnectable={isCustom}

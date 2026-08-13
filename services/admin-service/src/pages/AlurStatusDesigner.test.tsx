@@ -46,6 +46,7 @@ function configuredStore(): SystemConfigurationDto {
     serviceThemes: { ...DEFAULT_SERVICE_THEMES },
     tvPanelLayout: DEFAULT_TV_GRID_LAYOUT.map((w) => ({ ...w })),
     edgeRoutingLayout: {},
+    nodePositions: {},
   };
 }
 
@@ -58,6 +59,7 @@ function makeApi(config: SystemConfigurationDto = configuredStore()) {
       serviceThemes: payload.serviceThemes,
       tvPanelLayout: payload.tvPanelLayout,
       edgeRoutingLayout: {},
+      nodePositions: {},
     }),
   );
   const getConfig = vi.fn(() => Promise.resolve(config));
@@ -116,17 +118,18 @@ describe('AlurStatusDesigner (dedicated /config/alur-status page)', () => {
     expect(screen.queryByTestId('sm-source')).not.toBeInTheDocument();
   });
 
-  it('toggles to the Source view showing the serialized JSON graph', async () => {
+  it('toggles to the Source view showing the serialized XML graph', async () => {
     const { api } = makeApi();
     renderDesignerRoute(api);
     await screen.findByTestId('sm-mode');
 
     await userEvent.click(screen.getByTestId('sm-view-source'));
     expect(screen.getByTestId('sm-view-source')).toHaveAttribute('aria-pressed', 'true');
-    // The source textarea mounts with the default graph serialized as JSON.
+    // The source textarea mounts with the default graph serialized as XML.
     const source = screen.getByTestId('sm-source') as HTMLTextAreaElement;
-    expect(source.value).toContain('"states"');
-    expect(source.value).toContain('"transitions"');
+    expect(source.value).toContain('<stateMachine');
+    expect(source.value).toContain('<state ');
+    expect(source.value).toContain('<transition ');
     // The first transition's action label is present in the source text.
     expect(source.value).toContain('Panggil Berikutnya');
     // The diagram canvas is unmounted in Source view.
@@ -159,7 +162,7 @@ describe('AlurStatusDesigner (dedicated /config/alur-status page)', () => {
     expect(recallChip).toBeDefined();
   });
 
-  it('keeps the connector legend at the last-valid graph while the source holds invalid JSON', async () => {
+  it('keeps the connector legend at the last-valid graph while the source holds invalid XML', async () => {
     // The legend mirrors the draft (last-valid), NOT the live textarea — so a
     // broken parse does NOT blank the indicator; the error region explains the
     // divergence instead. Mirrors the Diagram view's last-valid behavior.
@@ -168,7 +171,7 @@ describe('AlurStatusDesigner (dedicated /config/alur-status page)', () => {
     await screen.findByTestId('sm-mode');
     await userEvent.click(screen.getByTestId('sm-view-source'));
 
-    fireEvent.change(screen.getByTestId('sm-source'), { target: { value: '{ not valid json' } });
+    fireEvent.change(screen.getByTestId('sm-source'), { target: { value: '<not-xml' } });
     expect(await screen.findByTestId('sm-source-error')).toBeInTheDocument();
     // The legend still shows the last-valid default graph's connectors.
     const chips = screen.getAllByTestId('sm-source-connector');
@@ -183,7 +186,7 @@ describe('AlurStatusDesigner (dedicated /config/alur-status page)', () => {
     await userEvent.click(screen.getByTestId('sm-view-source'));
     const source = screen.getByTestId('sm-source') as HTMLTextAreaElement;
 
-    // Edit the first action label via the JSON source, then save.
+    // Edit the first action label via the XML source, then save.
     fireEvent.change(source, { target: { value: source.value.replace('Panggil Berikutnya', 'Panggil Cepat') } });
     // No parse error — the save button is enabled.
     expect(screen.queryByTestId('sm-source-error')).not.toBeInTheDocument();
@@ -198,13 +201,13 @@ describe('AlurStatusDesigner (dedicated /config/alur-status page)', () => {
     expect((payload.stateMachine as unknown as Record<string, unknown>).mode).toBeUndefined();
   });
 
-  it('invalid JSON shows an error, blocks save, and keeps the draft at the last valid graph', async () => {
+  it('invalid XML shows an error, blocks save, and keeps the draft at the last valid graph', async () => {
     const { api, save } = makeApi();
     renderDesignerRoute(api);
     await screen.findByTestId('sm-mode');
     await userEvent.click(screen.getByTestId('sm-view-source'));
 
-    fireEvent.change(screen.getByTestId('sm-source'), { target: { value: '{ not valid json' } });
+    fireEvent.change(screen.getByTestId('sm-source'), { target: { value: '<not-xml' } });
     expect(await screen.findByTestId('sm-source-error')).toBeInTheDocument();
     // Save is disabled while the source holds an invalid parse.
     expect(screen.getByTestId('admin-save')).toBeDisabled();
@@ -330,6 +333,7 @@ describe('AlurStatusDesigner (dedicated /config/alur-status page)', () => {
     const verticalStore: SystemConfigurationDto = {
       ...configuredStore(),
       edgeRoutingLayout: { 'WAITING->CALLING': { sourceSide: 'bottom', targetSide: 'top' } },
+      nodePositions: { WAITING: { x: 10, y: 20 }, CALLING: { x: 30, y: 40 } },
     };
     const { api, save } = makeApi(verticalStore);
     renderDesignerRoute(api);
@@ -357,6 +361,14 @@ describe('AlurStatusDesigner (dedicated /config/alur-status page)', () => {
     expect(
       (payload.stateMachine.transitions[0] as unknown as Record<string, unknown>).sourceSide,
     ).toBeUndefined();
+    // The seeded node positions survived the round-trip through the canvas —
+    // `toForm` merged them into `form.positions`, `formToFlow` seeded the node
+    // positions, `flowToGraph` captured them back, and the PUT payload carries
+    // them in `nodePositions`. The autoLayout'd nodes (SERVING/SKIPPED/
+    // COMPLETED) also carry positions (autoLayout coordinates), so we assert
+    // the two explicitly-seeded positions survived, not exact equality.
+    expect(payload.nodePositions.WAITING).toEqual({ x: 10, y: 20 });
+    expect(payload.nodePositions.CALLING).toEqual({ x: 30, y: 40 });
   });
 
   it('shows a "fix elsewhere" hint when the state-machine is valid but another section is not', async () => {

@@ -2,6 +2,7 @@ import {
   DEFAULT_STATE_MACHINE,
   type EdgeRoutingLayoutDto,
   type EdgeSide,
+  type NodePositionsDto,
   type StateMachineDto,
   type StateTransitionDto,
 } from '../api/types';
@@ -12,14 +13,18 @@ import {
  * left-to-right flow the PRD §7 default state machine reads as. Mirrors
  * `DEFAULT_SOURCE_HANDLE`/`DEFAULT_TARGET_HANDLE` in `state-machine-flow.ts`
  * (the handle-id equivalents). Kept here (the form lib) so the form-model
- * helpers (`isDefaultSides`, `formToJson`, `toEdgeRoutingLayoutDto`,
- * `graphSignature`) share one source of truth for "what is default routing".
+ * helpers (`isDefaultSides`, `toEdgeRoutingLayoutDto`, `graphSignature`)
+ * share one source of truth for "what is default routing"; the DOM-dependent
+ * XML codec (`state-machine-xml.ts`) reaches them via import.
  */
 export const DEFAULT_SOURCE_SIDE: EdgeSide = 'right';
 export const DEFAULT_TARGET_SIDE: EdgeSide = 'left';
 
-/** The four valid connection sides — used by `jsonToForm` enum validation. */
-const EDGE_SIDES: readonly EdgeSide[] = ['top', 'right', 'bottom', 'left'];
+/** The four valid connection sides — used by `xmlToForm` enum validation at
+ *  the parse boundary (sides are layout, not graph structure, so they are not
+ *  validated in `validateCustomStateMachine`). Exported so the DOM-dependent
+ *  XML codec (`state-machine-xml.ts`) reuses the one enum source of truth. */
+export const EDGE_SIDES: readonly EdgeSide[] = ['top', 'right', 'bottom', 'left'];
 
 /** One transition edge in the editable state machine. */
 export interface Transition {
@@ -41,7 +46,7 @@ export interface Transition {
 
 /**
  * True when the sides are both default (or absent, which means default). Used
- * by `formToJson` (omit default sides from the Source JSON), `toEdgeRoutingLayoutDto`
+ * by `formToXml` (omit default sides from the Source XML), `toEdgeRoutingLayoutDto`
  * (omit default edges from the sparse wire map), and `isDefaultGraph` (a
  * default-structure graph with custom routing is custom, not default).
  */
@@ -67,6 +72,16 @@ export interface StateMachineForm {
   mode: 'default' | 'custom';
   states: string[];
   transitions: Transition[];
+  /**
+   * State-node canvas positions keyed by state name. `{}` means "use the
+   * deterministic `autoLayout`". Positions are now ON the form/wire
+   * (mirroring `sourceSide`/`targetSide`): `flowToGraph` captures them from
+   * the canvas, `xmlToForm` parses them from the Source XML, and
+   * `toNodePositionsDto` ships them in the separate `nodePositions` wire map.
+   * A drag-stop lifts them via `commit` → `onChange`, and `graphSignature`
+   * includes them so a position change is detectable as an external change.
+   */
+  positions: Record<string, { x: number; y: number }>;
 }
 
 /** The PRD §7 default graph prefilled into the editor's default mode. */
@@ -75,19 +90,29 @@ export function defaultStateMachineForm(): StateMachineForm {
     mode: 'default',
     states: [...DEFAULT_STATE_MACHINE.states],
     transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
+    positions: {},
   };
 }
 
 /**
  * Structural deep-equal against the PRD §7 default graph (prefill mode inference).
  *
- * Considers connection-point sides: a graph that structurally matches the PRD
- * §7 default but has a non-default-routed edge is CUSTOM (the manager touched
- * the handle routing), so it loads as `mode: 'custom'` (editable) rather than
+ * Considers connection-point sides AND node positions: a graph that
+ * structurally matches the PRD §7 default but has a non-default-routed edge or
+ * a non-empty positions map is CUSTOM (the manager touched the handle routing
+ * or moved a node), so it loads as `mode: 'custom'` (editable) rather than
  * `mode: 'default'` (read-only). The PRD default transitions carry no sides
- * (treated as default), so an uncustomized graph stays default.
+ * and the default canvas carries no positions, so an uncustomized graph stays
+ * default. The `positions` param defaults to `{}` (backward-compatible) but
+ * every caller passes the form's positions so a store with saved positions
+ * loads editable, not read-only default.
  */
-export function isDefaultGraph(states: readonly string[], transitions: readonly Transition[]): boolean {
+export function isDefaultGraph(
+  states: readonly string[],
+  transitions: readonly Transition[],
+  positions: Record<string, { x: number; y: number }> = {},
+): boolean {
+  if (Object.keys(positions).length > 0) return false;
   if (states.length !== DEFAULT_STATE_MACHINE.states.length) return false;
   if (transitions.length !== DEFAULT_STATE_MACHINE.transitions.length) return false;
   const sameStates = states.every((s, i) => s === DEFAULT_STATE_MACHINE.states[i]);
@@ -179,6 +204,19 @@ export function toEdgeRoutingLayoutDto(form: StateMachineForm): EdgeRoutingLayou
     };
   }
   return layout;
+}
+
+/**
+ * Builds the node-positions wire map from the form. A shallow copy of
+ * `form.positions` (the form is the source of truth — built by `flowToGraph`
+ * on a canvas commit, or by `xmlToForm` on a Source edit). `{}` means "use the
+ * deterministic `autoLayout`". Mirrors `toEdgeRoutingLayoutDto`'s doc style:
+ * read `form.positions` directly, do not special-case mode (default mode
+ * force-resets the graph in `toStateMachineDto` and the default canvas carries
+ * no positions, so the map is `{}` regardless).
+ */
+export function toNodePositionsDto(form: StateMachineForm): NodePositionsDto {
+  return { ...form.positions };
 }
 
 /**
@@ -340,14 +378,21 @@ export function updateState(form: StateMachineForm, i: number, value: string): S
   // show the old value which is no longer in the states list). Spread preserves
   // the canvas-only `sourceSide`/`targetSide` (a rename must not drop the
   // manager-chosen handle routing — regression: the field-list rebuild used to
-  // drop them, snapping a vertical edge back to L→R on rename).
+  // drop them, snapping a vertical edge back to L→R on rename). The positions
+  // map is keyed by state name, so the renamed state keeps its canvas spot
+  // (the entry is moved to the new key).
   const oldName = form.states[i];
   const transitions = form.transitions.map((t) => ({
     ...t,
     from: t.from === oldName ? value : t.from,
     to: t.to === oldName ? value : t.to,
   }));
-  return { ...form, states, transitions };
+  const positions = { ...form.positions };
+  if (oldName !== value && positions[oldName] !== undefined) {
+    positions[value] = positions[oldName];
+    delete positions[oldName];
+  }
+  return { ...form, states, transitions, positions };
 }
 
 export function addState(form: StateMachineForm): StateMachineForm {
@@ -355,141 +400,18 @@ export function addState(form: StateMachineForm): StateMachineForm {
 }
 
 export function removeState(form: StateMachineForm, i: number): StateMachineForm {
-  return { ...form, states: form.states.filter((_, idx) => idx !== i) };
+  const removedName = form.states[i];
+  // Deleting a state must also drop its positions entry (the map is keyed by
+  // state name), or the stale position would survive a rename-back / re-add
+  // and snap a re-added node to the old spot. Transitions are NOT cascaded here
+  // (the diagram's delete path owns the cascade; this helper is the form-only
+  // slice used by the form-based editor in the wizard).
+  const positions = { ...form.positions };
+  delete positions[removedName];
+  return { ...form, states: form.states.filter((_, idx) => idx !== i), positions };
 }
 
-// --- JSON source view (Kaleo-style "Source" view of the graph) ----------------
-
-/**
- * Serializes the editable state machine into the indented JSON shown in the
- * designer's Source view. The `mode` preset is deliberately NOT included — the
- * source is the graph only (`{ states, transitions }`), and `mode` is a
- * client-only UI preset that never travels on the wire ({@link toStateMachineDto}
- * owns stripping it). Key order is `states` then `transitions` so the output is
- * deterministic and stable across re-serializations (a flickering diff while the
- * manager types would be noise).
- *
- * Connection sides are included on a transition ONLY when non-default
- * (`!isDefaultSides`): a default edge → `{ from, to, actionLabel }`; a vertical
- * edge → `{ from, to, actionLabel, sourceSide: "bottom", targetSide: "top" }`.
- * Both sides are emitted together when either is non-default, so the source
- * never shows a half-routed edge. This mirrors the sparse {@link
- * toEdgeRoutingLayoutDto} wire map — the source is the human-readable twin of
- * the wire map, so they omit the same default entries.
- */
-export function formToJson(form: StateMachineForm): string {
-  return JSON.stringify(
-    {
-      states: form.states,
-      transitions: form.transitions.map((t) => {
-        if (isDefaultSides(t.sourceSide, t.targetSide)) {
-          return { from: t.from, to: t.to, actionLabel: t.actionLabel };
-        }
-        return {
-          from: t.from,
-          to: t.to,
-          actionLabel: t.actionLabel,
-          sourceSide: t.sourceSide ?? DEFAULT_SOURCE_SIDE,
-          targetSide: t.targetSide ?? DEFAULT_TARGET_SIDE,
-        };
-      }),
-    },
-    null,
-    2,
-  );
-}
-
-/** A successful {@link jsonToForm} parse — the rebuilt form (always custom mode). */
-export interface JsonToFormOk {
-  ok: true;
-  form: StateMachineForm;
-}
-
-/** A failed parse — a single manager-facing (Indonesian) error message. */
-export interface JsonToFormErr {
-  ok: false;
-  error: string;
-}
-
-/**
- * Parses the Source view's JSON text back into a {@link StateMachineForm}.
- *
- * **Never throws** — every failure (malformed JSON, wrong shape, a graph the
- * backend would 400) is returned as `{ ok: false, error }` so a half-typed
- * textarea can never crash the designer page. The textarea is the one untrusted
- * input on this surface; funneling every failure through a result type keeps the
- * page resilient (mirrors the domain rule that a shared VO's construction
- * failure is a result/400, not an uncaught throw).
- *
- * The returned form is ALWAYS `mode: 'custom'` — editing the source is an
- * explicit custom-graph intent, so even a JSON that deep-equals the PRD §7
- * default graph is treated as custom (the manager typed it). This matches
- * {@link toStateMachineDto}'s contract: it force-resets to the default graph
- * only when `mode === 'default'`, and a manager who touched the source chose
- * custom.
- *
- * Unknown top-level keys are ignored (lenient on extras, strict on the required
- * `states`/`transitions` shape); per-transition unknown keys are likewise
- * ignored. Validation runs through the shared {@link validateCustomStateMachine}
- * so the source view and the visual diagram enforce the same invariants — the
- * first error is returned (one message at a time stays readable in the textarea
- * gutter; the full list is visible in the Diagram view's `sm-errors`).
- */
-export function jsonToForm(json: string): JsonToFormOk | JsonToFormErr {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(json);
-  } catch (err) {
-    return { ok: false, error: `JSON tidak valid: ${err instanceof Error ? err.message : String(err)}` };
-  }
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return { ok: false, error: 'JSON harus berupa objek dengan "states" dan "transitions".' };
-  }
-  const obj = parsed as Record<string, unknown>;
-  if (!Array.isArray(obj.states)) {
-    return { ok: false, error: 'Field "states" harus berupa daftar (array).' };
-  }
-  if (!Array.isArray(obj.transitions)) {
-    return { ok: false, error: 'Field "transitions" harus berupa daftar (array).' };
-  }
-  for (const s of obj.states) {
-    if (typeof s !== 'string') {
-      return { ok: false, error: 'Setiap status harus berupa teks (string).' };
-    }
-  }
-  for (const t of obj.transitions) {
-    if (t === null || typeof t !== 'object' || Array.isArray(t)) {
-      return { ok: false, error: 'Setiap transisi harus berupa objek.' };
-    }
-    const tr = t as Record<string, unknown>;
-    if (typeof tr.from !== 'string' || typeof tr.to !== 'string' || typeof tr.actionLabel !== 'string') {
-      return { ok: false, error: 'Setiap transisi harus memiliki "from", "to", dan "actionLabel" berupa teks.' };
-    }
-    // Optional connection sides: when present must be a valid EdgeSide enum.
-    // The side enum is validated HERE (the parse boundary), NOT in
-    // `validateCustomStateMachine` — sides are layout, not graph structure.
-    if (tr.sourceSide !== undefined) {
-      if (typeof tr.sourceSide !== 'string' || !EDGE_SIDES.includes(tr.sourceSide as EdgeSide)) {
-        return { ok: false, error: '"sourceSide" harus salah satu dari "top", "right", "bottom", "left".' };
-      }
-    }
-    if (tr.targetSide !== undefined) {
-      if (typeof tr.targetSide !== 'string' || !EDGE_SIDES.includes(tr.targetSide as EdgeSide)) {
-        return { ok: false, error: '"targetSide" harus salah satu dari "top", "right", "bottom", "left".' };
-      }
-    }
-  }
-  const form: StateMachineForm = {
-    mode: 'custom',
-    states: obj.states as string[],
-    transitions: obj.transitions as Transition[],
-  };
-  const errors = validateCustomStateMachine(form);
-  if (errors.length > 0) {
-    return { ok: false, error: errors[0] };
-  }
-  return { ok: true, form };
-}
+// --- graph signature (change detection for the re-seed / source-sync guards) ---
 
 /**
  * A canonical graph-structure signature for change detection. Used by the
@@ -497,15 +419,24 @@ export function jsonToForm(json: string): JsonToFormOk | JsonToFormErr {
  * page's source-sync guard ({@link AlurStatusDesigner}) to distinguish an
  * EXTERNAL value change (post-save re-GET, prefill change) from a change WE
  * drove (an in-session edit), so a self-driven round-trip never re-seeds the
- * canvas (which would snap handle routing back to default).
+ * canvas (which would snap handle routing / positions back to default).
  *
  * Excludes `mode` (the canvas graph = `states`/`transitions` regardless of
- * mode; mode only toggles read-only) and positions (owned internally, never on
- * the wire). The side canonicalization (undefined → default) is LOAD-BEARING:
- * after a save+re-GET, `toForm` merges non-default sides back from
- * `edgeRoutingLayout` (default edges get undefined), so the post-save signature
- * equals the pre-save signature → no spurious re-seed and the manager-chosen
- * handles survive in-session.
+ * mode; mode only toggles read-only). Includes a canonicalized `p` field for
+ * positions — positions are now ON the form/wire (mirroring sides), so a
+ * position change is an external change the guards must detect: a diagram
+ * drag-stop (position change) is "our own change" (`lastEmitted` stamped before
+ * `onChange` → the sync effect skips the re-seed → no snap), and a source
+ * position edit re-seeds the canvas to the source positions. The position
+ * entries are canonicalized (sorted by key) so the signature is order-
+ * insensitive (the wire map is a `Record`, never an ordered map).
+ *
+ * The side canonicalization (undefined → default) is LOAD-BEARING: after a
+ * save+re-GET, `toForm` merges non-default sides back from `edgeRoutingLayout`
+ * (default edges get undefined), so the post-save signature equals the
+ * pre-save signature → no spurious re-seed and the manager-chosen handles
+ * survive in-session. The same holds for positions: the post-save round-trip
+ * persists them exactly (non-sparse, order-insensitive signature).
  */
 export function graphSignature(form: StateMachineForm): string {
   return JSON.stringify({
@@ -517,5 +448,8 @@ export function graphSignature(form: StateMachineForm): string {
       sourceSide: t.sourceSide ?? DEFAULT_SOURCE_SIDE,
       targetSide: t.targetSide ?? DEFAULT_TARGET_SIDE,
     })),
+    p: Object.entries(form.positions)
+      .map(([k, v]) => `${k}:${v.x},${v.y}`)
+      .sort(),
   });
 }

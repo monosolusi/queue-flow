@@ -81,6 +81,7 @@ describe('SaveSystemConfigurationUseCase — daily-reset policy audit + re-arm (
         { id: 'runningText', component: 'runningText', x: 0, y: 10, w: 12, h: 1 },
       ],
       edgeRoutingLayout: {},
+      nodePositions: {},
       actor: 'admin',
       ...overrides,
     };

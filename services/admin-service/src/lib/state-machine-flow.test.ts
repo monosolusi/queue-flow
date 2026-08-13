@@ -115,6 +115,7 @@ describe('formToFlow', () => {
           ? { ...t, sourceSide: 'bottom' as const, targetSide: 'top' as const }
           : { ...t },
       ),
+      positions: {},
     };
     const { edges } = formToFlow(form, {});
     const waitingCalling = edges.find((e) => e.source === 'WAITING' && e.target === 'CALLING')!;
@@ -142,6 +143,7 @@ describe('formToFlow', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go', sourceSide: 'bottom' }],
+      positions: {},
     };
     const { edges } = formToFlow(form, {});
     expect(edges[0].sourceHandle).toBe(HANDLE_IDS.bottomSource);
@@ -169,6 +171,21 @@ describe('formToFlow', () => {
     // CALLING was not provided → falls back to autoLayout.
     const calling = nodes.find((n) => n.id === 'CALLING')!;
     expect(calling.position.x).toBeGreaterThan(0);
+  });
+
+  it('prefers form.positions over the provided positions arg (save+re-GET round-trip)', () => {
+    // Position priority: `value.positions[name]` → `positions` arg (oldPositions)
+    // → `auto[name]` → `{0,0}`. A form that carries saved positions (from a
+    // re-GET) MUST win over the stale oldPositions arg so a save+re-GET does not
+    // snap the nodes back to their pre-save locations.
+    const form: StateMachineForm = {
+      ...defaultStateMachineForm(),
+      positions: { WAITING: { x: 99, y: 88 } },
+    };
+    const positions = { WAITING: { x: 10, y: 20 } }; // stale oldPositions
+    const { nodes } = formToFlow(form, positions);
+    const waiting = nodes.find((n) => n.id === 'WAITING')!;
+    expect(waiting.position).toEqual({ x: 99, y: 88 });
   });
 
   it('stamps an arrow markerEnd on every edge so direction reads', () => {
@@ -204,6 +221,22 @@ describe('flowToGraph', () => {
       expect(t.sourceSide).toBe('right');
       expect(t.targetSide).toBe('left');
     }
+  });
+
+  it('captures node positions into the positions map (drag → form → wire)', () => {
+    // `flowToGraph` returns a `positions` map keyed by `n.data.name → n.position`
+    // so a manager-dragged node's new location flows through `commit` → `onChange`
+    // → save into the `nodePositions` wire field.
+    const form = defaultStateMachineForm();
+    const { nodes, edges } = formToFlow(form, {});
+    // Move WAITING to a known position.
+    const moved = nodes.map((n) =>
+      n.id === 'WAITING' ? { ...n, position: { x: 42, y: 7 } } : n,
+    );
+    const { positions } = flowToGraph(moved, edges);
+    expect(positions.WAITING).toEqual({ x: 42, y: 7 });
+    // The other nodes keep their autoLayout positions.
+    expect(positions.CALLING).toBeDefined();
   });
 
   it('preserves node array order as the states order', () => {
@@ -317,8 +350,9 @@ describe('flowToGraph', () => {
     expect(result.states).toEqual(['A', 'B']);
     // The states array is `string[]` — no object carries the description.
     expect(result.states.every((s) => typeof s === 'string')).toBe(true);
-    // The output shape is exactly `{ states, transitions }` — no `description` key.
-    expect(Object.keys(result).sort()).toEqual(['states', 'transitions']);
+    // The output shape is exactly `{ states, transitions, positions }` — no
+    // `description` key (the client-side description never reaches the form).
+    expect(Object.keys(result).sort()).toEqual(['positions', 'states', 'transitions']);
   });
 
   it('formToFlow stamps data.description from describeState on every node', () => {
@@ -345,6 +379,7 @@ describe('flowToGraph', () => {
         { from: 'ONHOLD', to: 'WAITING', actionLabel: 'Kembali' },
         { from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut' },
       ],
+      positions: {},
     };
     const nodes: import('./state-machine-flow').FlowNode[] = [
       { id: 'WAITING', type: 'state', position: { x: 0, y: 0 }, data: { name: 'WAITING', description: '' } },
@@ -514,6 +549,7 @@ describe('side ↔ handle mappers', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go', sourceSide: 'bottom', targetSide: 'top' }],
+      positions: {},
     };
     const { nodes, edges } = formToFlow(form, {});
     const { transitions } = flowToGraph(nodes, edges);

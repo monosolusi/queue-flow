@@ -35,6 +35,7 @@ import {
   isDefaultGraph,
   mergeEdgeSides,
   toEdgeRoutingLayoutDto,
+  toNodePositionsDto,
   toStateMachineDto,
   validateCustomStateMachine,
 } from '../lib/state-machine';
@@ -361,6 +362,11 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
           config.stateMachine.transitions,
           config.edgeRoutingLayout,
         );
+        // Prefill positions from the wire map (mirrors edgeRoutingLayout /
+        // mergeEdgeSides prefill) so a wizard re-edit round-trips the canvas
+        // positions. The wizard uses the form-based StateMachineEditor (no
+        // canvas), so positions stay `{}` for a first-run store.
+        const smPositions = config.nodePositions ?? {};
         setForm({
           storeName: config.storeName,
           brandColor: config.brandColor || DEFAULT_BRAND_COLOR,
@@ -380,11 +386,12 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
           // default-structure graph with custom routing loads as custom, and a
           // wizard re-edit preserves the handles on re-save.
           stateMachine: {
-            mode: isDefaultGraph(config.stateMachine.states, smMergedTransitions)
+            mode: isDefaultGraph(config.stateMachine.states, smMergedTransitions, smPositions)
               ? 'default'
               : 'custom',
             states: [...config.stateMachine.states],
             transitions: smMergedTransitions,
+            positions: smPositions,
           },
           dailyReset: {
             mode: config.dailyResetPolicy.mode,
@@ -561,11 +568,13 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
       await api.saveSystemConfig({
         storeName: form.storeName,
         stateMachine: sm,
-        // The wizard uses the form-based StateMachineEditor (no handles drawn),
-        // so the form transitions carry no sides → the map is `{}`. Send it
-        // anyway — it is a required wire field now (the client is the source of
-        // truth for handles).
+        // The wizard uses the form-based StateMachineEditor (no handles drawn,
+        // no canvas), so the form transitions carry no sides and positions are
+        // `{}` → both maps are `{}`. Send them anyway — they are required wire
+        // fields now (the client is the source of truth for handle routing and
+        // canvas positions).
         edgeRoutingLayout: toEdgeRoutingLayoutDto(form.stateMachine),
+        nodePositions: toNodePositionsDto(form.stateMachine),
         dailyReset: {
           mode: form.dailyReset.mode,
           cronExpression: form.dailyReset.mode === 'AUTOMATIC_CRON' ? form.dailyReset.cronExpression : null,

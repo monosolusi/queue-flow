@@ -16,6 +16,7 @@ import {
   type CleanupTransactionLogResultDto,
   type EdgeRoutingLayoutDto,
   type ManualResetResultDto,
+  type NodePositionsDto,
   type SaveSystemConfigurationPayload,
   type ServiceThemesMap,
   type SystemConfigurationDto,
@@ -50,6 +51,7 @@ function configuredStore(): SystemConfigurationDto {
     serviceThemes: { ...DEFAULT_SERVICE_THEMES },
     tvPanelLayout: DEFAULT_TV_GRID_LAYOUT,
     edgeRoutingLayout: {},
+    nodePositions: {},
   };
 }
 
@@ -65,7 +67,7 @@ function unassignedRoutingStore(): SystemConfigurationDto {
 
 function makeApi(
   config: SystemConfigurationDto = configuredStore(),
-  saveImpl?: (payload: SaveSystemConfigurationPayload) => Promise<{ isInitialSetupCompleted: boolean; storeName: string; brandColor: string; serviceThemes: ServiceThemesMap; tvPanelLayout: TvGridLayout; edgeRoutingLayout: EdgeRoutingLayoutDto }>,
+  saveImpl?: (payload: SaveSystemConfigurationPayload) => Promise<{ isInitialSetupCompleted: boolean; storeName: string; brandColor: string; serviceThemes: ServiceThemesMap; tvPanelLayout: TvGridLayout; edgeRoutingLayout: EdgeRoutingLayoutDto; nodePositions: NodePositionsDto }>,
   overrides?: {
     manualReset?: () => Promise<ManualResetResultDto>;
     cleanup?: (retentionDays: number) => Promise<CleanupTransactionLogResultDto>;
@@ -74,7 +76,7 @@ function makeApi(
   const save = vi.fn(
     saveImpl ??
       ((payload: SaveSystemConfigurationPayload) =>
-        Promise.resolve({ isInitialSetupCompleted: true, storeName: payload.storeName, brandColor: payload.brandColor, serviceThemes: payload.serviceThemes, tvPanelLayout: payload.tvPanelLayout, edgeRoutingLayout: {} })),
+        Promise.resolve({ isInitialSetupCompleted: true, storeName: payload.storeName, brandColor: payload.brandColor, serviceThemes: payload.serviceThemes, tvPanelLayout: payload.tvPanelLayout, edgeRoutingLayout: {}, nodePositions: {} })),
   );
   // The panel reloads the config after a successful save; default to returning
   // the same config (with ids preserved) so the post-save repopulate succeeds.
@@ -1003,6 +1005,7 @@ describe('AdminPanel shared-config coherence', () => {
           serviceThemes: payload.serviceThemes,
           tvPanelLayout: payload.tvPanelLayout,
           edgeRoutingLayout: {},
+          nodePositions: {},
         });
       },
     );

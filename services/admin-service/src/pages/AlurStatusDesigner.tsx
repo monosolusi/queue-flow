@@ -7,10 +7,12 @@
  * to see (`.sm-canvas` was `60vh / min 360px` crammed inside a config card). This
  * page gives the canvas the full `<main>` width + a tall height, and adds a
  * Kaleo-Workflow-Designer-style **Diagram / Source toggle**: a visual editor
- * (React Flow) and an editable JSON source view of the same `{ states,
- * transitions }` graph. The wire format to core-api stays JSON (via the existing
- * `toStateMachineDto`); the source view is just a different VIEW over the same
- * `StateMachineForm`, never a second source of truth.
+ * (React Flow) and an editable XML source view of the same state-machine graph
+ * (`<stateMachine>` with `<state>` x/y positions + `<transition>` connection
+ * sides + from→to direction). The wire format to core-api stays JSON (via the
+ * existing `toStateMachineDto` + `toNodePositionsDto`); the XML source view is
+ * just a different VIEW over the same `StateMachineForm`, never a second
+ * source of truth.
  *
  * **Shared draft.** The page reads the config draft from {@link useConfigDraft}
  * — the SAME draft the `/admin/config` panel edits. The {@link ConfigDraftProvider}
@@ -30,7 +32,7 @@
  * our own edits (no re-serialize → the manager's typing/cursor is never
  * clobbered) and only re-serializes on an EXTERNAL draft change (a diagram edit
  * while in Diagram view, or a post-save re-seed). Invalid source text never
- * reaches the draft — `jsonToForm` returns `{ ok: false, error }` and we set the
+ * reaches the draft — `xmlToForm` returns `{ ok: false, error }` and we set the
  * error WITHOUT `setState`-ing, so the diagram (and the shared draft) stays at
  * the last valid graph and the manager keeps typing toward a valid one.
  */
@@ -41,7 +43,8 @@ import { StateMachineSource } from '../components/StateMachineSource';
 import { StateMachineWorkflow } from '../components/StateMachineWorkflow';
 import { useConfigDraft } from './admin-config/config-draft-context';
 import { computeFormValidity } from './admin-config/validity';
-import { formToJson, graphSignature, jsonToForm } from '../lib/state-machine';
+import { graphSignature } from '../lib/state-machine';
+import { formToXml, xmlToForm } from '../lib/state-machine-xml';
 
 export function AlurStatusDesigner(): JSX.Element {
   const { state, setState, save, submitting, retry, savedAt } = useConfigDraft();
@@ -49,8 +52,8 @@ export function AlurStatusDesigner(): JSX.Element {
   const [view, setView] = useState<'diagram' | 'source'>('diagram');
   // The source-view mirror of the draft's state machine. Kept in sync with the
   // draft by the effect below; the textarea is controlled over this, NOT over
-  // `formToJson(draft)` directly (so the manager's in-progress, possibly-invalid
-  // typing is preserved between keystrokes — a live `formToJson` would reformat
+  // `formToXml(draft)` directly (so the manager's in-progress, possibly-invalid
+  // typing is preserved between keystrokes — a live `formToXml` would reformat
   // and jump the cursor on every render).
   const [sourceText, setSourceText] = useState('');
   const [sourceError, setSourceError] = useState<string | null>(null);
@@ -72,7 +75,7 @@ export function AlurStatusDesigner(): JSX.Element {
     const sig = graphSignature(state.form.stateMachine);
     if (sig !== lastEmittedSig.current) {
       lastEmittedSig.current = sig;
-      setSourceText(formToJson(state.form.stateMachine));
+      setSourceText(formToXml(state.form.stateMachine));
       setSourceError(null);
     }
   }, [state]);
@@ -116,11 +119,11 @@ export function AlurStatusDesigner(): JSX.Element {
   /** Lift a valid source edit to the shared draft; record an invalid one as an error. */
   function handleSourceChange(next: string): void {
     setSourceText(next);
-    const result = jsonToForm(next);
+    const result = xmlToForm(next);
     if (result.ok) {
       // Stamp the ref BEFORE setState so the sync effect treats this as our own
       // change and skips the re-serialize (preserves `next` verbatim — no
-      // reformat/cursor jump). Mode is forced to 'custom' by `jsonToForm`.
+      // reformat/cursor jump). Mode is forced to 'custom' by `xmlToForm`.
       lastEmittedSig.current = graphSignature(result.form);
       setState({ status: 'ready', form: { ...form, stateMachine: result.form } });
       setSourceError(null);
@@ -136,7 +139,7 @@ export function AlurStatusDesigner(): JSX.Element {
    *  draft change, so an invalid `sourceText` left from a prior visit is intact
    *  but its error was cleared on the Diagram switch). */
   function switchToSource(): void {
-    const result = jsonToForm(sourceText);
+    const result = xmlToForm(sourceText);
     setSourceError(result.ok ? null : result.error);
     setView('source');
   }

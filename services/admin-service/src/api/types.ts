@@ -138,6 +138,29 @@ export interface EdgeSides {
  */
 export type EdgeRoutingLayoutDto = Record<string, EdgeSides>;
 
+/**
+ * One state node's canvas position (column/row-pixel coordinates on the
+ * state-machine diagram). Mirrors core-api's `NodePosition` VO. Keyed by
+ * state NAME (not id — the state-machine graph carries no ids), so a state
+ * rename renames the key (the form helpers `updateState`/`removeState` keep
+ * the map consistent).
+ */
+export interface NodePosition {
+  readonly x: number;
+  readonly y: number;
+}
+
+/**
+ * Persisted node positions for the state-machine diagram, keyed by state
+ * name. `{}` means "use the deterministic `autoLayout`" (the client's
+ * left-to-right ranking). Non-sparse: every state whose position is known
+ * has an entry. NOT change-gated for audit (an appearance concern, like
+ * {@link EdgeRoutingLayoutDto} / `tvPanelLayout` / `serviceThemes` /
+ * `brandColor`). Mirrors core-api's `NodePositions` VO + the
+ * `edgeRoutingLayout` field-for-field precedent.
+ */
+export type NodePositionsDto = Record<string, NodePosition>;
+
 export interface DailyResetPolicyDto {
   readonly mode: DailyResetMode;
   readonly cronExpression: string | null;
@@ -185,6 +208,11 @@ export interface SystemConfigurationDto {
    *  the default L→R routing); `toForm` keeps a defensive `?? {}` coercion
    *  (belt-and-suspenders, same as `tvPanelLayout ?? DEFAULT_TV_GRID_LAYOUT`). */
   readonly edgeRoutingLayout: EdgeRoutingLayoutDto;
+  /** State-node canvas positions keyed by state name (appearance concern,
+   *  not change-gated). Always present — the backend defaults to `{}` (use
+   *  the deterministic autoLayout); `toForm` keeps a defensive `?? {}`
+   *  coercion (belt-and-suspenders, same as `edgeRoutingLayout`). */
+  readonly nodePositions: NodePositionsDto;
 }
 
 /**
@@ -229,6 +257,10 @@ export interface SaveSystemConfigurationPayload {
    *  the map (built by `toEdgeRoutingLayoutDto`); `{}` when every edge uses the
    *  default routing. */
   readonly edgeRoutingLayout: EdgeRoutingLayoutDto;
+  /** State-node canvas positions (REQUIRED on the PUT — the client is the
+   *  source of truth for positions now and always sends the map, built by
+   *  `toNodePositionsDto`; `{}` when the canvas was never customized). */
+  readonly nodePositions: NodePositionsDto;
 }
 
 /** Result of `PUT /api/system/config`. */
@@ -242,6 +274,10 @@ export interface SaveSystemConfigurationResult {
    *  The save path ignores the result body and re-GETs, so this is not
    *  load-bearing; kept for contract completeness (mirrors `tvPanelLayout`). */
   readonly edgeRoutingLayout: EdgeRoutingLayoutDto;
+  /** Always echoed by the backend (mirrors the persisted map). The save path
+   *  ignores the result body and re-GETs, so this is not load-bearing; kept
+   *  for contract completeness (mirrors `edgeRoutingLayout`). */
+  readonly nodePositions: NodePositionsDto;
 }
 
 /**
@@ -284,6 +320,14 @@ export const DEFAULT_DAILY_RESET: DailyResetPolicyDto = {
  * regression, mirroring {@link DEFAULT_TV_GRID_LAYOUT}).
  */
 export const DEFAULT_EDGE_ROUTING_LAYOUT: EdgeRoutingLayoutDto = {};
+
+/**
+ * Empty node-positions map — "use the deterministic `autoLayout`". Matches
+ * the backend `NodePositions.DEFAULT` so a store that never customizes node
+ * positions keeps the existing diagram layout (zero visual regression,
+ * mirroring {@link DEFAULT_EDGE_ROUTING_LAYOUT}).
+ */
+export const DEFAULT_NODE_POSITIONS: NodePositionsDto = {};
 
 /**
  * The shared accent color the four frontends hardcode in `:root` (`--accent:

@@ -9,6 +9,7 @@ import {
   ServiceThemes,
   TvPanelLayout,
   EdgeRoutingLayout,
+  NodePositions,
   StateMachine,
   StateSchema,
   StateTransitionRule,
@@ -96,6 +97,7 @@ describe('StateTransitionValidator (active-policy resolver — QUE-10 AC#1)', ()
       serviceThemes: ServiceThemes.DEFAULT,
       tvPanelLayout: TvPanelLayout.DEFAULT,
       edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
+      nodePositions: NodePositions.DEFAULT,
     });
     await config.save(system);
 

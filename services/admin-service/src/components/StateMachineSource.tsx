@@ -1,16 +1,17 @@
 /**
- * The JSON "Source" view of the Alur Status Tiket graph — a Kaleo-Designer-style
+ * The XML "Source" view of the Alur Status Tiket graph — a Kaleo-Designer-style
  * editable source pane alongside the visual {@link StateMachineWorkflow} diagram.
  *
  * Purely presentational: it renders a controlled `<textarea>` carrying the
- * serialized graph (`{ states, transitions }` as indented JSON) plus an inline
- * error region. **All parsing/validation lives in the designer page** — this
- * component never calls `JSON.parse` or `jsonToForm`. Keeping the textarea dumb
- * means a half-typed document can never crash it: the designer live-parses on
- * every `onChange`, lifts a valid graph to the shared draft, and on a parse
- * failure sets `error` (shown here) WITHOUT `setState`-ing a broken form, so the
- * diagram view is never clobbered by invalid source. The textarea stays
- * editable and the manager keeps typing toward a valid graph.
+ * serialized graph (an XML document with `<state>` x/y positions + `<transition>`
+ * connection sides + from→to direction) plus an inline error region. **All
+ * parsing/validation lives in the designer page** — this component never calls
+ * `DOMParser` or `xmlToForm`. Keeping the textarea dumb means a half-typed
+ * document can never crash it: the designer live-parses on every `onChange`,
+ * lifts a valid graph to the shared draft, and on a parse failure sets `error`
+ * (shown here) WITHOUT `setState`-ing a broken form, so the diagram view is
+ * never clobbered by invalid source. The textarea stays editable and the
+ * manager keeps typing toward a valid graph.
  *
  * SRP split vs. the designer: the designer owns the view-toggle state machine
  * (Diagram↔Source), the round-trip lifecycle (re-serialize on Diagram→Source,
@@ -18,20 +19,21 @@
  * textarea affordance + its a11y wiring. Mirrors the `StateMachineWorkflow`
  * split (visual editor is presentational over the same `StateMachineForm`).
  *
- * **Connector legend (`connectors`).** Manager feedback: the raw JSON source
- * did not explain which point connects to which (`tidak dijelaskan ini konek
- * pada titik yang mana ke titik yang mana, jadinya ruwet`). The `from`/`to`
- * keys encode a directed connector (panah) but that direction is invisible in a
- * flat JSON list. So this view renders a read-only legend of the connectors —
- * one chip per transition, `from → to · actionLabel` — between the hint and the
- * textarea. The legend is a VIEW over the SAME last-valid draft the diagram
- * shows (passed in as `connectors`); it never parses `sourceText` itself, so a
- * broken textarea can never show a broken graph here — while the manager types
- * invalid JSON the legend stays at the last-valid connectors and the inline
- * `error` region explains the divergence. The arrow glyph carries the direction
- * the JSON keys encode; `.sr-only` bridge words keep that direction + the label
- * AT-readable (a screen reader announces "WAITING ke CALLING aksi: Panggil
- * Berikutnya", not "rightwards arrow" run together with the label).
+ * **Connector legend (`connectors`).** Manager feedback: the raw source did
+ * not explain which point connects to which (`tidak dijelaskan ini konek pada
+ * titik yang mana ke titik yang mana, jadinya ruwet`). The `from`/`to`
+ * attributes encode a directed connector (panah) but that direction is
+ * invisible in a flat element list. So this view renders a read-only legend of
+ * the connectors — one chip per transition, `from → to · actionLabel` —
+ * between the hint and the textarea. The legend is a VIEW over the SAME
+ * last-valid draft the diagram shows (passed in as `connectors`); it never
+ * parses `sourceText` itself, so a broken textarea can never show a broken
+ * graph here — while the manager types invalid XML the legend stays at the
+ * last-valid connectors and the inline `error` region explains the divergence.
+ * The arrow glyph carries the direction the XML attributes encode; `.sr-only`
+ * bridge words keep that direction + the label AT-readable (a screen reader
+ * announces "WAITING ke CALLING aksi: Panggil Berikutnya", not "rightwards
+ * arrow" run together with the label).
  */
 import { isDefaultSides, type Transition } from '../lib/state-machine';
 import './state-machine-workflow.css';
@@ -42,7 +44,7 @@ export function StateMachineSource({
   error,
   connectors,
 }: {
-  /** The current JSON source text (controlled). */
+  /** The current XML source text (controlled). */
   sourceText: string;
   /** Fired on every keystroke with the raw textarea value — the designer parses it. */
   onSourceChange: (next: string) => void;
@@ -60,16 +62,18 @@ export function StateMachineSource({
   return (
     <div className="sm-source-wrap">
       <label htmlFor="sm-source" className="sm-source__label">
-        Sumber JSON alur status
+        Sumber XML alur status
       </label>
       <p className="sm-source__hint">
         Tiap transisi adalah <strong>konektor (panah)</strong> dari satu titik
-        status ke titik status lain: <code>from</code> = titik asal,{' '}
-        <code>to</code> = titik tujuan, <code>actionLabel</code> = label tombol
-        aksi. <code>sourceSide</code>/<code>targetSide</code> opsional:{' '}
+        status ke titik status lain: <code>&lt;transition from="…" to="…"
+        actionLabel="…"/&gt;</code>. Atribut <code>sourceSide</code>/{' '}
+        <code>targetSide</code> opsional:{' '}
         <code>"top"</code>|<code>"right"</code>|<code>"bottom"</code>|<code>"left"</code>{' '}
         (default <code>right</code>→<code>left</code>); menentukan titik sambungan
-        saat digambar ulang. Mengubah sumber ini menyusun alur kustom sendiri.
+        saat digambar ulang. Tiap <code>&lt;state name="…" x="…" y="…"/&gt;</code>{' '}
+        menyimpan posisi simpul di kanvas. Mengubah sumber ini menyusun alur
+        kustom sendiri.
       </p>
 
       {/* Connector legend — the "indikator konektor" (from → to) the manager
