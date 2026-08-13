@@ -949,10 +949,8 @@ describe('Alur Status Tiket designer — warning relocation + dedicated full-pag
     expect(del).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
   });
 
-  it('the Aksi + Nilai row uses text/accent tokens (no hardcoded color)', () => {
-    expect(wfRule('.sm-properties__action-type')).toContain('color: var(--accent-on-surface)');
+  it('the Aksi + Nilai row labels use text tokens (no hardcoded color)', () => {
     expect(wfRule('.sm-properties__action-label')).toContain('color: var(--text)');
-    expect(wfRule('.sm-properties__action-type')).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
     expect(wfRule('.sm-properties__action-label')).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
   });
 

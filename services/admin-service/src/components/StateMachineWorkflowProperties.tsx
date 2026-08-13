@@ -37,6 +37,7 @@
 import { useEffect, useState } from "react";
 import {
   describeState,
+  NODE_ACTION_TYPE_LABELS,
   type StateMachineForm,
 } from "../lib/state-machine";
 import {
@@ -45,6 +46,18 @@ import {
   type FlowNode,
 } from "../lib/state-machine-flow";
 import type { WorkflowHandlers } from "./StateMachineWorkflowNodes";
+import type { NodeActionType } from "../api/types";
+
+/** The action-type options shown in the "Aksi" dropdown, built from the shared
+ *  `NODE_ACTION_TYPE_LABELS` map (the single source of truth in the pure
+ *  `state-machine.ts` — a `Record<NodeActionType, string>` exhaustive guard, so
+ *  a future action type is a one-line addition there that flows here
+ *  automatically). One option today (`UPDATE_STATUS`); the manager chose a
+ *  dropdown over a read-only badge so the control is structurally ready as
+ *  more action types arrive. */
+const NODE_ACTION_TYPE_OPTIONS: ReadonlyArray<{ value: NodeActionType; label: string }> = (
+  Object.keys(NODE_ACTION_TYPE_LABELS) as NodeActionType[]
+).map((value) => ({ value, label: NODE_ACTION_TYPE_LABELS[value] }));
 
 export interface WorkflowPropertiesPanelProps {
   mode: "default" | "custom";
@@ -357,13 +370,14 @@ export function StateMachineWorkflowProperties({
         <aside className="sm-properties" data-testid="sm-properties" aria-label="Properti aksi otomatis">
           {subViewBackButton}
           {/* "Aksi" — node-level actions, NOT linked to any edge.
-              Each row is "Saat" (ON_ENTRY/ON_EXIT, when the action fires) + a
-              read-only "Update Status" chip (the fixed action type — the only
-              QMS action semantic today) + "Nilai" (the target status, an
-              editable <select> of all states) + a "Hapus" button. "+ Tambah
-              aksi" adds a new node-level action (onAddNodeAction). Panel-only:
-              the canvas never reflects these (they are not transitions); a
-              node-action edit lifts as a form-only change (no re-seed). */}
+              Each row is "Saat" (ON_ENTRY/ON_EXIT, when the action fires) + an
+              "Aksi" dropdown (the action type — `UPDATE_STATUS` today, editable
+              via a <select> so the control is ready as more action types
+              arrive) + "Nilai" (the target status, an editable <select> of all
+              states) + a "Hapus" button. "+ Tambah aksi" adds a new node-level
+              action (onAddNodeAction). Panel-only: the canvas never reflects
+              these (they are not transitions); a node-action edit lifts as a
+              form-only change (no re-seed). */}
           <div className="sm-properties__field">
             <p className="sm-properties__label" id="panel-node-actions-label">
               Aksi
@@ -383,6 +397,7 @@ export function StateMachineWorkflowProperties({
               >
                 {nodeActions.map((action, i) => {
                   const saatId = `panel-node-action-saat-${i}`;
+                  const typeId = `panel-node-action-type-${i}`;
                   const toId = `panel-node-action-to-${i}`;
                   return (
                     <li key={i} className="sm-properties__action">
@@ -403,13 +418,26 @@ export function StateMachineWorkflowProperties({
                         <option value="ON_ENTRY">Saat masuk</option>
                         <option value="ON_EXIT">Saat keluar</option>
                       </select>
-                      <p className="sm-properties__action-label">Aksi</p>
-                      <span
-                        className="sm-properties__action-type"
+                      <label className="sm-properties__action-label" htmlFor={typeId}>
+                        Aksi
+                      </label>
+                      <select
+                        id={typeId}
+                        className="sm-properties__input"
                         data-testid={`panel-node-action-type-${i}`}
+                        value={action.type}
+                        onChange={(e) =>
+                          handlers.onEditNodeAction(name, i, {
+                            type: e.target.value as NodeActionType,
+                          })
+                        }
                       >
-                        Update Status
-                      </span>
+                        {NODE_ACTION_TYPE_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
                       <label className="sm-properties__action-label" htmlFor={toId}>
                         Nilai
                       </label>
