@@ -7,6 +7,7 @@ export * from './state-machine';
 export * from './system-configuration.aggregate';
 export * from './value-objects/brand-color';
 export * from './value-objects/daily-reset-policy';
+export * from './value-objects/edge-routing-layout';
 export * from './value-objects/priority-policy';
 export * from './value-objects/service-themes';
 export * from './value-objects/state-schema';

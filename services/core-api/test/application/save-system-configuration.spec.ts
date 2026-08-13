@@ -7,6 +7,7 @@ import {
   StateMachine,
   DailyResetMode,
   SystemConfigurationChangedEvent,
+  EdgeRoutingLayout,
 } from '../../src/domain/store-config';
 import type { DomainEvent } from '../../src/domain/shared/domain-event';
 import type { IEventDispatcher } from '../../src/domain/shared/event-dispatcher.port';
@@ -69,6 +70,7 @@ describe('SaveSystemConfigurationUseCase — category id preservation (QUE-24)',
         { id: 'countersServing', component: 'countersServing', x: 0, y: 7, w: 12, h: 3 },
         { id: 'runningText', component: 'runningText', x: 0, y: 10, w: 12, h: 1 },
       ],
+      edgeRoutingLayout: {},
       actor: 'admin',
     };
   }
@@ -188,6 +190,7 @@ describe('SaveSystemConfigurationUseCase — brandColor (QUE-36)', () => {
         { id: 'countersServing', component: 'countersServing', x: 0, y: 7, w: 12, h: 3 },
         { id: 'runningText', component: 'runningText', x: 0, y: 10, w: 12, h: 1 },
       ],
+      edgeRoutingLayout: {},
       actor: 'admin',
     };
   }
@@ -308,6 +311,7 @@ describe('SaveSystemConfigurationUseCase — SYSTEM_CONFIG_CHANGED broadcast (FR
         { id: 'countersServing', component: 'countersServing', x: 0, y: 7, w: 12, h: 3 },
         { id: 'runningText', component: 'runningText', x: 0, y: 10, w: 12, h: 1 },
       ],
+      edgeRoutingLayout: {},
       actor: 'admin',
     };
   }
@@ -368,5 +372,149 @@ describe('SaveSystemConfigurationUseCase — SYSTEM_CONFIG_CHANGED broadcast (FR
     );
     // Post-commit broadcast never fires — the save rolled back pre-tx (NFR-REL-02).
     expect(published).toHaveLength(0);
+  });
+});
+
+/**
+ * Edge routing layout persistence (per-edge connection-point map for the admin
+ * state-machine visual editor). `edgeRoutingLayout` is a required field on the
+ * save command; the use case validates it pre-tx (fail-fast — a malformed map
+ * never acquires a transaction), performs the edge-membership cross-check
+ * (anti-corruption: the VO stays free of a StateMachine dependency), and the
+ * persisted aggregate carries it through. The result echoes the stored map
+ * back to the caller.
+ */
+describe('SaveSystemConfigurationUseCase — edgeRoutingLayout', () => {
+  function buildUseCase() {
+    return {
+      config: new InMemorySystemConfigurationRepository(),
+      categories: new InMemoryCategoryRepository(),
+      routingRules: new InMemoryCounterRoutingRuleRepository(),
+    };
+  }
+
+  function command(edgeRoutingLayout: Record<string, { sourceSide: string; targetSide: string }>): SaveSystemConfigurationCommand {
+    return {
+      storeName: 'Toko Brand',
+      stateMachine: projectStateMachine(StateMachine.DEFAULT),
+      dailyReset: {
+        mode: DailyResetMode.MANUAL,
+        cronExpression: null,
+        resetTicketNumberTo: 1,
+        archivePreviousDayData: true,
+      },
+      categories: [{ code: 'A', name: 'Customer Service' }],
+      routingRules: [
+        {
+          counterId: 1,
+          counterName: 'Loket 1',
+          assignedCategoryCodes: ['A'],
+          priorityPolicy: PriorityPolicy.FIFO_GLOBAL,
+        },
+      ],
+      brandColor: '#2563eb',
+      serviceThemes: { kiosk: 'light', tv: 'light', caller: 'light', admin: 'light' },
+      tvPanelLayout: [
+        { id: 'nowServing', component: 'nowServing', x: 0, y: 0, w: 12, h: 4 },
+        { id: 'waitingQueue', component: 'waitingQueue', x: 0, y: 4, w: 6, h: 3 },
+        { id: 'callHistory', component: 'callHistory', x: 6, y: 4, w: 6, h: 3 },
+        { id: 'countersServing', component: 'countersServing', x: 0, y: 7, w: 12, h: 3 },
+        { id: 'runningText', component: 'runningText', x: 0, y: 10, w: 12, h: 1 },
+      ],
+      edgeRoutingLayout: edgeRoutingLayout as SaveSystemConfigurationCommand['edgeRoutingLayout'],
+      actor: 'admin',
+    };
+  }
+
+  it('persists a non-empty edgeRoutingLayout and echoes it in the result', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    const layout = { 'SKIPPED->CALLING': { sourceSide: 'bottom', targetSide: 'top' } };
+    const result = await useCase.execute(command(layout));
+
+    expect(result.edgeRoutingLayout).toEqual(layout);
+    const saved = await repos.config.get();
+    expect(saved!.edgeRoutingLayout.toDto()).toEqual(layout);
+  });
+
+  it('round-trips a re-GET via the aggregate (sparse map preserved)', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    const layout = {
+      'SKIPPED->CALLING': { sourceSide: 'bottom', targetSide: 'top' },
+      'WAITING->CALLING': { sourceSide: 'top', targetSide: 'bottom' },
+    };
+    await useCase.execute(command(layout));
+
+    const saved = await repos.config.get();
+    expect(saved!.edgeRoutingLayout.toDto()).toEqual(layout);
+  });
+
+  it('rejects a layout key that is not a transition in the active state machine (cross-check, NFR-REL-02)', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    // WAITING->COMPLETED is not an edge in the default state machine — the
+    // cross-check must throw InvalidValueObjectException pre-tx.
+    await expect(
+      useCase.execute(command({ 'WAITING->COMPLETED': { sourceSide: 'top', targetSide: 'bottom' } })),
+    ).rejects.toThrow(InvalidValueObjectException);
+    // Nothing persisted — fail-fast happened before the tx opened.
+    expect(await repos.config.get()).toBeNull();
+  });
+
+  it('rejects an invalid side enum pre-tx with InvalidValueObjectException (VO of())', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    await expect(
+      useCase.execute(
+        command({ 'SKIPPED->CALLING': { sourceSide: 'sideways', targetSide: 'top' } }),
+      ),
+    ).rejects.toThrow(InvalidValueObjectException);
+    expect(await repos.config.get()).toBeNull();
+  });
+
+  it('accepts an empty edgeRoutingLayout (all-default routing)', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    const result = await useCase.execute(command({}));
+    expect(result.edgeRoutingLayout).toEqual({});
+    const saved = await repos.config.get();
+    expect(saved!.edgeRoutingLayout.toDto()).toEqual({});
+    expect(saved!.edgeRoutingLayout.equals(EdgeRoutingLayout.DEFAULT)).toBe(true);
   });
 });

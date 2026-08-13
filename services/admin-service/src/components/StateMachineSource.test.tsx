@@ -143,4 +143,38 @@ describe('StateMachineSource (JSON Source view)', () => {
     const textarea = screen.getByTestId('sm-source') as HTMLTextAreaElement;
     expect(textarea).toHaveAttribute('aria-invalid', 'false');
   });
+
+  it('shows the connection sides in the connector legend for a non-default-routed edge', () => {
+    // Manager feedback: the source didn't say which point connects to which.
+    // The legend now appends `sourceSide→targetSide` when the edge uses a
+    // non-default connection point, so the routing is visible alongside the
+    // from→to direction.
+    const connectors: Transition[] = [
+      { from: 'SKIPPED', to: 'CALLING', actionLabel: 'Panggil Ulang', sourceSide: 'bottom', targetSide: 'top' },
+    ];
+    render(
+      <StateMachineSource
+        sourceText="{}"
+        onSourceChange={() => {}}
+        error={null}
+        connectors={connectors}
+      />,
+    );
+    const sides = screen.getByTestId('sm-source-connector-sides');
+    expect(sides).toHaveTextContent('bottom→top');
+  });
+
+  it('hides the connection sides segment for a default-routed edge', () => {
+    // A default edge (right→left) omits the sides segment — the legend stays
+    // concise and the default routing is not noise.
+    render(
+      <StateMachineSource
+        sourceText="{}"
+        onSourceChange={() => {}}
+        error={null}
+        connectors={DEFAULT_CONNECTORS}
+      />,
+    );
+    expect(screen.queryAllByTestId('sm-source-connector-sides')).toHaveLength(0);
+  });
 });

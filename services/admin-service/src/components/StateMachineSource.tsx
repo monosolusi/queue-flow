@@ -33,7 +33,7 @@
  * AT-readable (a screen reader announces "WAITING ke CALLING aksi: Panggil
  * Berikutnya", not "rightwards arrow" run together with the label).
  */
-import type { Transition } from '../lib/state-machine';
+import { isDefaultSides, type Transition } from '../lib/state-machine';
 import './state-machine-workflow.css';
 
 export function StateMachineSource({
@@ -66,33 +66,53 @@ export function StateMachineSource({
         Tiap transisi adalah <strong>konektor (panah)</strong> dari satu titik
         status ke titik status lain: <code>from</code> = titik asal,{' '}
         <code>to</code> = titik tujuan, <code>actionLabel</code> = label tombol
-        aksi. Mengubah sumber ini menyusun alur kustom sendiri.
+        aksi. <code>sourceSide</code>/<code>targetSide</code> opsional:{' '}
+        <code>"top"</code>|<code>"right"</code>|<code>"bottom"</code>|<code>"left"</code>{' '}
+        (default <code>right</code>→<code>left</code>); menentukan titik sambungan
+        saat digambar ulang. Mengubah sumber ini menyusun alur kustom sendiri.
       </p>
 
       {/* Connector legend — the "indikator konektor" (from → to) the manager
           asked for. A read-only map of which point connects to which, derived
           from the last-valid draft (passed as `connectors`), NOT re-parsed from
           the textarea. The arrow is decorative (aria-hidden); the `.sr-only`
-          "ke" word keeps the direction AT-readable. */}
+          "ke" word keeps the direction AT-readable. When an edge uses a
+          non-default connection point, the sides are appended
+          (`· sourceSide→targetSide`) so the legend shows which point connects
+          to which — the manager's "ruwet" feedback. */}
       <ul
         className="sm-source-connectors"
         data-testid="sm-source-connectors"
         aria-label="Daftar konektor transisi (dari titik asal ke titik tujuan)"
       >
-        {connectors.map((c, i) => (
-          <li
-            key={`${c.from}->${c.to}#${i}`}
-            className="sm-source-connector"
-            data-testid="sm-source-connector"
-          >
-            <span className="sm-source-connector__from">{c.from}</span>
-            <span className="sr-only"> ke </span>
-            <span className="sm-source-connector__arrow" aria-hidden="true">→</span>
-            <span className="sm-source-connector__to">{c.to}</span>
-            <span className="sr-only"> aksi: </span>
-            <span className="sm-source-connector__label">{c.actionLabel}</span>
-          </li>
-        ))}
+        {connectors.map((c, i) => {
+          const hasSides = !isDefaultSides(c.sourceSide, c.targetSide);
+          return (
+            <li
+              key={`${c.from}->${c.to}#${i}`}
+              className="sm-source-connector"
+              data-testid="sm-source-connector"
+            >
+              <span className="sm-source-connector__from">{c.from}</span>
+              <span className="sr-only"> ke </span>
+              <span className="sm-source-connector__arrow" aria-hidden="true">→</span>
+              <span className="sm-source-connector__to">{c.to}</span>
+              <span className="sr-only"> aksi: </span>
+              <span className="sm-source-connector__label">{c.actionLabel}</span>
+              {hasSides && (
+                <>
+                  <span className="sr-only"> titik: </span>
+                  <span
+                    className="sm-source-connector__sides"
+                    data-testid="sm-source-connector-sides"
+                  >
+                    {c.sourceSide ?? 'right'}→{c.targetSide ?? 'left'}
+                  </span>
+                </>
+              )}
+            </li>
+          );
+        })}
       </ul>
 
       <textarea

@@ -33,6 +33,8 @@ import {
   type StateMachineForm,
   defaultStateMachineForm,
   isDefaultGraph,
+  mergeEdgeSides,
+  toEdgeRoutingLayoutDto,
   toStateMachineDto,
   validateCustomStateMachine,
 } from '../lib/state-machine';
@@ -351,6 +353,14 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
                   priorityPolicy: 'FIFO_GLOBAL' as PriorityPolicy,
                 },
               ];
+        // Merge the wire `edgeRoutingLayout` into per-transition sides (mirrors
+        // `toForm` in admin-config/form.ts via the shared `mergeEdgeSides` helper)
+        // so a default-structure graph with custom routing loads as custom mode,
+        // and a wizard re-edit preserves the handles on re-save.
+        const smMergedTransitions = mergeEdgeSides(
+          config.stateMachine.transitions,
+          config.edgeRoutingLayout,
+        );
         setForm({
           storeName: config.storeName,
           brandColor: config.brandColor || DEFAULT_BRAND_COLOR,
@@ -365,10 +375,16 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
           categoriesMode: isDefaultCategories(loadedCategories) ? 'default' : 'custom',
           counterCount: String(routingRules.length),
           routingRules,
+          // Merge the wire `edgeRoutingLayout` into per-transition sides before
+          // inferring mode (mirrors `toForm` in admin-config/form.ts) so a
+          // default-structure graph with custom routing loads as custom, and a
+          // wizard re-edit preserves the handles on re-save.
           stateMachine: {
-            mode: isDefaultGraph(config.stateMachine.states, config.stateMachine.transitions) ? 'default' : 'custom',
+            mode: isDefaultGraph(config.stateMachine.states, smMergedTransitions)
+              ? 'default'
+              : 'custom',
             states: [...config.stateMachine.states],
-            transitions: config.stateMachine.transitions.map((t) => ({ ...t })),
+            transitions: smMergedTransitions,
           },
           dailyReset: {
             mode: config.dailyResetPolicy.mode,
@@ -545,6 +561,11 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
       await api.saveSystemConfig({
         storeName: form.storeName,
         stateMachine: sm,
+        // The wizard uses the form-based StateMachineEditor (no handles drawn),
+        // so the form transitions carry no sides → the map is `{}`. Send it
+        // anyway — it is a required wire field now (the client is the source of
+        // truth for handles).
+        edgeRoutingLayout: toEdgeRoutingLayoutDto(form.stateMachine),
         dailyReset: {
           mode: form.dailyReset.mode,
           cronExpression: form.dailyReset.mode === 'AUTOMATIC_CRON' ? form.dailyReset.cronExpression : null,

@@ -137,4 +137,32 @@ describe('jsonToForm', () => {
     const result = jsonToForm(formToJson(form));
     expect(result.ok).toBe(false);
   });
+
+  it('round-trips a non-default-routed edge (sourceSide/targetSide) through formToJson→jsonToForm', () => {
+    // The Source JSON now carries the connection-point sides; a vertical edge
+    // survives a serialize→parse round-trip so the manager's chosen routing is
+    // not lost when editing the source.
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'up', sourceSide: 'bottom', targetSide: 'top' }],
+    };
+    const result = jsonToForm(formToJson(form));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.form.transitions[0].sourceSide).toBe('bottom');
+    expect(result.form.transitions[0].targetSide).toBe('top');
+  });
+
+  it('the default graph source JSON omits sourceSide/targetSide on every transition', () => {
+    // Default-routed edges carry no sides in the source (sparse), so the
+    // default graph's source is unchanged — a store that never customized
+    // routing sees the same JSON as before the feature.
+    const json = formToJson(defaultForm());
+    const parsed = JSON.parse(json) as { transitions: Record<string, unknown>[] };
+    for (const t of parsed.transitions) {
+      expect(t.sourceSide).toBeUndefined();
+      expect(t.targetSide).toBeUndefined();
+    }
+  });
 });

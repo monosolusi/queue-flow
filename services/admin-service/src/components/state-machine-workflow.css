@@ -425,6 +425,16 @@
   padding-left: 0.4rem;
   margin-left: 0.1rem;
 }
+/* The connection-point sides (e.g. `bottom→top`) — shown only for non-default-
+   routed edges so the legend says which point connects to which. Visually
+   parted like the label so the from→to pair stays the primary read. */
+.sm-source-connector__sides {
+  color: var(--accent);
+  border-left: 1px solid color-mix(in srgb, var(--text) 15%, transparent);
+  padding-left: 0.4rem;
+  margin-left: 0.1rem;
+  font-weight: 600;
+}
 .sm-source {
   flex: 1 1 auto;
   min-height: 24rem;

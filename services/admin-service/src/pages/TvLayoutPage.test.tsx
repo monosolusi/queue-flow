@@ -46,6 +46,7 @@ function configuredStore(): SystemConfigurationDto {
     brandColor: DEFAULT_BRAND_COLOR,
     serviceThemes: { ...DEFAULT_SERVICE_THEMES },
     tvPanelLayout: DEFAULT_TV_GRID_LAYOUT.map((w) => ({ ...w })),
+    edgeRoutingLayout: {},
   };
 }
 
@@ -62,6 +63,7 @@ function makeApi(
           brandColor: payload.brandColor,
           serviceThemes: payload.serviceThemes,
           tvPanelLayout: payload.tvPanelLayout,
+          edgeRoutingLayout: {},
         })),
   );
   const getConfig = vi.fn(() => Promise.resolve(config));

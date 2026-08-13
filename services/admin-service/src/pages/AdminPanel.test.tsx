@@ -14,6 +14,7 @@ import {
   DEFAULT_SERVICE_THEMES,
   DEFAULT_TV_GRID_LAYOUT,
   type CleanupTransactionLogResultDto,
+  type EdgeRoutingLayoutDto,
   type ManualResetResultDto,
   type SaveSystemConfigurationPayload,
   type ServiceThemesMap,
@@ -48,6 +49,7 @@ function configuredStore(): SystemConfigurationDto {
     brandColor: DEFAULT_BRAND_COLOR,
     serviceThemes: { ...DEFAULT_SERVICE_THEMES },
     tvPanelLayout: DEFAULT_TV_GRID_LAYOUT,
+    edgeRoutingLayout: {},
   };
 }
 
@@ -63,7 +65,7 @@ function unassignedRoutingStore(): SystemConfigurationDto {
 
 function makeApi(
   config: SystemConfigurationDto = configuredStore(),
-  saveImpl?: (payload: SaveSystemConfigurationPayload) => Promise<{ isInitialSetupCompleted: boolean; storeName: string; brandColor: string; serviceThemes: ServiceThemesMap; tvPanelLayout: TvGridLayout }>,
+  saveImpl?: (payload: SaveSystemConfigurationPayload) => Promise<{ isInitialSetupCompleted: boolean; storeName: string; brandColor: string; serviceThemes: ServiceThemesMap; tvPanelLayout: TvGridLayout; edgeRoutingLayout: EdgeRoutingLayoutDto }>,
   overrides?: {
     manualReset?: () => Promise<ManualResetResultDto>;
     cleanup?: (retentionDays: number) => Promise<CleanupTransactionLogResultDto>;
@@ -72,7 +74,7 @@ function makeApi(
   const save = vi.fn(
     saveImpl ??
       ((payload: SaveSystemConfigurationPayload) =>
-        Promise.resolve({ isInitialSetupCompleted: true, storeName: payload.storeName, brandColor: payload.brandColor, serviceThemes: payload.serviceThemes, tvPanelLayout: payload.tvPanelLayout })),
+        Promise.resolve({ isInitialSetupCompleted: true, storeName: payload.storeName, brandColor: payload.brandColor, serviceThemes: payload.serviceThemes, tvPanelLayout: payload.tvPanelLayout, edgeRoutingLayout: {} })),
   );
   // The panel reloads the config after a successful save; default to returning
   // the same config (with ids preserved) so the post-save repopulate succeeds.
@@ -1000,6 +1002,7 @@ describe('AdminPanel shared-config coherence', () => {
           brandColor: payload.brandColor,
           serviceThemes: payload.serviceThemes,
           tvPanelLayout: payload.tvPanelLayout,
+          edgeRoutingLayout: {},
         });
       },
     );

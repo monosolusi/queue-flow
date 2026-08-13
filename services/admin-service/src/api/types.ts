@@ -114,6 +114,30 @@ export interface StateMachineDto {
   readonly transitions: readonly StateTransitionDto[];
 }
 
+/**
+ * Which side of a node an edge attaches to. The four React Flow handle sides.
+ * Connection-point (handle) routing is now sourced from the form transitions
+ * (`Transition.sourceSide`/`targetSide`) and persisted in the separate
+ * {@link EdgeRoutingLayoutDto} map — NOT on the wire {@link StateTransitionDto}
+ * (which stays `{ from, to, actionLabel }` only).
+ */
+export type EdgeSide = 'top' | 'right' | 'bottom' | 'left';
+
+/** A directed pair of connection sides for one transition edge. */
+export interface EdgeSides {
+  readonly sourceSide: EdgeSide;
+  readonly targetSide: EdgeSide;
+}
+
+/**
+ * The sparse edge-routing layout map keyed by `"from->to"`. Only edges with
+ * NON-DEFAULT connection points are included — the default routing
+ * (`sourceSide='right'`, `targetSide='left'`) is OMITTED, so `{}` means "every
+ * edge uses the default left→right routing". Mirrors the backend
+ * `edgeRoutingLayout` JSONB map on `SystemConfiguration`.
+ */
+export type EdgeRoutingLayoutDto = Record<string, EdgeSides>;
+
 export interface DailyResetPolicyDto {
   readonly mode: DailyResetMode;
   readonly cronExpression: string | null;
@@ -156,6 +180,11 @@ export interface SystemConfigurationDto {
    *  `{ x, y, w, h }` rect on a CSS grid (the PRD default mirrors the former
    *  fixed-panel layout — zero visual regression). */
   readonly tvPanelLayout: TvGridLayout;
+  /** Sparse edge-routing layout (`from->to` → sides) for the state-machine
+   *  diagram. Always present — the backend defaults to `{}` (every edge uses
+   *  the default L→R routing); `toForm` keeps a defensive `?? {}` coercion
+   *  (belt-and-suspenders, same as `tvPanelLayout ?? DEFAULT_TV_GRID_LAYOUT`). */
+  readonly edgeRoutingLayout: EdgeRoutingLayoutDto;
 }
 
 /**
@@ -195,6 +224,11 @@ export interface SaveSystemConfigurationPayload {
   readonly brandColor: string;
   readonly serviceThemes: ServiceThemesMap;
   readonly tvPanelLayout: TvGridLayout;
+  /** Sparse edge-routing layout for the state-machine diagram. REQUIRED on the
+   *  PUT — the client is the source of truth for handles now and always sends
+   *  the map (built by `toEdgeRoutingLayoutDto`); `{}` when every edge uses the
+   *  default routing. */
+  readonly edgeRoutingLayout: EdgeRoutingLayoutDto;
 }
 
 /** Result of `PUT /api/system/config`. */
@@ -204,6 +238,10 @@ export interface SaveSystemConfigurationResult {
   readonly brandColor: string;
   readonly serviceThemes: ServiceThemesMap;
   readonly tvPanelLayout: TvGridLayout;
+  /** Always echoed by the backend (the save result mirrors the persisted map).
+   *  The save path ignores the result body and re-GETs, so this is not
+   *  load-bearing; kept for contract completeness (mirrors `tvPanelLayout`). */
+  readonly edgeRoutingLayout: EdgeRoutingLayoutDto;
 }
 
 /**
@@ -238,6 +276,14 @@ export const DEFAULT_DAILY_RESET: DailyResetPolicyDto = {
   archivePreviousDayData: true,
   timezone: BROWSER_TIMEZONE,
 };
+
+/**
+ * Empty edge-routing layout — "every edge uses the default L→R routing".
+ * Matches the backend `EdgeRoutingLayout.DEFAULT` so a store that never
+ * customizes handle routing keeps the existing diagram look (zero visual
+ * regression, mirroring {@link DEFAULT_TV_GRID_LAYOUT}).
+ */
+export const DEFAULT_EDGE_ROUTING_LAYOUT: EdgeRoutingLayoutDto = {};
 
 /**
  * The shared accent color the four frontends hardcode in `:root` (`--accent:

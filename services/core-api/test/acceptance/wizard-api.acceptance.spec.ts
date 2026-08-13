@@ -226,4 +226,78 @@ describe('DoD-2 — First-Run Wizard API (FR-WZD-01..06)', () => {
     expect(ticket.body.ticket.ticketNumber).toBe('A-001');
     expect(ticket.body.ticket.status).toBe('WAITING');
   });
+
+  it('persists a custom edge routing layout and returns it on GET (round-trip)', async () => {
+    const payload = prdWizardPayload();
+    payload.edgeRoutingLayout = {
+      'SKIPPED->CALLING': { sourceSide: 'bottom', targetSide: 'top' },
+    };
+    const res = await http(booted.app)
+      .put('/api/system/config')
+      .send(payload)
+      .expect(200);
+    expect(res.body.edgeRoutingLayout).toEqual({
+      'SKIPPED->CALLING': { sourceSide: 'bottom', targetSide: 'top' },
+    });
+    const cfg = await http(booted.app).get('/api/system/config').expect(200);
+    expect(cfg.body.edgeRoutingLayout).toEqual({
+      'SKIPPED->CALLING': { sourceSide: 'bottom', targetSide: 'top' },
+    });
+  });
+
+  it('a clean store prefills edgeRoutingLayout with {} (all-default routing)', async () => {
+    const res = await http(booted.app).get('/api/system/config').expect(200);
+    expect(res.body.edgeRoutingLayout).toEqual({});
+  });
+
+  it('rejects a malformed edgeRoutingLayout (non-object) at the transport boundary with 400', async () => {
+    const bad = prdWizardPayload();
+    (bad as { edgeRoutingLayout: unknown }).edgeRoutingLayout = 'not-an-object';
+    const res = await http(booted.app).put('/api/system/config').send(bad);
+    expect(res.status).toBe(400);
+    const cfg = await http(booted.app).get('/api/system/config').expect(200);
+    expect(cfg.body.isInitialSetupCompleted).toBe(false);
+  });
+
+  it('rejects a malformed edgeRoutingLayout (array) at the transport boundary with 400', async () => {
+    const bad = prdWizardPayload();
+    (bad as { edgeRoutingLayout: unknown }).edgeRoutingLayout = [
+      { 'SKIPPED->CALLING': { sourceSide: 'bottom', targetSide: 'top' } },
+    ];
+    const res = await http(booted.app).put('/api/system/config').send(bad);
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a non-string sourceSide in edgeRoutingLayout at the transport boundary with 400', async () => {
+    const bad = prdWizardPayload();
+    (bad as { edgeRoutingLayout: unknown }).edgeRoutingLayout = {
+      'SKIPPED->CALLING': { sourceSide: 5, targetSide: 'top' },
+    };
+    const res = await http(booted.app).put('/api/system/config').send(bad);
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects an edge routing layout key that is not a transition (cross-check) with 400', async () => {
+    // WAITING->COMPLETED is not an edge in the default state machine — the
+    // use-case cross-check throws InvalidValueObjectException → 400 (not a 500).
+    const bad = prdWizardPayload();
+    (bad as { edgeRoutingLayout: unknown }).edgeRoutingLayout = {
+      'WAITING->COMPLETED': { sourceSide: 'top', targetSide: 'bottom' },
+    };
+    const res = await http(booted.app).put('/api/system/config').send(bad);
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_VALUE_OBJECT');
+    const cfg = await http(booted.app).get('/api/system/config').expect(200);
+    expect(cfg.body.isInitialSetupCompleted).toBe(false);
+  });
+
+  it('rejects an invalid side enum in edgeRoutingLayout with 400 (VO of())', async () => {
+    const bad = prdWizardPayload();
+    (bad as { edgeRoutingLayout: unknown }).edgeRoutingLayout = {
+      'SKIPPED->CALLING': { sourceSide: 'sideways', targetSide: 'top' },
+    };
+    const res = await http(booted.app).put('/api/system/config').send(bad);
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_VALUE_OBJECT');
+  });
 });

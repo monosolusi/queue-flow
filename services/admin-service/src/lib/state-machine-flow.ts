@@ -13,8 +13,12 @@
  * mapper). Positions live only in the component's internal node state — they
  * never reach the wire form.
  */
-import { describeState, type StateMachineForm, type Transition } from './state-machine';
-import { DEFAULT_STATE_MACHINE } from '../api/types';
+import {
+  describeState,
+  type StateMachineForm,
+  type Transition,
+} from './state-machine';
+import { DEFAULT_STATE_MACHINE, type EdgeSide } from '../api/types';
 
 /** Node payload: the state name (the node id IS the state name — names are
  *  unique per `validateCustomStateMachine`, so they are valid unique node ids)
@@ -139,6 +143,35 @@ export const HANDLE_IDS = {
 export const DEFAULT_SOURCE_HANDLE = HANDLE_IDS.rightSource;
 export const DEFAULT_TARGET_HANDLE = HANDLE_IDS.leftTarget;
 
+/**
+ * Maps a connection side to its source-handle id (e.g. `'bottom'` →
+ * `'bottom-source'`). The form transition's `sourceSide` is the source of
+ * truth; `formToFlow` seeds the React Flow `sourceHandle` from it.
+ */
+export function sideToSourceHandle(side: EdgeSide): string {
+  return HANDLE_IDS[`${side}Source` as keyof typeof HANDLE_IDS];
+}
+
+/** Maps a connection side to its target-handle id (see {@link sideToSourceHandle}). */
+export function sideToTargetHandle(side: EdgeSide): string {
+  return HANDLE_IDS[`${side}Target` as keyof typeof HANDLE_IDS];
+}
+
+/**
+ * Inverse of {@link sideToSourceHandle}/{@link sideToTargetHandle}: extracts the
+ * side from a handle id. Handles look like `'top-source'`/`'right-target'` →
+ * `split('-')[0]` gives the side. Returns `undefined` for a missing/unknown
+ * handle so a default edge (handle resolves to a valid side) and an absent
+ * handle (undefined → form treats as default) both flow through the form's
+ * `isDefaultSides`/`toEdgeRoutingLayoutDto` omit path cleanly.
+ */
+const FLOW_SIDES: readonly EdgeSide[] = ['top', 'right', 'bottom', 'left'];
+export function handleToSide(handle: string | undefined): EdgeSide | undefined {
+  if (!handle) return undefined;
+  const side = handle.split('-')[0];
+  return FLOW_SIDES.includes(side as EdgeSide) ? (side as EdgeSide) : undefined;
+}
+
 /** Horizontal gap between ranks (left-to-right flow). */
 const X_SPACING = 240;
 /** Vertical gap between nodes stacked within a rank. */
@@ -258,17 +291,21 @@ export function autoLayout(
  * edge: `{ id: \`${t.from}->${t.to}#${i}\`, source, target, type: 'transition',
  * data: { actionLabel } }`. Positions reuse `positions[name]` when present
  * (surviving state names keep their canvas spot on an external re-seed),
- * otherwise fall back to the `autoLayout` placement. Handle routing reuses
- * `handleMap[\`${from}->${to}\`]` when present (a surviving edge keeps the side
- * the manager dragged it on — vertical stays vertical — across an external
- * re-seed, mirroring the position-preservation pattern), otherwise falls back
- * to the canonical L→R default. `validateCustomStateMachine` forbids duplicate
- * `from->to` edges, so the key is unique per graph.
+ * otherwise fall back to the `autoLayout` placement.
+ *
+ * **Handle routing is sourced from the form.** Each transition's `sourceSide`/
+ * `targetSide` is the source of truth — the form is the single owner of handle
+ * routing now (previously the component passed a `handleMap` rebuilt from the
+ * prior edges, which was lost on every save/reload). A transition with no sides
+ * (absent) seeds the canonical L→R default ({@link DEFAULT_SOURCE_HANDLE}/
+ * {@link DEFAULT_TARGET_HANDLE}); a transition with `sourceSide: 'bottom'`
+ * routes out the bottom. So a redraw always respects the source. `commit` →
+ * {@link flowToGraph} captures the canvas handles back into the form, closing
+ * the loop.
  */
 export function formToFlow(
   value: StateMachineForm,
   positions: Record<string, { x: number; y: number }>,
-  handleMap?: Record<string, { sourceHandle?: string; targetHandle?: string }>,
 ): { nodes: FlowNode[]; edges: FlowEdge[] } {
   const auto = autoLayout(value.states, value.transitions);
   const nodes: FlowNode[] = value.states.map((name) => ({
@@ -277,24 +314,18 @@ export function formToFlow(
     position: positions[name] ?? auto[name] ?? { x: 0, y: 0 },
     data: { name, description: describeState(value, name) },
   }));
-  const edges: FlowEdge[] = value.transitions.map((t, i) => {
-    const prev = handleMap?.[`${t.from}->${t.to}`];
-    return {
-      id: `${t.from}->${t.to}#${i}`,
-      source: t.from,
-      target: t.to,
-      type: 'transition',
-      data: { actionLabel: t.actionLabel },
-      // Reuse the prior routing when present (surviving edge keeps its side on
-      // an external re-seed); else seed the canonical L→R default. A manager-
-      // drawn edge carries the actual dragged handle ids (see `onConnect`); the
-      // default only applies to edges rebuilt from a wire Transition that
-      // carries no handle info (canvas-only).
-      sourceHandle: prev?.sourceHandle ?? DEFAULT_SOURCE_HANDLE,
-      targetHandle: prev?.targetHandle ?? DEFAULT_TARGET_HANDLE,
-      markerEnd: EDGE_ARROW_MARKER,
-    };
-  });
+  const edges: FlowEdge[] = value.transitions.map((t, i) => ({
+    id: `${t.from}->${t.to}#${i}`,
+    source: t.from,
+    target: t.to,
+    type: 'transition',
+    data: { actionLabel: t.actionLabel },
+    // Seed from the form sides (the source of truth); a transition with no
+    // sides (absent) gets the canonical L→R default.
+    sourceHandle: t.sourceSide !== undefined ? sideToSourceHandle(t.sourceSide) : DEFAULT_SOURCE_HANDLE,
+    targetHandle: t.targetSide !== undefined ? sideToTargetHandle(t.targetSide) : DEFAULT_TARGET_HANDLE,
+    markerEnd: EDGE_ARROW_MARKER,
+  }));
   return { nodes, edges };
 }
 
@@ -304,6 +335,11 @@ export function formToFlow(
  * `source`/`target` (node ids = state names) back to transition `from`/`to`.
  * Reads only `data.name` (never `data.description`) — the description is
  * CANVAS-ONLY and never reaches the wire {@link Transition}.
+ *
+ * Captures the connection sides from the edge handles via {@link handleToSide}
+ * — the form is the source of truth for handles now, so a manager-drawn edge's
+ * chosen side flows back into the form (via `commit` → `onChange`), then
+ * `formToJson`/`toEdgeRoutingLayoutDto` omit the default ones → sparse wire.
  */
 export function flowToGraph(
   nodes: readonly FlowNode[],
@@ -316,6 +352,8 @@ export function flowToGraph(
     from: idToName.get(e.source) ?? e.source,
     to: idToName.get(e.target) ?? e.target,
     actionLabel: e.data.actionLabel,
+    sourceSide: handleToSide(e.sourceHandle),
+    targetSide: handleToSide(e.targetHandle),
   }));
   return { states, transitions };
 }

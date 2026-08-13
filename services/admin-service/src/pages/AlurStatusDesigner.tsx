@@ -41,12 +41,7 @@ import { StateMachineSource } from '../components/StateMachineSource';
 import { StateMachineWorkflow } from '../components/StateMachineWorkflow';
 import { useConfigDraft } from './admin-config/config-draft-context';
 import { computeFormValidity } from './admin-config/validity';
-import { formToJson, jsonToForm, type StateMachineForm } from '../lib/state-machine';
-
-/** Graph-structure signature (states + transitions, mode/positions excluded). */
-function signatureOf(form: StateMachineForm): string {
-  return JSON.stringify({ s: form.states, t: form.transitions });
-}
+import { formToJson, graphSignature, jsonToForm } from '../lib/state-machine';
 
 export function AlurStatusDesigner(): JSX.Element {
   const { state, setState, save, submitting, retry, savedAt } = useConfigDraft();
@@ -74,7 +69,7 @@ export function AlurStatusDesigner(): JSX.Element {
   //   - invalid source edit: no setState → `state` unchanged → effect no-ops.
   useEffect(() => {
     if (state.status !== 'ready') return;
-    const sig = signatureOf(state.form.stateMachine);
+    const sig = graphSignature(state.form.stateMachine);
     if (sig !== lastEmittedSig.current) {
       lastEmittedSig.current = sig;
       setSourceText(formToJson(state.form.stateMachine));
@@ -126,7 +121,7 @@ export function AlurStatusDesigner(): JSX.Element {
       // Stamp the ref BEFORE setState so the sync effect treats this as our own
       // change and skips the re-serialize (preserves `next` verbatim — no
       // reformat/cursor jump). Mode is forced to 'custom' by `jsonToForm`.
-      lastEmittedSig.current = signatureOf(result.form);
+      lastEmittedSig.current = graphSignature(result.form);
       setState({ status: 'ready', form: { ...form, stateMachine: result.form } });
       setSourceError(null);
     } else {

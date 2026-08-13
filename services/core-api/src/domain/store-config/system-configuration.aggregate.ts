@@ -3,6 +3,7 @@ import { Identifier } from '../shared/identifier';
 import { InvalidValueObjectException } from '../shared/errors';
 import { BrandColor } from './value-objects/brand-color';
 import { DailyResetPolicy } from './value-objects/daily-reset-policy';
+import { EdgeRoutingLayout } from './value-objects/edge-routing-layout';
 import { ServiceThemes } from './value-objects/service-themes';
 import { TvPanelLayout } from './value-objects/tv-panel-layout';
 import { StateMachine } from './state-machine';
@@ -21,6 +22,7 @@ export class SystemConfiguration extends AggregateRoot {
   private _brandColor: BrandColor;
   private _serviceThemes: ServiceThemes;
   private _tvPanelLayout: TvPanelLayout;
+  private _edgeRoutingLayout: EdgeRoutingLayout;
 
   private constructor(
     id: Identifier,
@@ -31,6 +33,7 @@ export class SystemConfiguration extends AggregateRoot {
     brandColor: BrandColor,
     serviceThemes: ServiceThemes,
     tvPanelLayout: TvPanelLayout,
+    edgeRoutingLayout: EdgeRoutingLayout,
   ) {
     super(id);
     this._storeName = storeName;
@@ -40,18 +43,21 @@ export class SystemConfiguration extends AggregateRoot {
     this._brandColor = brandColor;
     this._serviceThemes = serviceThemes;
     this._tvPanelLayout = tvPanelLayout;
+    this._edgeRoutingLayout = edgeRoutingLayout;
   }
 
   /** Creates a fresh, not-yet-configured instance with the default state machine,
-   * brand color, service themes, and TV panel layout. `brandColor` +
-   * `serviceThemes` + `tvPanelLayout` default so the dev seed and acceptance
-   * `seedPrdConfig` (2-arg calls) need no change. */
+   * brand color, service themes, TV panel layout, and edge routing layout.
+   * `brandColor` + `serviceThemes` + `tvPanelLayout` + `edgeRoutingLayout`
+   * default so the dev seed and acceptance `seedPrdConfig` (2-arg calls) need no
+   * change. */
   public static create(
     id: Identifier,
     storeName = '',
     brandColor: BrandColor = BrandColor.DEFAULT,
     serviceThemes: ServiceThemes = ServiceThemes.DEFAULT,
     tvPanelLayout: TvPanelLayout = TvPanelLayout.DEFAULT,
+    edgeRoutingLayout: EdgeRoutingLayout = EdgeRoutingLayout.DEFAULT,
   ): SystemConfiguration {
     return new SystemConfiguration(
       id,
@@ -62,6 +68,7 @@ export class SystemConfiguration extends AggregateRoot {
       brandColor,
       serviceThemes,
       tvPanelLayout,
+      edgeRoutingLayout,
     );
   }
 
@@ -74,6 +81,7 @@ export class SystemConfiguration extends AggregateRoot {
     brandColor: BrandColor;
     serviceThemes: ServiceThemes;
     tvPanelLayout: TvPanelLayout;
+    edgeRoutingLayout: EdgeRoutingLayout;
   }): SystemConfiguration {
     return new SystemConfiguration(
       params.id,
@@ -84,6 +92,7 @@ export class SystemConfiguration extends AggregateRoot {
       params.brandColor,
       params.serviceThemes,
       params.tvPanelLayout,
+      params.edgeRoutingLayout,
     );
   }
 
@@ -113,6 +122,10 @@ export class SystemConfiguration extends AggregateRoot {
 
   public get tvPanelLayout(): TvPanelLayout {
     return this._tvPanelLayout;
+  }
+
+  public get edgeRoutingLayout(): EdgeRoutingLayout {
+    return this._edgeRoutingLayout;
   }
 
   public setStoreName(name: string): void {

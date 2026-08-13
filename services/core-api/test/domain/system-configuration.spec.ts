@@ -4,6 +4,7 @@ import {
   BrandColor,
   DailyResetMode,
   DailyResetPolicy,
+  EdgeRoutingLayout,
   ServiceThemes,
   StateMachine,
   StateSchema,
@@ -212,6 +213,12 @@ describe('SystemConfiguration aggregate', () => {
     ]);
   });
 
+  it('defaults edgeRoutingLayout to the empty default map (zero visual regression)', () => {
+    const config = SystemConfiguration.create(Identifier.generate());
+    expect(config.edgeRoutingLayout).toBe(EdgeRoutingLayout.DEFAULT);
+    expect(config.edgeRoutingLayout.toDto()).toEqual({});
+  });
+
   it('reconstitute carries a custom brand color through', () => {
     const config = SystemConfiguration.reconstitute({
       id: Identifier.generate(),
@@ -222,6 +229,7 @@ describe('SystemConfiguration aggregate', () => {
       brandColor: BrandColor.of('#aabbcc'),
       serviceThemes: ServiceThemes.DEFAULT,
       tvPanelLayout: TvPanelLayout.DEFAULT,
+      edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
     });
     expect(config.brandColor.value).toBe('#aabbcc');
   });
@@ -236,6 +244,7 @@ describe('SystemConfiguration aggregate', () => {
       brandColor: BrandColor.DEFAULT,
       serviceThemes: ServiceThemes.of({ kiosk: 'light', tv: 'dark', caller: 'dark', admin: 'light' }),
       tvPanelLayout: TvPanelLayout.DEFAULT,
+      edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
     });
     expect(config.serviceThemes.toDto()).toEqual({
       kiosk: 'light',
@@ -258,11 +267,31 @@ describe('SystemConfiguration aggregate', () => {
         { id: 'nowServing', component: 'nowServing', x: 0, y: 0, w: 8, h: 4 },
         { id: 'waitingQueue', component: 'waitingQueue', x: 8, y: 0, w: 4, h: 4 },
       ]),
+      edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
     });
     expect(config.tvPanelLayout.toDto()).toEqual([
       { id: 'nowServing', component: 'nowServing', x: 0, y: 0, w: 8, h: 4 },
       { id: 'waitingQueue', component: 'waitingQueue', x: 8, y: 0, w: 4, h: 4 },
     ]);
+  });
+
+  it('reconstitute carries a custom edge routing layout through', () => {
+    const config = SystemConfiguration.reconstitute({
+      id: Identifier.generate(),
+      storeName: 'Toko Brand',
+      isInitialSetupCompleted: true,
+      stateMachine: StateMachine.DEFAULT,
+      dailyResetPolicy: DailyResetPolicy.DEFAULT,
+      brandColor: BrandColor.DEFAULT,
+      serviceThemes: ServiceThemes.DEFAULT,
+      tvPanelLayout: TvPanelLayout.DEFAULT,
+      edgeRoutingLayout: EdgeRoutingLayout.of({
+        'SKIPPED->CALLING': { sourceSide: 'bottom', targetSide: 'top' },
+      }),
+    });
+    expect(config.edgeRoutingLayout.toDto()).toEqual({
+      'SKIPPED->CALLING': { sourceSide: 'bottom', targetSide: 'top' },
+    });
   });
 
   it('cannot complete setup without a store name', () => {

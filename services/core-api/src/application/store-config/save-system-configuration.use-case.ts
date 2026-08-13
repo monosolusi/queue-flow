@@ -11,6 +11,7 @@ import { DailyResetPolicy, DailyResetMode } from '../../domain/store-config';
 import { BrandColor } from '../../domain/store-config';
 import { ServiceThemes, type ServiceThemesMap } from '../../domain/store-config';
 import { TvPanelLayout, type TvGridLayout } from '../../domain/store-config';
+import { EdgeRoutingLayout, type EdgeRoutingLayoutDto } from '../../domain/store-config';
 import { type IDailyResetSchedulerPort } from '../../domain/store-config';
 import {
   Identifier,
@@ -90,6 +91,12 @@ export interface SaveSystemConfigurationCommand {
    *  duplicate id, overlapping rectangles). Not change-gated (like
    *  `brandColor`/`serviceThemes`). */
   readonly tvPanelLayout: TvGridLayout;
+  /** Per-edge connection-point (handle) layout for the admin state-machine
+   *  visual editor (sparse keyed map "from->to" -> { sourceSide, targetSide }).
+   *  Required on the wire; the VO recovers a null/undefined to the empty default
+   *  (all-default routing) and rejects a present-but-invalid entry. Not
+   *  change-gated (like `brandColor`/`serviceThemes`/`tvPanelLayout`). */
+  readonly edgeRoutingLayout: EdgeRoutingLayoutDto;
   readonly actor: string;
 }
 
@@ -99,6 +106,7 @@ export interface SaveSystemConfigurationResult {
   readonly brandColor: string;
   readonly serviceThemes: ServiceThemesMap;
   readonly tvPanelLayout: TvGridLayout;
+  readonly edgeRoutingLayout: EdgeRoutingLayoutDto;
 }
 
 /** Minimal projection used only for audit before/after snapshots. */
@@ -222,9 +230,27 @@ export class SaveSystemConfigurationUseCase {
     // malformed layout (bad widget, duplicate id, overlapping rectangles)
     // fails fast.
     const tvPanelLayout = TvPanelLayout.of(command.tvPanelLayout);
+    // Per-edge connection-point layout — same shape: pure appearance, not
+    // change-gated, no post-commit side-effect. Validated pre-tx so a malformed
+    // layout (bad side enum, non-object value) fails fast.
+    const edgeRoutingLayout = EdgeRoutingLayout.of(command.edgeRoutingLayout);
     const newCategories = this.buildCategories(command.categories);
     const codeToId = new Map(newCategories.map((c) => [c.code, c.id.value]));
     const newRules = this.buildRoutingRules(command.routingRules, codeToId);
+    // Edge-membership cross-check (anti-corruption): the VO deliberately does
+    // NOT depend on `StateMachine` (DIP), so it cannot validate that a layout
+    // key corresponds to a real transition. That check belongs here, in the use
+    // case, which already built the state machine. Done pre-tx so a layout key
+    // that names no edge fails fast (NFR-REL-02 — no illegal layout burns a
+    // write). Keys are opaque "from->to" strings.
+    const edgeKeys = new Set(stateMachine.transitions.map((r) => `${r.from}->${r.to}`));
+    for (const key of edgeRoutingLayout.keys()) {
+      if (!edgeKeys.has(key)) {
+        throw new InvalidValueObjectException(
+          `edge routing layout key '${key}' is not a transition in the active state machine`,
+        );
+      }
+    }
 
     // Whether the daily-reset policy changed (or this is the initial setup).
     // Hoisted out of the tx so the post-commit re-arm (below) can read it
@@ -268,6 +294,7 @@ export class SaveSystemConfigurationUseCase {
         brandColor,
         serviceThemes,
         tvPanelLayout,
+        edgeRoutingLayout,
       });
       system.completeInitialSetup(); // idempotent — validates store name, flips the flag
 
@@ -318,6 +345,7 @@ export class SaveSystemConfigurationUseCase {
         brandColor: system.brandColor.value,
         serviceThemes: system.serviceThemes.toDto(),
         tvPanelLayout: system.tvPanelLayout.toDto(),
+        edgeRoutingLayout: system.edgeRoutingLayout.toDto(),
       };
     });
 

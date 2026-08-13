@@ -2,10 +2,21 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_STATE_MACHINE } from '../api/types';
 import {
   CANONICAL_STATE_DESCRIPTIONS,
+  DEFAULT_SOURCE_SIDE,
+  DEFAULT_TARGET_SIDE,
+  addTransition,
   defaultStateMachineForm,
   describeState,
+  formToJson,
+  graphSignature,
+  isDefaultGraph,
+  jsonToForm,
+  mergeEdgeSides,
   missingCanonicalStates,
+  toEdgeRoutingLayoutDto,
   toStateMachineDto,
+  updateState,
+  updateTransition,
   validateCustomStateMachine,
   type StateMachineForm,
 } from './state-machine';
@@ -198,5 +209,286 @@ describe('describeState (client-side description derivation)', () => {
     const dto = toStateMachineDto(form);
     expect((dto as unknown as Record<string, unknown>).description).toBeUndefined();
     expect(Object.keys(dto).sort()).toEqual(['states', 'transitions']);
+  });
+});
+
+describe('connection sides (sourceSide / targetSide)', () => {
+  it('toStateMachineDto strips sides — they never reach the wire StateTransitionDto', () => {
+    // The wire contract is unchanged: sides travel in the separate
+    // `edgeRoutingLayout` map, NOT on the wire transitions. A custom form with
+    // a vertical edge still emits `{ from, to, actionLabel }` on the wire.
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['WAITING', 'CALLING'],
+      transitions: [
+        { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', sourceSide: 'bottom', targetSide: 'top' },
+      ],
+    };
+    const dto = toStateMachineDto(form);
+    expect(dto.transitions).toEqual([{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }]);
+    expect(Object.keys(dto.transitions[0] as object).sort()).toEqual(['actionLabel', 'from', 'to']);
+  });
+
+  it('formToJson includes sourceSide/targetSide only when non-default', () => {
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B', 'C'],
+      transitions: [
+        { from: 'A', to: 'B', actionLabel: 'go' }, // default → omitted
+        { from: 'B', to: 'C', actionLabel: 'up', sourceSide: 'bottom', targetSide: 'top' }, // non-default
+      ],
+    };
+    const parsed = JSON.parse(formToJson(form)) as { transitions: Record<string, unknown>[] };
+    expect(parsed.transitions[0]).toEqual({ from: 'A', to: 'B', actionLabel: 'go' });
+    expect(parsed.transitions[1]).toEqual({
+      from: 'B',
+      to: 'C',
+      actionLabel: 'up',
+      sourceSide: 'bottom',
+      targetSide: 'top',
+    });
+  });
+
+  it('formToJson emits both sides together when only one is non-default', () => {
+    // Asymmetric edge: sourceSide set, targetSide absent → both emitted (the
+    // default targetSide is materialized) so the source never shows a
+    // half-routed edge.
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', sourceSide: 'bottom' }],
+    };
+    const parsed = JSON.parse(formToJson(form)) as { transitions: Record<string, unknown>[] };
+    expect(parsed.transitions[0].sourceSide).toBe('bottom');
+    expect(parsed.transitions[0].targetSide).toBe(DEFAULT_TARGET_SIDE);
+  });
+
+  it('jsonToForm parses valid sides and forces mode to custom', () => {
+    const json = JSON.stringify({
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', sourceSide: 'bottom', targetSide: 'top' }],
+    });
+    const result = jsonToForm(json);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.form.mode).toBe('custom');
+    expect(result.form.transitions[0].sourceSide).toBe('bottom');
+    expect(result.form.transitions[0].targetSide).toBe('top');
+  });
+
+  it('jsonToForm rejects an invalid sourceSide enum with a clear error', () => {
+    const json = JSON.stringify({
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', sourceSide: 'sideways' }],
+    });
+    const result = jsonToForm(json);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatch(/sourceSide/i);
+    expect(result.error).toMatch(/top.*right.*bottom.*left/i);
+  });
+
+  it('jsonToForm rejects an invalid targetSide enum', () => {
+    const json = JSON.stringify({
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', targetSide: 42 }],
+    });
+    const result = jsonToForm(json);
+    expect(result.ok).toBe(false);
+  });
+
+  it('jsonToForm leaves sides absent when not present (default routing)', () => {
+    const json = JSON.stringify({
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+    });
+    const result = jsonToForm(json);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.form.transitions[0].sourceSide).toBeUndefined();
+    expect(result.form.transitions[0].targetSide).toBeUndefined();
+  });
+
+  it('toEdgeRoutingLayoutDto builds the sparse map (default omitted, non-default included)', () => {
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B', 'C'],
+      transitions: [
+        { from: 'A', to: 'B', actionLabel: 'go' }, // default → omitted
+        { from: 'B', to: 'C', actionLabel: 'up', sourceSide: 'bottom', targetSide: 'top' },
+      ],
+    };
+    expect(toEdgeRoutingLayoutDto(form)).toEqual({
+      'B->C': { sourceSide: 'bottom', targetSide: 'top' },
+    });
+  });
+
+  it('toEdgeRoutingLayoutDto returns {} when every edge is default', () => {
+    const form = defaultStateMachineForm();
+    expect(toEdgeRoutingLayoutDto(form)).toEqual({});
+  });
+
+  it('toEdgeRoutingLayoutDto round-trips a vertical edge through formToJson', () => {
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'up', sourceSide: 'bottom', targetSide: 'top' }],
+    };
+    // The wire map and the source JSON omit the same default entries; a
+    // non-default edge appears in both.
+    expect(toEdgeRoutingLayoutDto(form)).toEqual({
+      'A->B': { sourceSide: 'bottom', targetSide: 'top' },
+    });
+    const parsed = JSON.parse(formToJson(form)) as { transitions: Record<string, unknown>[] };
+    expect(parsed.transitions[0].sourceSide).toBe('bottom');
+  });
+
+  it('graphSignature canonicalizes undefined→default so explicit-default equals absent', () => {
+    // The key anti-re-seed property: a form with explicit default sides and a
+    // form with undefined sides produce the SAME signature. After a save+re-GET,
+    // `toForm` merges non-default sides back (default edges get undefined), so
+    // the post-save signature equals the pre-save signature → no spurious re-seed.
+    const explicit: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [
+        { from: 'A', to: 'B', actionLabel: 'go', sourceSide: DEFAULT_SOURCE_SIDE, targetSide: DEFAULT_TARGET_SIDE },
+      ],
+    };
+    const absent: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+    };
+    expect(graphSignature(explicit)).toBe(graphSignature(absent));
+  });
+
+  it('graphSignature differs when the sides differ', () => {
+    const vertical: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', sourceSide: 'bottom', targetSide: 'top' }],
+    };
+    const horizontal: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+    };
+    expect(graphSignature(vertical)).not.toBe(graphSignature(horizontal));
+  });
+
+  it('isDefaultGraph returns false when a default-structure graph has a non-default side', () => {
+    // A graph that structurally matches the PRD §7 default but has a custom-
+    // routed edge is CUSTOM (the manager touched the handle routing) → loads
+    // as `mode: 'custom'` (editable), not `mode: 'default'` (read-only).
+    const transitions = DEFAULT_STATE_MACHINE.transitions.map((t, i) =>
+      i === 3 // SKIPPED → CALLING back-edge with a vertical routing
+        ? { ...t, sourceSide: 'top' as const, targetSide: 'bottom' as const }
+        : { ...t },
+    );
+    expect(isDefaultGraph([...DEFAULT_STATE_MACHINE.states], transitions)).toBe(false);
+  });
+
+  it('isDefaultGraph returns true for the all-default graph', () => {
+    expect(
+      isDefaultGraph([...DEFAULT_STATE_MACHINE.states], DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t }))),
+    ).toBe(true);
+  });
+
+  it('updateState (rename) preserves sourceSide/targetSide on affected transitions', () => {
+    // Regression: before the fix the rename rebuilt each transition as
+    // `{ from, to, actionLabel }`, dropping the sides and snapping a vertical
+    // edge back to L→R. The spread form preserves them.
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['WAITING', 'CALLING'],
+      transitions: [
+        { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', sourceSide: 'bottom', targetSide: 'top' },
+      ],
+    };
+    const renamed = updateState(form, 0, 'PENDING');
+    expect(renamed.transitions[0].from).toBe('PENDING');
+    expect(renamed.transitions[0].sourceSide).toBe('bottom');
+    expect(renamed.transitions[0].targetSide).toBe('top');
+  });
+
+  it('updateTransition preserves existing sides when patching from/to/actionLabel', () => {
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', sourceSide: 'bottom', targetSide: 'top' }],
+    };
+    const patched = updateTransition(form, 0, { actionLabel: 'go fast' });
+    expect(patched.transitions[0].actionLabel).toBe('go fast');
+    expect(patched.transitions[0].sourceSide).toBe('bottom');
+    expect(patched.transitions[0].targetSide).toBe('top');
+  });
+
+  it('addTransition creates a new transition with no sides (default routing)', () => {
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+    };
+    const added = addTransition(form);
+    expect(added.transitions[1].sourceSide).toBeUndefined();
+    expect(added.transitions[1].targetSide).toBeUndefined();
+  });
+});
+
+describe('mergeEdgeSides (wire map → form transitions)', () => {
+  it('merges a sparse map — present edges get sides, absent edges get none', () => {
+    const transitions = DEFAULT_STATE_MACHINE.transitions;
+    const layout = { 'SKIPPED->CALLING': { sourceSide: 'top' as const, targetSide: 'bottom' as const } };
+    const merged = mergeEdgeSides(transitions, layout);
+    // The SKIPPED→CALLING back-edge carries the vertical sides.
+    const back = merged.find((t) => t.from === 'SKIPPED' && t.to === 'CALLING')!;
+    expect(back.sourceSide).toBe('top');
+    expect(back.targetSide).toBe('bottom');
+    // Every other edge has no sides (undefined → default routing).
+    const others = merged.filter((t) => !(t.from === 'SKIPPED' && t.to === 'CALLING'));
+    expect(others.every((t) => t.sourceSide === undefined && t.targetSide === undefined)).toBe(true);
+  });
+
+  it('undefined edgeLayout yields all-default transitions (no sides)', () => {
+    const merged = mergeEdgeSides(DEFAULT_STATE_MACHINE.transitions, undefined);
+    expect(merged.every((t) => t.sourceSide === undefined && t.targetSide === undefined)).toBe(true);
+  });
+
+  it('empty edgeLayout yields all-default transitions', () => {
+    const merged = mergeEdgeSides(DEFAULT_STATE_MACHINE.transitions, {});
+    expect(merged.every((t) => t.sourceSide === undefined && t.targetSide === undefined)).toBe(true);
+  });
+
+  it('is the inverse of toEdgeRoutingLayoutDto (round-trip)', () => {
+    // Build a form with a vertical edge, serialize to the sparse wire map, then
+    // merge back — the merged transitions carry the same sides.
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B', 'C'],
+      transitions: [
+        { from: 'A', to: 'B', actionLabel: 'go' }, // default
+        { from: 'B', to: 'C', actionLabel: 'up', sourceSide: 'bottom', targetSide: 'top' }, // vertical
+      ],
+    };
+    const wire = toEdgeRoutingLayoutDto(form);
+    const merged = mergeEdgeSides(
+      form.transitions.map((t) => ({ from: t.from, to: t.to, actionLabel: t.actionLabel })),
+      wire,
+    );
+    expect(merged[0].sourceSide).toBeUndefined();
+    expect(merged[1].sourceSide).toBe('bottom');
+    expect(merged[1].targetSide).toBe('top');
+  });
+
+  it('uses explicit fields (not spread) so an EdgeSides widening cannot leak extras', () => {
+    // A malicious / future entry with an extra field must NOT leak onto the
+    // Transition — only sourceSide/targetSide are copied.
+    const transitions = [{ from: 'A', to: 'B', actionLabel: 'go' }];
+    const layout = { 'A->B': { sourceSide: 'bottom', targetSide: 'top', extra: 'leak' } as unknown as { sourceSide: 'bottom'; targetSide: 'top' } };
+    const merged = mergeEdgeSides(transitions, layout);
+    expect(merged[0].sourceSide).toBe('bottom');
+    expect(merged[0].targetSide).toBe('top');
+    expect(Object.keys(merged[0]).sort()).toEqual(['actionLabel', 'from', 'sourceSide', 'targetSide', 'to']);
   });
 });

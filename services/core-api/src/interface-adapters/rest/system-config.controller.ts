@@ -37,6 +37,7 @@ const REQUIRED_CONFIG_FIELDS: ReadonlyArray<keyof SaveSystemConfigurationCommand
   'brandColor',
   'serviceThemes',
   'tvPanelLayout',
+  'edgeRoutingLayout',
 ];
 
 /**
@@ -62,6 +63,7 @@ const CONFIG_FIELD_SHAPES: ReadonlyArray<{
   { field: 'routingRules', kind: 'array' },
   { field: 'serviceThemes', kind: 'object' },
   { field: 'tvPanelLayout', kind: 'array' },
+  { field: 'edgeRoutingLayout', kind: 'object' },
 ];
 
 /** True when `value` does not match the expected `kind` (object = plain object, not array). */
@@ -198,6 +200,30 @@ function configNestedShapeErrors(body: Partial<SaveSystemConfigurationCommand>):
       }
     });
   }
+  // edgeRoutingLayout: the VO throws `InvalidValueObjectException` (→ 400) on a
+  // present-but-invalid entry (non-object value, or a `sourceSide`/`targetSide`
+  // that is not a string in {top,right,bottom,left}). This boundary guard
+  // catches the crash class (a non-object entry value, or a present-but-non-
+  // string `sourceSide`/`targetSide` would TypeError before the VO's own guard
+  // on a non-string `EDGE_SIDES.includes` check) and gives consistent,
+  // field-named error messages. Enum membership (top/right/bottom/left) stays
+  // in the VO. Unknown extra properties on an entry are ignored.
+  const edgeLayout = body.edgeRoutingLayout;
+  if (edgeLayout != null && typeof edgeLayout === 'object' && !Array.isArray(edgeLayout)) {
+    for (const [key, value] of Object.entries(edgeLayout as Record<string, unknown>)) {
+      if (value == null || typeof value !== 'object' || Array.isArray(value)) {
+        errs.push(`edgeRoutingLayout['${key}'] must be an object with string sourceSide/targetSide`);
+        continue;
+      }
+      const e = value as Record<string, unknown>;
+      if (e.sourceSide != null && typeof e.sourceSide !== 'string') {
+        errs.push(`edgeRoutingLayout['${key}'].sourceSide must be a string`);
+      }
+      if (e.targetSide != null && typeof e.targetSide !== 'string') {
+        errs.push(`edgeRoutingLayout['${key}'].targetSide must be a string`);
+      }
+    }
+  }
   return errs;
 }
 
@@ -285,6 +311,7 @@ export class SystemConfigController {
       brandColor: body.brandColor!,
       serviceThemes: body.serviceThemes!,
       tvPanelLayout: body.tvPanelLayout!,
+      edgeRoutingLayout: body.edgeRoutingLayout!,
       actor: principal?.username ?? 'system',
     };
     return this.saveConfig.execute(command);
