@@ -668,6 +668,17 @@ function FlowCanvas({
           elementsSelectable={isCustom}
           fitView
           deleteKeyCode={null}
+          // Arrow direction = drag direction (manager feedback "panah sesuai
+          // arah tarikan"). The fix lives in `StateNode` (StateMachineWorkflowNodes):
+          // its four `target` handles are DROP-ONLY via `isConnectableStart={false}`,
+          // so every drag starts at a `source` handle and the arrow always points
+          // where the manager dropped. React Flow assigns source/target by the
+          // START handle's TYPE (not by drag direction or a connection-mode toggle),
+          // so `connectionMode` is left at the strict default — it keeps the
+          // directed-edge contract (a source-start drag may only land on a target
+          // handle, which React Flow highlights as the valid drop target). See the
+          // `StateNode` JSDoc for the full mechanism. CANVAS-ONLY — never reaches
+          // the wire Transition.
           // Hide the React Flow attribution badge: the link points to
           // reactflow.dev (unreachable on the offline LAN, NFR-REL-01) and would
           // confuse a non-technical manager. The MIT license does not require
