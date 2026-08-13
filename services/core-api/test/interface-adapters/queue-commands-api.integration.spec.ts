@@ -25,6 +25,7 @@ import {
   BrandColor,
   ServiceThemes,
   TvPanelLayout,
+  EdgeRoutingLayout,
   DailyResetPolicy,
   StateMachine,
   StateSchema,
@@ -253,6 +254,7 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
         brandColor: BrandColor.DEFAULT,
         serviceThemes: ServiceThemes.DEFAULT,
         tvPanelLayout: TvPanelLayout.DEFAULT,
+        edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
       }),
     );
 
@@ -347,6 +349,7 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
         brandColor: BrandColor.DEFAULT,
         serviceThemes: ServiceThemes.DEFAULT,
         tvPanelLayout: TvPanelLayout.DEFAULT,
+        edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
       }),
     );
 

@@ -101,6 +101,11 @@ export function prdWizardPayload() {
       { id: 'countersServing', component: 'countersServing', x: 0, y: 7, w: 12, h: 3 },
       { id: 'runningText', component: 'runningText', x: 0, y: 10, w: 12, h: 1 },
     ],
+    // edgeRoutingLayout: per-edge connection-point layout for the admin
+    // state-machine visual editor; sparse keyed map "from->to" ->
+    // { sourceSide, targetSide }, '{}' = every edge uses the default
+    // left->right routing.
+    edgeRoutingLayout: {},
     // QUE-43: `actor` is no longer a wire field — the server derives the audit
     // actor from the authenticated principal (or the 'system' sentinel on the
     // pre-setup wizard path). The wizard client stopped sending it; this fixture

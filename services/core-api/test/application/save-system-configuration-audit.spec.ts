@@ -80,6 +80,7 @@ describe('SaveSystemConfigurationUseCase — daily-reset policy audit + re-arm (
         { id: 'countersServing', component: 'countersServing', x: 0, y: 7, w: 12, h: 3 },
         { id: 'runningText', component: 'runningText', x: 0, y: 10, w: 12, h: 1 },
       ],
+      edgeRoutingLayout: {},
       actor: 'admin',
       ...overrides,
     };
@@ -288,5 +289,39 @@ describe('SaveSystemConfigurationUseCase — daily-reset policy audit + re-arm (
     // initial-setup policy entry, not a second one.
     expect((await policyChangeActions(repos))).toHaveLength(1);
     expect(scheduler.calls).toBe(1); // brand-color change does not re-arm
+  });
+
+  /**
+   * Regression guard: edge routing layout is cosmetic (an appearance concern
+   * like brandColor/serviceThemes/tvPanelLayout), so it is NOT audited.
+   * NFR-SEC-02 scopes audit to manual reset / state-schema / routing / daily-
+   * reset-policy; there is no `EDGE_ROUTING_LAYOUT_CHANGE` audit action and an
+   * edge-layout-only edit must record nothing spurious on top of the always-on
+   * `STATE_SCHEMA_CHANGE` + `ROUTING_CHANGE`. Locks the decision so a future
+   * change has to make an explicit, reviewable choice.
+   */
+  it('does NOT record an edge-routing-layout audit entry when only the layout changes', async () => {
+    const repos = buildRepos();
+    const scheduler = fakeScheduler();
+    const useCase = buildUseCase(repos, scheduler);
+
+    await useCase.execute(baseCommand());
+    // Re-save with a NON-empty edge routing layout but the same store name,
+    // state machine, routing, and daily-reset policy — only the layout changed.
+    await useCase.execute(
+      baseCommand({
+        edgeRoutingLayout: { 'SKIPPED->CALLING': { sourceSide: 'top', targetSide: 'bottom' } },
+      }),
+    );
+
+    const all = await repos.auditLog.list();
+    // No audit action names an edge-routing-layout change.
+    for (const entry of all) {
+      expect(entry.action).not.toMatch(/EDGE_ROUTING/i);
+    }
+    // The edge-layout-only re-save did not change the policy → only the
+    // initial-setup policy entry, not a second one.
+    expect((await policyChangeActions(repos))).toHaveLength(1);
+    expect(scheduler.calls).toBe(1); // edge-layout change does not re-arm
   });
 });

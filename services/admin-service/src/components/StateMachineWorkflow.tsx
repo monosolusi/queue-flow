@@ -50,6 +50,7 @@ import '@xyflow/react/dist/style.css';
 import {
   type StateMachineForm,
   defaultStateMachineForm,
+  graphSignature,
   missingCanonicalStates,
 } from '../lib/state-machine';
 import {
@@ -77,16 +78,6 @@ import { StateMachineWorkflowProperties } from './StateMachineWorkflowProperties
 import { useToast } from '../toast/useToast';
 import './state-machine-workflow.css';
 
-/**
- * Signature of the graph structure (states + transitions). Excludes `mode`
- * (the canvas graph = `value.states`/`value.transitions` regardless of mode;
- * mode only toggles read-only) and positions (owned internally, never on the
- * wire). Used to detect an EXTERNAL value change vs. our own emitted change.
- */
-function signatureOf(form: StateMachineForm): string {
-  return JSON.stringify({ s: form.states, t: form.transitions });
-}
-
 export function StateMachineWorkflow({
   value,
   onChange,
@@ -107,7 +98,7 @@ export function StateMachineWorkflow({
   // means an external reset (we did NOT emit it), so we re-sync. When WE cause
   // a change we update this ref before `onChange`, so the effect skips the
   // round-trip and preserves canvas positions.
-  const lastEmitted = useRef<string>(signatureOf(value));
+  const lastEmitted = useRef<string>(graphSignature(value));
   // Monotonic per-instance counter for newly minted edge ids. Edges rebuilt by
   // `formToFlow` (external reset) use index-based ids `${from}->${to}#${i}`;
   // edges minted here (`onConnect` / "Tambah Transisi") use `sm-edge-N` — a
@@ -165,29 +156,23 @@ export function StateMachineWorkflow({
   // callback so it always sees the latest committed node state. Clears
   // selection — a stale selected node/edge id must never edit a node that no
   // longer exists after the re-seed.
+  //
+  // Handle routing is NO LONGER rebuilt from the prior edges — the form is the
+  // source of truth now (`formToFlow` reads `t.sourceSide`/`t.targetSide`
+  // directly), so a redraw always respects the source. The `graphSignature`
+  // canonicalizes undefined→default, so a save+re-GET (which merges non-default
+  // sides back from `edgeRoutingLayout`) produces the same signature as the
+  // pre-save form → the guard skips the re-seed and handles survive in-session.
   useEffect(() => {
-    const sig = signatureOf(value);
+    const sig = graphSignature(value);
     if (sig !== lastEmitted.current) {
       lastEmitted.current = sig;
+      const oldPositions: Record<string, { x: number; y: number }> = {};
       setNodes((prev) => {
-        const oldPositions: Record<string, { x: number; y: number }> = {};
         for (const n of prev) oldPositions[n.data.name] = n.position;
         return formToFlow(value, oldPositions).nodes;
       });
-      setEdges((prev) => {
-        // Preserve the manager-chosen handle routing for surviving edges
-        // (mirroring the position-preservation above): a vertical edge stays
-        // vertical across an external re-seed instead of snapping back to L→R.
-        // Keyed by `from->to` (unique per validateCustomStateMachine).
-        const oldHandles: Record<string, { sourceHandle?: string; targetHandle?: string }> = {};
-        for (const e of prev) {
-          oldHandles[`${e.source}->${e.target}`] = {
-            sourceHandle: e.sourceHandle,
-            targetHandle: e.targetHandle,
-          };
-        }
-        return formToFlow(value, {}, oldHandles).edges;
-      });
+      setEdges(() => formToFlow(value, {}).edges);
       setSelectedNodeId(null);
       setSelectedEdgeId(null);
     }
@@ -221,7 +206,7 @@ export function StateMachineWorkflow({
       const refreshed = withDescriptions(nextNodes, form);
       setNodes(refreshed);
       setEdges(nextEdges);
-      lastEmitted.current = signatureOf(form);
+      lastEmitted.current = graphSignature(form);
       onChange(form);
     },
     [value.mode, onChange],

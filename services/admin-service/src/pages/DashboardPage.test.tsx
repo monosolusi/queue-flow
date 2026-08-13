@@ -35,6 +35,7 @@ function configuredStore(): SystemConfigurationDto {
     brandColor: DEFAULT_BRAND_COLOR,
     serviceThemes: { ...DEFAULT_SERVICE_THEMES },
     tvPanelLayout: DEFAULT_TV_GRID_LAYOUT,
+    edgeRoutingLayout: {},
   };
 }
 

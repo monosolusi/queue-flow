@@ -3,7 +3,10 @@ import {
   autoLayout,
   flowToGraph,
   formToFlow,
+  handleToSide,
   nextStateName,
+  sideToSourceHandle,
+  sideToTargetHandle,
   withDescriptions,
   isDuplicateTransition,
   rejectionMessageForConnection,
@@ -13,7 +16,7 @@ import {
   EDGE_ARROW_MARKER,
   type FlowEdge,
 } from './state-machine-flow';
-import { defaultStateMachineForm } from './state-machine';
+import { defaultStateMachineForm, type StateMachineForm } from './state-machine';
 import { DEFAULT_STATE_MACHINE } from '../api/types';
 // Type-only: verifies the framework-free marker trick in the guard at the
 // bottom of this file (tests may depend on `@xyflow/react`; the lib cannot).
@@ -98,27 +101,51 @@ describe('formToFlow', () => {
     expect(DEFAULT_TARGET_HANDLE).toBe(HANDLE_IDS.leftTarget);
   });
 
-  it('preserves prior handle routing for surviving edges across a re-seed', () => {
-    // External re-seed preserves the manager-chosen side (a vertical edge
-    // stays vertical) via the handleMap arg, mirroring position preservation.
-    // Edges with no prior routing entry fall back to the L→R default.
-    const form = defaultStateMachineForm();
-    const handleMap = {
-      // WAITING->CALLING was a manager-drawn vertical edge (out the bottom,
-      // into the top) — it must keep that routing, not snap back to L→R.
-      'WAITING->CALLING': {
-        sourceHandle: HANDLE_IDS.bottomSource,
-        targetHandle: HANDLE_IDS.topTarget,
-      },
+  it('seeds handle routing from the form transition sides (redraw respects the source)', () => {
+    // The form is the source of truth for handles now: a transition carrying
+    // `sourceSide`/`targetSide` seeds the corresponding React Flow handles, so
+    // a redraw always respects the source. A transition with no sides (absent)
+    // gets the canonical L→R default. This is the core fix — the diagram redraws
+    // according to the source sides, not an unclear default.
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: [...DEFAULT_STATE_MACHINE.states],
+      transitions: DEFAULT_STATE_MACHINE.transitions.map((t, i) =>
+        i === 0
+          ? { ...t, sourceSide: 'bottom' as const, targetSide: 'top' as const }
+          : { ...t },
+      ),
     };
-    const { edges } = formToFlow(form, {}, handleMap);
+    const { edges } = formToFlow(form, {});
     const waitingCalling = edges.find((e) => e.source === 'WAITING' && e.target === 'CALLING')!;
     expect(waitingCalling.sourceHandle).toBe(HANDLE_IDS.bottomSource);
     expect(waitingCalling.targetHandle).toBe(HANDLE_IDS.topTarget);
-    // An edge with no prior routing entry falls back to the L→R default.
+    // An edge with no sides falls back to the L→R default.
     const callingServing = edges.find((e) => e.source === 'CALLING' && e.target === 'SERVING')!;
     expect(callingServing.sourceHandle).toBe(DEFAULT_SOURCE_HANDLE);
     expect(callingServing.targetHandle).toBe(DEFAULT_TARGET_HANDLE);
+  });
+
+  it('seeds a default-routed edge (no sides) with the L→R handles', () => {
+    // A transition with no sides (absent) → default L→R handles.
+    const form = defaultStateMachineForm();
+    const { edges } = formToFlow(form, {});
+    for (const e of edges) {
+      expect(e.sourceHandle).toBe(DEFAULT_SOURCE_HANDLE);
+      expect(e.targetHandle).toBe(DEFAULT_TARGET_HANDLE);
+    }
+  });
+
+  it('supports an asymmetric edge (sourceSide set, targetSide absent)', () => {
+    // Only the source side is customized; the target falls back to the default.
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', sourceSide: 'bottom' }],
+    };
+    const { edges } = formToFlow(form, {});
+    expect(edges[0].sourceHandle).toBe(HANDLE_IDS.bottomSource);
+    expect(edges[0].targetHandle).toBe(DEFAULT_TARGET_HANDLE);
   });
 
   it('exposes eight handle ids — source + target on every side', () => {
@@ -168,7 +195,15 @@ describe('flowToGraph', () => {
     const { nodes, edges } = formToFlow(form, {});
     const { states, transitions } = flowToGraph(nodes, edges);
     expect(states).toEqual([...DEFAULT_STATE_MACHINE.states]);
-    expect(transitions).toEqual(DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })));
+    // The structural fields round-trip; `flowToGraph` now also captures the
+    // default sides (right→left) from the default handles `formToFlow` seeds.
+    expect(transitions.map(({ from, to, actionLabel }) => ({ from, to, actionLabel }))).toEqual(
+      DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
+    );
+    for (const t of transitions) {
+      expect(t.sourceSide).toBe('right');
+      expect(t.targetSide).toBe('left');
+    }
   });
 
   it('preserves node array order as the states order', () => {
@@ -180,13 +215,14 @@ describe('flowToGraph', () => {
     expect(states).toEqual(['C', 'A']);
   });
 
-  it('drops sourceHandle/targetHandle — handle routing never reaches the wire', () => {
-    // The load-bearing invariant of the vertical-edges feature: handle fields
-    // are CANVAS-ONLY. flowToGraph must emit a Transition with exactly
-    // { from, to, actionLabel } — never sourceHandle/targetHandle — so the PUT
-    // /api/system/config payload (and the StateMachineDto wire contract) is
-    // unchanged. An explicit keys assertion gives a clear regression message
-    // (the round-trip toEqual guards it implicitly but doesn't name the rule).
+  it('captures sourceSide/targetSide from the edge handles (form is source of truth)', () => {
+    // The form is the source of truth for handles now: `flowToGraph` captures
+    // the connection sides from the edge's `sourceHandle`/`targetHandle` so a
+    // manager-drawn edge's chosen side flows back into the form (via `commit` →
+    // `onChange`). The sides are on the form {@link Transition}, NOT on the
+    // wire {@link StateTransitionDto} — `toStateMachineDto` strips them at the
+    // wire boundary (see state-machine.test.ts). An edge with a vertical
+    // routing → `sourceSide: 'bottom'`, `targetSide: 'top'`.
     const nodes = [
       { id: 'A', type: 'state', position: { x: 0, y: 0 }, data: { name: 'A', description: '' } },
       { id: 'B', type: 'state', position: { x: 0, y: 0 }, data: { name: 'B', description: '' } },
@@ -204,16 +240,43 @@ describe('flowToGraph', () => {
     ];
     const { transitions } = flowToGraph(nodes, edges);
     expect(transitions).toHaveLength(1);
-    expect(Object.keys(transitions[0]).sort()).toEqual(['actionLabel', 'from', 'to']);
-    expect(transitions[0]).toEqual({ from: 'A', to: 'B', actionLabel: 'go' });
+    expect(transitions[0].sourceSide).toBe('bottom');
+    expect(transitions[0].targetSide).toBe('top');
+    // The canvas-only handle ids + markerEnd are NOT captured (never on the
+    // form Transition); only the side is derived.
+    expect((transitions[0] as unknown as Record<string, unknown>).sourceHandle).toBeUndefined();
+    expect((transitions[0] as unknown as Record<string, unknown>).markerEnd).toBeUndefined();
   });
 
-  it('drops markerEnd — the arrow never reaches the wire', () => {
-    // Mirrors the sourceHandle/targetHandle drop test above: `markerEnd` is
-    // CANVAS-ONLY (like handle routing), so the PUT /api/system/config payload
-    // (and the StateMachineDto wire contract) is unchanged. An explicit keys
-    // assertion guards the rule: the wire Transition has exactly { from, to,
-    // actionLabel } — never markerEnd.
+  it('captures default sides for a default-routed edge (right→left)', () => {
+    // An edge with the default L→R handles → `sourceSide: 'right'`,
+    // `targetSide: 'left'` (the canonicalization the form uses to omit default
+    // entries from the sparse wire map).
+    const nodes = [
+      { id: 'A', type: 'state', position: { x: 0, y: 0 }, data: { name: 'A', description: '' } },
+      { id: 'B', type: 'state', position: { x: 0, y: 0 }, data: { name: 'B', description: '' } },
+    ];
+    const edges: FlowEdge[] = [
+      {
+        id: 'A->B#0',
+        source: 'A',
+        target: 'B',
+        type: 'transition',
+        data: { actionLabel: 'go' },
+        sourceHandle: DEFAULT_SOURCE_HANDLE,
+        targetHandle: DEFAULT_TARGET_HANDLE,
+      },
+    ];
+    const { transitions } = flowToGraph(nodes, edges);
+    expect(transitions[0].sourceSide).toBe('right');
+    expect(transitions[0].targetSide).toBe('left');
+  });
+
+  it('drops markerEnd — the arrow never reaches the form/wire', () => {
+    // `markerEnd` is CANVAS-ONLY (like the handle ids), so `flowToGraph` never
+    // surfaces it on the form Transition. The wire `toStateMachineDto` further
+    // strips the sides, so the wire `StateTransitionDto` is exactly
+    // `{ from, to, actionLabel }` (see state-machine.test.ts).
     const nodes = [
       { id: 'A', type: 'state', position: { x: 0, y: 0 }, data: { name: 'A', description: '' } },
       { id: 'B', type: 'state', position: { x: 0, y: 0 }, data: { name: 'B', description: '' } },
@@ -232,7 +295,7 @@ describe('flowToGraph', () => {
     ];
     const { transitions } = flowToGraph(nodes, edges);
     expect(transitions).toHaveLength(1);
-    expect(Object.keys(transitions[0]).sort()).toEqual(['actionLabel', 'from', 'to']);
+    expect((transitions[0] as unknown as Record<string, unknown>).markerEnd).toBeUndefined();
     // Sanity: the marker config object itself is still the arrow (the drop is
     // on `flowToGraph`'s output, not on the input marker).
     expect(EDGE_ARROW_MARKER.type).toBe('arrowclosed');
@@ -422,3 +485,39 @@ describe('rejectionMessageForConnection', () => {
 // lib is no longer pure-assignable and this guard fails tsc.
 const _markerTypeGuard: EdgeMarker = EDGE_ARROW_MARKER;
 void _markerTypeGuard;
+
+describe('side ↔ handle mappers', () => {
+  it('sideToSourceHandle/sideToTargetHandle round-trip all 4 sides', () => {
+    for (const side of ['top', 'right', 'bottom', 'left'] as const) {
+      expect(sideToSourceHandle(side)).toBe(`${side}-source`);
+      expect(sideToTargetHandle(side)).toBe(`${side}-target`);
+    }
+  });
+
+  it('handleToSide extracts the side from a handle id', () => {
+    expect(handleToSide('top-source')).toBe('top');
+    expect(handleToSide('bottom-target')).toBe('bottom');
+    expect(handleToSide('right-source')).toBe('right');
+    expect(handleToSide('left-target')).toBe('left');
+  });
+
+  it('handleToSide returns undefined for a missing/unknown handle', () => {
+    expect(handleToSide(undefined)).toBeUndefined();
+    expect(handleToSide('garbage')).toBeUndefined();
+    expect(handleToSide('')).toBeUndefined();
+  });
+
+  it('side ↔ handle round-trips through formToFlow/flowToGraph', () => {
+    // A transition with sourceSide 'bottom' / targetSide 'top' → edges with
+    // bottom-source / top-target handles → flowToGraph captures 'bottom'/'top'.
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', sourceSide: 'bottom', targetSide: 'top' }],
+    };
+    const { nodes, edges } = formToFlow(form, {});
+    const { transitions } = flowToGraph(nodes, edges);
+    expect(transitions[0].sourceSide).toBe('bottom');
+    expect(transitions[0].targetSide).toBe('top');
+  });
+});

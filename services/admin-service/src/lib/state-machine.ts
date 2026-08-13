@@ -1,10 +1,58 @@
-import { DEFAULT_STATE_MACHINE, type StateMachineDto } from '../api/types';
+import {
+  DEFAULT_STATE_MACHINE,
+  type EdgeRoutingLayoutDto,
+  type EdgeSide,
+  type StateMachineDto,
+  type StateTransitionDto,
+} from '../api/types';
+
+/**
+ * The default connection-point routing for a transition that carries no
+ * manager-chosen handle: out the right, into the left — the canonical
+ * left-to-right flow the PRD §7 default state machine reads as. Mirrors
+ * `DEFAULT_SOURCE_HANDLE`/`DEFAULT_TARGET_HANDLE` in `state-machine-flow.ts`
+ * (the handle-id equivalents). Kept here (the form lib) so the form-model
+ * helpers (`isDefaultSides`, `formToJson`, `toEdgeRoutingLayoutDto`,
+ * `graphSignature`) share one source of truth for "what is default routing".
+ */
+export const DEFAULT_SOURCE_SIDE: EdgeSide = 'right';
+export const DEFAULT_TARGET_SIDE: EdgeSide = 'left';
+
+/** The four valid connection sides — used by `jsonToForm` enum validation. */
+const EDGE_SIDES: readonly EdgeSide[] = ['top', 'right', 'bottom', 'left'];
 
 /** One transition edge in the editable state machine. */
 export interface Transition {
   from: string;
   to: string;
   actionLabel: string;
+  /**
+   * Which side of the source node this edge exits. Optional — absent means
+   * the default ({@link DEFAULT_SOURCE_SIDE}). The form is the source of truth
+   * for handle routing now; `formToFlow` reads this to seed the React Flow
+   * `sourceHandle`, and `flowToGraph` captures it back from the canvas. It is
+   * NOT on the wire {@link StateTransitionDto} — it travels in the separate
+   * {@link EdgeRoutingLayoutDto} map (built by {@link toEdgeRoutingLayoutDto}).
+   */
+  sourceSide?: EdgeSide;
+  /** Which side of the target node this edge enters (see {@link sourceSide}). */
+  targetSide?: EdgeSide;
+}
+
+/**
+ * True when the sides are both default (or absent, which means default). Used
+ * by `formToJson` (omit default sides from the Source JSON), `toEdgeRoutingLayoutDto`
+ * (omit default edges from the sparse wire map), and `isDefaultGraph` (a
+ * default-structure graph with custom routing is custom, not default).
+ */
+export function isDefaultSides(
+  sourceSide: EdgeSide | undefined,
+  targetSide: EdgeSide | undefined,
+): boolean {
+  return (
+    (sourceSide ?? DEFAULT_SOURCE_SIDE) === DEFAULT_SOURCE_SIDE &&
+    (targetSide ?? DEFAULT_TARGET_SIDE) === DEFAULT_TARGET_SIDE
+  );
 }
 
 /**
@@ -30,7 +78,15 @@ export function defaultStateMachineForm(): StateMachineForm {
   };
 }
 
-/** Structural deep-equal against the PRD §7 default graph (prefill mode inference). */
+/**
+ * Structural deep-equal against the PRD §7 default graph (prefill mode inference).
+ *
+ * Considers connection-point sides: a graph that structurally matches the PRD
+ * §7 default but has a non-default-routed edge is CUSTOM (the manager touched
+ * the handle routing), so it loads as `mode: 'custom'` (editable) rather than
+ * `mode: 'default'` (read-only). The PRD default transitions carry no sides
+ * (treated as default), so an uncustomized graph stays default.
+ */
 export function isDefaultGraph(states: readonly string[], transitions: readonly Transition[]): boolean {
   if (states.length !== DEFAULT_STATE_MACHINE.states.length) return false;
   if (transitions.length !== DEFAULT_STATE_MACHINE.transitions.length) return false;
@@ -38,7 +94,12 @@ export function isDefaultGraph(states: readonly string[], transitions: readonly 
   if (!sameStates) return false;
   return transitions.every((t, i) => {
     const d = DEFAULT_STATE_MACHINE.transitions[i];
-    return t.from === d.from && t.to === d.to && t.actionLabel === d.actionLabel;
+    return (
+      t.from === d.from &&
+      t.to === d.to &&
+      t.actionLabel === d.actionLabel &&
+      isDefaultSides(t.sourceSide, t.targetSide)
+    );
   });
 }
 
@@ -61,7 +122,63 @@ export function toStateMachineDto(form: StateMachineForm): StateMachineDto {
         states: [...DEFAULT_STATE_MACHINE.states],
         transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
       }
-    : { states: form.states, transitions: form.transitions };
+    : {
+        states: form.states,
+        // Strip the canvas-only `sourceSide`/`targetSide` — they are NOT on the
+        // wire {@link StateTransitionDto}; they travel in the separate
+        // {@link EdgeRoutingLayoutDto} map (see {@link toEdgeRoutingLayoutDto}).
+        transitions: form.transitions.map((t) => ({ from: t.from, to: t.to, actionLabel: t.actionLabel })),
+      };
+}
+
+/**
+ * Merges a sparse wire `edgeRoutingLayout` map into per-transition sides. The
+ * inverse of {@link toEdgeRoutingLayoutDto}: a present entry carries the
+ * `sourceSide`/`targetSide` onto the matching transition; an absent entry
+ * (default routing) yields a transition with no sides (undefined → default).
+ * Used by the admin `toForm` and the wizard prefill so both surfaces share one
+ * merge owner (no duplicated inline logic + style drift).
+ *
+ * Uses the explicit-field form (not `...sides`) so a future widening of
+ * {@link EdgeSides} can't silently leak extra fields onto a {@link Transition}.
+ * The `edgeLayout ?? {}` coercion is belt-and-suspenders (the backend always
+ * returns `edgeRoutingLayout`, defaulting to `{}`) — same defensive pattern as
+ * `tvPanelLayout ?? DEFAULT_TV_GRID_LAYOUT` in `toForm`.
+ */
+export function mergeEdgeSides(
+  transitions: readonly StateTransitionDto[],
+  edgeLayout: EdgeRoutingLayoutDto | undefined,
+): Transition[] {
+  const layout = edgeLayout ?? {};
+  return transitions.map((t) => {
+    const sides = layout[`${t.from}->${t.to}`];
+    return sides
+      ? { from: t.from, to: t.to, actionLabel: t.actionLabel, sourceSide: sides.sourceSide, targetSide: sides.targetSide }
+      : { from: t.from, to: t.to, actionLabel: t.actionLabel };
+  });
+}
+
+/**
+ * Builds the sparse edge-routing wire map from the form transitions. For each
+ * transition with NON-DEFAULT connection sides, emits `map["from->to"] =
+ * { sourceSide, targetSide }`; default-routed edges (right→left, or absent) are
+ * OMITTED so `{}` means "all default". The map is the wire {@link
+ * EdgeRoutingLayoutDto} — keyed by `from->to` (unique per
+ * `validateCustomStateMachine`). In default mode `toStateMachineDto`
+ * force-resets the graph, so the form's transitions may still carry sides, but
+ * the default graph uses default routing so this map is `{}` regardless — read
+ * `form.transitions` directly, do not special-case mode.
+ */
+export function toEdgeRoutingLayoutDto(form: StateMachineForm): EdgeRoutingLayoutDto {
+  const layout: EdgeRoutingLayoutDto = {};
+  for (const t of form.transitions) {
+    if (isDefaultSides(t.sourceSide, t.targetSide)) continue;
+    layout[`${t.from}->${t.to}`] = {
+      sourceSide: t.sourceSide ?? DEFAULT_SOURCE_SIDE,
+      targetSide: t.targetSide ?? DEFAULT_TARGET_SIDE,
+    };
+  }
+  return layout;
 }
 
 /**
@@ -220,12 +337,15 @@ export function updateState(form: StateMachineForm, i: number, value: string): S
   const states = form.states.map((s, idx) => (idx === i ? value : s));
   // Renaming a state must propagate to any transition that referenced the old
   // name, so a rename never leaves a dangling edge (the dropdowns would then
-  // show the old value which is no longer in the states list).
+  // show the old value which is no longer in the states list). Spread preserves
+  // the canvas-only `sourceSide`/`targetSide` (a rename must not drop the
+  // manager-chosen handle routing — regression: the field-list rebuild used to
+  // drop them, snapping a vertical edge back to L→R on rename).
   const oldName = form.states[i];
   const transitions = form.transitions.map((t) => ({
+    ...t,
     from: t.from === oldName ? value : t.from,
     to: t.to === oldName ? value : t.to,
-    actionLabel: t.actionLabel,
   }));
   return { ...form, states, transitions };
 }
@@ -248,10 +368,32 @@ export function removeState(form: StateMachineForm, i: number): StateMachineForm
  * owns stripping it). Key order is `states` then `transitions` so the output is
  * deterministic and stable across re-serializations (a flickering diff while the
  * manager types would be noise).
+ *
+ * Connection sides are included on a transition ONLY when non-default
+ * (`!isDefaultSides`): a default edge → `{ from, to, actionLabel }`; a vertical
+ * edge → `{ from, to, actionLabel, sourceSide: "bottom", targetSide: "top" }`.
+ * Both sides are emitted together when either is non-default, so the source
+ * never shows a half-routed edge. This mirrors the sparse {@link
+ * toEdgeRoutingLayoutDto} wire map — the source is the human-readable twin of
+ * the wire map, so they omit the same default entries.
  */
 export function formToJson(form: StateMachineForm): string {
   return JSON.stringify(
-    { states: form.states, transitions: form.transitions },
+    {
+      states: form.states,
+      transitions: form.transitions.map((t) => {
+        if (isDefaultSides(t.sourceSide, t.targetSide)) {
+          return { from: t.from, to: t.to, actionLabel: t.actionLabel };
+        }
+        return {
+          from: t.from,
+          to: t.to,
+          actionLabel: t.actionLabel,
+          sourceSide: t.sourceSide ?? DEFAULT_SOURCE_SIDE,
+          targetSide: t.targetSide ?? DEFAULT_TARGET_SIDE,
+        };
+      }),
+    },
     null,
     2,
   );
@@ -323,6 +465,19 @@ export function jsonToForm(json: string): JsonToFormOk | JsonToFormErr {
     if (typeof tr.from !== 'string' || typeof tr.to !== 'string' || typeof tr.actionLabel !== 'string') {
       return { ok: false, error: 'Setiap transisi harus memiliki "from", "to", dan "actionLabel" berupa teks.' };
     }
+    // Optional connection sides: when present must be a valid EdgeSide enum.
+    // The side enum is validated HERE (the parse boundary), NOT in
+    // `validateCustomStateMachine` — sides are layout, not graph structure.
+    if (tr.sourceSide !== undefined) {
+      if (typeof tr.sourceSide !== 'string' || !EDGE_SIDES.includes(tr.sourceSide as EdgeSide)) {
+        return { ok: false, error: '"sourceSide" harus salah satu dari "top", "right", "bottom", "left".' };
+      }
+    }
+    if (tr.targetSide !== undefined) {
+      if (typeof tr.targetSide !== 'string' || !EDGE_SIDES.includes(tr.targetSide as EdgeSide)) {
+        return { ok: false, error: '"targetSide" harus salah satu dari "top", "right", "bottom", "left".' };
+      }
+    }
   }
   const form: StateMachineForm = {
     mode: 'custom',
@@ -334,4 +489,33 @@ export function jsonToForm(json: string): JsonToFormOk | JsonToFormErr {
     return { ok: false, error: errors[0] };
   }
   return { ok: true, form };
+}
+
+/**
+ * A canonical graph-structure signature for change detection. Used by the
+ * visual editor's re-seed guard ({@link StateMachineWorkflow}) and the designer
+ * page's source-sync guard ({@link AlurStatusDesigner}) to distinguish an
+ * EXTERNAL value change (post-save re-GET, prefill change) from a change WE
+ * drove (an in-session edit), so a self-driven round-trip never re-seeds the
+ * canvas (which would snap handle routing back to default).
+ *
+ * Excludes `mode` (the canvas graph = `states`/`transitions` regardless of
+ * mode; mode only toggles read-only) and positions (owned internally, never on
+ * the wire). The side canonicalization (undefined → default) is LOAD-BEARING:
+ * after a save+re-GET, `toForm` merges non-default sides back from
+ * `edgeRoutingLayout` (default edges get undefined), so the post-save signature
+ * equals the pre-save signature → no spurious re-seed and the manager-chosen
+ * handles survive in-session.
+ */
+export function graphSignature(form: StateMachineForm): string {
+  return JSON.stringify({
+    s: form.states,
+    t: form.transitions.map((t) => ({
+      from: t.from,
+      to: t.to,
+      actionLabel: t.actionLabel,
+      sourceSide: t.sourceSide ?? DEFAULT_SOURCE_SIDE,
+      targetSide: t.targetSide ?? DEFAULT_TARGET_SIDE,
+    })),
+  });
 }

@@ -23,6 +23,7 @@ import {
   BrandColor,
   ServiceThemes,
   TvPanelLayout,
+  EdgeRoutingLayout,
   DailyResetPolicy,
   DailyResetMode,
   SystemConfiguration,
@@ -185,6 +186,7 @@ describe('System daily-reset REST surface (integration — QUE-2)', () => {
         brandColor: BrandColor.DEFAULT,
         serviceThemes: ServiceThemes.DEFAULT,
         tvPanelLayout: TvPanelLayout.DEFAULT,
+        edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
       }),
     );
 

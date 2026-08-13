@@ -64,6 +64,7 @@ function wizardPayload() {
       { id: 'countersServing', component: 'countersServing', x: 0, y: 7, w: 12, h: 3 },
       { id: 'runningText', component: 'runningText', x: 0, y: 10, w: 12, h: 1 },
     ],
+    edgeRoutingLayout: {},
   };
 }
 

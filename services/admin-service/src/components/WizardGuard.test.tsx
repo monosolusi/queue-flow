@@ -18,6 +18,7 @@ function cleanStore(): SystemConfigurationDto {
     brandColor: '#2563eb',
     serviceThemes: { ...DEFAULT_SERVICE_THEMES },
     tvPanelLayout: DEFAULT_TV_GRID_LAYOUT,
+    edgeRoutingLayout: {},
   };
 }
 

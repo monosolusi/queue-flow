@@ -7,6 +7,7 @@ import { BROWSER_TIMEZONE } from '../../lib/timezone';
 import {
   type StateMachineForm,
   isDefaultGraph,
+  mergeEdgeSides,
 } from '../../lib/state-machine';
 
 /**
@@ -81,15 +82,25 @@ export type PanelState =
  *  and converting routing `assignedCategoryIds` -> codes. */
 export function toForm(config: SystemConfigurationDto): AdminForm {
   const idToCode = new Map(config.categories.map((c) => [c.id, c.code]));
+  // Merge the wire `edgeRoutingLayout` map into per-transition sides BEFORE
+  // inferring mode — `isDefaultGraph` now considers sides, so a default-
+  // structure graph with custom routing loads as `mode: 'custom'` (editable).
+  // The wire transitions carry no sides; the layout map is the sparse source
+  // (default edges omitted → undefined → default routing). Shared `mergeEdgeSides`
+  // owner (the wizard prefill uses the same helper).
+  const mergedTransitions = mergeEdgeSides(
+    config.stateMachine.transitions,
+    config.edgeRoutingLayout,
+  );
   return {
     storeName: config.storeName,
     // Build a StateMachineForm with the client-only `mode` preset inferred by
     // deep-equal against the PRD §7 default graph (mirrors the wizard's prefill
     // inference). `mode` is stripped at save (never on the wire).
     stateMachine: {
-      mode: isDefaultGraph(config.stateMachine.states, config.stateMachine.transitions) ? 'default' : 'custom',
+      mode: isDefaultGraph(config.stateMachine.states, mergedTransitions) ? 'default' : 'custom',
       states: [...config.stateMachine.states],
-      transitions: config.stateMachine.transitions.map((t) => ({ ...t })),
+      transitions: mergedTransitions,
     },
     brandColor: config.brandColor || DEFAULT_BRAND_COLOR,
     // Coerce a partial/degraded GET projection into a complete 4-surface map

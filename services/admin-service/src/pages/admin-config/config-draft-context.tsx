@@ -3,7 +3,7 @@ import { Outlet } from 'react-router-dom';
 import type { IAdminApi } from '../../api/admin-api';
 import { useSystemConfigContext } from '../../config/system-config-context';
 import { applyBrandColor, applyThemeMode } from '../../lib/theme';
-import { toStateMachineDto } from '../../lib/state-machine';
+import { toEdgeRoutingLayoutDto, toStateMachineDto } from '../../lib/state-machine';
 import { useToast } from '../../toast/useToast';
 import { type PanelState, toForm } from './form';
 
@@ -123,8 +123,12 @@ export function ConfigDraftProvider({
           storeName: form.storeName,
           // Strip the client-only `mode` preset + force the PRD §7 default graph
           // in default mode via the shared mapper (same one the wizard's finalize
-          // uses — neither surface can drift).
+          // uses — neither surface can drift). Sides are NOT on the wire
+          // StateTransitionDto; they travel in the separate sparse
+          // `edgeRoutingLayout` map (the client is the source of truth for
+          // handles now).
           stateMachine: toStateMachineDto(form.stateMachine),
+          edgeRoutingLayout: toEdgeRoutingLayoutDto(form.stateMachine),
           brandColor: form.brandColor,
           serviceThemes: form.serviceThemes,
           // Payload-only passthrough — the TV-layout editor lives on the

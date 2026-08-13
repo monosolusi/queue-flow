@@ -45,6 +45,7 @@ function configuredStore(): SystemConfigurationDto {
     brandColor: DEFAULT_BRAND_COLOR,
     serviceThemes: { ...DEFAULT_SERVICE_THEMES },
     tvPanelLayout: DEFAULT_TV_GRID_LAYOUT.map((w) => ({ ...w })),
+    edgeRoutingLayout: {},
   };
 }
 
@@ -56,6 +57,7 @@ function makeApi(config: SystemConfigurationDto = configuredStore()) {
       brandColor: payload.brandColor,
       serviceThemes: payload.serviceThemes,
       tvPanelLayout: payload.tvPanelLayout,
+      edgeRoutingLayout: {},
     }),
   );
   const getConfig = vi.fn(() => Promise.resolve(config));
@@ -311,6 +313,50 @@ describe('AlurStatusDesigner (dedicated /config/alur-status page)', () => {
     // The panel renders (store-name heading); no save was sent.
     expect(await screen.findByTestId('admin-store-name')).toBeInTheDocument();
     expect(save).not.toHaveBeenCalled();
+  });
+
+  it('save round-trip preserves a vertical edge (edgeRoutingLayout in the payload + re-GET)', async () => {
+    // THE persistence round-trip — the whole point of the feature: a vertical
+    // edge survives a save + re-GET. The GET returns the sparse
+    // `edgeRoutingLayout` map; `toForm` merges it back into the form
+    // transitions; the PUT payload carries it back. The proof that the diagram
+    // "redraws according to the source" is the round-trip: select the vertical
+    // edge (seeded from the merged sides), edit its label — `commit` →
+    // `flowToGraph` captures the sides back from the canvas edges → the emitted
+    // form still carries `sourceSide:'bottom'` → the save payload's
+    // `edgeRoutingLayout` carries it. If `toForm` had not merged the sides, the
+    // seeded edge would use the default right/left handles and the payload's
+    // `edgeRoutingLayout` would be `{}`.
+    const verticalStore: SystemConfigurationDto = {
+      ...configuredStore(),
+      edgeRoutingLayout: { 'WAITING->CALLING': { sourceSide: 'bottom', targetSide: 'top' } },
+    };
+    const { api, save } = makeApi(verticalStore);
+    renderDesignerRoute(api);
+    await screen.findByTestId('sm-mode');
+    // The store has a custom-routed default-structure graph → `toForm` infers
+    // `mode: 'custom'` (isDefaultGraph now considers sides), so the canvas is
+    // already editable.
+    expect(screen.getByLabelText(/Susun alur status sendiri/)).toBeChecked();
+    // Select the vertical edge and edit its label — the round-trip captures the
+    // merged sides back into the form, proving the diagram was seeded from them.
+    fireEvent.click(screen.getByTestId('rf__edge-WAITING->CALLING#0'));
+    fireEvent.change(screen.getByTestId('panel-action-label'), { target: { value: 'Panggil Cepat' } });
+
+    await userEvent.click(screen.getByTestId('admin-save'));
+    await screen.findByText('Konfigurasi tersimpan.');
+    const payload = save.mock.calls[0][0] as SaveSystemConfigurationPayload;
+    // The PUT payload carries the sparse edgeRoutingLayout map (the vertical
+    // routing survived the round-trip through the canvas).
+    expect(payload.edgeRoutingLayout).toEqual({
+      'WAITING->CALLING': { sourceSide: 'bottom', targetSide: 'top' },
+    });
+    // The edited label reached the wire.
+    expect(payload.stateMachine.transitions[0].actionLabel).toBe('Panggil Cepat');
+    // The wire transitions stay side-free (sides travel only in edgeRoutingLayout).
+    expect(
+      (payload.stateMachine.transitions[0] as unknown as Record<string, unknown>).sourceSide,
+    ).toBeUndefined();
   });
 
   it('shows a "fix elsewhere" hint when the state-machine is valid but another section is not', async () => {

@@ -6,6 +6,7 @@ import { BrandColor } from '../../domain/store-config';
 import { DailyResetPolicy, DailyResetMode } from '../../domain/store-config';
 import { ServiceThemes, type ServiceThemesMap } from '../../domain/store-config';
 import { TvPanelLayout, type TvGridLayout } from '../../domain/store-config';
+import { EdgeRoutingLayout, type EdgeRoutingLayoutDto } from '../../domain/store-config';
 import type { PriorityPolicy } from '../../domain/shared';
 
 /**
@@ -64,6 +65,9 @@ export interface SystemConfigurationDto {
   readonly serviceThemes: ServiceThemesMap;
   /** Per-widget TV grid layout (an ordered array of placed widgets). */
   readonly tvPanelLayout: TvGridLayout;
+  /** Per-edge connection-point (handle) layout for the admin state-machine
+   *  visual editor (sparse keyed map "from->to" -> { sourceSide, targetSide }). */
+  readonly edgeRoutingLayout: EdgeRoutingLayoutDto;
 }
 
 /** Projects the domain `StateMachine` into the flat {@link StateMachineDto}. */
@@ -137,6 +141,10 @@ export class GetSystemConfigurationUseCase {
         // store prefills the admin TV-layout editor with every widget at its
         // PRD-default grid position.
         tvPanelLayout: TvPanelLayout.DEFAULT.toDto(),
+        // Default edge routing layout — empty map = every edge uses the default
+        // left->right routing, so a clean store prefills the admin state-machine
+        // editor with no per-edge handle overrides.
+        edgeRoutingLayout: EdgeRoutingLayout.DEFAULT.toDto(),
       };
     }
 
@@ -154,6 +162,7 @@ export class GetSystemConfigurationUseCase {
       brandColor: system.brandColor.value,
       serviceThemes: system.serviceThemes.toDto(),
       tvPanelLayout: system.tvPanelLayout.toDto(),
+      edgeRoutingLayout: system.edgeRoutingLayout.toDto(),
       categories: allCategories
         .slice()
         .sort((a, b) => a.code.localeCompare(b.code))

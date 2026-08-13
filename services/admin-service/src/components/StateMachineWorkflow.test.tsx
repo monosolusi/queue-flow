@@ -455,4 +455,67 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     // `marker-end` attribute above is the authoritative guard (it proves the
     // component forwarded the resolved marker url to `BaseEdge`).
   });
+
+  it('redraw respects the source sides — a vertical edge round-trips through the canvas', () => {
+    // THE core fix: the form transition carries sourceSide/targetSide, and the
+    // diagram redraws according to those sides (not the unclear default). The
+    // proof is a full round-trip: form sides → `formToFlow` seeds the canvas
+    // edges with the bottom/top handles → a canvas edit calls `commit` →
+    // `flowToGraph` captures the sides back from the handles → the emitted form
+    // STILL carries `sourceSide:'bottom'`/`targetSide:'top'`. If `formToFlow`
+    // ignored the form sides (the old behavior), the seeded edge would use the
+    // default right/left handles and the round-tripped form would carry
+    // `sourceSide:'right'` instead of `'bottom'`.
+    const onChange = vi.fn();
+    const form: StateMachineForm = {
+      mode: 'custom' as const,
+      states: [...DEFAULT_STATE_MACHINE.states],
+      transitions: DEFAULT_STATE_MACHINE.transitions.map((t, i) =>
+        i === 0
+          ? { ...t, sourceSide: 'bottom' as const, targetSide: 'top' as const }
+          : { ...t },
+      ),
+    };
+    renderWorkflow(form, [], onChange);
+    // Select the vertical edge and edit its label — `commit` lifts the
+    // `flowToGraph`-captured form (with the sides) to the parent.
+    selectEdge('WAITING->CALLING#0');
+    fireEvent.change(screen.getByTestId('panel-action-label'), { target: { value: 'Panggil Cepat' } });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next = onChange.mock.calls[0][0];
+    // The round-tripped transition keeps its vertical routing — the canvas
+    // edges were seeded from the form sides and `flowToGraph` captured them
+    // back. (The old default-routing seed would have produced 'right'/'left'.)
+    const vertical = next.transitions.find((t: Transition) => t.from === 'WAITING' && t.to === 'CALLING');
+    expect(vertical?.sourceSide).toBe('bottom');
+    expect(vertical?.targetSide).toBe('top');
+    expect(vertical?.actionLabel).toBe('Panggil Cepat');
+  });
+
+  it('rename a state preserves the sides on affected transitions (regression)', () => {
+    // Before the fix, `updateState` rebuilt each transition as
+    // `{ from, to, actionLabel }`, dropping sourceSide/targetSide and snapping
+    // a vertical edge back to L→R on rename. The spread form preserves them.
+    const onChange = vi.fn();
+    const customForm: StateMachineForm = {
+      mode: 'custom' as const,
+      states: ['WAITING', 'CALLING', 'EXTRA'],
+      transitions: [
+        { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', sourceSide: 'bottom', targetSide: 'top' },
+        ...DEFAULT_STATE_MACHINE.transitions.slice(1).map((t) => ({ ...t })),
+      ],
+    };
+    renderWorkflow(customForm, [], onChange);
+    // Select the WAITING node and rename it to PENDING.
+    selectStateNode('WAITING');
+    const panel = screen.getByTestId('sm-properties');
+    const nameInput = within(panel).getByTestId('panel-state-name') as HTMLInputElement;
+    fireEvent.change(nameInput, { target: { value: 'PENDING' } });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next = onChange.mock.calls[0][0];
+    // The renamed transition keeps its vertical routing.
+    const renamed = next.transitions.find((t: Transition) => t.from === 'PENDING' && t.to === 'CALLING');
+    expect(renamed?.sourceSide).toBe('bottom');
+    expect(renamed?.targetSide).toBe('top');
+  });
 });

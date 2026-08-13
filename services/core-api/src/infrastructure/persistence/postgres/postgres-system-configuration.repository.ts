@@ -17,6 +17,10 @@ import {
   TvPanelLayout,
   type TvGridLayout,
 } from '../../../domain/store-config/value-objects/tv-panel-layout';
+import {
+  EdgeRoutingLayout,
+  type EdgeRoutingLayoutMap,
+} from '../../../domain/store-config/value-objects/edge-routing-layout';
 import { StateMachine } from '../../../domain/store-config/state-machine';
 import { StateSchema } from '../../../domain/store-config/value-objects/state-schema';
 import { StateTransitionRule } from '../../../domain/store-config/value-objects/state-transition-rule';
@@ -32,6 +36,7 @@ interface ConfigRow {
   brand_color: string;
   service_themes: ServiceThemesMap | null;
   tv_panel_layout: TvGridLayout | null;
+  edge_routing_layout: EdgeRoutingLayoutMap | null;
 }
 
 /**
@@ -58,8 +63,8 @@ export class PostgresSystemConfigurationRepository implements ISystemConfigurati
   async save(config: SystemConfiguration): Promise<void> {
     await withDbClient(this.pool, async (client) => {
       await client.query(
-        `INSERT INTO system_configuration (id, store_name, is_initial_setup_completed, state_machine, daily_reset_policy, brand_color, service_themes, tv_panel_layout)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        `INSERT INTO system_configuration (id, store_name, is_initial_setup_completed, state_machine, daily_reset_policy, brand_color, service_themes, tv_panel_layout, edge_routing_layout)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          ON CONFLICT (id) DO UPDATE SET
            store_name                = EXCLUDED.store_name,
            is_initial_setup_completed = EXCLUDED.is_initial_setup_completed,
@@ -67,7 +72,8 @@ export class PostgresSystemConfigurationRepository implements ISystemConfigurati
            daily_reset_policy        = EXCLUDED.daily_reset_policy,
            brand_color               = EXCLUDED.brand_color,
            service_themes            = EXCLUDED.service_themes,
-           tv_panel_layout           = EXCLUDED.tv_panel_layout`,
+           tv_panel_layout           = EXCLUDED.tv_panel_layout,
+           edge_routing_layout       = EXCLUDED.edge_routing_layout`,
         [
           config.id.value,
           config.storeName,
@@ -83,6 +89,7 @@ export class PostgresSystemConfigurationRepository implements ISystemConfigurati
           config.brandColor.value,
           JSON.stringify(config.serviceThemes.toDto()),
           JSON.stringify(config.tvPanelLayout.toDto()),
+          JSON.stringify(config.edgeRoutingLayout.toDto()),
         ],
       );
     });
@@ -125,6 +132,12 @@ function toConfig(row: ConfigRow): SystemConfiguration {
     // lacks the column (pg returns undefined here) — both paths reconstitute
     // TvPanelLayout.DEFAULT. Mirrors the serviceThemes fallback.
     tvPanelLayout: TvPanelLayout.of(row.tv_panel_layout ?? undefined),
+    // Same boot-window fallback for edge_routing_layout (0011 migration). `of()`
+    // recovers a null/undefined column to the empty default map (all-default
+    // routing), and a pre-migration row's SELECT * simply lacks the column (pg
+    // returns undefined here) — both paths reconstitute
+    // EdgeRoutingLayout.DEFAULT. Mirrors the tvPanelLayout fallback.
+    edgeRoutingLayout: EdgeRoutingLayout.of(row.edge_routing_layout ?? undefined),
   });
 }
 
