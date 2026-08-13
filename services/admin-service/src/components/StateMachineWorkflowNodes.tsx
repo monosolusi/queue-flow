@@ -72,6 +72,14 @@ export interface WorkflowHandlers {
    * new pair equals the edge's current endpoints.
    */
   onRerouteTransition: (edgeId: string, from: string, to: string) => void;
+  /**
+   * Add a new outgoing transition from the given source state, picking the
+   * first non-duplicate target (a status not already the target of an outgoing
+   * edge from this source). No-op when every status is already a target (no
+   * non-duplicate target left). Mirrors `addTransitionButton`'s structure but
+   * anchors the source to the selected node rather than the first state.
+   */
+  onAddTransitionFrom: (source: string) => void;
 }
 
 export const WorkflowContext = createContext<WorkflowHandlers | null>(null);

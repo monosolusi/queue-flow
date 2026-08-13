@@ -142,9 +142,10 @@ describe('AlurStatusDesigner (dedicated /config/alur-status page)', () => {
     // moved here. It is always visible (both Diagram + Source views) — the
     // active alur status is resolved per operation, so a ticket sitting in a
     // status this save removes has no legal next step (caller buttons vanish).
-    // Distinct from the dropped-standard-status caution inside
-    // StateMachineWorkflow (`sm-standard-warning`), which warns about FUTURE
-    // tickets. Uses the existing `.admin-panel__warning` class (the
+    // The dropped-standard-status caution was removed from the designer (the
+    // standar/bawaan distinction is no longer surfaced in the UI), so this
+    // live-ticket strand caution is the only warning the designer renders.
+    // Uses the existing `.admin-panel__warning` class (the
     // warning-at-decision-point invariant).
     const { api } = makeApi();
     renderDesignerRoute(api);
@@ -313,7 +314,11 @@ describe('AlurStatusDesigner (dedicated /config/alur-status page)', () => {
     expect(payload.stateMachine.transitions[0].actionLabel).toBe('Panggil Cepat');
   });
 
-  it('warns without blocking save when a custom flow drops a standard status', async () => {
+  it('does not block save when a custom flow drops a standard status (the dropped-status warning is removed)', async () => {
+    // Manager feedback: the dropped-standard-status caution was removed from the
+    // designer (the standar/bawaan distinction is no longer surfaced in the UI).
+    // A custom flow that drops standard statuses is still accepted by the
+    // backend — save is not blocked, and no sm-standard-warning is rendered.
     const trimmedFlow: SystemConfigurationDto = {
       ...configuredStore(),
       stateMachine: {
@@ -325,9 +330,7 @@ describe('AlurStatusDesigner (dedicated /config/alur-status page)', () => {
     renderDesignerRoute(api);
     await screen.findByTestId('sm-mode');
 
-    const warning = screen.getByTestId('sm-standard-warning');
-    expect(warning).toHaveTextContent('SERVING');
-    expect(warning).toHaveTextContent('COMPLETED');
+    expect(screen.queryByTestId('sm-standard-warning')).not.toBeInTheDocument();
     expect(screen.queryByTestId('sm-errors')).not.toBeInTheDocument();
     expect(screen.getByTestId('admin-save')).not.toBeDisabled();
 

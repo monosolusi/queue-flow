@@ -5,9 +5,9 @@
  * `/admin/config` surface (the wizard keeps the form editor — first-run only).
  *
  * States become nodes; transitions become edges drawn between nodes. The manager
- * drags a "Status" card from the palette onto the canvas (or uses the
- * accessible "Tambah Status" button) to add a state, and drags between a node's
- * connection handles to draw a transition edge (or uses "Tambah Transisi").
+ * drags a "Status" card from the palette onto the canvas to add a state, and
+ * drags between a node's connection handles to draw a transition edge (or uses
+ * the inline "Tambah aksi" button in the selected node's properties panel).
  *
  * **Wire contract unchanged.** The component is a different VIEW over the same
  * {@link StateMachineForm} + same `lib/state-machine` helpers: it lifts
@@ -69,10 +69,8 @@ import '@xyflow/react/dist/style.css';
 import {
   autoLayout,
   type StateMachineForm,
-  availableCanonicalStatuses,
   defaultStateMachineForm,
   graphSignature,
-  missingCanonicalStates,
 } from '../lib/state-machine';
 import {
   flowToGraph,
@@ -375,73 +373,14 @@ export function StateMachineWorkflow({
   const addStateAt = useCallback(
     (position: { x: number; y: number }, name?: string) => {
       const newName = name ?? nextStateName(value.states);
-      // Trim-aware duplicate guard mirroring `availableCanonicalStatuses`'s
-      // trimmed comparison, so a state stored with stray whitespace cannot slip
-      // the guard and seed a second node under the same canonical name.
+      // Trim-aware duplicate guard so a state stored with stray whitespace cannot
+      // slip the guard and seed a second node under the same canonical name.
       if (name && value.states.some((s) => s.trim() === name)) return;
       const newNode: FlowNode = { id: newName, type: 'state', position, data: { name: newName, description: '' } };
       commit([...nodes, newNode], edges);
     },
     [nodes, edges, value.states, commit],
   );
-
-  // Accessible, touch-friendly fallback for the palette drag: add a CUSTOM
-  // state at a visible offset from the last node. The double-tap ref guard
-  // (m3) absorbs a second same-tick tap; reset in the value-sync effect after
-  // the round-trip.
-  const addStateButton = useCallback(() => {
-    if (addPendingRef.current) return;
-    addPendingRef.current = true;
-    const lastNode = nodes[nodes.length - 1];
-    const position = lastNode
-      ? { x: lastNode.position.x + 120, y: lastNode.position.y + 120 }
-      : { x: 0, y: 0 };
-    addStateAt(position);
-  }, [nodes, addStateAt]);
-
-  // Add a canonical (PRD §7 "status standar") status under its load-bearing
-  // name. The calibrated picker (manager feedback: "pilihan status ada banyak,
-  // tidak jelas itu apa aja — kalibrasi dan cek ulang") offers exactly the
-  // canonical statuses NOT yet on the canvas, each with its sub-description, so
-  // the manager knows what each is before adding. Shares the same double-tap
-  // guard as the custom add so a fast double-click can't seed two nodes.
-  const addCanonicalStateButton = useCallback(
-    (canonicalName: string) => {
-      if (addPendingRef.current) return;
-      addPendingRef.current = true;
-      const lastNode = nodes[nodes.length - 1];
-      const position = lastNode
-        ? { x: lastNode.position.x + 120, y: lastNode.position.y + 120 }
-        : { x: 0, y: 0 };
-      addStateAt(position, canonicalName);
-    },
-    [nodes, addStateAt],
-  );
-
-  // Accessible fallback for drawing edges: add a self-edge on the first state
-  // (mirrors `addTransition`), which the manager then re-routes by dragging a
-  // handle or deletes. Disabled when there are no states to anchor on. Guards:
-  // the double-tap ref (m3) absorbs a second same-tick tap; the duplicate
-  // self-edge guard (m1) mirrors `onConnect` so the button can't seed the M1
-  // collision and stays consistent with drawn edges.
-  const addTransitionButton = useCallback(() => {
-    if (addPendingRef.current) return;
-    if (value.states.length === 0) return;
-    const firstState = value.states[0];
-    if (isDuplicateTransition(edges, firstState, firstState)) return;
-    addPendingRef.current = true;
-    const newEdge: FlowEdge = {
-      id: mintEdgeId(),
-      source: firstState,
-      target: firstState,
-      type: 'transition',
-      data: { actionLabel: '' },
-      sourceHandle: DEFAULT_SOURCE_HANDLE,
-      targetHandle: DEFAULT_TARGET_HANDLE,
-      markerEnd: EDGE_ARROW_MARKER,
-    };
-    commit(nodes, [...edges, newEdge]);
-  }, [nodes, edges, value.states, commit, mintEdgeId]);
 
   // Handlers the custom node/edge components + the properties panel reach via
   // context (the panel receives them as a prop). Behavior-only — no `form` data
@@ -549,8 +488,33 @@ export function StateMachineWorkflow({
         const nextEdges = edges.map((e) => (e.id === edgeId ? { ...e, source: from, target: to } : e));
         commit(nodes, nextEdges);
       },
+      // Add a new outgoing transition from the given source state (the inline
+      // "Tambah aksi" button in the node properties panel). Mirrors the old
+      // `addTransitionButton` structure but anchors the source to the selected
+      // node rather than the first state. Picks the first non-duplicate target
+      // (a status not already the target of an outgoing edge from this source);
+      // no-op when every status is already a target (the button is disabled in
+      // that case, but guard anyway so a stale click can't seed a duplicate).
+      // Double-tap guard via `addPendingRef` (same as the old add buttons).
+      onAddTransitionFrom: (source) => {
+        if (addPendingRef.current) return;
+        const target = value.states.find((s) => !isDuplicateTransition(edges, source, s));
+        if (!target) return; // no non-duplicate target left — no-op
+        addPendingRef.current = true;
+        const newEdge: FlowEdge = {
+          id: mintEdgeId(),
+          source,
+          target,
+          type: 'transition',
+          data: { actionLabel: '' },
+          sourceHandle: DEFAULT_SOURCE_HANDLE,
+          targetHandle: DEFAULT_TARGET_HANDLE,
+          markerEnd: EDGE_ARROW_MARKER,
+        };
+        commit(nodes, [...edges, newEdge]);
+      },
     }),
-    [value, nodes, edges, commit, selectedNodeId, selectedEdgeId, toast],
+    [value, nodes, edges, commit, selectedNodeId, selectedEdgeId, toast, mintEdgeId],
   );
 
   // Click-to-select: mark the clicked node as the sole selected node (clear any
@@ -588,16 +552,7 @@ export function StateMachineWorkflow({
     [],
   );
 
-  const missingStandardStates = useMemo(() => missingCanonicalStates(value), [value]);
-  // The calibrated "status standar" picker choices — the canonical statuses NOT
-  // yet on the canvas, each with its sub-description (manager feedback:
-  // "pilihan status ada banyak, tidak jelas itu apa aja — kalibrasi dan cek
-  // ulang"). Empty when the graph already has all five (the default graph does).
-  const availableCanonical = useMemo(() => availableCanonicalStatuses(value.states), [value.states]);
-  const editorDescribedBy =
-    [errors.length > 0 ? 'sm-errors' : null, missingStandardStates.length > 0 ? 'sm-standard-warning' : null]
-      .filter((id): id is string => id !== null)
-      .join(' ') || undefined;
+  const editorDescribedBy = errors.length > 0 ? 'sm-errors' : undefined;
   const isCustom = value.mode === 'custom';
 
   return (
@@ -676,58 +631,6 @@ export function StateMachineWorkflow({
               <StateIcon size={18} />
               <span>Status</span>
             </div>
-            <button
-              type="button"
-              className="btn btn--secondary"
-              data-testid="sm-add-state"
-              onClick={addStateButton}
-            >
-              <StateIcon size={16} />
-              Tambah Status Kustom
-            </button>
-            {/* Calibrated "status standar" picker (manager feedback: "pilihan
-                status ada banyak, tidak jelas itu apa aja"). The 5 PRD §7
-                canonical statuses are the hardcoded system identities the queue
-                engine keys off — listed here with their sub-descriptions so the
-                manager knows exactly what each is before adding it under its
-                load-bearing name. Custom statuses stay a free name (the button
-                above); this section offers only the canonical set NOT yet on the
-                canvas, so it is empty (the "semua sudah ada" note) once all five
-                are present (the default graph always is). */}
-            <div className="sm-palette__standard" data-testid="sm-palette-standard">
-              <p className="sm-properties__label">Status standar (sistem)</p>
-              {availableCanonical.length === 0 ? (
-                <p className="sm-palette__all-standard" data-testid="sm-palette-all-standard">
-                  Semua status standar sudah ada di kanvas.
-                </p>
-              ) : (
-                <ul className="sm-palette__standard-list">
-                  {availableCanonical.map((s) => (
-                    <li key={s.name}>
-                      <button
-                        type="button"
-                        className="sm-palette__standard-item"
-                        data-testid={`sm-add-standard-${s.name}`}
-                        onClick={() => addCanonicalStateButton(s.name)}
-                      >
-                        <span className="sm-palette__standard-name">{s.name}</span>
-                        <span className="sm-palette__standard-desc">{s.description}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-            <button
-              type="button"
-              className="btn btn--secondary"
-              data-testid="sm-add-transition"
-              onClick={addTransitionButton}
-              disabled={value.states.length === 0}
-            >
-              <StateIcon size={16} />
-              Tambah Transisi
-            </button>
           </aside>
         ))}
       </div>
@@ -738,28 +641,6 @@ export function StateMachineWorkflow({
             <li key={msg}>{msg}</li>
           ))}
         </ul>
-      )}
-
-      {/* Dropped-standard-status caution — rendered OUTSIDE the editor group and
-          in the warn tint so it never reads as one of the red sm-errors that
-          block saving. Identical copy/markup to the shared StateMachineEditor. */}
-      {missingStandardStates.length > 0 && (
-        <div className="sm-warning" id="sm-standard-warning" data-testid="sm-standard-warning">
-          <p className="sm-warning__intro">
-            Perhatian: alur status yang Anda susun tidak memakai sebagian status dari alur standar.
-            Untuk semua tiket berikutnya:
-          </p>
-          <ul className="sm-warning__list">
-            {missingStandardStates.map(({ state, consequence }) => (
-              <li key={state}>
-                <strong>{state}</strong> tidak ada — {consequence}.
-              </li>
-            ))}
-          </ul>
-          <p className="sm-warning__outro">
-            Jika ini memang disengaja, konfigurasi tetap bisa disimpan.
-          </p>
-        </div>
       )}
     </>
   );

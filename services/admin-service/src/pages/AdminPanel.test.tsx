@@ -868,14 +868,11 @@ describe('AdminPanel (post-wizard safety rails)', () => {
     expect(save).not.toHaveBeenCalled();
   });
 
-  it('warns — without blocking save — when the ticket flow drops a standard status', async () => {
-    // The bigger hazard than a live ticket: core-api's queue engine transitions
-    // to the standard status names as literals, but `StateSchema` carries no
-    // invariant that they survive a custom graph. Dropping COMPLETED breaks
-    // "Selesai Layan" for every FUTURE ticket and stops stamping completed_at
-    // (the analytics average). The manager is warned; the save still goes
-    // through, because a custom flow may legitimately skip a status. The warning
-    // travels with the StateMachineWorkflow, which now lives on the designer.
+  it('does not block save when the ticket flow drops a standard status (the dropped-status warning is removed)', async () => {
+    // The dropped-standard-status caution was removed from the designer (the
+    // standar/bawaan distinction is no longer surfaced in the UI). A custom
+    // flow that drops standard statuses is still accepted by the backend — save
+    // is not blocked, and no sm-standard-warning is rendered.
     const trimmedFlow: SystemConfigurationDto = {
       ...configuredStore(),
       stateMachine: {
@@ -886,17 +883,13 @@ describe('AdminPanel (post-wizard safety rails)', () => {
     const { api, save } = makeApi(trimmedFlow);
     renderPanel(api);
     await screen.findByText('Apotek Sehat');
-    // The warning lives on the designer now (the StateMachineWorkflow renders it
-    // from the form alone) — navigate to the designer route directly.
+    // Navigate to the designer route directly.
     await goToSection('Alur Status Tiket');
     await screen.findByTestId('sm-mode');
 
-    const warning = screen.getByTestId('sm-standard-warning');
-    expect(warning).toHaveTextContent('SERVING');
-    expect(warning).toHaveTextContent('SKIPPED');
-    expect(warning).toHaveTextContent('COMPLETED');
-    expect(warning).toHaveTextContent(/Selesai Layan/);
-    // Not an error list, and not a save gate.
+    // The dropped-status warning is gone (manager feedback: remove the
+    // standar/bawaan distinction from the UI).
+    expect(screen.queryByTestId('sm-standard-warning')).not.toBeInTheDocument();
     expect(screen.queryByTestId('sm-errors')).not.toBeInTheDocument();
     expect(screen.getByTestId('admin-save')).not.toBeDisabled();
 
@@ -912,8 +905,8 @@ describe('AdminPanel (post-wizard safety rails)', () => {
     // the former section's testids render on the panel (sm-summary /
     // sm-open-designer / state-machine-warning were removed with the section),
     // and navigating to `/config/alur-status` mounts the designer (sm-mode), not
-    // the panel. The dropped-standard-status caution still renders on the
-    // designer (`sm-standard-warning`); the live-ticket strand caution
+    // the panel. The dropped-standard-status caution was removed from the
+    // designer; the live-ticket strand caution
     // (`state-machine-warning`) was RE-SURFACED on the AlurStatusDesigner page
     // (the new decision point) — guarded in `AlurStatusDesigner.test.tsx`.
     const { api } = makeApi();

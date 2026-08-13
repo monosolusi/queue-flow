@@ -174,10 +174,10 @@ export function AlurStatusDesigner(): JSX.Element {
           Diagram + Source views: the active alur status is resolved per
           operation, so a ticket sitting in a status this save removes or
           renames has no legal next step — its caller action buttons vanish and
-          it can only be cleared by a daily reset. This is distinct from the
-          dropped-standard-status caution inside `StateMachineWorkflow`
-          (`.sm-standard-warning`), which warns about breaking FUTURE tickets'
-          caller actions + the analytics average. Uses the existing
+          it can only be cleared by a daily reset. The dropped-standard-status
+          caution was removed from the designer (the standar/bawaan distinction
+          is no longer surfaced in the UI), so this live-ticket strand caution is
+          the only warning the designer renders. Uses the existing
           `.admin-panel__warning` class (the warning-at-decision-point invariant
           — do not remove that CSS rule). */}
       <p className="admin-panel__warning" data-testid="state-machine-warning">

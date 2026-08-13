@@ -40,13 +40,10 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     expect(screen.getByTestId('sm-mode')).toBeInTheDocument();
     // The canvas mounts in both modes (read-only in default).
     expect(screen.getByTestId('sm-canvas')).toBeInTheDocument();
-    // No palette / add buttons in default mode.
+    // No palette in default mode.
     expect(screen.queryByTestId('sm-palette')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('sm-add-state')).not.toBeInTheDocument();
     // No properties panel in default mode (canvas is read-only).
     expect(screen.queryByTestId('sm-properties')).not.toBeInTheDocument();
-    // No dropped-status warning in default mode (the standard graph is intact).
-    expect(screen.queryByTestId('sm-standard-warning')).not.toBeInTheDocument();
   });
 
   it('switches to custom mode and shows the palette + editable canvas', async () => {
@@ -60,31 +57,22 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     expect(next.states).toEqual([...DEFAULT_STATE_MACHINE.states]);
   });
 
-  it('adds a state via the "Tambah Status" button', () => {
+  it('adds a transition via the inline "Tambah aksi" button in the node panel', () => {
     const onChange = vi.fn();
     const customForm = { ...defaultStateMachineForm(), mode: 'custom' as const };
     renderWorkflow(customForm, [], onChange);
-    fireEvent.click(screen.getByTestId('sm-add-state'));
-    expect(onChange).toHaveBeenCalledTimes(1);
-    const next = onChange.mock.calls[0][0];
-    expect(next.states).toHaveLength(DEFAULT_STATE_MACHINE.states.length + 1);
-    // The new state is a non-colliding generated name (STATUS_N), not empty.
-    const added = next.states[next.states.length - 1];
-    expect(/^STATUS_\d+$/.test(added)).toBe(true);
-  });
-
-  it('adds a transition via the "Tambah Transisi" button', () => {
-    const onChange = vi.fn();
-    const customForm = { ...defaultStateMachineForm(), mode: 'custom' as const };
-    renderWorkflow(customForm, [], onChange);
-    fireEvent.click(screen.getByTestId('sm-add-transition'));
+    // Select the WAITING node → the panel renders the inline Aksi editor.
+    selectStateNode('WAITING');
+    fireEvent.click(screen.getByTestId('panel-add-action'));
     expect(onChange).toHaveBeenCalledTimes(1);
     const next = onChange.mock.calls[0][0];
     expect(next.transitions).toHaveLength(DEFAULT_STATE_MACHINE.transitions.length + 1);
-    // The new transition is a self-edge on the first state with an empty label.
+    // The new transition is an outgoing edge from WAITING (the selected node)
+    // to the first non-duplicate target. WAITING→CALLING already exists, and
+    // WAITING→WAITING (self-edge) does not, so the self-edge is the first
+    // non-duplicate target.
     const added = next.transitions[next.transitions.length - 1];
-    expect(added.from).toBe(DEFAULT_STATE_MACHINE.states[0]);
-    expect(added.to).toBe(DEFAULT_STATE_MACHINE.states[0]);
+    expect(added.from).toBe('WAITING');
     expect(added.actionLabel).toBe('');
   });
 
@@ -120,26 +108,6 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     const customForm = { ...defaultStateMachineForm(), mode: 'custom' as const };
     renderWorkflow(customForm, []);
     expect(screen.queryByTestId('sm-errors')).not.toBeInTheDocument();
-  });
-
-  it('warns when a custom graph drops a standard status', () => {
-    renderWorkflow({
-      mode: 'custom',
-      states: ['WAITING', 'CALLING'],
-      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' }],
-      positions: {},
-    });
-    const warning = screen.getByTestId('sm-standard-warning');
-    expect(warning).toHaveTextContent('COMPLETED');
-    expect(warning).toHaveTextContent(/Selesai Layan/);
-    // Not an error list.
-    expect(screen.queryByTestId('sm-errors')).not.toBeInTheDocument();
-    expect(warning).toHaveAttribute('id', 'sm-standard-warning');
-  });
-
-  it('shows no dropped-status warning on a complete custom graph', () => {
-    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' });
-    expect(screen.queryByTestId('sm-standard-warning')).not.toBeInTheDocument();
   });
 
   it('reverts to the default graph when switching back to default from custom', () => {
@@ -193,44 +161,6 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
   });
 
   // --- Regression tests pinning the arch-reviewer's applied fixes ---
-
-  it('absorbs a same-tick double-tap on "Tambah Status" (m3: exactly one add)', () => {
-    // `disabled` only takes effect after a re-render, so two clicks landing in
-    // the same tick both pass a state-only guard. The ref guard must flip BEFORE
-    // the first commit and stay set until the value-sync effect resets it after
-    // the parent re-renders — here the vi.fn() parent never feeds back, so the
-    // ref stays set and the second tap is absorbed.
-    const onChange = vi.fn();
-    const customForm = { ...defaultStateMachineForm(), mode: 'custom' as const };
-    renderWorkflow(customForm, [], onChange);
-    const btn = screen.getByTestId('sm-add-state');
-    fireEvent.click(btn);
-    fireEvent.click(btn); // same-tick second tap
-    expect(onChange).toHaveBeenCalledTimes(1);
-    const next = onChange.mock.calls[0][0];
-    expect(next.states).toHaveLength(DEFAULT_STATE_MACHINE.states.length + 1);
-  });
-
-  it('no-ops "Tambah Transisi" when a self-edge on the first state already exists (m1)', () => {
-    // The default graph has no self-edges, so seed one on WAITING (the first
-    // state). The button must mirror onConnect's duplicate-edge guard and skip
-    // instead of minting a second self-edge (which the M1 length-based id bug
-    // would have collided on the wire-irrelevant React key).
-    const onChange = vi.fn();
-    const firstState = DEFAULT_STATE_MACHINE.states[0];
-    const customForm = {
-      mode: 'custom' as const,
-      states: [...DEFAULT_STATE_MACHINE.states],
-      transitions: [
-        ...DEFAULT_STATE_MACHINE.transitions,
-        { from: firstState, to: firstState, actionLabel: 'ulang' },
-      ],
-      positions: {},
-    };
-    renderWorkflow(customForm, [], onChange);
-    fireEvent.click(screen.getByTestId('sm-add-transition'));
-    expect(onChange).not.toHaveBeenCalled();
-  });
 
   it('no-ops a rename onto an existing state name (M2: no duplicate node id)', () => {
     // The node id IS the state name. Renaming EXTRA → WAITING would mint a
@@ -343,7 +273,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
   });
 
   it('mints opaque `sm-edge-N` ids for newly added edges (M1: disjoint id space)', () => {
-    // Newly minted edges (onConnect / "Tambah Transisi") use an opaque
+    // Newly minted edges (onConnect / inline "Tambah aksi") use an opaque
     // `sm-edge-N` id from a per-instance monotonic counter — a DISTINCT prefix
     // from `formToFlow`'s index-based `${from}->${to}#${i}` ids — so a delete
     // (which leaves gaps in the index space) can never collide with a re-add.
@@ -353,7 +283,11 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     const onChange = vi.fn();
     const customForm = { ...defaultStateMachineForm(), mode: 'custom' as const };
     renderWorkflow(customForm, [], onChange);
-    fireEvent.click(screen.getByTestId('sm-add-transition'));
+    // Select the WAITING node → panel renders the inline Aksi editor → add an
+    // outgoing edge via the "Tambah aksi" button (replaces the old palette
+    // "Tambah Transisi" button which was removed in the palette de-dup).
+    selectStateNode('WAITING');
+    fireEvent.click(screen.getByTestId('panel-add-action'));
     const renderedEdges = document.querySelectorAll('.react-flow__edge');
     expect(renderedEdges.length).toBeGreaterThan(0);
     const newEdge = Array.from(renderedEdges).find((e) =>
@@ -386,13 +320,15 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     expect(screen.getByTestId('sm-palette')).toBeInTheDocument();
   });
 
-  it('selecting a node shows its panel (name input + description + delete button)', () => {
+  it('selecting a node shows its panel (name input + Deskripsi + inline Aksi + delete button)', () => {
     renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
     selectStateNode('CALLING');
     const panel = screen.getByTestId('sm-properties');
     expect(within(panel).getByTestId('panel-state-name')).toBeInTheDocument();
-    // The derived description for a canonical state is the canonical copy.
-    expect(panel).toHaveTextContent('Sedang dipanggil ke counter');
+    // The read-only "Deskripsi" field shows the canonical description.
+    expect(within(panel).getByTestId('panel-state-description')).toHaveTextContent(
+      'Sedang dipanggil ke counter',
+    );
     expect(within(panel).getByTestId('panel-delete-state')).toBeInTheDocument();
   });
 
@@ -456,12 +392,12 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     // The description lives on `data.description` (computed by `formToFlow`/
     // `withDescriptions`), NOT derived from the form prop at render. So a
     // mutation that changes a state's outgoing count (here: adding a self-edge
-    // on the first state via "Tambah Transisi") must refresh the node card's
+    // via the inline "Tambah aksi" button) must refresh the node card's
     // description via `commit`'s `withDescriptions` call — even though the
     // vi.fn() parent never feeds the new form back.
     const onChange = vi.fn();
-    // ONHOLD is a custom state with 0 outgoing → "Status kustom" initially.
-    // After a self-edge is added, it has 1 outgoing → "1 transisi keluar".
+    // ONHOLD is a custom state with 1 outgoing → "1 transisi keluar" initially.
+    // After a self-edge is added, it has 2 outgoing → "2 transisi keluar".
     renderWorkflow(
       {
         mode: 'custom',
@@ -475,8 +411,11 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     // ONHOLD already has 1 outgoing (to CALLING) → "1 transisi keluar".
     const card = screen.getByTestId('sm-node-card-ONHOLD');
     expect(card).toHaveTextContent('1 transisi keluar');
-    // Add a self-edge on ONHOLD (the first state) via the button → 2 outgoing.
-    fireEvent.click(screen.getByTestId('sm-add-transition'));
+    // Select ONHOLD → panel renders the inline Aksi editor → add a self-edge
+    // (ONHOLD→ONHOLD is the first non-duplicate target since ONHOLD→CALLING
+    // already exists). The node now has 2 outgoing → "2 transisi keluar".
+    selectStateNode('ONHOLD');
+    fireEvent.click(screen.getByTestId('panel-add-action'));
     expect(onChange).toHaveBeenCalledTimes(1);
     // The node card description refreshes via `withDescriptions` in `commit`.
     const refreshedCard = screen.getByTestId('sm-node-card-ONHOLD');
@@ -576,56 +515,180 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     expect(renamed?.targetSide).toBe('top');
   });
 
-  // --- State-panel "Aksi" list + edge reroute (manager feedback) ---
+  // --- State-panel inline "Aksi" editor + edge reroute (manager feedback) ---
   //
-  // The manager reported two issues: (1) they could not connect SERVING to
-  // COMPLETED from the panel — the route was read-only and only editable by
-  // dragging handles on the canvas; (2) adding a state was confusing because
-  // its interactions with the ticket (the caller-panel buttons / "actions"
-  // that enter/leave it) were invisible — the panel only showed a name + a
-  // derived description + delete. The fix surfaces the state's incoming/
-  // outgoing transitions as a clickable list (each item jumps the canvas
-  // selection to that edge) and replaces the read-only route paragraph with
-  // two editable "Dari"/"Ke" selects.
+  // Manager feedback: "update status → update to" — a state node's properties
+  // should surface its outgoing actions inline and editable. Each outgoing
+  // transition is a row with a "Update to" <select> (re-point the target), a
+  // "Label aksi" <input>, and a "Hapus" button. The read-only "Status" badge +
+  // consequence block is gone; a read-only "Deskripsi" field replaces it. The
+  // standalone edge editor (Dari / Ke / Label aksi / Hapus transisi) is kept
+  // unchanged — two edit paths (inline node actions + click-an-edge).
 
-  it('the state panel lists the state\'s outgoing + incoming "Aksi" (actions on its transitions)', () => {
+  it('the state panel shows the inline Aksi editor with outgoing transitions only', () => {
     renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
     selectStateNode('SERVING');
     const panel = screen.getByTestId('sm-properties');
-    // Outgoing action: SERVING → COMPLETED ("Selesai Layan").
-    const outBtn = within(panel).getByTestId('panel-state-action-out-SERVING->COMPLETED') as HTMLButtonElement;
-    expect(outBtn).toBeInTheDocument();
-    expect(outBtn).toHaveTextContent('COMPLETED');
-    expect(outBtn).toHaveTextContent('Selesai Layan');
-    // Incoming action: CALLING → SERVING ("Mulai Melayani").
-    const inBtn = within(panel).getByTestId('panel-state-action-in-CALLING->SERVING') as HTMLButtonElement;
-    expect(inBtn).toBeInTheDocument();
-    expect(inBtn).toHaveTextContent('CALLING');
-    expect(inBtn).toHaveTextContent('Mulai Melayani');
+    // SERVING has one outgoing: SERVING → COMPLETED (index 4 in the default
+    // graph). The inline editor renders a "Update to" select showing COMPLETED
+    // and a "Label aksi" input with the action label "Selesai Layan".
+    const toSelect = within(panel).getByTestId('panel-action-to-SERVING->COMPLETED#4') as HTMLSelectElement;
+    expect(toSelect).toBeInTheDocument();
+    expect(toSelect.value).toBe('COMPLETED');
+    const labelInput = within(panel).getByTestId('panel-action-label-SERVING->COMPLETED#4') as HTMLInputElement;
+    expect(labelInput.value).toBe('Selesai Layan');
+    // The incoming transition (CALLING → SERVING, index 1) is NOT listed
+    // (outgoing only).
+    expect(within(panel).queryByTestId('panel-action-to-CALLING->SERVING#1')).not.toBeInTheDocument();
   });
 
-  it('clicking a state-panel action jumps the canvas selection to that edge (panel switches to the edge editor)', () => {
+  it('the state panel shows the read-only Deskripsi field (derived description)', () => {
     renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
     selectStateNode('SERVING');
     const panel = screen.getByTestId('sm-properties');
-    // Click the outgoing action for SERVING (SERVING → COMPLETED).
-    const outBtn = within(panel).getByTestId('panel-state-action-out-SERVING->COMPLETED');
-    fireEvent.click(outBtn);
-    // The panel switches to the EDGE editor — the action-label input and
-    // the "Hapus transisi" button are the edge-editor affordances.
-    const edgePanel = screen.getByTestId('sm-properties');
-    expect(within(edgePanel).getByTestId('panel-action-label')).toBeInTheDocument();
-    expect(within(edgePanel).getByTestId('panel-delete-transition')).toBeInTheDocument();
-    // The state-panel "Aksi" list is gone (the editor switched views).
-    expect(within(edgePanel).queryByTestId('panel-state-actions')).not.toBeInTheDocument();
+    // The "Deskripsi" field shows the canonical description for SERVING.
+    expect(within(panel).getByTestId('panel-state-description')).toHaveTextContent('Sedang dilayani');
+    // The old "Status" badge / sub-description / consequence blocks are gone.
+    expect(within(panel).queryByTestId('panel-state-status')).not.toBeInTheDocument();
+    expect(within(panel).queryByTestId('panel-state-badge')).not.toBeInTheDocument();
+    expect(within(panel).queryByTestId('panel-state-subdescription')).not.toBeInTheDocument();
+    expect(within(panel).queryByTestId('panel-state-consequence')).not.toBeInTheDocument();
   });
+
+  it('the state panel Deskripsi shows the derived summary for a custom node', () => {
+    const customForm: StateMachineForm = {
+      mode: 'custom' as const,
+      states: ['WAITING', 'CALLING', 'ONHOLD'],
+      transitions: [
+        { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' },
+        { from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut' },
+      ],
+      positions: {},
+    };
+    renderWorkflow(customForm);
+    selectStateNode('ONHOLD');
+    const panel = screen.getByTestId('sm-properties');
+    // ONHOLD has 1 outgoing transition → derived "1 transisi keluar".
+    expect(within(panel).getByTestId('panel-state-description')).toHaveTextContent('1 transisi keluar');
+    // No old badge block.
+    expect(within(panel).queryByTestId('panel-state-badge')).not.toBeInTheDocument();
+  });
+
+  it('the inline "Tambah aksi" button adds a new outgoing edge from the selected node', () => {
+    const onChange = vi.fn();
+    const customForm: StateMachineForm = {
+      mode: 'custom' as const,
+      states: ['WAITING', 'CALLING'],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
+      positions: {},
+    };
+    renderWorkflow(customForm, [], onChange);
+    selectStateNode('WAITING');
+    fireEvent.click(screen.getByTestId('panel-add-action'));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next = onChange.mock.calls[0][0];
+    // The new edge is WAITING → WAITING (the first non-duplicate target: CALLING
+    // is already a target, so WAITING itself is the next candidate).
+    expect(next.transitions).toHaveLength(2);
+    const added = next.transitions[next.transitions.length - 1];
+    expect(added.from).toBe('WAITING');
+    expect(added.actionLabel).toBe('');
+  });
+
+  it('the inline "Tambah aksi" button is disabled when every status is already a target', () => {
+    // A 2-state graph where WAITING has outgoing edges to both WAITING and
+    // CALLING → no non-duplicate target left → the button is disabled.
+    const customForm: StateMachineForm = {
+      mode: 'custom' as const,
+      states: ['WAITING', 'CALLING'],
+      transitions: [
+        { from: 'WAITING', to: 'WAITING', actionLabel: 'ulang' },
+        { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' },
+      ],
+      positions: {},
+    };
+    renderWorkflow(customForm);
+    selectStateNode('WAITING');
+    expect(screen.getByTestId('panel-add-action')).toBeDisabled();
+  });
+
+  it('the inline "Update to" select re-routes the edge (source stays the selected node)', () => {
+    const onChange = vi.fn();
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const }, [], onChange);
+    selectStateNode('SERVING');
+    // SERVING → COMPLETED (index 4) is the outgoing edge. Change "Update to" to
+    // SKIPPED.
+    const toSelect = screen.getByTestId('panel-action-to-SERVING->COMPLETED#4') as HTMLSelectElement;
+    fireEvent.change(toSelect, { target: { value: 'SKIPPED' } });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next = onChange.mock.calls[0][0];
+    // The edge is re-routed: source stays SERVING, target becomes SKIPPED.
+    const routed = next.transitions.find((t: Transition) => t.from === 'SERVING');
+    expect(routed?.to).toBe('SKIPPED');
+  });
+
+  it('the inline "Label aksi" input edits the edge action label', () => {
+    const onChange = vi.fn();
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const }, [], onChange);
+    selectStateNode('SERVING');
+    const labelInput = screen.getByTestId('panel-action-label-SERVING->COMPLETED#4') as HTMLInputElement;
+    fireEvent.change(labelInput, { target: { value: 'Selesai' } });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next = onChange.mock.calls[0][0];
+    const edited = next.transitions.find((t: Transition) => t.from === 'SERVING' && t.to === 'COMPLETED');
+    expect(edited?.actionLabel).toBe('Selesai');
+  });
+
+  it('the inline "Hapus" button deletes the outgoing action (disabled when only one transition remains)', () => {
+    // 2-state / 1-transition graph → the Hapus button on the sole outgoing
+    // edge is disabled (the ≥1-transition invariant).
+    const oneTransitionForm: StateMachineForm = {
+      mode: 'custom' as const,
+      states: ['WAITING', 'CALLING'],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
+      positions: {},
+    };
+    renderWorkflow(oneTransitionForm);
+    selectStateNode('WAITING');
+    const deleteBtn = screen.getByTestId('panel-action-delete-WAITING->CALLING#0');
+    expect(deleteBtn).toBeDisabled();
+  });
+
+  it('the inline "Hapus" button deletes the outgoing action when more than one transition exists', () => {
+    const onChange = vi.fn();
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const }, [], onChange);
+    selectStateNode('SERVING');
+    const deleteBtn = screen.getByTestId('panel-action-delete-SERVING->COMPLETED#4');
+    expect(deleteBtn).not.toBeDisabled();
+    fireEvent.click(deleteBtn);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next = onChange.mock.calls[0][0];
+    // The SERVING → COMPLETED transition is gone.
+    expect(next.transitions.every((t: Transition) => !(t.from === 'SERVING' && t.to === 'COMPLETED'))).toBe(true);
+  });
+
+  it('the state panel shows the empty-state hint when the node has no outgoing transitions', () => {
+    const customForm: StateMachineForm = {
+      mode: 'custom' as const,
+      states: ['WAITING', 'CALLING', 'LONELY'],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
+      positions: {},
+    };
+    renderWorkflow(customForm);
+    selectStateNode('LONELY');
+    const panel = screen.getByTestId('sm-properties');
+    expect(within(panel).getByTestId('panel-state-actions-empty')).toHaveTextContent(
+      'Belum ada aksi keluar. Tambah aksi untuk mengubah status ini ke status lain.',
+    );
+  });
+
+  // --- Edge editor (unchanged): reroute + duplicate revert via the standalone
+  //     edge editor's Dari/Ke selects --------------------------------------------
 
   it('re-routes an edge via the panel "Ke" select (CALLING stays, target becomes COMPLETED)', () => {
-    // The fix for "can't connect X to Y from the panel": the edge editor's
-    // "Dari"/"Ke" selects lift a reroute via `onRerouteTransition`. Changing
-    // the "Ke" select on WAITING->CALLING to COMPLETED re-points the edge to
-    // WAITING->COMPLETED (a non-duplicate pair) — `commit` lifts the new form
-    // and the first transition becomes WAITING → COMPLETED.
+    // The standalone edge editor's "Dari"/"Ke" selects lift a reroute via
+    // `onRerouteTransition`. Changing the "Ke" select on WAITING->CALLING to
+    // COMPLETED re-points the edge to WAITING->COMPLETED (a non-duplicate pair).
     const onChange = vi.fn();
     renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const }, [], onChange);
     selectEdge('WAITING->CALLING#0');
@@ -663,92 +726,5 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     // The controlled `<select>` reverts to the live edge value (CALLING) —
     // the DOM reflects the controlled value, not the rejected pick.
     expect(toSelect.value).toBe('CALLING');
-  });
-
-  // --- Calibrated "status standar" picker (manager feedback: "pilihan status
-  //     ada banyak, tidak jelas itu apa aja — kalibrasi dan cek ulang") --------
-  it('palette lists the canonical statuses NOT yet on the canvas, each with a sub-description', () => {
-    // A custom graph missing SERVING/SKIPPED/COMPLETED → the picker offers
-    // exactly those three, each labelled with its canonical sub-description so
-    // the manager knows what each is before adding. The "semua sudah ada" note
-    // is absent (statuses are still missing).
-    const customForm: StateMachineForm = {
-      mode: 'custom' as const,
-      states: ['WAITING', 'CALLING'],
-      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
-      positions: {},
-    };
-    renderWorkflow(customForm);
-    expect(screen.getByTestId('sm-palette-standard')).toBeInTheDocument();
-    expect(screen.queryByTestId('sm-palette-all-standard')).not.toBeInTheDocument();
-    expect(screen.getByTestId('sm-add-standard-SERVING')).toBeInTheDocument();
-    expect(screen.getByTestId('sm-add-standard-SKIPPED')).toBeInTheDocument();
-    expect(screen.getByTestId('sm-add-standard-COMPLETED')).toBeInTheDocument();
-    // The absent canonicals (WAITING/CALLING are present) are NOT offered.
-    expect(screen.queryByTestId('sm-add-standard-WAITING')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('sm-add-standard-CALLING')).not.toBeInTheDocument();
-  });
-
-  it('palette shows "semua sudah ada" when all 5 canonical statuses are on the canvas', () => {
-    // The default graph has all five → the picker is empty and the note shows.
-    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
-    expect(screen.getByTestId('sm-palette-all-standard')).toBeInTheDocument();
-    expect(screen.queryByTestId('sm-add-standard-SERVING')).not.toBeInTheDocument();
-  });
-
-  it('adds a canonical status under its load-bearing name via the picker', () => {
-    // Adding SERVING from the picker commits it under the exact canonical name
-    // (the system identity the queue engine keys off), NOT a generated STATUS_N.
-    const onChange = vi.fn();
-    const customForm: StateMachineForm = {
-      mode: 'custom' as const,
-      states: ['WAITING', 'CALLING'],
-      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
-      positions: {},
-    };
-    renderWorkflow(customForm, [], onChange);
-    fireEvent.click(screen.getByTestId('sm-add-standard-SERVING'));
-    expect(onChange).toHaveBeenCalledTimes(1);
-    const next = onChange.mock.calls[0][0];
-    expect(next.states).toContain('SERVING');
-  });
-
-  // --- Properties panel "Status" property (manager feedback: "status node itu
-  //     apa? masukn d properties" + "tambahkan properties untuk status, dan sub
-  //     description juga") -----------------------------------------------------
-  it('properties panel shows the "Status standar" badge + sub-description + consequence for a canonical node', () => {
-    // The status is DERIVED from the name (the name IS the load-bearing system
-    // identity). For a canonical node the panel surfaces a read-only "Status
-    // standar" badge, the status's sub-description, and the consequence (what
-    // stops working without it) — so the manager understands the status's role
-    // before editing or dropping it.
-    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
-    selectStateNode('SERVING');
-    const panel = screen.getByTestId('sm-properties');
-    expect(within(panel).getByTestId('panel-state-badge')).toHaveTextContent('Status standar');
-    expect(within(panel).getByTestId('panel-state-subdescription')).toHaveTextContent('Sedang dilayani');
-    expect(within(panel).getByTestId('panel-state-consequence')).toBeInTheDocument();
-  });
-
-  it('properties panel shows the "Status kustom" badge + derived sub-description, no consequence, for a custom node', () => {
-    // A custom (non-canonical) node gets a "Status kustom" badge + the derived
-    // summary, and NO consequence (the consequence is a canonical-status
-    // property — a custom status has no engine-coupled role to lose).
-    const customForm: StateMachineForm = {
-      mode: 'custom' as const,
-      states: ['WAITING', 'CALLING', 'ONHOLD'],
-      transitions: [
-        { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' },
-        { from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut' },
-      ],
-      positions: {},
-    };
-    renderWorkflow(customForm);
-    selectStateNode('ONHOLD');
-    const panel = screen.getByTestId('sm-properties');
-    expect(within(panel).getByTestId('panel-state-badge')).toHaveTextContent('Status kustom');
-    // ONHOLD has 1 outgoing transition → derived "1 transisi keluar".
-    expect(within(panel).getByTestId('panel-state-subdescription')).toHaveTextContent('1 transisi keluar');
-    expect(within(panel).queryByTestId('panel-state-consequence')).not.toBeInTheDocument();
   });
 });

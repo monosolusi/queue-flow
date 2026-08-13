@@ -21,8 +21,8 @@
  * (preserves the existing guard). The panel renders only in custom mode
  * (default mode is read-only canvas only).
  */
-import { canonicalStatusOf, describeState, stateActions, type StateMachineForm } from '../lib/state-machine';
-import type { FlowEdge, FlowNode } from '../lib/state-machine-flow';
+import { describeState, type StateMachineForm } from '../lib/state-machine';
+import { isDuplicateTransition, type FlowEdge, type FlowNode } from '../lib/state-machine-flow';
 import type { WorkflowHandlers } from './StateMachineWorkflowNodes';
 
 export interface WorkflowPropertiesPanelProps {
@@ -98,32 +98,25 @@ export function StateMachineWorkflowProperties({
   if (selectedNode) {
     const name = selectedNode.data.name;
     const description = describeState(form, name);
-    // The status the node IS, derived from its name (manager feedback: "nama
-    // status boleh, tapi status itu state yang harus d hardcode — masukn d
-    // properties"). The name is free-editable, but the STATUS is one of the 5
-    // hardcoded PRD §7 system identities the queue engine keys off as literals
-    // (QueueTicket.create() writes WAITING, complete() writes COMPLETED, …).
-    // A true free-name vs. hardcoded-status decoupling would require a domain
-    // rewrite (aggregate + repos + DB + wire DTO + all frontends — the engine
-    // hardcodes TicketStatus.WAITING/CALLING/SERVING/SKIPPED/COMPLETED with
-    // lifecycle timestamps coupled to the literal names), out of scope for this
-    // manager-feedback fix. So the status is DERIVED from the name and surfaced
-    // READ-ONLY here: a canonical name → "Status standar" badge + the status's
-    // sub-description + the consequence (what stops working without it); a
-    // custom name → "Status kustom" badge + the derived summary. The manager
-    // sees exactly "what status is this node" without the name carrying the
-    // burden of being both the display label and the system identity.
-    const canonical = canonicalStatusOf(name);
-    const statusLabel = canonical ? 'Status standar' : 'Status kustom';
-    const subDescription = canonical ? canonical.description : description;
-    // The state's "actions" (manager feedback: a state is just a status label;
-    // the caller-panel buttons live on the transitions that enter/leave it).
-    // The panel lists both directions so the manager can SEE the state's
-    // interactions with the ticket without hunting the canvas. Clicking an
-    // action jumps the canvas selection to that edge (the edge editor opens).
-    const { incoming, outgoing } = stateActions(form, name);
-    const edgeIdFor = (from: string, to: string): string | undefined =>
-      edges.find((e) => e.source === from && e.target === to)?.id;
+    // The node's outgoing transitions (its "actions" — the caller-panel buttons
+    // that leave this status). Manager feedback: a state node's properties
+    // should surface its actions inline and editable — "update status → update
+    // to" — rather than a read-only badge + a click-to-jump list. Each outgoing
+    // edge is rendered as a row with a "Update to" <select> (re-point the target
+    // via onRerouteTransition, source stays this node), a "Label aksi" <input>
+    // (onEditTransitionLabel), and a "Hapus" button (onDeleteTransition, disabled
+    // when only one transition remains — the ≥1-transition invariant). The
+    // edges are read directly from the canvas because the inline editor needs
+    // the edge `id` to call the handlers — the outgoing edges are exactly
+    // `edges.filter(e => e.source === name)`.
+    const outgoing = edges.filter((e) => e.source === name);
+    // The "Tambah aksi" button is disabled when every status on the canvas is
+    // already a target of an outgoing edge from this node (no non-duplicate
+    // target left — adding would produce a duplicate edge, which the graph
+    // invariant rejects). `isDuplicateTransition` is the single source of truth
+    // for the duplicate check, shared with onConnect / onRerouteTransition /
+    // onAddTransitionFrom.
+    const canAddAction = !form.states.every((s) => isDuplicateTransition(edges, name, s));
     return (
       <aside className="sm-properties" data-testid="sm-properties" aria-label="Properti status">
         {backButton}
@@ -145,77 +138,97 @@ export function StateMachineWorkflowProperties({
             {description}
           </p>
         </div>
-        {/* Read-only "Status" property — the hardcoded system role the node
-            represents (derived from the name). NOT editable: the status is a
-            load-bearing system identity, not a free label. The badge names the
-            role (standar/kustom), the sub-description says what the status IS,
-            and the consequence (canonical only) says what stops working without
-            it — so the manager understands the status before editing/dropping. */}
-        <div className="sm-properties__field" data-testid="panel-state-status">
-          <p className="sm-properties__label">Status</p>
-          <p className="sm-properties__badge" data-testid="panel-state-badge">
-            {statusLabel}
+        {/* Read-only "Deskripsi" — the derived description (canonical copy for
+            a canonical name, or a summary of outgoing transitions for a custom
+            name). NOT editable: the wire contract carries no description field,
+            so this is a client-side derivation only. Manager feedback: replace
+            the read-only "Status" badge + sub-description + consequence block
+            with a single labeled "Deskripsi" field. */}
+        <div className="sm-properties__field">
+          <p className="sm-properties__label">Deskripsi</p>
+          <p className="sm-properties__hint" data-testid="panel-state-description">
+            {description}
           </p>
-          <p className="sm-properties__subdescription" data-testid="panel-state-subdescription">
-            {subDescription}
-          </p>
-          {canonical && (
-            <p className="sm-properties__consequence" data-testid="panel-state-consequence">
-              Tanpa status ini, {canonical.consequence}.
-            </p>
-          )}
         </div>
+        {/* Inline-editable "Aksi" list — the node's outgoing transitions. Each
+            row is a card with a "Update status →" prefix, a "Update to" select
+            (all statuses on the canvas), a "Label aksi" input, and a "Hapus"
+            button. Manager feedback: "update status → update to" — the actions
+            are editable inline, not click-to-jump. */}
         <div className="sm-properties__field">
           <p className="sm-properties__label" id="panel-state-actions-label">
             Aksi
           </p>
-          <p className="sm-properties__hint" id="panel-state-actions-hint">
-            Status hanya sebuah label. Aksi (tombol di panel petugas) diatur pada transisi yang masuk dan keluar.
-          </p>
-          {incoming.length === 0 && outgoing.length === 0 ? (
+          {outgoing.length === 0 ? (
             <p className="sm-properties__hint" data-testid="panel-state-actions-empty">
-              Belum ada transisi yang terhubung. Tarik garis dari titik status ini ke status lain di kanvas, atau tambah transisi.
+              Belum ada aksi keluar. Tambah aksi untuk mengubah status ini ke status lain.
             </p>
           ) : (
-            <ul className="sm-properties__actions" aria-labelledby="panel-state-actions-label" aria-describedby="panel-state-actions-hint" data-testid="panel-state-actions">
-              {outgoing.map((t) => {
-                const edgeId = edgeIdFor(t.from, t.to);
+            <ul
+              className="sm-properties__actions"
+              aria-labelledby="panel-state-actions-label"
+              data-testid="panel-state-actions"
+            >
+              {outgoing.map((edge) => {
+                const toId = `panel-action-to-${edge.id}`;
+                const labelId = `panel-action-label-${edge.id}`;
                 return (
-                  <li key={`out-${t.from}->${t.to}`}>
+                  <li key={edge.id} className="sm-properties__action">
+                    <span className="sm-properties__action-prefix" aria-hidden="true">
+                      Update status →
+                    </span>
+                    <label className="sm-properties__action-label" htmlFor={toId}>
+                      Update to
+                    </label>
+                    <select
+                      id={toId}
+                      className="sm-properties__input"
+                      data-testid={`panel-action-to-${edge.id}`}
+                      value={edge.target}
+                      onChange={(e) => handlers.onRerouteTransition(edge.id, name, e.target.value)}
+                    >
+                      {form.states.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                    <label className="sm-properties__action-label" htmlFor={labelId}>
+                      Label aksi
+                    </label>
+                    <input
+                      id={labelId}
+                      type="text"
+                      className="sm-properties__input"
+                      data-testid={`panel-action-label-${edge.id}`}
+                      placeholder="Label aksi"
+                      value={edge.data.actionLabel}
+                      onChange={(e) => handlers.onEditTransitionLabel(edge.id, e.target.value)}
+                    />
                     <button
                       type="button"
-                      className="sm-properties__action"
-                      data-testid={`panel-state-action-out-${t.from}->${t.to}`}
-                      aria-label={`Pilih transisi ${t.from} ke ${t.to}: ${t.actionLabel || 'Label aksi'}`}
-                      disabled={!edgeId}
-                      onClick={() => edgeId && handlers.onSelectEdge(edgeId)}
+                      className="sm-properties__action-delete"
+                      data-testid={`panel-action-delete-${edge.id}`}
+                      aria-label="Hapus aksi"
+                      disabled={handlers.transitionsCount <= 1}
+                      onClick={() => handlers.onDeleteTransition(edge.id)}
                     >
-                      <span aria-hidden="true">→</span> {t.to}
-                      <span className="sm-properties__action-label">{t.actionLabel || 'Label aksi'}</span>
-                    </button>
-                  </li>
-                );
-              })}
-              {incoming.map((t) => {
-                const edgeId = edgeIdFor(t.from, t.to);
-                return (
-                  <li key={`in-${t.from}->${t.to}`}>
-                    <button
-                      type="button"
-                      className="sm-properties__action"
-                      data-testid={`panel-state-action-in-${t.from}->${t.to}`}
-                      aria-label={`Pilih transisi ${t.from} ke ${t.to}: ${t.actionLabel || 'Label aksi'}`}
-                      disabled={!edgeId}
-                      onClick={() => edgeId && handlers.onSelectEdge(edgeId)}
-                    >
-                      {t.from} <span aria-hidden="true">→</span>
-                      <span className="sm-properties__action-label">{t.actionLabel || 'Label aksi'}</span>
+                      Hapus
                     </button>
                   </li>
                 );
               })}
             </ul>
           )}
+          <button
+            type="button"
+            className="btn btn--secondary sm-properties__add-action"
+            data-testid="panel-add-action"
+            onClick={() => handlers.onAddTransitionFrom(name)}
+            disabled={!canAddAction}
+          >
+            + Tambah aksi
+          </button>
         </div>
         <button
           type="button"
