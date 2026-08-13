@@ -368,6 +368,63 @@
   color: var(--accent-on-surface);
   font-size: 0.8rem;
 }
+
+/* --- Connector legend (the "indikator konektor" from → to) ------------------
+   Manager feedback: the raw JSON source did not show which point connects to
+   which. A read-only wrap of one chip per transition, `from → to · actionLabel`,
+   sitting between the hint and the textarea. Token-driven (light/dark + brand
+   re-theme for free); monospace so the status names align with the JSON below.
+   Capped height + scroll so a large custom graph never pushes the textarea off
+   the viewport. No hardcoded color literal — the styles.test.ts static guard
+   rejects `#[0-9a-fA-F]{3,8}` in `.sm-source-*` rules. */
+.sm-source-connectors {
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  max-height: 10rem;
+  overflow-y: auto;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--text) 15%, transparent);
+  background: var(--surface-2);
+}
+.sm-source-connector {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+  background: var(--surface);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.sm-source-connector__from {
+  font-weight: 600;
+  color: var(--text);
+}
+.sm-source-connector__to {
+  font-weight: 600;
+  color: var(--text);
+}
+/* The direction indicator — brand accent so the arrow reads as the connector's
+   "this way" cue (mirrors the React Flow edge arrowhead in the Diagram view). */
+.sm-source-connector__arrow {
+  color: var(--accent);
+  font-weight: 700;
+}
+/* The action label reads as the connector's annotation, visually parted from the
+   from→to pair by a hairline border so it does not blend into the status names. */
+.sm-source-connector__label {
+  color: var(--text-muted);
+  border-left: 1px solid color-mix(in srgb, var(--text) 15%, transparent);
+  padding-left: 0.4rem;
+  margin-left: 0.1rem;
+}
 .sm-source {
   flex: 1 1 auto;
   min-height: 24rem;

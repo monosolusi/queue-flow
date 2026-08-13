@@ -717,6 +717,41 @@ describe('Alur Status Tiket designer — warning relocation + dedicated full-pag
     const err = wfRule('.sm-source-error');
     expect(err).toContain('color: var(--danger-on-surface)');
   });
+
+  it('renders a connector legend (from → to) so the source shows which point connects to which', () => {
+    // Manager feedback: the raw JSON source did not explain which point
+    // connects to which (ruwet). The Source view now renders a read-only
+    // connector legend between the hint and the textarea. The legend container
+    // is a token-surface panel (scrollable so a large graph never pushes the
+    // textarea off-screen) — no hardcoded color, dark mode flips it for free.
+    expect(wfCss).toContain('.sm-source-connectors');
+    const connectors = wfRule('.sm-source-connectors');
+    expect(connectors).toContain('display: flex');
+    expect(connectors).toContain('overflow-y: auto');
+    expect(connectors).toContain('background: var(--surface-2)');
+    expect(connectors).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    // One chip per transition.
+    const chip = wfRule('.sm-source-connector');
+    expect(chip).toContain('display: inline-flex');
+    expect(chip).toContain('font-family: ui-monospace');
+  });
+
+  it('colors the connector arrow with the brand accent (the direction indicator, no hardcoded hex)', () => {
+    // The arrow glyph is the connector's "this way" cue — brand accent so it
+    // reads as the directed edge, mirroring the React Flow arrowhead in the
+    // Diagram view. Token-driven so light/dark + brandColor re-theme apply.
+    const arrow = wfRule('.sm-source-connector__arrow');
+    expect(arrow).toContain('color: var(--accent)');
+    expect(arrow).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    // The from/to status names use the text token (not a hardcoded literal).
+    expect(wfRule('.sm-source-connector__from')).toContain('color: var(--text)');
+    expect(wfRule('.sm-source-connector__to')).toContain('color: var(--text)');
+    // The action-label annotation uses the muted token, visually parted from
+    // the from→to pair by a hairline border (no hardcoded color).
+    const label = wfRule('.sm-source-connector__label');
+    expect(label).toContain('color: var(--text-muted)');
+    expect(label).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+  });
 });
 
 describe('shared .btn baseline is element-agnostic (manager feedback: Link-as-btn overlapped + underlined)', () => {
