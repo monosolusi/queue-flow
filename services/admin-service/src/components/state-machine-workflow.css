@@ -67,7 +67,7 @@
   flex: 1 1 22rem;
   min-width: 0;
   height: 60vh;
-  min-height: 360px;
+  min-height: 28rem;
   border-radius: 6px;
   border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
   background: var(--surface);
@@ -536,19 +536,24 @@
    the biggest size, no scrolling"). */
 .alur-status-designer .sm-canvas {
   height: calc(100vh - 16rem);
-  min-height: 30rem;
+  min-height: 36rem;
 }
 
 /* Desktop flex-fill: the app-shell main column is a fixed-viewport flex column
    on the designer route (see the `:has(.alur-status-designer)` rules in
    styles.css), so `.sm-workflow-layout` can flex to fill the remaining height
    and the canvas can stretch to the row (height: auto + the flex row's default
-   align-items: stretch). `min-height: 0` lets the flex algorithm size the canvas
-   to the remaining space rather than its min-content. React Flow measures the
-   container via a ResizeObserver, so a flex-stretched (definite) height is fine.
-   The right panel (`flex: 0 0 16rem`) stretches to the same row height via
-   align-items: stretch — so the canvas and the properties panel are now the SAME
-   height, addressing "editor is smaller than its properties bar". */
+   align-items: stretch). `min-height: 28rem` keeps a generous floor so the
+   diagram (and the right panel, which stretches to the same row height via
+   align-items: stretch) get a bigger default even when the viewport is short —
+   the flex-fill still grows them to fill the remaining space above the floor.
+   React Flow measures the container via a ResizeObserver, so a flex-stretched
+   (definite) height is fine. The right panel (`flex: 0 0 16rem`) stretches to
+   the same row height — so the canvas and the properties panel are the SAME
+   height, addressing "editor is smaller than its properties bar". The panel
+   scrolls internally when its content overflows that row height (see the
+   `.sm-properties` overflow rule below) — so tall panel content is reachable
+   without bringing back page-level scroll. */
 @media (min-width: 48rem) {
   .alur-status-designer .sm-workflow-layout {
     flex: 1 1 0;
@@ -556,7 +561,36 @@
   }
   .alur-status-designer .sm-canvas {
     height: auto;
+    min-height: 28rem;
+  }
+  /* The right properties panel stretches to the row height via align-items:
+     stretch. When its content (transitions / node actions lists) grows taller
+     than that stretched height, it must scroll INTERNALLY instead of being
+     clipped — `min-height: 0` lets the flex column child shrink within the row
+     so `overflow-y: auto` actually engages (default `min-height: auto` would
+     prevent scroll and the panel would overflow the row, which PR #100's
+     `overflow: hidden` on the designer root then clipped — unreachable). This
+     keeps PR #100's "no page scroll on desktop" win while making tall panel
+     content reachable. Also applies inside the fullscreen overlay (the overlay
+     root carries `.alur-status-designer` + `--fullscreen`; the root's
+     `overflow: hidden` clips the overlay, the panel still scrolls internally). */
+  .alur-status-designer .sm-properties {
     min-height: 0;
+    overflow-y: auto;
+  }
+  /* Sticky panel heading — now that the panel scrolls internally (see the
+     `.sm-properties` overflow rule above), keep the "Pilihan status" title
+     pinned at the top of the scroll container so the user keeps context while
+     scrolling through palette items. Surface background so scrolling content
+     does not bleed through the title. Scoped to the desktop flex-fill / the
+     fullscreen overlay (the only place the panel scrolls internally) — on
+     narrow viewports the panel stacks and the page scrolls, so sticky would
+     stick the heading under the app topbar instead; keep it desktop-only. */
+  .alur-status-designer .sm-properties__heading {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--surface);
   }
 }
 

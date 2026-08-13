@@ -700,17 +700,19 @@ describe('Alur Status Tiket designer — warning relocation + dedicated full-pag
   });
 
   it('the designer canvas is tall on narrow viewports (descendant selector beats the base .sm-canvas height)', () => {
-    // The base `.sm-canvas` (60vh / min 360px) is the inline config-card size the
+    // The base `.sm-canvas` (60vh / min 28rem) is the inline config-card size the
     // manager found too small. `.alur-status-designer .sm-canvas` (specificity
     // 0-2-0) overrides it without changing the StateMachineWorkflow API. This
     // `calc(100vh - 16rem)` is the NARROW-viewport fallback (the page may scroll
     // when the stacked panel + chrome exceed the viewport — acceptable on a
     // narrow stacked layout). At ≥48rem the desktop flex-fill block below takes
     // over so there is NO page scroll (see the next test). Guard the fallback
-    // height + the larger min-height.
+    // height + the larger min-height (36rem — raised so the diagram + right
+    // panel get a bigger default floor on short viewports, manager feedback:
+    // "make a min-height a bit longer so we have a bigger right and diagram").
     const canvas = wfRule('.alur-status-designer .sm-canvas');
     expect(canvas).toContain('height: calc(100vh - 16rem)');
-    expect(canvas).toContain('min-height: 30rem');
+    expect(canvas).toContain('min-height: 36rem');
   });
 
   it('on desktop the canvas flex-fills the viewport (no page scroll, biggest size, same height as the right panel)', () => {
@@ -747,10 +749,33 @@ describe('Alur Status Tiket designer — warning relocation + dedicated full-pag
     expect(desktopWf).toMatch(/\.alur-status-designer \.sm-workflow-layout\s*\{[^}]*flex: 1 1 0/);
     expect(desktopWf).toMatch(/\.alur-status-designer \.sm-workflow-layout\s*\{[^}]*min-height: 0/);
     expect(desktopWf).toMatch(/\.alur-status-designer \.sm-canvas\s*\{[^}]*height: auto/);
-    expect(desktopWf).toMatch(/\.alur-status-designer \.sm-canvas\s*\{[^}]*min-height: 0/);
+    expect(desktopWf).toMatch(/\.alur-status-designer \.sm-canvas\s*\{[^}]*min-height: 28rem/);
+    // The right panel scrolls internally when its content overflows the
+    // stretched row height (manager feedback: "scrolling is not do-able" —
+    // PR #100's overflow: hidden on the designer root clipped tall panel
+    // content). `min-height: 0` is load-bearing — it lets the flex column
+    // child shrink so overflow-y: auto engages (default min-height: auto
+    // would prevent scroll). Still no page-level scroll on desktop.
+    expect(desktopWf).toMatch(/\.alur-status-designer \.sm-properties\s*\{[^}]*min-height: 0/);
+    expect(desktopWf).toMatch(/\.alur-status-designer \.sm-properties\s*\{[^}]*overflow-y: auto/);
     // The narrow fallback (calc) must stay OUTSIDE the desktop media block — it
     // is the non-media rule, so it must NOT appear inside `desktopWf`.
     expect(desktopWf).not.toContain('calc(100vh - 16rem)');
+  });
+
+  it('the properties panel heading is sticky so it stays visible while the panel scrolls internally', () => {
+    // Manager feedback (UX polish): when the right panel scrolls internally,
+    // the "Pilihan status" title should stay pinned at the top of the scroll
+    // container so the user keeps context. Surface background so scrolling
+    // content does not bleed through the title. Scoped to the desktop flex-fill
+    // / fullscreen overlay — the ONLY place the panel scrolls internally — so
+    // the rule must live INSIDE the `@media (min-width: 48rem)` block. On
+    // narrow viewports the panel stacks and the page scrolls, so a sticky
+    // heading would slide under the app topbar; keep it desktop-only.
+    const desktopWf = wfAtRuleBlock('@media (min-width: 48rem)');
+    expect(desktopWf).toMatch(/\.alur-status-designer \.sm-properties__heading\s*\{[^}]*position: sticky/);
+    expect(desktopWf).toMatch(/\.alur-status-designer \.sm-properties__heading\s*\{[^}]*top: 0/);
+    expect(desktopWf).toMatch(/\.alur-status-designer \.sm-properties__heading\s*\{[^}]*background: var\(--surface\)/);
   });
 
   it('offers a full-screen editor overlay (manager feedback: "add option to make it full screen")', () => {
