@@ -24,6 +24,7 @@ import {
   ServiceThemes,
   TvPanelLayout,
   EdgeRoutingLayout,
+  NodeActions,
   NodePositions,
   PrinterConfiguration,
   DailyResetPolicy,
@@ -190,6 +191,7 @@ describe('System daily-reset REST surface (integration — QUE-2)', () => {
         tvPanelLayout: TvPanelLayout.DEFAULT,
         edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
         nodePositions: NodePositions.DEFAULT,
+        nodeActions: NodeActions.DEFAULT,
         printerConfiguration: PrinterConfiguration.DEFAULT,
       }),
     );

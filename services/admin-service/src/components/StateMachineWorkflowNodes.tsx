@@ -31,7 +31,7 @@ import {
   type EdgeProps,
   type NodeProps,
 } from '@xyflow/react';
-import { DEFAULT_STATE_MACHINE } from '../api/types';
+import { DEFAULT_STATE_MACHINE, type NodeActionDto } from '../api/types';
 import { HANDLE_IDS, type FlowEdgeData, type FlowNodeData } from '../lib/state-machine-flow';
 
 /**
@@ -47,13 +47,21 @@ import { HANDLE_IDS, type FlowEdgeData, type FlowNodeData } from '../lib/state-m
  * `clearSelection` via its own prop (ISP: the canvas node/edge never clear the
  * selection, so the context carries no selection-clearing callback).
  *
- * `onRerouteTransition` serves the panel's state-editor "Aksi" row (the
- * Kaleo-style "Nilai" select re-points an outgoing edge's target from the
- * node row) AND the edge-editor's "Dari"/"Ke" selects (re-pointing either
- * endpoint from the full-edit path — the manager's "can't connect SERVING to
- * COMPLETED from the panel, only by dragging handles" feedback). The state
- * node/edge components never call it (it is panel-only), but it lives on this
- * surface so the panel shares the same handler context the canvas does.
+ * `onRerouteTransition` serves the panel's state-editor "Transisi keluar" row
+ * (the "Ke" select re-points an outgoing edge's target from the node row) AND
+ * the edge-editor's "Dari"/"Ke" selects (re-pointing either endpoint from the
+ * full-edit path — the manager's "can't connect SERVING to COMPLETED from the
+ * panel, only by dragging handles" feedback). The state node/edge components
+ * never call it (it is panel-only), but it lives on this surface so the panel
+ * shares the same handler context the canvas does.
+ *
+ * The node-level "Aksi" handlers (`onAddNodeAction` / `onDeleteNodeAction` /
+ * `onEditNodeAction`) are the Kaleo-style node-level actions, NOT linked to
+ * any edge — they edit `form.nodeActions[state]` (a persisted, independent
+ * list), never the canvas nodes/edges. They are panel-only (the canvas never
+ * calls them), but live on this surface so the panel shares the same handler
+ * context. The `patch` on `onEditNodeAction` covers `executionType` + `value`;
+ * `type` stays fixed `UPDATE_STATUS` (the only QMS action semantic today).
  */
 export interface WorkflowHandlers {
   mode: 'default' | 'custom';
@@ -81,6 +89,22 @@ export interface WorkflowHandlers {
    * but anchors the SOURCE to the selected node rather than the target.
    */
   onAddTransitionFrom: (source: string) => void;
+  /**
+   * Add a Kaleo-style node-level action (NOT linked to any edge) to
+   * `form.nodeActions[state]`. Seeds a default `{ executionType: 'ON_ENTRY',
+   * type: 'UPDATE_STATUS', value: <first non-self state> }`. The parent lifts
+   * this as a form-only edit (no canvas node/edge change — `graphSignature`
+   * excludes `nodeActions`, so no re-seed).
+   */
+  onAddNodeAction: (state: string) => void;
+  /** Delete the node-level action at `index` for `state`. Form-only lift. */
+  onDeleteNodeAction: (state: string, index: number) => void;
+  /**
+   * Patch the node-level action at `index` for `state`. The `patch` covers
+   * `executionType` + `value`; `type` stays fixed `UPDATE_STATUS`. Form-only
+   * lift (no canvas change).
+   */
+  onEditNodeAction: (state: string, index: number, patch: Partial<NodeActionDto>) => void;
 }
 
 export const WorkflowContext = createContext<WorkflowHandlers | null>(null);

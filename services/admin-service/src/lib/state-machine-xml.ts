@@ -275,6 +275,12 @@ export function xmlToForm(xml: string): XmlToFormOk | XmlToFormErr {
     states,
     transitions,
     positions,
+    // The XML Source view carries no node-level actions (they are panel-only,
+    // NOT serialized to XML — `formToXml` omits them). Emit `{}` here; the
+    // caller (`AlurStatusDesigner.handleSourceChange`) merges the existing
+    // `nodeActions` back so a source edit preserves node actions (the source
+    // edits only the graph + positions, never the node-level Aksi list).
+    nodeActions: {},
   };
   const errors = validateCustomStateMachine(form);
   if (errors.length > 0) {

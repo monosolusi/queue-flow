@@ -64,6 +64,7 @@ describe('PrintTicketUseCase', () => {
       tvPanelLayout: d.tvPanelLayout,
       edgeRoutingLayout: d.edgeRoutingLayout,
       nodePositions: d.nodePositions,
+      nodeActions: d.nodeActions,
       printerConfiguration: printer,
     });
     void repo.save(config);

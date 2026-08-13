@@ -110,6 +110,11 @@ export function prdWizardPayload() {
     // editor; keyed map "stateName" -> { x, y }, '{}' = use the deterministic
     // autoLayout.
     nodePositions: {},
+    // nodeActions: per-state Kaleo-style node-level actions for the admin
+    // state-machine editor; keyed map "stateName" -> NodeActionProps[]
+    // ({ executionType, type, value }), '{}' = no node-level actions (decoupled
+    // from transitions — Kaleo parity).
+    nodeActions: {},
     // printerConfiguration: which printer the kiosk uses — chrome mode = zero
     // behavior change (the kiosk keeps using Chrome's print dialog). The
     // standard wizard payload keeps the existing chrome behavior.

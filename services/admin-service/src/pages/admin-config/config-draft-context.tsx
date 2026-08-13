@@ -3,7 +3,7 @@ import { Outlet } from 'react-router-dom';
 import type { IAdminApi } from '../../api/admin-api';
 import { useSystemConfigContext } from '../../config/system-config-context';
 import { applyBrandColor, applyThemeMode } from '../../lib/theme';
-import { toEdgeRoutingLayoutDto, toNodePositionsDto, toStateMachineDto } from '../../lib/state-machine';
+import { toEdgeRoutingLayoutDto, toNodeActionsDto, toNodePositionsDto, toStateMachineDto } from '../../lib/state-machine';
 import { useToast } from '../../toast/useToast';
 import { type PanelState, toForm } from './form';
 
@@ -126,6 +126,10 @@ export function ConfigDraftProvider({
           stateMachine: toStateMachineDto(form.stateMachine),
           edgeRoutingLayout: toEdgeRoutingLayoutDto(form.stateMachine),
           nodePositions: toNodePositionsDto(form.stateMachine),
+          // Node-level actions travel the wire in the separate `nodeActions`
+          // map (the client is the source of truth — the properties panel
+          // "Aksi" editor builds it). Mirrors `nodePositions` passthrough.
+          nodeActions: toNodeActionsDto(form.stateMachine),
           brandColor: form.brandColor,
           serviceThemes: form.serviceThemes,
           // Payload-only passthrough — the TV-layout editor lives on the

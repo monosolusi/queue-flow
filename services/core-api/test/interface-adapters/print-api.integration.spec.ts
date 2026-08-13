@@ -77,6 +77,7 @@ describe('Print-proxy REST surface (integration — FR-printer-config)', () => {
       tvPanelLayout: d.tvPanelLayout,
       edgeRoutingLayout: d.edgeRoutingLayout,
       nodePositions: d.nodePositions,
+      nodeActions: d.nodeActions,
       printerConfiguration: printer,
     });
     void config.save(cfg);

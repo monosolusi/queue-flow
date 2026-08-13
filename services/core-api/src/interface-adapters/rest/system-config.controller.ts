@@ -39,6 +39,7 @@ const REQUIRED_CONFIG_FIELDS: ReadonlyArray<keyof SaveSystemConfigurationCommand
   'tvPanelLayout',
   'edgeRoutingLayout',
   'nodePositions',
+  'nodeActions',
   'printerConfiguration',
 ];
 
@@ -67,6 +68,7 @@ const CONFIG_FIELD_SHAPES: ReadonlyArray<{
   { field: 'tvPanelLayout', kind: 'array' },
   { field: 'edgeRoutingLayout', kind: 'object' },
   { field: 'nodePositions', kind: 'object' },
+  { field: 'nodeActions', kind: 'object' },
   { field: 'printerConfiguration', kind: 'object' },
 ];
 
@@ -251,6 +253,39 @@ function configNestedShapeErrors(body: Partial<SaveSystemConfigurationCommand>):
       }
     }
   }
+  // nodeActions: the VO throws `InvalidValueObjectException` (→ 400) on a
+  // present-but-invalid entry (non-array value, or an action element with a
+  // non-string `executionType`/`type`/`value`). This boundary guard catches the
+  // crash class (a non-array entry value, or a non-object action element, or a
+  // present-but-non-string `executionType`/`type`/`value` would TypeError before
+  // the VO's own guard) and gives consistent, field-named error messages. Enum
+  // membership (ON_ENTRY/ON_EXIT, UPDATE_STATUS) + non-empty-value enforcement
+  // stays in the VO (SRP). Unknown extra properties on an action are ignored.
+  const nodeActions = body.nodeActions;
+  if (nodeActions != null && typeof nodeActions === 'object' && !Array.isArray(nodeActions)) {
+    for (const [key, value] of Object.entries(nodeActions as Record<string, unknown>)) {
+      if (!Array.isArray(value)) {
+        errs.push(`nodeActions['${key}'] must be an array of action objects`);
+        continue;
+      }
+      (value as readonly unknown[]).forEach((a, i) => {
+        if (a == null || typeof a !== 'object' || Array.isArray(a)) {
+          errs.push(`nodeActions['${key}'][${i}] must be a plain object`);
+          return;
+        }
+        const e = a as Record<string, unknown>;
+        if (e.executionType != null && typeof e.executionType !== 'string') {
+          errs.push(`nodeActions['${key}'][${i}].executionType must be a string`);
+        }
+        if (e.type != null && typeof e.type !== 'string') {
+          errs.push(`nodeActions['${key}'][${i}].type must be a string`);
+        }
+        if (e.value != null && typeof e.value !== 'string') {
+          errs.push(`nodeActions['${key}'][${i}].value must be a string`);
+        }
+      });
+    }
+  }
   // printerConfiguration: the VO throws `InvalidValueObjectException` (→ 400)
   // on a present-but-invalid field (bad mode/paperWidth/cutMode enum,
   // non-integer port, network-escpos with no host). This boundary guard catches
@@ -374,6 +409,7 @@ export class SystemConfigController {
       tvPanelLayout: body.tvPanelLayout!,
       edgeRoutingLayout: body.edgeRoutingLayout!,
       nodePositions: body.nodePositions!,
+      nodeActions: body.nodeActions!,
       printerConfiguration: body.printerConfiguration!,
       actor: principal?.username ?? 'system',
     };

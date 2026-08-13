@@ -104,6 +104,11 @@ export function toForm(config: SystemConfigurationDto): AdminForm {
   // `nodePositions` (defaulting to `{}`); the `?? {}` is belt-and-suspenders
   // (same pattern as `edgeRoutingLayout ?? {}`).
   const positions = config.nodePositions ?? {};
+  // Node actions are keyed by state name (no per-transition merge needed,
+  // unlike `edgeRoutingLayout`). Coerce defensively — the backend always
+  // returns `nodeActions` (defaulting to `{}`); the `?? {}` is belt-and-
+  // suspenders (same pattern as `nodePositions ?? {}`).
+  const nodeActions = config.nodeActions ?? {};
   return {
     storeName: config.storeName,
     // Build a StateMachineForm with the client-only `mode` preset inferred by
@@ -116,6 +121,7 @@ export function toForm(config: SystemConfigurationDto): AdminForm {
       states: [...config.stateMachine.states],
       transitions: mergedTransitions,
       positions,
+      nodeActions,
     },
     brandColor: config.brandColor || DEFAULT_BRAND_COLOR,
     // Coerce a partial/degraded GET projection into a complete 4-surface map

@@ -56,8 +56,7 @@ describe('StateMachineEditor (shared editor — wizard + AdminPanel)', () => {
       mode: 'custom' as const,
       states: [...DEFAULT_STATE_MACHINE.states, 'EXTRA'],
       transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
-      positions: {},
-    };
+      positions: {}, nodeActions: {},    };
     renderEditor(customForm, [], onChange);
     // The EXTRA state's remove button is enabled (not referenced).
     const extraRow = screen.getAllByLabelText(/^Status \d+$/).find(
@@ -143,8 +142,7 @@ describe('StateMachineEditor (shared editor — wizard + AdminPanel)', () => {
       mode: 'custom',
       states: ['WAITING', 'CALLING'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' }],
-      positions: {},
-    });
+      positions: {}, nodeActions: {},    });
 
     const warning = screen.getByTestId('sm-standard-warning');
     expect(warning).toHaveTextContent('COMPLETED');
@@ -160,8 +158,7 @@ describe('StateMachineEditor (shared editor — wizard + AdminPanel)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: '' }],
-      positions: {},
-    };
+      positions: {}, nodeActions: {},    };
     renderEditor(value, validateCustomStateMachine(value));
     expect(screen.getByTestId('sm-editor')).toHaveAttribute(
       'aria-describedby',

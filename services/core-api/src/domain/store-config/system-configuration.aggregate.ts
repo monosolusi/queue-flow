@@ -4,6 +4,7 @@ import { InvalidValueObjectException } from '../shared/errors';
 import { BrandColor } from './value-objects/brand-color';
 import { DailyResetPolicy } from './value-objects/daily-reset-policy';
 import { EdgeRoutingLayout } from './value-objects/edge-routing-layout';
+import { NodeActions } from './value-objects/node-actions';
 import { NodePositions } from './value-objects/node-positions';
 import { PrinterConfiguration } from './value-objects/printer-configuration';
 import { ServiceThemes } from './value-objects/service-themes';
@@ -26,6 +27,7 @@ export class SystemConfiguration extends AggregateRoot {
   private _tvPanelLayout: TvPanelLayout;
   private _edgeRoutingLayout: EdgeRoutingLayout;
   private _nodePositions: NodePositions;
+  private _nodeActions: NodeActions;
   private _printerConfiguration: PrinterConfiguration;
 
   private constructor(
@@ -39,6 +41,7 @@ export class SystemConfiguration extends AggregateRoot {
     tvPanelLayout: TvPanelLayout,
     edgeRoutingLayout: EdgeRoutingLayout,
     nodePositions: NodePositions,
+    nodeActions: NodeActions,
     printerConfiguration: PrinterConfiguration,
   ) {
     super(id);
@@ -51,13 +54,14 @@ export class SystemConfiguration extends AggregateRoot {
     this._tvPanelLayout = tvPanelLayout;
     this._edgeRoutingLayout = edgeRoutingLayout;
     this._nodePositions = nodePositions;
+    this._nodeActions = nodeActions;
     this._printerConfiguration = printerConfiguration;
   }
 
   /** Creates a fresh, not-yet-configured instance with the default state machine,
    * brand color, service themes, TV panel layout, edge routing layout, node
    * positions, and printer configuration. `brandColor` + `serviceThemes` +
-   * `tvPanelLayout` + `edgeRoutingLayout` + `nodePositions` +
+   * `tvPanelLayout` + `edgeRoutingLayout` + `nodePositions` + `nodeActions` +
    * `printerConfiguration` default so the dev seed and acceptance `seedPrdConfig`
    * (2-arg calls) need no change. */
   public static create(
@@ -68,6 +72,7 @@ export class SystemConfiguration extends AggregateRoot {
     tvPanelLayout: TvPanelLayout = TvPanelLayout.DEFAULT,
     edgeRoutingLayout: EdgeRoutingLayout = EdgeRoutingLayout.DEFAULT,
     nodePositions: NodePositions = NodePositions.DEFAULT,
+    nodeActions: NodeActions = NodeActions.DEFAULT,
     printerConfiguration: PrinterConfiguration = PrinterConfiguration.DEFAULT,
   ): SystemConfiguration {
     return new SystemConfiguration(
@@ -81,6 +86,7 @@ export class SystemConfiguration extends AggregateRoot {
       tvPanelLayout,
       edgeRoutingLayout,
       nodePositions,
+      nodeActions,
       printerConfiguration,
     );
   }
@@ -96,6 +102,7 @@ export class SystemConfiguration extends AggregateRoot {
     tvPanelLayout: TvPanelLayout;
     edgeRoutingLayout: EdgeRoutingLayout;
     nodePositions: NodePositions;
+    nodeActions: NodeActions;
     printerConfiguration: PrinterConfiguration;
   }): SystemConfiguration {
     return new SystemConfiguration(
@@ -109,6 +116,7 @@ export class SystemConfiguration extends AggregateRoot {
       params.tvPanelLayout,
       params.edgeRoutingLayout,
       params.nodePositions,
+      params.nodeActions,
       params.printerConfiguration,
     );
   }
@@ -147,6 +155,10 @@ export class SystemConfiguration extends AggregateRoot {
 
   public get nodePositions(): NodePositions {
     return this._nodePositions;
+  }
+
+  public get nodeActions(): NodeActions {
+    return this._nodeActions;
   }
 
   public get printerConfiguration(): PrinterConfiguration {

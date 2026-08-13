@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { WizardPage } from './WizardPage';
 import type { IAdminApi, IAuthApi } from '../api/admin-api';
-import { DEFAULT_CATEGORIES, DEFAULT_STATE_MACHINE, DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES, DEFAULT_TV_GRID_LAYOUT, DEFAULT_PRINTER_CONFIGURATION, type EdgeRoutingLayoutDto, type NodePositionsDto, type PrinterConfigurationDto, type SaveSystemConfigurationPayload, type ServiceThemesMap, type SystemConfigurationDto, type TvGridLayout } from '../api/types';
+import { DEFAULT_CATEGORIES, DEFAULT_STATE_MACHINE, DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES, DEFAULT_TV_GRID_LAYOUT, DEFAULT_PRINTER_CONFIGURATION, type SaveSystemConfigurationPayload, type SaveSystemConfigurationResult, type SystemConfigurationDto } from '../api/types';
 import { BROWSER_TIMEZONE } from '../lib/timezone';
 
 /** A clean store mirrors core-api's `GetSystemConfigurationUseCase`: the default
@@ -23,7 +23,7 @@ function cleanStore(): SystemConfigurationDto {
     serviceThemes: { ...DEFAULT_SERVICE_THEMES },
     tvPanelLayout: DEFAULT_TV_GRID_LAYOUT,
     edgeRoutingLayout: {},
-    nodePositions: {},
+    nodePositions: {}, nodeActions: {},
     printerConfiguration: { ...DEFAULT_PRINTER_CONFIGURATION },
   };
 }
@@ -38,12 +38,12 @@ function prefilledStore(): SystemConfigurationDto {
 
 function makeApi(
   config: SystemConfigurationDto = prefilledStore(),
-  saveImpl?: (payload: SaveSystemConfigurationPayload) => Promise<{ isInitialSetupCompleted: boolean; storeName: string; brandColor: string; serviceThemes: ServiceThemesMap; tvPanelLayout: TvGridLayout; edgeRoutingLayout: EdgeRoutingLayoutDto; nodePositions: NodePositionsDto; printerConfiguration: PrinterConfigurationDto }>,
+  saveImpl?: (payload: SaveSystemConfigurationPayload) => Promise<SaveSystemConfigurationResult>,
 ) {
   const save = vi.fn(
     saveImpl ??
       ((payload: SaveSystemConfigurationPayload) =>
-        Promise.resolve({ isInitialSetupCompleted: true, storeName: payload.storeName, brandColor: payload.brandColor, serviceThemes: payload.serviceThemes, tvPanelLayout: payload.tvPanelLayout, edgeRoutingLayout: {}, nodePositions: {}, printerConfiguration: payload.printerConfiguration })),
+        Promise.resolve({ isInitialSetupCompleted: true, storeName: payload.storeName, brandColor: payload.brandColor, serviceThemes: payload.serviceThemes, tvPanelLayout: payload.tvPanelLayout, edgeRoutingLayout: {}, nodePositions: {}, nodeActions: {}, printerConfiguration: payload.printerConfiguration })),
   );
   // Auth spies (QUE-43). First-run finalize calls setupInitialAdmin then login;
   // re-edit finalize calls neither. Defaults resolve so the happy-path walk
