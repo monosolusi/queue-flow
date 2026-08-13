@@ -356,13 +356,31 @@ describe('AlurStatusDesigner (dedicated /config/alur-status page)', () => {
     expect(save).toHaveBeenCalledTimes(1);
   });
 
-  it('the back button returns to /config without saving', async () => {
+  it('renders no redundant back button (the sidebar already covers section nav)', async () => {
+    // Manager feedback: the designer's header "Kembali" button was useless — the
+    // always-visible AppShell sidebar already lists every config section as a
+    // NavLink, so a page-level back-to-/config affordance is redundant (and
+    // misleading: /config redirects to /config/profil regardless of origin). The
+    // only remaining "kembali ke Konfigurasi" link is the contextual one in the
+    // `otherSectionInvalid` hint, which points at a specific blocking error —
+    // not present here because the default flow is valid.
+    const { api } = makeApi();
+    renderDesignerRoute(api);
+    await screen.findByTestId('sm-mode');
+
+    expect(screen.queryByTestId('designer-back')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Kembali' })).not.toBeInTheDocument();
+  });
+
+  it('navigating back to /config via the route keeps the shared draft (no save)', async () => {
+    // The back button is gone, so a return to /config is a route navigation
+    // (as the sidebar would drive it). The shared draft persists across the
+    // navigation — no save is sent — and the panel renders.
     const { api, save } = makeApi();
     renderDesignerRoute(api);
     await screen.findByTestId('sm-mode');
 
-    await userEvent.click(screen.getByTestId('designer-back'));
-    // The panel renders (store-name heading); no save was sent.
+    await navigateTo('/config/profil');
     expect(await screen.findByTestId('admin-store-name')).toBeInTheDocument();
     expect(save).not.toHaveBeenCalled();
   });

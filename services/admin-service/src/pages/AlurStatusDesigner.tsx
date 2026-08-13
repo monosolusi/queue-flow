@@ -181,14 +181,7 @@ export function AlurStatusDesigner(): JSX.Element {
       <PageHeader
         title="Alur Status Tiket"
         subtitle="Konfigurasi Operasional"
-        actions={
-          <>
-            <Link to="/config" className="btn btn--secondary" data-testid="designer-back">
-              Kembali
-            </Link>
-            {saveButton}
-          </>
-        }
+        actions={saveButton}
       />
 
       {/* Live-ticket strand caution — the designer is now the decision point
