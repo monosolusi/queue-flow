@@ -2,17 +2,26 @@ import { describe, expect, it } from 'vitest';
 import {
   flowToGraph,
   formToFlow,
+  formToFlowWithMarkers,
+  deriveTerminalMarkers,
+  isTerminalNodeId,
   handleToSide,
   nextStateName,
   sideToHandle,
   withDescriptions,
   isDuplicateTransition,
   rejectionMessageForConnection,
+  START_NODE_ID,
+  END_NODE_ID,
+  START_NODE_TYPE,
+  END_NODE_TYPE,
+  TERMINAL_EDGE_TYPE,
   HANDLE_IDS,
   DEFAULT_SOURCE_HANDLE,
   DEFAULT_TARGET_HANDLE,
   EDGE_ARROW_MARKER,
   type FlowEdge,
+  type FlowNode,
 } from './state-machine-flow';
 import { autoLayout, defaultStateMachineForm, type StateMachineForm } from './state-machine';
 import { DEFAULT_STATE_MACHINE } from '../api/types';
@@ -437,6 +446,234 @@ describe('isDuplicateTransition', () => {
       { id: 'A->A#0', source: 'A', target: 'A', type: 'transition', data: { actionLabel: 'loop' } },
     ];
     expect(isDuplicateTransition(edges, 'A', 'A')).toBe(true);
+  });
+});
+
+describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
+  it('emits a Start marker + Start→source edge for the default graph (WAITING is the sole source)', () => {
+    // The PRD §7 default graph: WAITING is the only in-degree-0 state
+    // (CALLING has WAITING→CALLING and SKIPPED→CALLING incoming; SERVING has
+    // CALLING→SERVING; SKIPPED has CALLING→SKIPPED; COMPLETED has
+    // SERVING→COMPLETED). So the Start marker points at WAITING only.
+    const { nodes, edges } = deriveTerminalMarkers(
+      [...DEFAULT_STATE_MACHINE.states],
+      DEFAULT_STATE_MACHINE.transitions,
+      // Feed real positions so the marker x is offset from the leftmost node.
+      { WAITING: { x: 0, y: 0 }, CALLING: { x: 240, y: 0 }, SERVING: { x: 480, y: 0 }, SKIPPED: { x: 480, y: 120 }, COMPLETED: { x: 720, y: 0 } },
+    );
+    const start = nodes.find((n) => n.id === START_NODE_ID);
+    expect(start).toBeDefined();
+    expect(start?.type).toBe(START_NODE_TYPE);
+    expect(start?.draggable).toBe(false);
+    expect(start?.selectable).toBe(true);
+    expect(start?.data.name).toBe(START_NODE_ID);
+    // One Start→WAITING terminal edge.
+    const startEdges = edges.filter((e) => e.source === START_NODE_ID);
+    expect(startEdges).toHaveLength(1);
+    expect(startEdges[0].target).toBe('WAITING');
+    expect(startEdges[0].type).toBe(TERMINAL_EDGE_TYPE);
+    expect(startEdges[0].data.actionLabel).toBe('');
+    expect(startEdges[0].markerEnd).toEqual(EDGE_ARROW_MARKER);
+    expect(startEdges[0].sourceHandle).toBe(HANDLE_IDS.right);
+    expect(startEdges[0].targetHandle).toBe(HANDLE_IDS.left);
+  });
+
+  it('emits an End marker + sink→End edge for the default graph (COMPLETED is the sole sink)', () => {
+    // COMPLETED is the only out-degree-0 state in the default graph.
+    const { nodes, edges } = deriveTerminalMarkers(
+      [...DEFAULT_STATE_MACHINE.states],
+      DEFAULT_STATE_MACHINE.transitions,
+      { WAITING: { x: 0, y: 0 }, CALLING: { x: 240, y: 0 }, SERVING: { x: 480, y: 0 }, SKIPPED: { x: 480, y: 120 }, COMPLETED: { x: 720, y: 0 } },
+    );
+    const end = nodes.find((n) => n.id === END_NODE_ID);
+    expect(end).toBeDefined();
+    expect(end?.type).toBe(END_NODE_TYPE);
+    expect(end?.draggable).toBe(false);
+    expect(end?.data.name).toBe(END_NODE_ID);
+    const endEdges = edges.filter((e) => e.target === END_NODE_ID);
+    expect(endEdges).toHaveLength(1);
+    expect(endEdges[0].source).toBe('COMPLETED');
+    expect(endEdges[0].type).toBe(TERMINAL_EDGE_TYPE);
+  });
+
+  it('emits no markers for a pure cycle (every state has an incoming edge)', () => {
+    // A↔B: both A and B have incoming edges → no sources, no sinks → no markers.
+    const { nodes, edges } = deriveTerminalMarkers(
+      ['A', 'B'],
+      [
+        { from: 'A', to: 'B', actionLabel: 'a' },
+        { from: 'B', to: 'A', actionLabel: 'b' },
+      ],
+      { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
+    );
+    expect(nodes).toHaveLength(0);
+    expect(edges).toHaveLength(0);
+  });
+
+  it('emits no markers for an empty state list', () => {
+    const { nodes, edges } = deriveTerminalMarkers([], [], {});
+    expect(nodes).toHaveLength(0);
+    expect(edges).toHaveLength(0);
+  });
+
+  it('emits Start only (no End) when the graph has a source but no sink', () => {
+    // A→B→A is a cycle (no source/sink). Construct a graph with a source but no
+    // sink: A→B, B→A would be a cycle. Instead: A→B, B→B (self-loop). A has
+    // in-degree 0 (source); B has out-degree 1 (B→B) so B is NOT a sink; A has
+    // out-degree 1 so A is not a sink either. No sinks → no End marker.
+    const { nodes, edges } = deriveTerminalMarkers(
+      ['A', 'B'],
+      [
+        { from: 'A', to: 'B', actionLabel: 'a' },
+        { from: 'B', to: 'B', actionLabel: 'loop' },
+      ],
+      { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
+    );
+    const start = nodes.find((n) => n.id === START_NODE_ID);
+    expect(start).toBeDefined();
+    const end = nodes.find((n) => n.id === END_NODE_ID);
+    expect(end).toBeUndefined();
+    // Only the Start→A terminal edge (no sink→End edges).
+    expect(edges.every((e) => e.target !== END_NODE_ID)).toBe(true);
+  });
+
+  it('places Start.x left of min real x and End.x right of max real x', () => {
+    const real = { A: { x: 100, y: 0 }, B: { x: 300, y: 0 } };
+    const { nodes } = deriveTerminalMarkers(['A', 'B'], [{ from: 'A', to: 'B', actionLabel: 'a' }], real);
+    const start = nodes.find((n) => n.id === START_NODE_ID)!;
+    const end = nodes.find((n) => n.id === END_NODE_ID)!;
+    // TERMINAL_SPACING = 240 (matches autoLayout's X_SPACING).
+    expect(start.position.x).toBe(100 - 240);
+    expect(end.position.x).toBe(300 + 240);
+    // yCenter = (0 + 0) / 2 = 0.
+    expect(start.position.y).toBe(0);
+    expect(end.position.y).toBe(0);
+  });
+
+  it('defaults bounds to 0 when realPositions is empty (no NaN)', () => {
+    // A single isolated state (no edges) is both a source AND a sink, so both
+    // markers emit. realPositions empty → minX/maxX/minY/maxY default to 0.
+    const { nodes } = deriveTerminalMarkers(['LONE'], [], {});
+    const start = nodes.find((n) => n.id === START_NODE_ID)!;
+    const end = nodes.find((n) => n.id === END_NODE_ID)!;
+    expect(start.position).toEqual({ x: 0 - 240, y: 0 });
+    expect(end.position).toEqual({ x: 0 + 240, y: 0 });
+  });
+
+  it('ignores transitions referencing a state not in the schema (defensive)', () => {
+    // A transition A→C where C is not in `states` must not count toward A's
+    // out-degree (so A stays a source) nor seed any marker for C.
+    const { nodes, edges } = deriveTerminalMarkers(
+      ['A'],
+      [{ from: 'A', to: 'C', actionLabel: 'x' }],
+      { A: { x: 0, y: 0 } },
+    );
+    // A has no in-degree (the A→C edge is ignored) → A is a source → Start emits.
+    const start = nodes.find((n) => n.id === START_NODE_ID);
+    expect(start).toBeDefined();
+    // A also has no VALID out-degree (A→C ignored) → A is a sink → End emits.
+    const end = nodes.find((n) => n.id === END_NODE_ID);
+    expect(end).toBeDefined();
+    // No terminal edge references C.
+    expect(edges.every((e) => e.source !== 'C' && e.target !== 'C')).toBe(true);
+  });
+});
+
+describe('formToFlowWithMarkers', () => {
+  it('returns state nodes + Start/End markers for the default graph (7 nodes, 7 edges)', () => {
+    const form = defaultStateMachineForm();
+    const { nodes, edges } = formToFlowWithMarkers(form, {});
+    // 5 state nodes + 1 Start + 1 End = 7.
+    expect(nodes).toHaveLength(DEFAULT_STATE_MACHINE.states.length + 2);
+    expect(nodes.filter((n) => n.type === 'state')).toHaveLength(5);
+    expect(nodes.find((n) => n.id === START_NODE_ID)?.type).toBe(START_NODE_TYPE);
+    expect(nodes.find((n) => n.id === END_NODE_ID)?.type).toBe(END_NODE_TYPE);
+    // 5 transition edges + 1 Start→WAITING + 1 COMPLETED→End = 7.
+    expect(edges).toHaveLength(DEFAULT_STATE_MACHINE.transitions.length + 2);
+    expect(edges.filter((e) => e.type === 'transition')).toHaveLength(5);
+    expect(edges.filter((e) => e.type === TERMINAL_EDGE_TYPE)).toHaveLength(2);
+  });
+
+  it('round-trips clean through flowToGraph (markers filtered, form intact)', () => {
+    // flowToGraph MUST filter the terminal nodes/edges so the form/wire/XML
+    // never see __start/__end. The round-tripped form has 5 states + 5
+    // transitions (the markers are dropped).
+    const form = defaultStateMachineForm();
+    const { nodes, edges } = formToFlowWithMarkers(form, {});
+    const { states, transitions } = flowToGraph(nodes, edges);
+    expect(states).toEqual([...DEFAULT_STATE_MACHINE.states]);
+    expect(transitions.map(({ from, to, actionLabel }) => ({ from, to, actionLabel }))).toEqual(
+      DEFAULT_STATE_MACHINE.transitions.map((t) => ({ from: t.from, to: t.to, actionLabel: t.actionLabel })),
+    );
+  });
+
+  it('isTerminalNodeId identifies the reserved marker ids', () => {
+    expect(isTerminalNodeId(START_NODE_ID)).toBe(true);
+    expect(isTerminalNodeId(END_NODE_ID)).toBe(true);
+    expect(isTerminalNodeId('WAITING')).toBe(false);
+    expect(isTerminalNodeId('__other')).toBe(false);
+  });
+});
+
+describe('flowToGraph filters terminal markers', () => {
+  it('excludes type:"start"/type:"end" nodes from states/positions', () => {
+    // Feed a node list with real state nodes + a Start + an End marker, and an
+    // edge list with a real transition + a terminal edge. The terminal nodes/
+    // edges MUST be filtered from states/positions/transitions.
+    const nodes: FlowNode[] = [
+      { id: 'A', type: 'state', position: { x: 0, y: 0 }, data: { name: 'A', description: '' } },
+      { id: 'B', type: 'state', position: { x: 240, y: 0 }, data: { name: 'B', description: '' } },
+      { id: START_NODE_ID, type: START_NODE_TYPE, position: { x: -240, y: 0 }, data: { name: START_NODE_ID, description: '' } },
+      { id: END_NODE_ID, type: END_NODE_TYPE, position: { x: 480, y: 0 }, data: { name: END_NODE_ID, description: '' } },
+    ];
+    const edges: FlowEdge[] = [
+      { id: 'A->B#0', source: 'A', target: 'B', type: 'transition', data: { actionLabel: 'go' } },
+      { id: `${START_NODE_ID}->A`, source: START_NODE_ID, target: 'A', type: TERMINAL_EDGE_TYPE, data: { actionLabel: '' } },
+      { id: `B->${END_NODE_ID}`, source: 'B', target: END_NODE_ID, type: TERMINAL_EDGE_TYPE, data: { actionLabel: '' } },
+    ];
+    const { states, transitions, positions } = flowToGraph(nodes, edges);
+    expect(states).toEqual(['A', 'B']);
+    expect(Object.keys(positions).sort()).toEqual(['A', 'B']);
+    expect(transitions).toHaveLength(1);
+    expect(transitions[0].from).toBe('A');
+    expect(transitions[0].to).toBe('B');
+  });
+});
+
+describe('withDescriptions skips non-state nodes', () => {
+  it('leaves a terminal marker node untouched (description stays empty)', () => {
+    // A Start marker passed through withDescriptions keeps its `description: ''`
+    // — `describeState(form, '__start')` would return a spurious summary, so the
+    // helper skips non-state nodes entirely.
+    const form = defaultStateMachineForm();
+    const nodes: FlowNode[] = [
+      { id: START_NODE_ID, type: START_NODE_TYPE, position: { x: 0, y: 0 }, data: { name: START_NODE_ID, description: '' } },
+      { id: 'WAITING', type: 'state', position: { x: 0, y: 0 }, data: { name: 'WAITING', description: '' } },
+    ];
+    const refreshed = withDescriptions(nodes, form);
+    expect(refreshed.find((n) => n.id === START_NODE_ID)?.data.description).toBe('');
+    // The state node IS refreshed.
+    expect(refreshed.find((n) => n.id === 'WAITING')?.data.description).toBe('Tiket menunggu dipanggil');
+  });
+});
+
+describe('isDuplicateTransition excludes terminal edges', () => {
+  it('does not count a terminal edge as a duplicate of a real pair', () => {
+    // A terminal edge __start→A shares no real `from`/`to` pair, but the
+    // defensive `type !== 'terminal'` filter keeps the predicate honest when the
+    // full canvas edge list (which now includes the markers) is passed.
+    const edges: FlowEdge[] = [
+      { id: `${START_NODE_ID}->A`, source: START_NODE_ID, target: 'A', type: TERMINAL_EDGE_TYPE, data: { actionLabel: '' } },
+      { id: `A->${END_NODE_ID}`, source: 'A', target: END_NODE_ID, type: TERMINAL_EDGE_TYPE, data: { actionLabel: '' } },
+    ];
+    // No real A→A edge exists; the terminal edges do NOT make it a duplicate.
+    expect(isDuplicateTransition(edges, 'A', 'A')).toBe(false);
+    // A real transition edge IS a duplicate.
+    const withReal: FlowEdge[] = [
+      ...edges,
+      { id: 'A->B#0', source: 'A', target: 'B', type: 'transition', data: { actionLabel: 'go' } },
+    ];
+    expect(isDuplicateTransition(withReal, 'A', 'B')).toBe(true);
   });
 });
 

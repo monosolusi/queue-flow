@@ -51,6 +51,16 @@ export interface FlowNode {
   position: { x: number; y: number };
   data: FlowNodeData;
   selected?: boolean;
+  /** Canvas-only: whether the node is draggable. The Start/End terminal
+   *  markers set `draggable: false` so the manager cannot move them (their
+   *  position is auto-derived from the real topology). Optional — real state
+   *  nodes leave it unset (React Flow's `nodesDraggable` prop gates the
+   *  canvas-wide default). */
+  draggable?: boolean;
+  /** Canvas-only: whether the node is selectable. The Start/End markers set
+   *  `selectable: true` so clicking one opens the properties-panel marker
+   *  branch. Optional — real state nodes leave it unset. */
+  selectable?: boolean;
 }
 
 /** Edge payload: the transition's action label (the Caller UI button text).
@@ -166,6 +176,34 @@ export function sideToHandle(side: EdgeSide): string {
 }
 
 /**
+ * Canvas-only terminal markers (Start/End) — auto-derived visual affordances
+ * for the graph's entry (in-degree-0 sources) and exit (out-degree-0 sinks).
+ * They are NOT in the form, NOT on the wire, NOT in the XML source view —
+ * `flowToGraph` filters them out (see {@link flowToGraph}'s `type === 'state'`
+ * / `type === 'transition'` filters), and the XML codec `state-machine-xml.ts`
+ * is untouched. They re-derive on every canvas re-seed so the markers always
+ * reflect the real graph topology. core-api is unchanged — `actionLabel` stays
+ * per-{@link Transition} on the wire.
+ *
+ * The node ids (`__start` / `__end`) are reserved: a state name is validated by
+ * `validateCustomStateMachine` against duplicates + the 5 canonical names, but
+ * these ids live only on the canvas model (never in `form.states`), so they
+ * never collide. {@link isTerminalNodeId} is the single source of truth for the
+ * "is this id a terminal marker" predicate, used by the component's
+ * `isValidConnection` defensive guard + the properties-panel marker branch.
+ */
+export const START_NODE_TYPE = 'start';
+export const END_NODE_TYPE = 'end';
+export const TERMINAL_EDGE_TYPE = 'terminal';
+export const START_NODE_ID = '__start';
+export const END_NODE_ID = '__end';
+
+/** True when the id is a canvas-only Start/End terminal marker id. */
+export function isTerminalNodeId(id: string): boolean {
+  return id === START_NODE_ID || id === END_NODE_ID;
+}
+
+/**
  * Inverse of {@link sideToHandle}: extracts the side from a handle id. Handles
  * are the bare side strings (`'top'`, `'right'`, …) → `split('-')[0]` gives the
  * side. Returns `undefined` for a missing/unknown handle so a default edge
@@ -239,6 +277,153 @@ export function formToFlow(
 }
 
 /**
+ * Horizontal gap between a terminal marker (Start/End) and the nearest real
+ * state node. Matches `autoLayout`'s `X_SPACING = 240` in `state-machine.ts`
+ * (the canonical left-to-right rank gap) so the Start marker sits one rank to
+ * the LEFT of the leftmost source and the End marker one rank to the RIGHT of
+ * the rightmost sink — the markers read as the graph's entry/exit rank without
+ * crowding the real nodes. NOT imported from `state-machine.ts` to keep that
+ * module's internal spacing constant private (it is not exported); the value
+ * is duplicated here with a comment pointing back to the source of truth.
+ */
+const TERMINAL_SPACING = 240;
+
+/**
+ * Derive the canvas-only Start/End terminal markers + their terminal edges
+ * from the graph topology. Pure + framework-free (unit-testable in isolation,
+ * like every other mapper here).
+ *
+ * - `sources` = states with in-degree 0 (counting only transitions whose
+ *   `from` AND `to` are both in `states` — a transition referencing an unknown
+ *   state is ignored, mirroring {@link autoLayout}'s defensive guard).
+ * - `sinks` = states with out-degree 0 (same counting rule).
+ * - A Start marker is emitted ONLY when `sources.length > 0`; an End marker
+ *   ONLY when `sinks.length > 0`. A pure-cycle graph (every state has an
+ *   incoming edge) → no markers. An empty graph → no markers.
+ *
+ * Marker positions are derived from `realPositions` (a `Record<stateName,
+ * {x,y}>` of the REAL state node positions, built by the caller from the
+ * `formToFlow`-returned state nodes): Start sits at `minX - TERMINAL_SPACING`
+ * (one rank left of the leftmost real node), End at `maxX +
+ * TERMINAL_SPACING` (one rank right of the rightmost), both at the vertical
+ * center `yCenter = (minY + maxY) / 2`. If `realPositions` is empty, the
+ * bounds default to 0 so a lone Start/End never NaNs.
+ *
+ * Terminal edges: a Start marker emits one `START_NODE_ID → source` edge per
+ * source; an End marker emits one `sink → END_NODE_ID` edge per sink. They
+ * carry `type: 'terminal'` (filtered by {@link flowToGraph} so they never
+ * reach the form/wire), an empty `actionLabel` (no Caller button — they are
+ * visual markers, not real transitions), and the canonical L→R handle
+ * routing (`right` → `left`) + the {@link EDGE_ARROW_MARKER} so the arrow
+ * reads the same as a real transition edge.
+ */
+export function deriveTerminalMarkers(
+  states: readonly string[],
+  transitions: readonly { from: string; to: string; actionLabel: string }[],
+  realPositions: Record<string, { x: number; y: number }>,
+): { nodes: FlowNode[]; edges: FlowEdge[] } {
+  if (states.length === 0) return { nodes: [], edges: [] };
+  const stateSet = new Set(states);
+  const inDeg = new Map<string, number>();
+  const outDeg = new Map<string, number>();
+  for (const s of states) {
+    inDeg.set(s, 0);
+    outDeg.set(s, 0);
+  }
+  for (const t of transitions) {
+    // Ignore edges that reference a state not in the schema (defensive — mirrors
+    // `autoLayout`'s guard so the markers reflect the REAL graph only).
+    if (!stateSet.has(t.from) || !stateSet.has(t.to)) continue;
+    inDeg.set(t.to, (inDeg.get(t.to) ?? 0) + 1);
+    outDeg.set(t.from, (outDeg.get(t.from) ?? 0) + 1);
+  }
+  const sources = states.filter((s) => (inDeg.get(s) ?? 0) === 0);
+  const sinks = states.filter((s) => (outDeg.get(s) ?? 0) === 0);
+
+  const real = Object.values(realPositions);
+  const minX = real.length ? Math.min(...real.map((p) => p.x)) : 0;
+  const maxX = real.length ? Math.max(...real.map((p) => p.x)) : 0;
+  const minY = real.length ? Math.min(...real.map((p) => p.y)) : 0;
+  const maxY = real.length ? Math.max(...real.map((p) => p.y)) : 0;
+  const yCenter = (minY + maxY) / 2;
+
+  const nodes: FlowNode[] = [];
+  const edges: FlowEdge[] = [];
+
+  if (sources.length > 0) {
+    nodes.push({
+      id: START_NODE_ID,
+      type: START_NODE_TYPE,
+      position: { x: minX - TERMINAL_SPACING, y: yCenter },
+      data: { name: START_NODE_ID, description: '' },
+      draggable: false,
+      selectable: true,
+    });
+    for (const s of sources) {
+      edges.push({
+        id: `${START_NODE_ID}->${s}`,
+        source: START_NODE_ID,
+        target: s,
+        type: TERMINAL_EDGE_TYPE,
+        data: { actionLabel: '' },
+        sourceHandle: HANDLE_IDS.right,
+        targetHandle: HANDLE_IDS.left,
+        markerEnd: EDGE_ARROW_MARKER,
+      });
+    }
+  }
+  if (sinks.length > 0) {
+    nodes.push({
+      id: END_NODE_ID,
+      type: END_NODE_TYPE,
+      position: { x: maxX + TERMINAL_SPACING, y: yCenter },
+      data: { name: END_NODE_ID, description: '' },
+      draggable: false,
+      selectable: true,
+    });
+    for (const s of sinks) {
+      edges.push({
+        id: `${s}->${END_NODE_ID}`,
+        source: s,
+        target: END_NODE_ID,
+        type: TERMINAL_EDGE_TYPE,
+        data: { actionLabel: '' },
+        sourceHandle: HANDLE_IDS.right,
+        targetHandle: HANDLE_IDS.left,
+        markerEnd: EDGE_ARROW_MARKER,
+      });
+    }
+  }
+  return { nodes, edges };
+}
+
+/**
+ * {@link formToFlow} + the canvas-only Start/End terminal markers from
+ * {@link deriveTerminalMarkers} in one call. The markers are derived from the
+ * REAL state node positions returned by {@link formToFlow} (so they sit at the
+ * correct rank offset from the actual layout), NOT from the `positions` arg
+ * (which is the `oldPositions` fallback for surviving names — markers are
+ * auto-derived on every re-seed and carry no position memory). The returned
+ * `nodes`/`edges` are the concatenation `[...stateNodes, ...markerNodes]` /
+ * `[...transEdges, ...markerEdges]`; {@link flowToGraph} filters the markers
+ * back out so the form/wire/XML never see them.
+ */
+export function formToFlowWithMarkers(
+  value: StateMachineForm,
+  positions: Record<string, { x: number; y: number }>,
+): { nodes: FlowNode[]; edges: FlowEdge[] } {
+  const { nodes: stateNodes, edges: transEdges } = formToFlow(value, positions);
+  const realPositions: Record<string, { x: number; y: number }> = {};
+  for (const n of stateNodes) realPositions[n.data.name] = n.position;
+  const { nodes: markerNodes, edges: markerEdges } = deriveTerminalMarkers(
+    value.states,
+    value.transitions,
+    realPositions,
+  );
+  return { nodes: [...stateNodes, ...markerNodes], edges: [...transEdges, ...markerEdges] };
+}
+
+/**
  * The inverse of {@link formToFlow}: graph structure + positions.
  * `states` preserves the node array order; `transitions` resolves each edge's
  * `source`/`target` (node ids = state names) back to transition `from`/`to`.
@@ -257,18 +442,25 @@ export function flowToGraph(
   nodes: readonly FlowNode[],
   edges: readonly FlowEdge[],
 ): { states: string[]; transitions: Transition[]; positions: Record<string, { x: number; y: number }> } {
+  // Filter the canvas-only terminal markers (Start/End nodes + terminal edges)
+  // so they NEVER reach the form/wire/XML. The markers are a visual affordance
+  // auto-derived by {@link deriveTerminalMarkers} on each re-seed; round-tripping
+  // them would corrupt the form (`__start`/`__end` are not real state names).
+  const stateNodes = nodes.filter((n) => n.type === 'state');
   const idToName = new Map<string, string>();
-  for (const n of nodes) idToName.set(n.id, n.data.name);
-  const states = nodes.map((n) => n.data.name);
+  for (const n of stateNodes) idToName.set(n.id, n.data.name);
+  const states = stateNodes.map((n) => n.data.name);
   const positions: Record<string, { x: number; y: number }> = {};
-  for (const n of nodes) positions[n.data.name] = { ...n.position };
-  const transitions: Transition[] = edges.map((e) => ({
-    from: idToName.get(e.source) ?? e.source,
-    to: idToName.get(e.target) ?? e.target,
-    actionLabel: e.data.actionLabel,
-    sourceSide: handleToSide(e.sourceHandle),
-    targetSide: handleToSide(e.targetHandle),
-  }));
+  for (const n of stateNodes) positions[n.data.name] = { ...n.position };
+  const transitions: Transition[] = edges
+    .filter((e) => e.type === 'transition')
+    .map((e) => ({
+      from: idToName.get(e.source) ?? e.source,
+      to: idToName.get(e.target) ?? e.target,
+      actionLabel: e.data.actionLabel,
+      sourceSide: handleToSide(e.sourceHandle),
+      targetSide: handleToSide(e.targetHandle),
+    }));
   return { states, transitions, positions };
 }
 
@@ -280,7 +472,13 @@ export function flowToGraph(
  * CANVAS-ONLY — this never changes the wire form ({@link flowToGraph} ignores it).
  */
 export function withDescriptions(nodes: readonly FlowNode[], form: StateMachineForm): FlowNode[] {
-  return nodes.map((n) => ({ ...n, data: { ...n.data, description: describeState(form, n.data.name) } }));
+  // Skip non-state nodes (the canvas-only Start/End terminal markers). They
+  // carry no state name in the form, so `describeState(form, name)` would
+  // return a spurious summary; pass them through untouched (their
+  // `description: ''` placeholder stays).
+  return nodes.map((n) =>
+    n.type === 'state' ? { ...n, data: { ...n.data, description: describeState(form, n.data.name) } } : n,
+  );
 }
 
 /**
@@ -315,7 +513,13 @@ export function isDuplicateTransition(
   source: string,
   target: string,
 ): boolean {
-  return edges.some((e) => e.source === source && e.target === target);
+  // Exclude the canvas-only terminal edges (Start→source / sink→End) — they
+  // share no `from`/`to` pair with a real transition (the markers' ids are
+  // reserved `__start`/`__end`), but a defensive `type !== 'terminal'` filter
+  // keeps the predicate honest if a future caller passes the full canvas edge
+  // list (which now includes the markers). Terminal edges must never cause a
+  // false-positive duplicate on a real `source → target` pair.
+  return edges.some((e) => e.type !== 'terminal' && e.source === source && e.target === target);
 }
 
 /**

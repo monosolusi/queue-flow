@@ -380,6 +380,66 @@
   stroke: var(--accent);
 }
 
+/* --- Canvas-only Start/End terminal markers ----------------------------------
+   Auto-derived visual affordances for the graph's entry (in-degree-0 sources)
+   and exit (out-degree-0 sinks). NOT state cards — they carry no name/
+   description on the form, so they render as compact pills: a small glyph +
+   label, accent-tinted for Start (the entry cue), a bold muted ring for End
+   (the exit cue). Token-driven (light/dark + brand re-theme for free); no
+   hardcoded color literal (the styles.test.ts static guard rejects hex in the
+   `.sm-source-*` rules; the same token-only convention applies here). The
+   marker handles are `isConnectable={false}` → no `connectable` class → the
+   base `.react-flow__handle { opacity: 0 }` rule hides them (and the `::before`
+   hit area has `pointer-events: none`), so the markers stay non-interactive. */
+.terminal-node {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
+  border: 1.5px solid var(--text-muted);
+  background: var(--surface);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  cursor: default;
+  user-select: none;
+}
+.terminal-node--start {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+.terminal-node--end {
+  border-width: 2.5px;
+}
+.terminal-node__glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+.terminal-node__label {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.terminal-node svg {
+  display: block;
+}
+
+/* --- Canvas-only terminal edges (Start→source / sink→End) -------------------
+   A dashed muted line so the terminal edges read distinctly from solid
+   transition edges — they are visual affordances, not real transitions. The
+   `markerEnd` stays the default gray (forwarded by `TerminalEdge`'s
+   `BaseEdge`), so the arrow still reads "into the source" / "out of the sink".
+   Wrapped in `<g className="terminal-edge">` by `TerminalEdge` so this rule
+   targets the path inside it via descendant selector. No hardcoded color —
+   `--text-muted` flips with the theme. */
+.terminal-edge .react-flow__edge-path {
+  stroke: var(--text-muted);
+  stroke-dasharray: 5 4;
+}
+
 /* --- Custom transition edge label (read-only chip) --------------------------
    A small muted chip showing the action label — presentational only; editing
    lives in the properties panel. 4px radius to match the diagram chrome. The
