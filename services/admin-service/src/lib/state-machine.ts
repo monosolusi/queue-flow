@@ -435,20 +435,6 @@ export function canonicalStatusOf(name: string): CanonicalStatus | null {
   return CANONICAL_STATUSES.find((s) => s.name === name) ?? null;
 }
 
-/**
- * The canonical system statuses NOT yet on the canvas — the calibrated "status
- * standar" choices the add-picker offers (manager feedback: "pilihan status
- * ada banyak, tidak jelas itu apa aja — kalibrasi dan cek ulang"). Each carries
- * its sub-description so the manager knows exactly what each is before adding
- * it. Empty when the graph already has all five (the default graph always does).
- * Adding one inserts it under its canonical name (the load-bearing system
- * identity) so the engine keeps working.
- */
-export function availableCanonicalStatuses(states: readonly string[]): CanonicalStatus[] {
-  const present = new Set(states.map((s) => s.trim()));
-  return CANONICAL_STATUSES.filter((s) => !present.has(s.name));
-}
-
 /** One status of the standard flow that the edited graph no longer contains. */
 export interface MissingCanonicalState {
   /** The status name as it appears in the standard flow (e.g. `COMPLETED`). */
@@ -511,37 +497,6 @@ export function describeState(form: StateMachineForm, name: string): string {
   const outgoing = form.transitions.filter((t) => t.from === name).length;
   if (outgoing > 0) return `${outgoing} transisi keluar`;
   return 'Status kustom';
-}
-
-/**
- * The transitions connected to a state — its "actions". A state is an empty
- * status label; the actions (caller-panel buttons) live on the TRANSITIONS
- * (edges) that enter/leave it. This helper is the single derivation the
- * properties panel reads to surface that model (manager feedback: adding a
- * state was confusing because its interactions with the ticket were
- * invisible — the panel only showed a name + a derived description + delete,
- * never the state's incoming/outgoing transitions). Pure over the form slice;
- * never serialized.
- */
-export interface StateActions {
-  /** Transitions whose `to` is this state — actions that ENTER it. */
-  readonly incoming: readonly Transition[];
-  /** Transitions whose `from` is this state — actions that LEAVE it. */
-  readonly outgoing: readonly Transition[];
-}
-
-/**
- * Derive the transitions connected to a state — its "actions" — split by
- * direction. A state is just a status label; the actions (the buttons shown on
- * the caller panel) are set on the transitions that enter/leave it, and this
- * helper is the single derivation the properties panel reads to surface that
- * model. Pure over the form slice; never serialized. Order follows the form's
- * `transitions` array (stable across renders for an unchanged graph).
- */
-export function stateActions(form: StateMachineForm, name: string): StateActions {
-  const incoming = form.transitions.filter((t) => t.to === name);
-  const outgoing = form.transitions.filter((t) => t.from === name);
-  return { incoming, outgoing };
 }
 
 // --- form mutation helpers (pure over the StateMachineForm slice) ------------
