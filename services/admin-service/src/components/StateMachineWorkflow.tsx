@@ -458,17 +458,6 @@ export function StateMachineWorkflow({
         if (selectedEdgeId === edgeId) setSelectedEdgeId(null);
         commit(nodes, nextEdges);
       },
-      // Select an edge on the canvas from the panel (the state-editor "Aksi"
-      // list calls this so clicking a listed transition jumps the panel to the
-      // edge editor). Mirrors `onEdgeClick`: mark the edge sole-selected in
-      // local edge state, clear node selection, and set the tracked id so the
-      // panel switches to the edge editor. `onSelectionChange` then fires from
-      // the store sync and reaffirms `selectedEdgeId`.
-      onSelectEdge: (edgeId) => {
-        setEdges((prev) => prev.map((e) => ({ ...e, selected: e.id === edgeId })));
-        setNodes((prev) => prev.map((n) => ({ ...n, selected: false })));
-        setSelectedEdgeId(edgeId);
-      },
       // Re-point an edge's endpoints from the panel's "Dari"/"Ke" selects (the
       // manager's "can't connect SERVING to COMPLETED from the panel, only by
       // dragging handles" feedback). Controlled-component revert: a rejected
@@ -499,21 +488,21 @@ export function StateMachineWorkflow({
         const nextEdges = edges.map((e) => (e.id === edgeId ? { ...e, source: from, target: to } : e));
         commit(nodes, nextEdges);
       },
-      // Add a new incoming transition to the given target state (the inline
-      // "Tambah aksi masuk" button in the node properties panel). The panel's
-      // entry-action framing: the action shown for a node is the action when
-      // transitioning INTO that node, so the new edge's `target` IS the selected
-      // node and `source` is the first non-duplicate candidate (a status not
-      // already the source of an incoming edge into this target). No-op when
-      // every status is already a source into this target (the button is
-      // disabled in that case, but guard anyway so a stale click can't seed a
-      // duplicate). Double-tap guard via `addPendingRef` (same as the old add
-      // buttons). The wire contract is unchanged — `actionLabel` stays
-      // per-Transition on the wire; this is a conceptual flip only.
-      onAddTransitionTo: (target) => {
+      // Add a new OUTGOING transition from the given source state (the inline
+      // "Tambah aksi" button in the node properties panel). The panel's
+      // Kaleo-style "Aksi" framing: the action shown for a node is "Update
+      // Status ke <Nilai>", so the new edge's `source` IS the selected node
+      // and `target` is the first non-duplicate candidate (a status not
+      // already the target of an outgoing edge from this source). No-op when
+      // every status is already a target of an outgoing edge from this source
+      // (the button is disabled in that case, but guard anyway so a stale click
+      // can't seed a duplicate). Double-tap guard via `addPendingRef` (same as
+      // the old add buttons). The wire contract is unchanged — `actionLabel`
+      // stays per-Transition on the wire; this is a presentation reframing only.
+      onAddTransitionFrom: (source) => {
         if (addPendingRef.current) return;
-        const source = value.states.find((s) => !isDuplicateTransition(edges, s, target));
-        if (!source) return; // no non-duplicate source left — no-op
+        const target = value.states.find((s) => !isDuplicateTransition(edges, source, s));
+        if (!target) return; // no non-duplicate target left — no-op
         addPendingRef.current = true;
         const newEdge: FlowEdge = {
           id: mintEdgeId(),

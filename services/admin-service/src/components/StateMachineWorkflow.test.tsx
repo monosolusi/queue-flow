@@ -57,24 +57,24 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     expect(next.states).toEqual([...DEFAULT_STATE_MACHINE.states]);
   });
 
-  it('adds a transition via the inline "Tambah aksi masuk" button in the node panel', () => {
+  it('adds a transition via the inline "Tambah aksi" button in the node panel', () => {
     const onChange = vi.fn();
     const customForm = { ...defaultStateMachineForm(), mode: 'custom' as const };
     renderWorkflow(customForm, [], onChange);
-    // Select the WAITING node → the panel renders the inline Aksi masuk editor.
+    // Select the WAITING node → the panel renders the inline Aksi editor
+    // (outgoing transitions, Kaleo-style).
     selectStateNode('WAITING');
     fireEvent.click(screen.getByTestId('panel-add-action'));
     expect(onChange).toHaveBeenCalledTimes(1);
     const next = onChange.mock.calls[0][0];
     expect(next.transitions).toHaveLength(DEFAULT_STATE_MACHINE.transitions.length + 1);
-    // The new transition is an INCOMING self-edge into WAITING (the selected
-    // node): the first non-duplicate SOURCE into WAITING is WAITING itself
-    // (WAITING→WAITING does not exist; WAITING→CALLING already exists but that
-    // is an outgoing edge, not an incoming one into WAITING). The entry-action
-    // framing anchors the target to the selected node.
+    // The new transition is an OUTGOING self-edge from WAITING (the selected
+    // node): the first non-duplicate TARGET from WAITING is WAITING itself
+    // (WAITING→WAITING does not exist; WAITING→CALLING already exists). The
+    // Kaleo-style "Aksi" framing anchors the source to the selected node.
     const added = next.transitions[next.transitions.length - 1];
-    expect(added.to).toBe('WAITING');
     expect(added.from).toBe('WAITING');
+    expect(added.to).toBe('WAITING');
     expect(added.actionLabel).toBe('');
   });
 
@@ -526,29 +526,33 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
 
   // --- State-panel inline "Aksi" editor + edge reroute (manager feedback) ---
   //
-  // Manager feedback: "update status → update to" — a state node's properties
-  // should surface its outgoing actions inline and editable. Each outgoing
-  // transition is a row with a "Update to" <select> (re-point the target), a
-  // "Label aksi" <input>, and a "Hapus" button. The read-only "Status" badge +
-  // consequence block is gone; a read-only "Deskripsi" field replaces it. The
-  // standalone edge editor (Dari / Ke / Label aksi / Hapus transisi) is kept
-  // unchanged — two edit paths (inline node actions + click-an-edge).
+  // Manager feedback: Kaleo-style — a state node's properties should surface
+  // its OUTGOING actions as "Aksi" (the action type, read-only "Update Status")
+  // + "Nilai" (the value = the target status, an editable <select> re-pointing
+  // the target). No "Dari" (the source is the selected node, implicit) and no
+  // inline label editing (the Caller button text stays editable via the
+  // standalone edge editor). The read-only "Status" badge + consequence block
+  // is gone; a read-only "Deskripsi" field replaces it. The standalone edge
+  // editor (Dari / Ke / Label aksi / Hapus transisi) is kept unchanged — two
+  // edit paths (inline node actions + click-an-edge).
 
-  it('the state panel shows the inline Aksi masuk editor with incoming transitions only', () => {
+  it('the state panel shows the inline Aksi editor with outgoing transitions only', () => {
     renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
     selectStateNode('SERVING');
     const panel = screen.getByTestId('sm-properties');
-    // SERVING has one INCOMING: CALLING → SERVING (index 1 in the default
-    // graph). The inline editor renders a "Dari" select showing CALLING and a
-    // "Label aksi" input with the action label "Mulai Melayani".
-    const fromSelect = within(panel).getByTestId('panel-action-from-CALLING->SERVING#1') as HTMLSelectElement;
-    expect(fromSelect).toBeInTheDocument();
-    expect(fromSelect.value).toBe('CALLING');
-    const labelInput = within(panel).getByTestId('panel-action-label-CALLING->SERVING#1') as HTMLInputElement;
-    expect(labelInput.value).toBe('Mulai Melayani');
-    // The outgoing transition (SERVING → COMPLETED, index 4) is NOT listed
-    // (incoming only — the panel is reframed as entry actions).
-    expect(within(panel).queryByTestId('panel-action-from-SERVING->COMPLETED#4')).not.toBeInTheDocument();
+    // SERVING has one OUTGOING: SERVING → COMPLETED (index 4 in the default
+    // graph). The inline editor renders a read-only "Aksi" chip ("Update
+    // Status") and a "Nilai" select showing COMPLETED.
+    const toSelect = within(panel).getByTestId('panel-action-to-SERVING->COMPLETED#4') as HTMLSelectElement;
+    expect(toSelect).toBeInTheDocument();
+    expect(toSelect.value).toBe('COMPLETED');
+    const actionType = within(panel).getByTestId('panel-action-type-SERVING->COMPLETED#4');
+    expect(actionType).toHaveTextContent('Update Status');
+    // The incoming edge (CALLING → SERVING, index 1) is NOT listed (outgoing
+    // only — the panel is reframed as Kaleo-style outgoing actions).
+    expect(within(panel).queryByTestId('panel-action-to-CALLING->SERVING#1')).not.toBeInTheDocument();
+    // The inline label input is gone (label editing moved to the edge editor).
+    expect(within(panel).queryByTestId('panel-action-label-CALLING->SERVING#1')).not.toBeInTheDocument();
   });
 
   it('the state panel shows the read-only Deskripsi field (derived description)', () => {
@@ -583,7 +587,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     expect(within(panel).queryByTestId('panel-state-badge')).not.toBeInTheDocument();
   });
 
-  it('the inline "Tambah aksi masuk" button adds a new incoming edge into the selected node', () => {
+  it('the inline "Tambah aksi" button adds a new outgoing edge from the selected node', () => {
     const onChange = vi.fn();
     const customForm: StateMachineForm = {
       mode: 'custom' as const,
@@ -596,28 +600,30 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     fireEvent.click(screen.getByTestId('panel-add-action'));
     expect(onChange).toHaveBeenCalledTimes(1);
     const next = onChange.mock.calls[0][0];
-    // The new edge is an INCOMING self-edge into WAITING: the first non-duplicate
-    // SOURCE into WAITING is WAITING itself (no real edge has WAITING as its
-    // target). The entry-action framing anchors the target to the selected node.
+    // The new edge is an OUTGOING self-edge from WAITING: the first non-duplicate
+    // TARGET from WAITING is WAITING itself (WAITING→CALLING already exists;
+    // WAITING→WAITING does not). The Kaleo-style "Aksi" framing anchors the
+    // source to the selected node.
     expect(next.transitions).toHaveLength(2);
     const added = next.transitions[next.transitions.length - 1];
-    expect(added.to).toBe('WAITING');
     expect(added.from).toBe('WAITING');
+    expect(added.to).toBe('WAITING');
     expect(added.actionLabel).toBe('');
   });
 
-  it('the inline "Tambah aksi masuk" button is disabled when every status is already a source into this node', () => {
-    // Entry-action framing: the button is disabled when every status is already
-    // a SOURCE of an incoming edge into the selected node (no non-duplicate
-    // source left). Construct: select CALLING with transitions CALLING→CALLING
-    // (self — incoming from CALLING) and WAITING→CALLING (incoming from WAITING)
-    // → both states are sources into CALLING → button disabled.
+  it('the inline "Tambah aksi" button is disabled when every status is already a target of an outgoing edge from this node', () => {
+    // Kaleo-style outgoing framing: the button is disabled when every status
+    // is already a TARGET of an outgoing edge from the selected node (no
+    // non-duplicate target left). Construct: select CALLING with transitions
+    // CALLING→CALLING (self — target CALLING) and CALLING→WAITING (target
+    // WAITING) → both states are targets of outgoing edges from CALLING →
+    // button disabled.
     const customForm: StateMachineForm = {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING'],
       transitions: [
         { from: 'CALLING', to: 'CALLING', actionLabel: 'ulang' },
-        { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' },
+        { from: 'CALLING', to: 'WAITING', actionLabel: 'kembali' },
       ],
       positions: {},
     };
@@ -626,40 +632,25 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     expect(screen.getByTestId('panel-add-action')).toBeDisabled();
   });
 
-  it('the inline "Dari" select re-routes the edge (target stays the selected node as the entry target)', () => {
+  it('the inline "Nilai" select re-routes the edge target (source stays the selected node)', () => {
     const onChange = vi.fn();
     renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const }, [], onChange);
     selectStateNode('SERVING');
-    // SERVING's incoming edge is CALLING → SERVING (index 1). Change "Dari" to
-    // SKIPPED (a status that does not already have an edge into SERVING, so the
-    // reroute is non-duplicate). The target stays SERVING; the source is
-    // re-routed from CALLING to SKIPPED.
-    const fromSelect = screen.getByTestId('panel-action-from-CALLING->SERVING#1') as HTMLSelectElement;
-    fireEvent.change(fromSelect, { target: { value: 'SKIPPED' } });
+    // SERVING's outgoing edge is SERVING → COMPLETED (index 4). Change "Nilai"
+    // to SKIPPED (a status that is not already the target of an outgoing edge
+    // from SERVING, so the reroute is non-duplicate). The source stays SERVING;
+    // the target is re-routed from COMPLETED to SKIPPED.
+    const toSelect = screen.getByTestId('panel-action-to-SERVING->COMPLETED#4') as HTMLSelectElement;
+    fireEvent.change(toSelect, { target: { value: 'SKIPPED' } });
     expect(onChange).toHaveBeenCalledTimes(1);
     const next = onChange.mock.calls[0][0];
-    const routed = next.transitions.find((t: Transition) => t.to === 'SERVING');
-    expect(routed?.from).toBe('SKIPPED');
+    const routed = next.transitions.find((t: Transition) => t.from === 'SERVING');
+    expect(routed?.to).toBe('SKIPPED');
   });
 
-  it('the inline "Label aksi" input edits the edge action label', () => {
-    const onChange = vi.fn();
-    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const }, [], onChange);
-    selectStateNode('SERVING');
-    // SERVING's incoming edge is CALLING → SERVING (index 1). The label input
-    // testid is stable (`panel-action-label-${edge.id}`), so the label test
-    // exercises the incoming edge now.
-    const labelInput = screen.getByTestId('panel-action-label-CALLING->SERVING#1') as HTMLInputElement;
-    fireEvent.change(labelInput, { target: { value: 'Mulai' } });
-    expect(onChange).toHaveBeenCalledTimes(1);
-    const next = onChange.mock.calls[0][0];
-    const edited = next.transitions.find((t: Transition) => t.from === 'CALLING' && t.to === 'SERVING');
-    expect(edited?.actionLabel).toBe('Mulai');
-  });
-
-  it('the inline "Hapus" button deletes the incoming action (disabled when only one transition remains)', () => {
-    // 2-state / 1-transition graph (WAITING→CALLING). Select the TARGET node
-    // (CALLING) — its sole INCOMING edge is WAITING→CALLING. The Hapus button
+  it('the inline "Hapus" button is disabled when only one transition remains', () => {
+    // 2-state / 1-transition graph (WAITING→CALLING). Select the SOURCE node
+    // (WAITING) — its sole OUTGOING edge is WAITING→CALLING. The Hapus button
     // on that edge is disabled (the ≥1-transition invariant).
     const oneTransitionForm: StateMachineForm = {
       mode: 'custom' as const,
@@ -668,28 +659,28 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       positions: {},
     };
     renderWorkflow(oneTransitionForm);
-    selectStateNode('CALLING');
+    selectStateNode('WAITING');
     const deleteBtn = screen.getByTestId('panel-action-delete-WAITING->CALLING#0');
     expect(deleteBtn).toBeDisabled();
   });
 
-  it('the inline "Hapus" button deletes the incoming action when more than one transition exists', () => {
+  it('the inline "Hapus" button deletes the outgoing action when more than one transition exists', () => {
     const onChange = vi.fn();
     renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const }, [], onChange);
     selectStateNode('SERVING');
-    const deleteBtn = screen.getByTestId('panel-action-delete-CALLING->SERVING#1');
+    const deleteBtn = screen.getByTestId('panel-action-delete-SERVING->COMPLETED#4');
     expect(deleteBtn).not.toBeDisabled();
     fireEvent.click(deleteBtn);
     expect(onChange).toHaveBeenCalledTimes(1);
     const next = onChange.mock.calls[0][0];
-    // The CALLING → SERVING transition (the incoming edge into SERVING) is gone.
-    expect(next.transitions.every((t: Transition) => !(t.from === 'CALLING' && t.to === 'SERVING'))).toBe(true);
+    // The SERVING → COMPLETED transition (the outgoing edge from SERVING) is gone.
+    expect(next.transitions.every((t: Transition) => !(t.from === 'SERVING' && t.to === 'COMPLETED'))).toBe(true);
   });
 
-  it('the state panel shows the empty-state hint when the node has no incoming transitions', () => {
-    // LONELY has no INCOMING real transition (it is a source — the Start marker
-    // emits a terminal edge __start→LONELY, but terminal edges are filtered by
-    // the panel so the empty hint shows, not a spurious "Dari __start" row).
+  it('the state panel shows the empty-state hint when the node has no outgoing transitions', () => {
+    // LONELY has no OUTGOING real transition (it is a sink — the End marker
+    // emits a terminal edge LONELY→__end, but terminal edges are filtered by
+    // the panel so the empty hint shows, not a spurious row).
     const customForm: StateMachineForm = {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING', 'LONELY'],
@@ -700,7 +691,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     selectStateNode('LONELY');
     const panel = screen.getByTestId('sm-properties');
     expect(within(panel).getByTestId('panel-state-actions-empty')).toHaveTextContent(
-      'Belum ada aksi masuk. Tambah aksi masuk untuk membuat transisi dari status lain ke status ini.',
+      'Belum ada aksi. Tambah aksi untuk membuat transisi dari status ini ke status lain.',
     );
   });
 

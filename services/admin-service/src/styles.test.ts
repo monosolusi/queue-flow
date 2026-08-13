@@ -842,7 +842,7 @@ describe('Alur Status Tiket designer — warning relocation + dedicated full-pag
     expect(restBlock!.index!).toBeLessThan(fullIdx);
   });
 
-  // --- Inline "Aksi" editor rules (manager feedback: "update status → update to") ---
+  // --- Inline "Aksi" editor rules (Kaleo-style: Aksi type + Nilai value) ---
   //   The old calibrated "status standar" picker + read-only "Status" badge
   //   rules were removed (the palette is de-duplicated to just the draggable
   //   "Status" card, and the node properties panel shows an inline-editable
@@ -863,10 +863,10 @@ describe('Alur Status Tiket designer — warning relocation + dedicated full-pag
     expect(del).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
   });
 
-  it('the inline action prefix + field labels use text tokens (no hardcoded color)', () => {
-    expect(wfRule('.sm-properties__action-prefix')).toContain('color: var(--text-muted)');
+  it('the Kaleo-style Aksi + Nilai row uses text/accent tokens (no hardcoded color)', () => {
+    expect(wfRule('.sm-properties__action-type')).toContain('color: var(--accent-on-surface)');
     expect(wfRule('.sm-properties__action-label')).toContain('color: var(--text)');
-    expect(wfRule('.sm-properties__action-prefix')).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    expect(wfRule('.sm-properties__action-type')).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
     expect(wfRule('.sm-properties__action-label')).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
   });
 
