@@ -143,12 +143,12 @@
   font-size: 1rem;
   line-height: 1;
 }
-/* The state editor's inline "Aksi" list — each outgoing transition rendered as
-   an editable card: a "Update status →" prefix, a "Update to" <select>, a
-   "Label aksi" <input>, and a "Hapus" button. Manager feedback: "update status
-   → update to" — the actions are editable inline from the node properties, not
-   click-to-jump. Token-driven (light/dark + brand re-theme for free); no
-   hardcoded color literal (styles.test.ts static guard). */
+/* The state editor's inline "Aksi" list — each outgoing transition rendered
+   Kaleo-style as a card: a read-only "Aksi" chip ("Update Status"), a "Nilai"
+   <select> (re-point the target), and a "Hapus" button. Manager feedback: the
+   action TYPE is fixed ("Update Status"); the editable VALUE is the target
+   status. Token-driven (light/dark + brand re-theme for free); no hardcoded
+   color literal (styles.test.ts static guard). */
 .sm-properties__actions {
   list-style: none;
   margin: 0;
@@ -166,9 +166,15 @@
   border-radius: 5px;
   background: color-mix(in srgb, var(--surface) 95%, transparent);
 }
-.sm-properties__action-prefix {
-  color: var(--text-muted);
+.sm-properties__action-type {
+  color: var(--accent-on-surface);
   font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 999px;
+  align-self: flex-start;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 .sm-properties__action-label {
   color: var(--text);

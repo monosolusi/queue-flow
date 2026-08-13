@@ -47,12 +47,12 @@ import { HANDLE_IDS, type FlowEdgeData, type FlowNodeData } from '../lib/state-m
  * `clearSelection` via its own prop (ISP: the canvas node/edge never clear the
  * selection, so the context carries no selection-clearing callback).
  *
- * `onSelectEdge` and `onRerouteTransition` serve the panel's state-editor "Aksi"
- * list (clicking a listed transition jumps the canvas selection to that edge)
- * and the edge-editor "Dari"/"Ke" route selects (re-pointing an edge's
- * endpoints from the panel — the manager's "can't connect SERVING to COMPLETED
- * from the panel, only by dragging handles" feedback). The state node/edge
- * components never call them (they are panel-only), but they live on this
+ * `onRerouteTransition` serves the panel's state-editor "Aksi" row (the
+ * Kaleo-style "Nilai" select re-points an outgoing edge's target from the
+ * node row) AND the edge-editor's "Dari"/"Ke" selects (re-pointing either
+ * endpoint from the full-edit path — the manager's "can't connect SERVING to
+ * COMPLETED from the panel, only by dragging handles" feedback). The state
+ * node/edge components never call it (it is panel-only), but it lives on this
  * surface so the panel shares the same handler context the canvas does.
  */
 export interface WorkflowHandlers {
@@ -62,8 +62,6 @@ export interface WorkflowHandlers {
   onDeleteState: (name: string) => void;
   onEditTransitionLabel: (edgeId: string, label: string) => void;
   onDeleteTransition: (edgeId: string) => void;
-  /** Select the given edge on the canvas (jump the panel to the edge editor). */
-  onSelectEdge: (edgeId: string) => void;
   /**
    * Re-point an edge's `from`/`to` endpoints from the properties panel. Guards
    * a duplicate (a different edge already has that source/target pair) by
@@ -73,17 +71,16 @@ export interface WorkflowHandlers {
    */
   onRerouteTransition: (edgeId: string, from: string, to: string) => void;
   /**
-   * Add a new incoming transition to the given target state, picking the first
-   * non-duplicate source (a status not already the source of an incoming edge
-   * into this target). No-op when every status is already a source into this
-   * target. The panel's "Aksi masuk" framing flips from the prior
-   * `onAddTransitionFrom` (outgoing) to entry-actions (incoming): the action
-   * shown for a node is the action when transitioning INTO that node. The new
-   * edge's `target` IS the selected node; `source` is the first non-duplicate
-   * candidate. Mirrors `addTransitionButton`'s structure but anchors the target
-   * to the selected node rather than the first state.
+   * Add a new OUTGOING transition from the given source state, picking the
+   * first non-duplicate TARGET (a status not already the target of an outgoing
+   * edge from this source). No-op when every status is already a target of an
+   * outgoing edge from this source. The panel's Kaleo-style "Aksi" framing:
+   * the action shown for a node is "Update Status ke <Nilai>", so the new
+   * edge's `source` IS the selected node and `target` is the first
+   * non-duplicate candidate. Mirrors the prior `onAddTransitionTo` structure
+   * but anchors the SOURCE to the selected node rather than the target.
    */
-  onAddTransitionTo: (target: string) => void;
+  onAddTransitionFrom: (source: string) => void;
 }
 
 export const WorkflowContext = createContext<WorkflowHandlers | null>(null);
