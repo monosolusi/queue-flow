@@ -215,16 +215,6 @@
   border-radius: 5px;
   background: color-mix(in srgb, var(--surface) 95%, transparent);
 }
-.sm-properties__action-type {
-  color: var(--accent-on-surface);
-  font-size: 0.78rem;
-  font-weight: 600;
-  padding: 0.2rem 0.4rem;
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
-  border-radius: 999px;
-  align-self: flex-start;
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-}
 .sm-properties__action-label {
   color: var(--text);
   font-size: 0.78rem;

@@ -906,16 +906,30 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     // Navigate to the "Aksi" sub-view (the panel redesign splits the node editor
     // into overview + transitions/actions sub-views).
     fireEvent.click(screen.getByTestId('panel-goto-actions'));
+    // The "Aksi" action-type is a <select> dropdown (extensible — one option,
+    // UPDATE_STATUS, today), not a read-only badge.
+    const typeSelect = screen.getByTestId('panel-node-action-type-0');
+    expect(typeSelect.tagName).toBe('SELECT');
+    expect(typeSelect).toHaveValue('UPDATE_STATUS');
+    // Edit "Aksi" (type) → UPDATE_STATUS. One option today, so the value is
+    // unchanged, but the change exercises the dropdown's onChange →
+    // onEditNodeAction({ type }) wiring (the patch path that future action
+    // types will use) and proves no edge is touched.
+    fireEvent.change(typeSelect, { target: { value: 'UPDATE_STATUS' } });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const next0 = onChange.mock.calls[0][0];
+    expect(next0.transitions).toEqual(customForm.transitions);
+    expect(next0.nodeActions.WAITING[0].type).toBe('UPDATE_STATUS');
     // Edit "Saat" → ON_EXIT.
     fireEvent.change(screen.getByTestId('panel-node-action-saat-0'), { target: { value: 'ON_EXIT' } });
-    expect(onChange).toHaveBeenCalledTimes(1);
-    const next1 = onChange.mock.calls[0][0];
+    expect(onChange).toHaveBeenCalledTimes(2);
+    const next1 = onChange.mock.calls[1][0];
     expect(next1.transitions).toEqual(customForm.transitions);
     expect(next1.nodeActions.WAITING[0].executionType).toBe('ON_EXIT');
     // Edit "Nilai" → SKIPPED.
     fireEvent.change(screen.getByTestId('panel-node-action-to-0'), { target: { value: 'SKIPPED' } });
-    expect(onChange).toHaveBeenCalledTimes(2);
-    const next2 = onChange.mock.calls[1][0];
+    expect(onChange).toHaveBeenCalledTimes(3);
+    const next2 = onChange.mock.calls[2][0];
     expect(next2.transitions).toEqual(customForm.transitions);
     expect(next2.nodeActions.WAITING[0].value).toBe('SKIPPED');
   });
