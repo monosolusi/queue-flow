@@ -5,6 +5,7 @@ import {
   DailyResetMode,
   DailyResetPolicy,
   EdgeRoutingLayout,
+  NodePositions,
   ServiceThemes,
   StateMachine,
   StateSchema,
@@ -219,6 +220,12 @@ describe('SystemConfiguration aggregate', () => {
     expect(config.edgeRoutingLayout.toDto()).toEqual({});
   });
 
+  it('defaults nodePositions to the empty default map (zero visual regression — autoLayout)', () => {
+    const config = SystemConfiguration.create(Identifier.generate());
+    expect(config.nodePositions).toBe(NodePositions.DEFAULT);
+    expect(config.nodePositions.toDto()).toEqual({});
+  });
+
   it('reconstitute carries a custom brand color through', () => {
     const config = SystemConfiguration.reconstitute({
       id: Identifier.generate(),
@@ -230,6 +237,7 @@ describe('SystemConfiguration aggregate', () => {
       serviceThemes: ServiceThemes.DEFAULT,
       tvPanelLayout: TvPanelLayout.DEFAULT,
       edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
+      nodePositions: NodePositions.DEFAULT,
     });
     expect(config.brandColor.value).toBe('#aabbcc');
   });
@@ -245,6 +253,7 @@ describe('SystemConfiguration aggregate', () => {
       serviceThemes: ServiceThemes.of({ kiosk: 'light', tv: 'dark', caller: 'dark', admin: 'light' }),
       tvPanelLayout: TvPanelLayout.DEFAULT,
       edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
+      nodePositions: NodePositions.DEFAULT,
     });
     expect(config.serviceThemes.toDto()).toEqual({
       kiosk: 'light',
@@ -268,6 +277,7 @@ describe('SystemConfiguration aggregate', () => {
         { id: 'waitingQueue', component: 'waitingQueue', x: 8, y: 0, w: 4, h: 4 },
       ]),
       edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
+      nodePositions: NodePositions.DEFAULT,
     });
     expect(config.tvPanelLayout.toDto()).toEqual([
       { id: 'nowServing', component: 'nowServing', x: 0, y: 0, w: 8, h: 4 },
@@ -288,9 +298,32 @@ describe('SystemConfiguration aggregate', () => {
       edgeRoutingLayout: EdgeRoutingLayout.of({
         'SKIPPED->CALLING': { sourceSide: 'bottom', targetSide: 'top' },
       }),
+      nodePositions: NodePositions.DEFAULT,
     });
     expect(config.edgeRoutingLayout.toDto()).toEqual({
       'SKIPPED->CALLING': { sourceSide: 'bottom', targetSide: 'top' },
+    });
+  });
+
+  it('reconstitute carries a custom node positions map through', () => {
+    const config = SystemConfiguration.reconstitute({
+      id: Identifier.generate(),
+      storeName: 'Toko Brand',
+      isInitialSetupCompleted: true,
+      stateMachine: StateMachine.DEFAULT,
+      dailyResetPolicy: DailyResetPolicy.DEFAULT,
+      brandColor: BrandColor.DEFAULT,
+      serviceThemes: ServiceThemes.DEFAULT,
+      tvPanelLayout: TvPanelLayout.DEFAULT,
+      edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
+      nodePositions: NodePositions.of({
+        WAITING: { x: 0, y: 0 },
+        CALLING: { x: 240, y: 0 },
+      }),
+    });
+    expect(config.nodePositions.toDto()).toEqual({
+      WAITING: { x: 0, y: 0 },
+      CALLING: { x: 240, y: 0 },
     });
   });
 

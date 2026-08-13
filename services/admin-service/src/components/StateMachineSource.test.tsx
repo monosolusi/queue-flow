@@ -4,7 +4,7 @@ import { StateMachineSource } from './StateMachineSource';
 import type { Transition } from '../lib/state-machine';
 
 /**
- * Isolated presentational tests for the JSON Source view — the connector legend
+ * Isolated presentational tests for the XML Source view — the connector legend
  * (the "indikator konektor" from → to the manager asked for), the textarea
  * affordance, and the inline error region. No router, no draft, no parsing —
  * `StateMachineSource` is a controlled presentational component (the designer
@@ -21,7 +21,18 @@ const DEFAULT_CONNECTORS: Transition[] = [
   { from: 'SERVING', to: 'COMPLETED', actionLabel: 'Selesai Layan' },
 ];
 
-describe('StateMachineSource (JSON Source view)', () => {
+describe('StateMachineSource (XML Source view)', () => {
+  it('renders the "Sumber XML alur status" label for the textarea', () => {
+    render(
+      <StateMachineSource
+        sourceText='<?xml version="1.0"?><stateMachine/>'
+        onSourceChange={() => {}}
+        error={null}
+        connectors={DEFAULT_CONNECTORS}
+      />,
+    );
+    expect(screen.getByText('Sumber XML alur status')).toBeInTheDocument();
+  });
   it('renders one connector chip per transition with from, arrow, to, and label', () => {
     render(
       <StateMachineSource
@@ -114,9 +125,9 @@ describe('StateMachineSource (JSON Source view)', () => {
   it('renders the inline error region and marks the textarea invalid when error is set', () => {
     render(
       <StateMachineSource
-        sourceText='{ broken'
+        sourceText='<not-xml'
         onSourceChange={() => {}}
-        error="JSON tidak valid:Unexpected token"
+        error="XML tidak valid: kesalahan parse"
         connectors={DEFAULT_CONNECTORS}
       />,
     );

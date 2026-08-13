@@ -12,6 +12,7 @@ import { BrandColor } from '../../domain/store-config';
 import { ServiceThemes, type ServiceThemesMap } from '../../domain/store-config';
 import { TvPanelLayout, type TvGridLayout } from '../../domain/store-config';
 import { EdgeRoutingLayout, type EdgeRoutingLayoutDto } from '../../domain/store-config';
+import { NodePositions, type NodePositionsDto } from '../../domain/store-config';
 import { type IDailyResetSchedulerPort } from '../../domain/store-config';
 import {
   Identifier,
@@ -97,6 +98,13 @@ export interface SaveSystemConfigurationCommand {
    *  (all-default routing) and rejects a present-but-invalid entry. Not
    *  change-gated (like `brandColor`/`serviceThemes`/`tvPanelLayout`). */
   readonly edgeRoutingLayout: EdgeRoutingLayoutDto;
+  /** Per-state node x/y positions for the admin state-machine visual editor
+   *  (keyed map "stateName" -> { x, y }). Non-sparse: every state whose position
+   *  is known has an entry. Required on the wire; the VO recovers a
+   *  null/undefined to the empty default (autoLayout) and rejects a
+   *  present-but-invalid entry (non-finite x/y). Not change-gated (like
+   *  `edgeRoutingLayout`/`brandColor`/`serviceThemes`/`tvPanelLayout`). */
+  readonly nodePositions: NodePositionsDto;
   readonly actor: string;
 }
 
@@ -107,6 +115,7 @@ export interface SaveSystemConfigurationResult {
   readonly serviceThemes: ServiceThemesMap;
   readonly tvPanelLayout: TvGridLayout;
   readonly edgeRoutingLayout: EdgeRoutingLayoutDto;
+  readonly nodePositions: NodePositionsDto;
 }
 
 /** Minimal projection used only for audit before/after snapshots. */
@@ -234,6 +243,10 @@ export class SaveSystemConfigurationUseCase {
     // change-gated, no post-commit side-effect. Validated pre-tx so a malformed
     // layout (bad side enum, non-object value) fails fast.
     const edgeRoutingLayout = EdgeRoutingLayout.of(command.edgeRoutingLayout);
+    // Per-state node positions — same shape: pure appearance, not change-gated,
+    // no post-commit side-effect. Validated pre-tx so a malformed map (non-object
+    // value, non-finite x/y) fails fast.
+    const nodePositions = NodePositions.of(command.nodePositions);
     const newCategories = this.buildCategories(command.categories);
     const codeToId = new Map(newCategories.map((c) => [c.code, c.id.value]));
     const newRules = this.buildRoutingRules(command.routingRules, codeToId);
@@ -248,6 +261,21 @@ export class SaveSystemConfigurationUseCase {
       if (!edgeKeys.has(key)) {
         throw new InvalidValueObjectException(
           `edge routing layout key '${key}' is not a transition in the active state machine`,
+        );
+      }
+    }
+    // State-membership cross-check (anti-corruption): the VO stays free of a
+    // `StateMachine` dependency (DIP), so it cannot validate that a position key
+    // corresponds to a real state. That check belongs here, in the use case,
+    // which already built the state machine. Keys are state names, so they must
+    // be ⊆ the active state-schema STATES (NOT transition edges — that's
+    // `edgeRoutingLayout`'s check). Done pre-tx so a position key that names no
+    // state fails fast (NFR-REL-02 — no illegal layout burns a write).
+    const stateNames = new Set(stateMachine.stateSchema.states);
+    for (const key of nodePositions.keys()) {
+      if (!stateNames.has(key)) {
+        throw new InvalidValueObjectException(
+          `node positions key '${key}' is not a state in the active state machine`,
         );
       }
     }
@@ -295,6 +323,7 @@ export class SaveSystemConfigurationUseCase {
         serviceThemes,
         tvPanelLayout,
         edgeRoutingLayout,
+        nodePositions,
       });
       system.completeInitialSetup(); // idempotent — validates store name, flips the flag
 
@@ -346,6 +375,7 @@ export class SaveSystemConfigurationUseCase {
         serviceThemes: system.serviceThemes.toDto(),
         tvPanelLayout: system.tvPanelLayout.toDto(),
         edgeRoutingLayout: system.edgeRoutingLayout.toDto(),
+        nodePositions: system.nodePositions.toDto(),
       };
     });
 

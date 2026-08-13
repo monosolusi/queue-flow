@@ -28,6 +28,7 @@ function makeConfig(brandColor = '#2563eb'): SystemConfigurationDto {
     serviceThemes: { ...DEFAULT_SERVICE_THEMES },
     tvPanelLayout: DEFAULT_TV_GRID_LAYOUT,
     edgeRoutingLayout: {},
+    nodePositions: {},
   };
 }
 
@@ -59,7 +60,7 @@ function makeApi(
   return {
     getSystemConfig: reject ? vi.fn(() => Promise.reject(reject)) : vi.fn(() => Promise.resolve(config)),
     saveSystemConfig: vi.fn(() =>
-      Promise.resolve({ isInitialSetupCompleted: true, storeName: config.storeName, brandColor: config.brandColor, serviceThemes: config.serviceThemes, tvPanelLayout: config.tvPanelLayout, edgeRoutingLayout: {} }),
+      Promise.resolve({ isInitialSetupCompleted: true, storeName: config.storeName, brandColor: config.brandColor, serviceThemes: config.serviceThemes, tvPanelLayout: config.tvPanelLayout, edgeRoutingLayout: {}, nodePositions: {} }),
     ),
     getActiveStateMachine: vi.fn(() => Promise.resolve(config.stateMachine)),
     getDailyReport: vi.fn(),
@@ -221,6 +222,7 @@ describe('App (admin — first-run guard matrix)', () => {
           serviceThemes: completed.serviceThemes,
           tvPanelLayout: completed.tvPanelLayout,
           edgeRoutingLayout: {},
+          nodePositions: {},
         });
       }),
     });
@@ -269,6 +271,7 @@ describe('App (admin — first-run guard matrix)', () => {
           serviceThemes: current.serviceThemes,
           tvPanelLayout: current.tvPanelLayout,
           edgeRoutingLayout: {},
+          nodePositions: {},
         });
       }),
     });

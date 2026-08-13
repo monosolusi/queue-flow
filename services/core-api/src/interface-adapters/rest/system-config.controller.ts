@@ -38,6 +38,7 @@ const REQUIRED_CONFIG_FIELDS: ReadonlyArray<keyof SaveSystemConfigurationCommand
   'serviceThemes',
   'tvPanelLayout',
   'edgeRoutingLayout',
+  'nodePositions',
 ];
 
 /**
@@ -64,6 +65,7 @@ const CONFIG_FIELD_SHAPES: ReadonlyArray<{
   { field: 'serviceThemes', kind: 'object' },
   { field: 'tvPanelLayout', kind: 'array' },
   { field: 'edgeRoutingLayout', kind: 'object' },
+  { field: 'nodePositions', kind: 'object' },
 ];
 
 /** True when `value` does not match the expected `kind` (object = plain object, not array). */
@@ -224,6 +226,29 @@ function configNestedShapeErrors(body: Partial<SaveSystemConfigurationCommand>):
       }
     }
   }
+  // nodePositions: the VO throws `InvalidValueObjectException` (→ 400) on a
+  // present-but-invalid entry (non-object value, or a non-finite `x`/`y`). This
+  // boundary guard catches the crash class (a non-object entry value, or a
+  // present-but-non-number `x`/`y` would TypeError before the VO's own
+  // `Number.isFinite` guard on a non-number) and gives consistent, field-named
+  // error messages. Finite-ness (rejecting NaN/Infinity) stays in the VO.
+  // Unknown extra properties on an entry are ignored.
+  const nodePositions = body.nodePositions;
+  if (nodePositions != null && typeof nodePositions === 'object' && !Array.isArray(nodePositions)) {
+    for (const [key, value] of Object.entries(nodePositions as Record<string, unknown>)) {
+      if (value == null || typeof value !== 'object' || Array.isArray(value)) {
+        errs.push(`nodePositions['${key}'] must be an object with numeric x/y`);
+        continue;
+      }
+      const e = value as Record<string, unknown>;
+      if (e.x != null && typeof e.x !== 'number') {
+        errs.push(`nodePositions['${key}'].x must be a number`);
+      }
+      if (e.y != null && typeof e.y !== 'number') {
+        errs.push(`nodePositions['${key}'].y must be a number`);
+      }
+    }
+  }
   return errs;
 }
 
@@ -312,6 +337,7 @@ export class SystemConfigController {
       serviceThemes: body.serviceThemes!,
       tvPanelLayout: body.tvPanelLayout!,
       edgeRoutingLayout: body.edgeRoutingLayout!,
+      nodePositions: body.nodePositions!,
       actor: principal?.username ?? 'system',
     };
     return this.saveConfig.execute(command);

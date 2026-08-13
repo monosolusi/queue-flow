@@ -8,6 +8,7 @@ import {
   DailyResetMode,
   SystemConfigurationChangedEvent,
   EdgeRoutingLayout,
+  NodePositions,
 } from '../../src/domain/store-config';
 import type { DomainEvent } from '../../src/domain/shared/domain-event';
 import type { IEventDispatcher } from '../../src/domain/shared/event-dispatcher.port';
@@ -71,6 +72,7 @@ describe('SaveSystemConfigurationUseCase — category id preservation (QUE-24)',
         { id: 'runningText', component: 'runningText', x: 0, y: 10, w: 12, h: 1 },
       ],
       edgeRoutingLayout: {},
+      nodePositions: {},
       actor: 'admin',
     };
   }
@@ -191,6 +193,7 @@ describe('SaveSystemConfigurationUseCase — brandColor (QUE-36)', () => {
         { id: 'runningText', component: 'runningText', x: 0, y: 10, w: 12, h: 1 },
       ],
       edgeRoutingLayout: {},
+      nodePositions: {},
       actor: 'admin',
     };
   }
@@ -312,6 +315,7 @@ describe('SaveSystemConfigurationUseCase — SYSTEM_CONFIG_CHANGED broadcast (FR
         { id: 'runningText', component: 'runningText', x: 0, y: 10, w: 12, h: 1 },
       ],
       edgeRoutingLayout: {},
+      nodePositions: {},
       actor: 'admin',
     };
   }
@@ -422,6 +426,7 @@ describe('SaveSystemConfigurationUseCase — edgeRoutingLayout', () => {
         { id: 'runningText', component: 'runningText', x: 0, y: 10, w: 12, h: 1 },
       ],
       edgeRoutingLayout: edgeRoutingLayout as SaveSystemConfigurationCommand['edgeRoutingLayout'],
+      nodePositions: {},
       actor: 'admin',
     };
   }
@@ -516,5 +521,146 @@ describe('SaveSystemConfigurationUseCase — edgeRoutingLayout', () => {
     const saved = await repos.config.get();
     expect(saved!.edgeRoutingLayout.toDto()).toEqual({});
     expect(saved!.edgeRoutingLayout.equals(EdgeRoutingLayout.DEFAULT)).toBe(true);
+  });
+});
+
+/**
+ * Node positions persistence (per-state x/y map for the admin state-machine
+ * visual editor). `nodePositions` is a required field on the save command; the
+ * use case validates it pre-tx (fail-fast — a malformed map never acquires a
+ * transaction), performs the state-membership cross-check (anti-corruption:
+ * the VO stays free of a StateMachine dependency), and the persisted aggregate
+ * carries it through. The result echoes the stored map back to the caller. The
+ * cross-check is against the state-schema STATES (not transition edges — that's
+ * `edgeRoutingLayout`'s check).
+ */
+describe('SaveSystemConfigurationUseCase — nodePositions', () => {
+  function buildUseCase() {
+    return {
+      config: new InMemorySystemConfigurationRepository(),
+      categories: new InMemoryCategoryRepository(),
+      routingRules: new InMemoryCounterRoutingRuleRepository(),
+    };
+  }
+
+  function command(nodePositions: Record<string, { x: number; y: number }>): SaveSystemConfigurationCommand {
+    return {
+      storeName: 'Toko Brand',
+      stateMachine: projectStateMachine(StateMachine.DEFAULT),
+      dailyReset: {
+        mode: DailyResetMode.MANUAL,
+        cronExpression: null,
+        resetTicketNumberTo: 1,
+        archivePreviousDayData: true,
+      },
+      categories: [{ code: 'A', name: 'Customer Service' }],
+      routingRules: [
+        {
+          counterId: 1,
+          counterName: 'Loket 1',
+          assignedCategoryCodes: ['A'],
+          priorityPolicy: PriorityPolicy.FIFO_GLOBAL,
+        },
+      ],
+      brandColor: '#2563eb',
+      serviceThemes: { kiosk: 'light', tv: 'light', caller: 'light', admin: 'light' },
+      tvPanelLayout: [
+        { id: 'nowServing', component: 'nowServing', x: 0, y: 0, w: 12, h: 4 },
+        { id: 'waitingQueue', component: 'waitingQueue', x: 0, y: 4, w: 6, h: 3 },
+        { id: 'callHistory', component: 'callHistory', x: 6, y: 4, w: 6, h: 3 },
+        { id: 'countersServing', component: 'countersServing', x: 0, y: 7, w: 12, h: 3 },
+        { id: 'runningText', component: 'runningText', x: 0, y: 10, w: 12, h: 1 },
+      ],
+      edgeRoutingLayout: {},
+      nodePositions: nodePositions as SaveSystemConfigurationCommand['nodePositions'],
+      actor: 'admin',
+    };
+  }
+
+  it('persists a non-empty nodePositions and echoes it in the result', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    const positions = { WAITING: { x: 0, y: 0 }, CALLING: { x: 240, y: 0 } };
+    const result = await useCase.execute(command(positions));
+
+    expect(result.nodePositions).toEqual(positions);
+    const saved = await repos.config.get();
+    expect(saved!.nodePositions.toDto()).toEqual(positions);
+  });
+
+  it('round-trips a re-GET via the aggregate (positions preserved)', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    const positions = { WAITING: { x: 0, y: 0 }, CALLING: { x: 240, y: 0 } };
+    await useCase.execute(command(positions));
+
+    const saved = await repos.config.get();
+    expect(saved!.nodePositions.toDto()).toEqual(positions);
+  });
+
+  it('rejects a nodePositions key that is not a state in the active state machine (cross-check, NFR-REL-02)', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    // NOPE is not a state in the default state machine — the cross-check must
+    // throw InvalidValueObjectException pre-tx.
+    await expect(useCase.execute(command({ NOPE: { x: 0, y: 0 } }))).rejects.toThrow(
+      InvalidValueObjectException,
+    );
+    // Nothing persisted — fail-fast happened before the tx opened.
+    expect(await repos.config.get()).toBeNull();
+  });
+
+  it('rejects a non-finite x pre-tx with InvalidValueObjectException (VO of())', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    await expect(
+      useCase.execute(command({ WAITING: { x: NaN, y: 0 } })),
+    ).rejects.toThrow(InvalidValueObjectException);
+    expect(await repos.config.get()).toBeNull();
+  });
+
+  it('accepts an empty nodePositions (autoLayout)', async () => {
+    const repos = buildUseCase();
+    const useCase = new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+
+    const result = await useCase.execute(command({}));
+    expect(result.nodePositions).toEqual({});
+    const saved = await repos.config.get();
+    expect(saved!.nodePositions.toDto()).toEqual({});
+    expect(saved!.nodePositions.equals(NodePositions.DEFAULT)).toBe(true);
   });
 });

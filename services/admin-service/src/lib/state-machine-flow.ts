@@ -10,8 +10,9 @@
  * The wire contract is unchanged: the component lifts graph-structure changes
  * to the parent via `onChange(next: StateMachineForm)`, and AdminPanel's
  * existing save path calls `toStateMachineDto` (the single wire-boundary
- * mapper). Positions live only in the component's internal node state — they
- * never reach the wire form.
+ * mapper). Positions are now sourced from the form (`value.positions`) and
+ * lifted back on a drag-stop via `commit` → `flowToGraph`; they travel the
+ * wire in the separate `nodePositions` map (built by `toNodePositionsDto`).
  */
 import {
   describeState,
@@ -289,9 +290,16 @@ export function autoLayout(
  * `Status kustom`), computed here so the node card renders it with no form
  * dependency (the context stays behavior-only — see `WorkflowHandlers`). Each
  * edge: `{ id: \`${t.from}->${t.to}#${i}\`, source, target, type: 'transition',
- * data: { actionLabel } }`. Positions reuse `positions[name]` when present
- * (surviving state names keep their canvas spot on an external re-seed),
- * otherwise fall back to the `autoLayout` placement.
+ * data: { actionLabel } }`.
+ *
+ * **Position priority** (load-bearing for the re-seed guard): a node's
+ * `position` prefers `value.positions[name]` (the form is the source of truth
+ * now), then the `positions` arg (the `oldPositions` fallback captured from
+ * the prev canvas nodes — so a graph-only source edit keeps surviving nodes'
+ * canvas spots when the source omits their positions), then the `autoLayout`
+ * placement, then `{0,0}`. So a source edit that DOES carry positions moves the
+ * nodes to those positions (re-seed the canvas), while a diagram drag skips
+ * the re-seed (`lastEmitted` stamped in `commit` before `onChange`).
  *
  * **Handle routing is sourced from the form.** Each transition's `sourceSide`/
  * `targetSide` is the source of truth — the form is the single owner of handle
@@ -300,8 +308,8 @@ export function autoLayout(
  * (absent) seeds the canonical L→R default ({@link DEFAULT_SOURCE_HANDLE}/
  * {@link DEFAULT_TARGET_HANDLE}); a transition with `sourceSide: 'bottom'`
  * routes out the bottom. So a redraw always respects the source. `commit` →
- * {@link flowToGraph} captures the canvas handles back into the form, closing
- * the loop.
+ * {@link flowToGraph} captures the canvas handles + positions back into the
+ * form, closing the loop.
  */
 export function formToFlow(
   value: StateMachineForm,
@@ -311,7 +319,7 @@ export function formToFlow(
   const nodes: FlowNode[] = value.states.map((name) => ({
     id: name,
     type: 'state',
-    position: positions[name] ?? auto[name] ?? { x: 0, y: 0 },
+    position: value.positions[name] ?? positions[name] ?? auto[name] ?? { x: 0, y: 0 },
     data: { name, description: describeState(value, name) },
   }));
   const edges: FlowEdge[] = value.transitions.map((t, i) => ({
@@ -330,24 +338,29 @@ export function formToFlow(
 }
 
 /**
- * The inverse of {@link formToFlow}: graph structure only (no positions).
+ * The inverse of {@link formToFlow}: graph structure + positions.
  * `states` preserves the node array order; `transitions` resolves each edge's
  * `source`/`target` (node ids = state names) back to transition `from`/`to`.
- * Reads only `data.name` (never `data.description`) — the description is
+ * `positions` is built from the nodes (`n.data.name → n.position`) so a
+ * drag-stop's final positions flow back into the form (via `commit` →
+ * `onChange`), then `toNodePositionsDto` ships them in the wire map. Reads only
+ * `data.name`/`position` (never `data.description`) — the description is
  * CANVAS-ONLY and never reaches the wire {@link Transition}.
  *
  * Captures the connection sides from the edge handles via {@link handleToSide}
  * — the form is the source of truth for handles now, so a manager-drawn edge's
  * chosen side flows back into the form (via `commit` → `onChange`), then
- * `formToJson`/`toEdgeRoutingLayoutDto` omit the default ones → sparse wire.
+ * `formToXml`/`toEdgeRoutingLayoutDto` omit the default ones → sparse wire.
  */
 export function flowToGraph(
   nodes: readonly FlowNode[],
   edges: readonly FlowEdge[],
-): { states: string[]; transitions: Transition[] } {
+): { states: string[]; transitions: Transition[]; positions: Record<string, { x: number; y: number }> } {
   const idToName = new Map<string, string>();
   for (const n of nodes) idToName.set(n.id, n.data.name);
   const states = nodes.map((n) => n.data.name);
+  const positions: Record<string, { x: number; y: number }> = {};
+  for (const n of nodes) positions[n.data.name] = { ...n.position };
   const transitions: Transition[] = edges.map((e) => ({
     from: idToName.get(e.source) ?? e.source,
     to: idToName.get(e.target) ?? e.target,
@@ -355,7 +368,7 @@ export function flowToGraph(
     sourceSide: handleToSide(e.sourceHandle),
     targetSide: handleToSide(e.targetHandle),
   }));
-  return { states, transitions };
+  return { states, transitions, positions };
 }
 
 /**

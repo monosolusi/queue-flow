@@ -106,6 +106,10 @@ export function prdWizardPayload() {
     // { sourceSide, targetSide }, '{}' = every edge uses the default
     // left->right routing.
     edgeRoutingLayout: {},
+    // nodePositions: per-state x/y position for the admin state-machine visual
+    // editor; keyed map "stateName" -> { x, y }, '{}' = use the deterministic
+    // autoLayout.
+    nodePositions: {},
     // QUE-43: `actor` is no longer a wire field — the server derives the audit
     // actor from the authenticated principal (or the 'system' sentinel on the
     // pre-setup wizard path). The wizard client stopped sending it; this fixture

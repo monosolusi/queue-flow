@@ -127,6 +127,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom',
       states: ['WAITING', 'CALLING'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' }],
+      positions: {},
     });
     const warning = screen.getByTestId('sm-standard-warning');
     expect(warning).toHaveTextContent('COMPLETED');
@@ -159,6 +160,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING', 'EXTRA'],
       transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
+      positions: {},
     };
     renderWorkflow(customForm, [], onChange);
     // Select the EXTRA node on the canvas → panel renders the node editor.
@@ -223,6 +225,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
         ...DEFAULT_STATE_MACHINE.transitions,
         { from: firstState, to: firstState, actionLabel: 'ulang' },
       ],
+      positions: {},
     };
     renderWorkflow(customForm, [], onChange);
     fireEvent.click(screen.getByTestId('sm-add-transition'));
@@ -239,6 +242,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING', 'EXTRA'],
       transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
+      positions: {},
     };
     renderWorkflow(customForm, [], onChange);
     // Select the EXTRA node on the canvas → panel renders the node editor.
@@ -397,6 +401,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom',
       states: ['WAITING', 'CALLING'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' }],
+      positions: {},
     });
     selectEdge('WAITING->CALLING#0');
     const panel = screen.getByTestId('sm-properties');
@@ -449,6 +454,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
         mode: 'custom',
         states: ['ONHOLD', 'CALLING'],
         transitions: [{ from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut' }],
+        positions: {},
       },
       [],
       onChange,
@@ -511,6 +517,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
           ? { ...t, sourceSide: 'bottom' as const, targetSide: 'top' as const }
           : { ...t },
       ),
+      positions: {},
     };
     renderWorkflow(form, [], onChange);
     // Select the vertical edge and edit its label — `commit` lifts the
@@ -540,6 +547,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
         { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', sourceSide: 'bottom', targetSide: 'top' },
         ...DEFAULT_STATE_MACHINE.transitions.slice(1).map((t) => ({ ...t })),
       ],
+      positions: {},
     };
     renderWorkflow(customForm, [], onChange);
     // Select the WAITING node and rename it to PENDING.

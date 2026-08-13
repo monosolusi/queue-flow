@@ -65,6 +65,7 @@ function wizardPayload() {
       { id: 'runningText', component: 'runningText', x: 0, y: 10, w: 12, h: 1 },
     ],
     edgeRoutingLayout: {},
+    nodePositions: {},
   };
 }
 

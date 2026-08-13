@@ -25,7 +25,7 @@ import { useGridDnd } from '../lib/use-grid-dnd';
 import { PageHeader } from '../components/PageHeader';
 import { useToast } from '../toast/useToast';
 import { toForm } from './admin-config/form';
-import { toEdgeRoutingLayoutDto, toStateMachineDto } from '../lib/state-machine';
+import { toEdgeRoutingLayoutDto, toNodePositionsDto, toStateMachineDto } from '../lib/state-machine';
 
 /**
  * The TV-display grid layout page — a two-mode WYSIWYG flow.
@@ -122,10 +122,12 @@ export function TvLayoutPage({ api }: { api: IAdminApi }) {
           storeName: form.storeName,
           // Strip the client-only `mode` preset — never on the wire — via the
           // same shared mapper AdminPanel uses. Sides travel in the separate
-          // sparse `edgeRoutingLayout` map (this page does not edit routing, so
-          // the map is whatever `toForm` merged from the GET — passthrough).
+          // sparse `edgeRoutingLayout` map and node positions in `nodePositions`
+          // (this page edits neither, so both are whatever `toForm` merged from
+          // the GET — passthrough).
           stateMachine: toStateMachineDto(form.stateMachine),
           edgeRoutingLayout: toEdgeRoutingLayoutDto(form.stateMachine),
+          nodePositions: toNodePositionsDto(form.stateMachine),
           brandColor: form.brandColor,
           serviceThemes: form.serviceThemes,
           // The one field this page edits.

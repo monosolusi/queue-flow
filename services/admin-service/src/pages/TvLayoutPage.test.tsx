@@ -47,6 +47,7 @@ function configuredStore(): SystemConfigurationDto {
     serviceThemes: { ...DEFAULT_SERVICE_THEMES },
     tvPanelLayout: DEFAULT_TV_GRID_LAYOUT.map((w) => ({ ...w })),
     edgeRoutingLayout: {},
+    nodePositions: {},
   };
 }
 
@@ -64,6 +65,7 @@ function makeApi(
           serviceThemes: payload.serviceThemes,
           tvPanelLayout: payload.tvPanelLayout,
           edgeRoutingLayout: {},
+          nodePositions: {},
         })),
   );
   const getConfig = vi.fn(() => Promise.resolve(config));
