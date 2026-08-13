@@ -56,7 +56,7 @@ import { HANDLE_IDS, type FlowEdgeData, type FlowNodeData } from '../lib/state-m
  * shares the same handler context the canvas does.
  *
  * The node-level "Aksi" handlers (`onAddNodeAction` / `onDeleteNodeAction` /
- * `onEditNodeAction`) are the Kaleo-style node-level actions, NOT linked to
+ * `onEditNodeAction`) are the node-level actions, NOT linked to
  * any edge — they edit `form.nodeActions[state]` (a persisted, independent
  * list), never the canvas nodes/edges. They are panel-only (the canvas never
  * calls them), but live on this surface so the panel shares the same handler
@@ -82,7 +82,7 @@ export interface WorkflowHandlers {
    * Add a new OUTGOING transition from the given source state, picking the
    * first non-duplicate TARGET (a status not already the target of an outgoing
    * edge from this source). No-op when every status is already a target of an
-   * outgoing edge from this source. The panel's Kaleo-style "Aksi" framing:
+   * outgoing edge from this source. The panel's node-level "Aksi" framing:
    * the action shown for a node is "Update Status ke <Nilai>", so the new
    * edge's `source` IS the selected node and `target` is the first
    * non-duplicate candidate. Mirrors the prior `onAddTransitionTo` structure
@@ -90,7 +90,7 @@ export interface WorkflowHandlers {
    */
   onAddTransitionFrom: (source: string) => void;
   /**
-   * Add a Kaleo-style node-level action (NOT linked to any edge) to
+   * Add a node-level action (NOT linked to any edge) to
    * `form.nodeActions[state]`. Seeds a default `{ executionType: 'ON_ENTRY',
    * type: 'UPDATE_STATUS', value: <first non-self state> }`. The parent lifts
    * this as a form-only edit (no canvas node/edge change — `graphSignature`

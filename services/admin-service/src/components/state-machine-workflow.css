@@ -193,7 +193,7 @@
   line-height: 1;
 }
 /* The state editor's inline "Aksi" list — each outgoing transition rendered
-   Kaleo-style as a card: a read-only "Aksi" chip ("Update Status"), a "Nilai"
+   node-level as a card: a read-only "Aksi" chip ("Update Status"), a "Nilai"
    <select> (re-point the target), and a "Hapus" button. Manager feedback: the
    action TYPE is fixed ("Update Status"); the editable VALUE is the target
    status. Token-driven (light/dark + brand re-theme for free); no hardcoded
@@ -540,7 +540,7 @@
   min-height: 30rem;
 }
 
-/* Diagram / Source segmented toggle (Kaleo-style view switch). A `role="group"`
+/* Diagram / Source segmented toggle (view switch). A `role="group"`
    cluster of two `aria-pressed` buttons — NOT radios, so it stays a button group
    (CLAUDE.md: a labelled cluster of immediate-action buttons is role=group). */
 .sm-view-toggle {

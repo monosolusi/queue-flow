@@ -434,7 +434,7 @@ describe('connection sides (sourceSide / targetSide)', () => {
   });
 });
 
-describe('node actions (Kaleo-style node-level, panel-only)', () => {
+describe('node actions (node-level, panel-only)', () => {
   it('toNodeActionsDto builds the actions map from the form', () => {
     const form: StateMachineForm = {
       mode: 'custom',

@@ -880,7 +880,7 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
           <section className="wizard__step" data-testid="step-3">
             <h2 className="wizard__step-title">Alur Status Tiket</h2>
             <p className="wizard__hint">
-              Pilih alur status standar atau susun sendiri. Label aksi menjadi tombol di panel caller.
+              Pilih alur status standar atau susun sendiri. Label aksi menjadi tombol di layar petugas.
             </p>
 
             <StateMachineEditor

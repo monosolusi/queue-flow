@@ -518,7 +518,7 @@ export function StateMachineWorkflow({
       },
       // Add a new OUTGOING transition from the given source state (the inline
       // "Tambah aksi" button in the node properties panel). The panel's
-      // Kaleo-style "Aksi" framing: the action shown for a node is "Update
+      // Node-level "Aksi" framing: the action shown for a node is "Update
       // Status ke <Nilai>", so the new edge's `source` IS the selected node
       // and `target` is the first non-duplicate candidate (a status not
       // already the target of an outgoing edge from this source). No-op when
@@ -544,7 +544,7 @@ export function StateMachineWorkflow({
         };
         commit(nodes, [...edges, newEdge]);
       },
-      // Node-level actions (Kaleo parity) — NOT linked to any edge. Each builds
+      // Node-level actions — NOT linked to any edge. Each builds
       // a fresh `nodeActions` map, mutates `nodeActions[state]`, then `lift`s
       // (form-only: no canvas node/edge change → `graphSignature` excludes
       // `nodeActions` → the sync effect skips the re-seed → no canvas snap).
