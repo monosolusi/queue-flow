@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { StateMachineWorkflow } from './StateMachineWorkflow';
 import { type StateMachineForm, type Transition, defaultStateMachineForm, validateCustomStateMachine } from '../lib/state-machine';
 import { DEFAULT_STATE_MACHINE } from '../api/types';
+import { SELF_LOOP_RADIUS } from '../lib/state-machine-flow';
 
 function renderWorkflow(
   value = defaultStateMachineForm(),
@@ -1125,6 +1126,53 @@ describe('StateMachineWorkflow (Start/End terminal markers)', () => {
     expect(screen.getByTestId('sm-node-end')).toBeInTheDocument();
     expect(screen.getByTestId('rf__edge-__start->WAITING')).toBeInTheDocument();
     expect(screen.getByTestId('rf__edge-COMPLETED->__end')).toBeInTheDocument();
+  });
+
+  it('a self-loop on the entry status KEEPS its Start arrow (manager repro)', () => {
+    // Manager feedback: "WAITING memiliki transisi masuk dari Start dan aku mau
+    // bikin self-loop, kemudian yang dari Start hilang." The self-loop used to
+    // count toward WAITING's in-degree, so WAITING stopped being an entry point
+    // and `deriveTerminalMarkers` dropped the `__start → WAITING` arrow —
+    // looking to the manager like their existing connection was deleted.
+    //
+    // Drives the real COMMIT path, not a fresh re-seed: "+ Tambah transisi" on
+    // WAITING picks the first non-duplicate target, which is WAITING itself, so
+    // it adds exactly the self-loop the manager drew.
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
+    expect(screen.getByTestId('rf__edge-__start->WAITING')).toBeInTheDocument();
+
+    selectStateNode('WAITING');
+    fireEvent.click(screen.getByTestId('panel-goto-transitions'));
+    fireEvent.click(screen.getByTestId('panel-add-transition'));
+
+    // The self-loop is on the canvas AND the Start arrow survived.
+    expect(screen.getByTestId('rf__edge-sm-edge-0')).toBeInTheDocument();
+    expect(screen.getByTestId('rf__edge-__start->WAITING')).toBeInTheDocument();
+    expect(screen.getByTestId('sm-node-start')).toBeInTheDocument();
+  });
+
+  it('draws a self-loop as a long arc clear of the card, not a bezier through it', () => {
+    // Manager feedback: "self-loop garisnya overlap dan jelek sekali, seharusnya
+    // lebih panjang lagi." `getBezierPath` is degenerate when both endpoints sit
+    // on the same card — a short backwards curve running through/behind the node
+    // (edges render beneath nodes) with the label chip on top of it.
+    // `TransitionEdge` branches to `getSelfLoopPath` for `source === target`.
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
+    selectStateNode('WAITING');
+    fireEvent.click(screen.getByTestId('panel-goto-transitions'));
+    fireEvent.click(screen.getByTestId('panel-add-transition'));
+
+    const d = screen
+      .getByTestId('rf__edge-sm-edge-0')
+      .querySelector('path.react-flow__edge-path')!
+      .getAttribute('d')!;
+    // `M sx,sy C c1x,c1y c2x,c2y tx,ty` — pull every y out of the path. The
+    // endpoints share a y (both handles sit at the card's vertical middle for
+    // the seeded right→left routing); both control points must sit a full
+    // SELF_LOOP_RADIUS above them, so the loop swings up and over the card.
+    const ys = [...d.matchAll(/-?[\d.]+,(-?[\d.]+)/g)].map((m) => Number(m[1]));
+    expect(ys).toHaveLength(4);
+    expect(Math.min(...ys)).toBeLessThanOrEqual(ys[0] - SELF_LOOP_RADIUS);
   });
 
   it('the End marker renders with ZERO endSources so it can be dragged into', () => {

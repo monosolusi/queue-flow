@@ -186,6 +186,25 @@ describe('DoD-3 — Offline End-to-End realtime flow', () => {
     await waitForLength(tvEvents, 3);
     expect(tvEvents[2].payload.to).toBe('SKIPPED');
 
+    // The skipped ticket lands in the caller snapshot's `skipped` bucket, at the
+    // counter that skipped it — the surface "Panggil Ulang" (the RECALL command
+    // `GET /api/queue/actions` publishes for SKIPPED -> CALLING) acts on. Without
+    // it the ticket would be in no bucket and the configured action unreachable.
+    const afterSkip = await http(booted.app)
+      .get('/api/queue?counterId=1')
+      .set(authHeader(token))
+      .expect(200);
+    expect(afterSkip.body.active).toEqual([]);
+    expect(afterSkip.body.skipped).toEqual([
+      {
+        ticketId,
+        ticketNumber: 'A-001',
+        categoryId: catAId,
+        status: 'SKIPPED',
+        counterId: 1,
+      },
+    ]);
+
     await http(booted.app).post(`/api/queue/${ticketId}/recall`).set(authHeader(token)).expect(201);
     // Recall is a re-call to the same counter: it emits STATUS_UPDATED
     // (SKIPPED -> CALLING) then TICKET_CALLED carrying {ticketNumber, counterId}
@@ -197,6 +216,17 @@ describe('DoD-3 — Offline End-to-End realtime flow', () => {
     expect(tvEvents[4].type).toBe('TICKET_CALLED');
     expect(tvEvents[4].payload.ticketNumber).toBe('A-001');
     expect(tvEvents[4].payload.counterId).toBe(1);
+
+    // …and the recall empties the skipped bucket: the ticket is active again at
+    // the same counter, so the snapshot's three buckets stay disjoint.
+    const afterRecall = await http(booted.app)
+      .get('/api/queue?counterId=1')
+      .set(authHeader(token))
+      .expect(200);
+    expect(afterRecall.body.skipped).toEqual([]);
+    expect(afterRecall.body.active.map((t: { ticketNumber: string }) => t.ticketNumber)).toEqual([
+      'A-001',
+    ]);
 
     tv.close();
   });

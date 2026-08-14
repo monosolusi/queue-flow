@@ -204,8 +204,25 @@ describeOrSkip('DoD-4 — Power-cut recovery (FR-ENG-05, NFR-REL-02/03)', () => 
     // queue state — not just the sequence — recovered.
     const callRes = await post('/api/queue/call-next', { counterId: 1 }, auth);
     expect(callRes.status).toBe(201);
-    const call = (await callRes.json()) as { status: string; ticket?: { ticketNumber: string } };
+    const call = (await callRes.json()) as {
+      status: string;
+      ticket?: { ticketId: string; ticketNumber: string };
+    };
     expect(call.status).toBe('called');
     expect(call.ticket!.ticketNumber).toBe('A-002');
+
+    // Skipping that ticket parks it in the snapshot's counter-scoped `skipped`
+    // bucket — the surface "Panggil Ulang" acts on. This is the PostgreSQL half
+    // of `findSkippedByCounter` (the in-memory twin is covered in the unit
+    // suite): the two implementations must stay interchangeable (LSP), and only
+    // a real DB proves the SQL predicate matches.
+    const skipRes = await post(`/api/queue/${call.ticket!.ticketId}/skip`, undefined, auth);
+    expect(skipRes.status).toBe(201);
+    const parkedRes = await getJson('/api/queue?counterId=1', auth);
+    const parked = (await parkedRes.json()) as {
+      skipped: { ticketNumber: string; counterId: number }[];
+    };
+    expect(parked.skipped.map((t) => t.ticketNumber)).toEqual(['A-002']);
+    expect(parked.skipped[0].counterId).toBe(1);
   }, 90_000);
 });

@@ -1,5 +1,5 @@
 import { QueueTicket, TicketNumber, ticketIdGenerate } from '../../src/domain/queue';
-import { PriorityPolicy } from '../../src/domain/store-config';
+import { PriorityPolicy, StateMachine } from '../../src/domain/store-config';
 import { InMemoryQueueRepository } from '../../src/infrastructure/persistence/in-memory';
 
 function waiting(categoryId: string, createdAt: number, seq: number): QueueTicket {
@@ -9,6 +9,26 @@ function waiting(categoryId: string, createdAt: number, seq: number): QueueTicke
     categoryId,
     createdAt,
   );
+}
+
+/** A ticket called to `counterId` (WAITING -> CALLING) via the default machine. */
+function calling(categoryId: string, createdAt: number, seq: number, counterId: number): QueueTicket {
+  const ticket = waiting(categoryId, createdAt, seq);
+  ticket.markCalling(counterId, StateMachine.DEFAULT, createdAt + 1);
+  return ticket;
+}
+
+/** A ticket called to `counterId` then skipped at `skippedAt` (CALLING -> SKIPPED). */
+function skipped(
+  categoryId: string,
+  createdAt: number,
+  seq: number,
+  counterId: number,
+  skippedAt: number,
+): QueueTicket {
+  const ticket = calling(categoryId, createdAt, seq, counterId);
+  ticket.skip(StateMachine.DEFAULT, skippedAt);
+  return ticket;
 }
 
 describe('InMemoryQueueRepository (IQueueRepository contract)', () => {
@@ -80,6 +100,43 @@ describe('InMemoryQueueRepository (IQueueRepository contract)', () => {
       priorityPolicy: PriorityPolicy.FIFO_GLOBAL,
     });
     expect(next?.ticketNumber.sequence).toBe(2);
+  });
+
+  describe('findSkippedByCounter (the caller panel\'s recall surface)', () => {
+    it('returns only SKIPPED tickets assigned to that counter, oldest skip first', async () => {
+      const repo = new InMemoryQueueRepository();
+      await repo.save(skipped('CAT-A', 100, 1, 1, 400)); // skipped later
+      await repo.save(skipped('CAT-A', 200, 2, 1, 300)); // skipped earlier
+      await repo.save(skipped('CAT-A', 300, 3, 2, 350)); // other counter
+      await repo.save(calling('CAT-A', 400, 4, 1)); // same counter, still CALLING
+      await repo.save(waiting('CAT-A', 500, 5)); // never called
+
+      const result = await repo.findSkippedByCounter(1);
+
+      expect(result.map((t) => t.ticketNumber.sequence)).toEqual([2, 1]);
+    });
+
+    it('returns an empty list when the counter skipped nothing', async () => {
+      const repo = new InMemoryQueueRepository();
+      await repo.save(skipped('CAT-A', 100, 1, 2, 300));
+
+      expect(await repo.findSkippedByCounter(1)).toEqual([]);
+    });
+
+    it('drops a ticket out of the skipped list once it is recalled', async () => {
+      // The bucket tracks live status, so "Panggil Ulang" empties it — the same
+      // aggregate instance moves SKIPPED -> CALLING and is re-saved.
+      const repo = new InMemoryQueueRepository();
+      const ticket = skipped('CAT-A', 100, 1, 1, 300);
+      await repo.save(ticket);
+      expect(await repo.findSkippedByCounter(1)).toHaveLength(1);
+
+      ticket.recall(StateMachine.DEFAULT, 400);
+      await repo.save(ticket);
+
+      expect(await repo.findSkippedByCounter(1)).toEqual([]);
+      expect((await repo.findActiveByCounter(1)).map((t) => t.ticketNumber.sequence)).toEqual([1]);
+    });
   });
 
   describe('purgeArchivedBefore (QUE-25 / FR-ADM-02)', () => {

@@ -21,17 +21,30 @@ export interface GetQueueSnapshotCommand {
  *
  * `active` holds every CALLING / SERVING ticket at this counter; `waiting`
  * holds the WAITING tickets the counter is eligible to serve next (its
- * assigned categories), oldest first.
+ * assigned categories), oldest first; `skipped` holds the tickets this counter
+ * skipped and can still re-call ("Panggil Ulang", PRD §7), oldest skip first.
+ *
+ * The three buckets are disjoint and, together, cover every status a caller can
+ * act on — a SKIPPED ticket used to fall through all of them, which left the
+ * configured `SKIPPED -> CALLING` edge (published as the `RECALL` command by
+ * {@link GetWorkflowActionsUseCase}) unreachable from the panel: no surface
+ * could hold the ticket the action applies to.
+ *
+ * `waitingCount` counts the `waiting` bucket only — it is the "berapa lagi yang
+ * mengantre" figure, and a skipped ticket is not queueing, it is parked at this
+ * counter awaiting a recall decision.
  */
 export interface QueueSnapshotDto {
   readonly counterId: number;
   readonly active: readonly TicketStateDto[];
   readonly waiting: readonly TicketStateDto[];
+  readonly skipped: readonly TicketStateDto[];
   readonly waitingCount: number;
 }
 
 /**
- * Read-side use case: loads the active + waiting queue for a bound counter.
+ * Read-side use case: loads the active + waiting + skipped queue for a bound
+ * counter.
  * This is the "dimuat" (loaded) half of QUE-19's AC — the WebSocket broadcaster
  * handles the "diperbarui" (updated) half. A counter with no routing rule is a
  * configuration error (not an empty queue) and throws
@@ -54,15 +67,19 @@ export class GetQueueSnapshotUseCase {
       throw new EntityNotFoundException('CounterRoutingRule', String(command.counterId));
     }
 
-    const [active, waiting] = await Promise.all([
+    // The skipped read is counter-scoped (not category-scoped) like the active
+    // read: `skip` leaves the counter assigned and `recall` re-announces to it.
+    const [active, waiting, skipped] = await Promise.all([
       this.queue.findActiveByCounter(command.counterId),
       this.queue.findWaitingByCategories(rule.assignedCategoryIds),
+      this.queue.findSkippedByCounter(command.counterId),
     ]);
 
     return {
       counterId: command.counterId,
       active: active.map(projectTicketState),
       waiting: waiting.map(projectTicketState),
+      skipped: skipped.map(projectTicketState),
       waitingCount: waiting.length,
     };
   }

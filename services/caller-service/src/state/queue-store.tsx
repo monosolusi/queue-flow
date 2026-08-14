@@ -26,6 +26,14 @@ export interface QueueState {
   readonly counterId: number;
   readonly active: readonly TicketStateDto[];
   readonly waiting: readonly TicketStateDto[];
+  /**
+   * Tickets this counter skipped ("Lewati / Absen") and has not resolved yet.
+   * A third bucket rather than an eviction: SKIPPED is a live status with its
+   * own outgoing transition in the PRD §7 flow ("Panggil Ulang", SKIPPED →
+   * CALLING), so dropping the ticket from every surface would make that action
+   * unreachable — the queue could never re-call an absent customer.
+   */
+  readonly skipped: readonly TicketStateDto[];
   readonly waitingCount: number;
   /** Live WS connection state, surfaced in the header. */
   readonly connection: ConnectionStatus;
@@ -53,6 +61,7 @@ const initialState = (counterId: number): QueueState => ({
   counterId,
   active: [],
   waiting: [],
+  skipped: [],
   waitingCount: 0,
   connection: 'closed',
   loadStatus: 'loading',
@@ -84,6 +93,12 @@ export function makeQueueReducer(ctx: QueueCtx) {
           ...state,
           active: [...s.active],
           waiting: [...s.waiting],
+          // Tolerated as absent because this is parsed JSON, not a typed
+          // literal: a service-worker-cached client can outlive the response
+          // shape it was built against. An empty skipped list is exactly the
+          // pre-bucket behaviour, so the panel degrades to it rather than
+          // crashing. Server order (oldest skip first) is preserved as sent.
+          skipped: [...(s.skipped ?? [])],
           waitingCount: s.waitingCount ?? s.waiting.length,
           loadStatus: 'loaded',
           loadError: null,
@@ -128,47 +143,82 @@ function projectEvent(state: QueueState, e: QueueLifecycleWireEvent, ctx: QueueC
     case 'TICKET_CALLED': {
       const p = e.payload as Extract<QueueLifecycleWireEvent['payload'], { ticketNumber: string; counterId: number }>;
       if (p.counterId !== ctx.counterId) {
-        // Called at another counter: drop from our waiting if it was in our view.
+        // Called at another counter: drop it from whichever of our lists held it.
         const waiting = state.waiting.filter((t) => t.ticketId !== e.aggregateId);
-        if (waiting.length === state.waiting.length) {
+        const skipped = state.skipped.filter((t) => t.ticketId !== e.aggregateId);
+        if (waiting.length === state.waiting.length && skipped.length === state.skipped.length) {
           return state;
         }
-        return { ...state, waiting, waitingCount: waiting.length };
+        return { ...state, waiting, skipped, waitingCount: waiting.length };
       }
       const called: TicketStateDto = {
         ticketId: e.aggregateId,
         ticketNumber: p.ticketNumber,
-        // The TICKET_CALLED payload carries no categoryId. The ticket was in
-        // our waiting list with a real categoryId — reuse it so the transfer
+        // The TICKET_CALLED payload carries no categoryId. The ticket is already
+        // in one of our lists with a real categoryId — reuse it so the transfer
         // chooser can exclude the active ticket's own category (FR-CLR-03).
-        categoryId: state.waiting.find((t) => t.ticketId === e.aggregateId)?.categoryId ?? '',
+        // A recall ("Panggil Ulang") reaches here from `skipped`, and its
+        // preceding STATUS_UPDATED may already have moved it into `active`, so
+        // all three buckets are searched rather than `waiting` alone.
+        categoryId: findKnown(state, e.aggregateId)?.categoryId ?? '',
         status: 'CALLING',
         counterId: ctx.counterId,
       };
       const waiting = state.waiting.filter((t) => t.ticketId !== e.aggregateId);
+      const skipped = state.skipped.filter((t) => t.ticketId !== e.aggregateId);
       const active = dedupePrepend(called, state.active);
-      return { ...state, active, waiting, waitingCount: waiting.length };
+      return { ...state, active, waiting, skipped, waitingCount: waiting.length };
     }
     case 'STATUS_UPDATED': {
       const p = e.payload as Extract<QueueLifecycleWireEvent['payload'], { from: string; to: string }>;
-      const idx = state.active.findIndex((t) => t.ticketId === e.aggregateId);
-      if (idx === -1) {
+      const at = state.active.find((t) => t.ticketId === e.aggregateId);
+      const absent = state.skipped.find((t) => t.ticketId === e.aggregateId);
+      const ticket = at ?? absent;
+      if (!ticket) {
         return state;
       }
       const to = p.to;
-      if (to === 'COMPLETED' || to === 'SKIPPED') {
-        const active = state.active.filter((t) => t.ticketId !== e.aggregateId);
-        return { ...state, active };
+      if (to === 'COMPLETED') {
+        // The one truly terminal target: the ticket leaves every counter surface.
+        return {
+          ...state,
+          active: state.active.filter((t) => t.ticketId !== e.aggregateId),
+          skipped: state.skipped.filter((t) => t.ticketId !== e.aggregateId),
+        };
+      }
+      if (to === 'SKIPPED') {
+        // MOVE, never drop. The customer is absent, not done: SKIPPED has an
+        // outgoing transition ("Panggil Ulang", SKIPPED → CALLING) that staff
+        // must be able to tap, which needs the ticket on a surface. Dropping it
+        // here is what made recall unreachable.
+        const skipped = dedupeAppend({ ...ticket, status: to }, state.skipped);
+        return {
+          ...state,
+          active: state.active.filter((t) => t.ticketId !== e.aggregateId),
+          skipped,
+        };
+      }
+      if (absent && !at) {
+        // Leaving SKIPPED for a non-terminal status: the counter is handling the
+        // ticket again, so it returns to the board. The recall path emits
+        // STATUS_UPDATED (SKIPPED → CALLING) *before* its TICKET_CALLED, and both
+        // must land the ticket in the same place — TICKET_CALLED then dedupes
+        // and stamps the counter.
+        return {
+          ...state,
+          active: dedupePrepend({ ...ticket, status: to }, state.active),
+          skipped: state.skipped.filter((t) => t.ticketId !== e.aggregateId),
+        };
       }
       // Any other target (CALLING, SERVING, or a custom in-progress state like
       // PREPARING reached via the generic apply-transition endpoint, QUE-33)
       // keeps the ticket on the board as the active ticket at the counter — the
-      // staff is still serving it, just in a sub-state. Only the PRD-default
-      // terminal states (COMPLETED/SKIPPED) leave the counter. The caller only
-      // fires the generic endpoint for the active ticket (ActionControls renders
-      // edges from `active.status`), so a WAITING-sourced generic transition is
-      // out of the UI scope; the `idx === -1` guard above leaves such a ticket in
-      // `waiting` untouched (no divergence on the supported flow).
+      // staff is still serving it, just in a sub-state. Only COMPLETED leaves
+      // the counter outright; SKIPPED moves to its own list (above). The caller
+      // fires the generic endpoint for the active ticket and for the rows of the
+      // waiting/skipped lists, so a WAITING-sourced generic transition leaves a
+      // ticket this branch never sees; the `!ticket` guard above leaves such a
+      // ticket in `waiting` untouched (no divergence on the supported flow).
       //
       // The one WAITING target that *does* reach the active ticket is the transfer
       // flow (FR-CLR-03 "Pindah Kategori"): the aggregate records STATUS_UPDATED
@@ -193,9 +243,11 @@ function projectEvent(state: QueueState, e: QueueLifecycleWireEvent, ctx: QueueC
       // (FR-CLR-03). Without this, the preceding STATUS_UPDATED (CALLING ->
       // WAITING) leaves a stale WAITING entry on the board for a transfer away,
       // or the ticket appears in both `active` and `waiting` for a transfer into
-      // my own categories. Drop it from `active`, then re-add to `waiting` only
-      // when the new category is one of mine.
+      // my own categories. Drop it from `active` (and from `skipped`, which a
+      // configured `SKIPPED → …` category move leaves it in), then re-add to
+      // `waiting` only when the new category is one of mine.
       const active = state.active.filter((t) => t.ticketId !== e.aggregateId);
+      const skipped = state.skipped.filter((t) => t.ticketId !== e.aggregateId);
       let waiting = state.waiting.filter((t) => t.ticketId !== e.aggregateId);
       if (mine) {
         const ticket: TicketStateDto = {
@@ -207,7 +259,7 @@ function projectEvent(state: QueueState, e: QueueLifecycleWireEvent, ctx: QueueC
         };
         waiting = [...waiting, ticket].sort(byTicketNumber);
       }
-      return { ...state, active, waiting, waitingCount: waiting.length };
+      return { ...state, active, skipped, waiting, waitingCount: waiting.length };
     }
     case 'SYSTEM_RESET':
       // The provider refetches the snapshot; mark stale as a signal.
@@ -228,6 +280,53 @@ function projectEvent(state: QueueState, e: QueueLifecycleWireEvent, ctx: QueueC
 function dedupePrepend(ticket: TicketStateDto, list: readonly TicketStateDto[]): readonly TicketStateDto[] {
   const rest = list.filter((t) => t.ticketId !== ticket.ticketId);
   return [ticket, ...rest];
+}
+
+/**
+ * Append to the skipped list, replacing any prior entry for the same ticket and
+ * **preserving skip order** — oldest skip first, the order staff work them back
+ * through. This deliberately does NOT re-sort by ticket number, because the
+ * server hands the same list back in that order (`findSkippedByCounter` reads
+ * `updatedAt` ascending), and a client that re-sorted would make the list depend
+ * on how you arrived at it: skip B-003 then A-011 and the live list would read
+ * `[A-011, B-003]`, but a reload would swap them back. Rows moving under a
+ * reaching finger on a touch panel is a mis-tap onto the wrong customer's
+ * "Panggil Ulang". Appending keeps live and reloaded order identical.
+ *
+ * A ticket ALREADY in the bucket is replaced **in place**, not moved to the end.
+ * The two arrival paths differ and both must match the server:
+ *  - A genuine re-skip (recall, then skipped again) reaches here with the ticket
+ *    ABSENT — `TICKET_CALLED` removed it on the way out — so it appends, which
+ *    mirrors the `updatedAt` bump that moves it last server-side.
+ *  - A REDELIVERED `SKIPPED` for a ticket still in the bucket changes nothing
+ *    server-side (`updatedAt` unmoved), so moving the row to the end would
+ *    reorder the list on a duplicate broadcast alone — the same mis-tap hazard
+ *    this function exists to remove, in miniature.
+ *
+ * The waiting list keeps its own ticket-number sort (see `byTicketNumber` call
+ * sites): its server order is `createdAt` ascending and that pairing predates
+ * this bucket — not changed here.
+ */
+function dedupeAppend(ticket: TicketStateDto, list: readonly TicketStateDto[]): readonly TicketStateDto[] {
+  const at = list.findIndex((t) => t.ticketId === ticket.ticketId);
+  if (at === -1) return [...list, ticket];
+  const next = [...list];
+  next[at] = ticket;
+  return next;
+}
+
+/**
+ * Looks a ticket up across every bucket this counter projects. Lifecycle payloads
+ * are lean (TICKET_CALLED carries no `categoryId`), so a projection recovers the
+ * missing fields from what it already knows rather than blanking them — a blank
+ * `categoryId` would silently break the transfer chooser (FR-CLR-03).
+ */
+function findKnown(state: QueueState, ticketId: string): TicketStateDto | undefined {
+  return (
+    state.waiting.find((t) => t.ticketId === ticketId) ??
+    state.skipped.find((t) => t.ticketId === ticketId) ??
+    state.active.find((t) => t.ticketId === ticketId)
+  );
 }
 
 export interface QueueStoreValue {

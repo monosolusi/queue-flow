@@ -213,8 +213,10 @@ export type NodeActionsDto = Record<string, NodeActionDto[]>;
  * marker omitted. Mirrors core-api's `TerminalNodeState` VO. This field controls
  * marker PRESENCE + POSITION only. The Start marker's edges are auto-derived
  * from topology (sources = in-degree 0 AND out-degree > 0 — an isolated,
- * not-yet-wired state is not one); the End marker's edges are manual only and
- * come from {@link EndSourcesDto}.
+ * not-yet-wired state is not one, and a transition from a status to ITSELF
+ * counts for neither degree, so a self-loop never costs a status its Start
+ * arrow); the End marker's edges are manual only and come from
+ * {@link EndSourcesDto}.
  */
 export type TerminalNodeStateDto = 'auto' | 'hidden' | { readonly x: number; readonly y: number };
 

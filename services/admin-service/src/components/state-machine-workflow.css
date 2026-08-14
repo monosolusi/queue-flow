@@ -428,7 +428,8 @@
 /* --- Canvas-only Start/End terminal markers ----------------------------------
    Visual affordances for the graph's entry and exit. Start is auto-derived for
    the real entry states (in-degree 0 with out-degree > 0 — an isolated,
-   not-yet-wired status is not one); End is manual-only (its arrows come from
+   not-yet-wired status is not one, and a transition from a status to itself
+   counts for neither degree); End is manual-only (its arrows come from
    the manager-drawn `endSources`) and renders even with none. NOT state cards —
    they carry no name/description on the form, so they render as compact pills:
    a small glyph + label, accent-tinted for Start (the entry cue), a bold muted

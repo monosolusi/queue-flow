@@ -32,7 +32,7 @@ import {
   type NodeProps,
 } from '@xyflow/react';
 import { DEFAULT_STATE_MACHINE, type NodeActionDto } from '../api/types';
-import { HANDLE_IDS, type FlowEdgeData, type FlowNodeData } from '../lib/state-machine-flow';
+import { HANDLE_IDS, getSelfLoopPath, type FlowEdgeData, type FlowNodeData } from '../lib/state-machine-flow';
 
 /**
  * Handlers the parent provides via context. Behavior-only — no `form` data
@@ -239,17 +239,27 @@ export function StateNode({ data }: NodeProps): JSX.Element {
  * showing the action label (the Caller UI button text). Editing the label
  * happens in the properties panel, not on the canvas — the chip is presentational
  * only. In default mode the chip is still shown (read-only board).
+ *
+ * A SELF-LOOP (`source === target`, e.g. "SERVING → SERVING") takes a different
+ * path: `getBezierPath` is degenerate when both endpoints sit on the same card
+ * (a short backwards curve running through/behind the node, with the label chip
+ * on top of it — the manager's "self-loop garisnya overlap dan jelek sekali"
+ * feedback), so the loop geometry comes from the pure {@link getSelfLoopPath},
+ * which arcs it a full card-width clear of the node and puts the label on the
+ * loop's apex. Same tuple shape, so nothing else in this component changes.
  */
 export function TransitionEdge(props: EdgeProps): JSX.Element {
   const edgeData = props.data as FlowEdgeData;
-  const [edgePath, labelX, labelY] = getBezierPath({
+  const pathParams = {
     sourceX: props.sourceX,
     sourceY: props.sourceY,
     sourcePosition: props.sourcePosition,
     targetX: props.targetX,
     targetY: props.targetY,
     targetPosition: props.targetPosition,
-  });
+  };
+  const [edgePath, labelX, labelY] =
+    props.source === props.target ? getSelfLoopPath(pathParams) : getBezierPath(pathParams);
   const label = edgeData.actionLabel;
   return (
     <>
@@ -279,7 +289,9 @@ export function TransitionEdge(props: EdgeProps): JSX.Element {
  * A canvas-only Start terminal marker — a compact BPMN-style "play" affordance
  * (▶ glyph) with a "Mulai" label. Auto-derived by `deriveTerminalMarkers` for
  * the graph's real entry states (in-degree 0 AND out-degree > 0 — an isolated,
- * not-yet-wired status is NOT an entry point); NOT in the form/wire/XML. ONE
+ * not-yet-wired status is NOT an entry point, and a transition from a status to
+ * ITSELF counts for neither degree, so a self-loop never costs a status its
+ * Start arrow); NOT in the form/wire/XML. ONE
  * `<Handle type="source" position={Position.Right} id={HANDLE_IDS.right}
  * isConnectable={false} />` — non-interactive (the manager cannot drag a
  * transition from a marker; the marker is a visual entry cue, not a state).

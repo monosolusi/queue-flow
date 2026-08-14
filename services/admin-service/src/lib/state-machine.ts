@@ -406,7 +406,9 @@ const Y_SPACING = 120;
  * the default graph's `SKIPPED → CALLING`) are removed for ranking so a cycle
  * never inflates a node's rank; they remain as visual back-arrows on the
  * canvas. Pure cycles (no node with zero in-degree) have no source to seed
- * relaxation from, so every node in them keeps rank 0.
+ * relaxation from, so every node in them keeps rank 0. SELF-LOOPS (`from ===
+ * to`) are dropped outright: a status that points at itself is still a source,
+ * and it is not ranked after itself.
  *
  * Pure + stable: same input ⇒ same output (no `Math.random` / `Date.now`). It
  * lives here in the form-model lib (not in `state-machine-flow.ts`, the React
@@ -430,6 +432,16 @@ export function autoLayout(
     // Ignore edges that reference a state not in the schema (defensive — the
     // editor never produces these, but a corrupt prefill could).
     if (!stateSet.has(t.from) || !stateSet.has(t.to)) continue;
+    // A SELF-LOOP is dropped entirely: it is flow that leaves a status and
+    // returns to it, so it neither ranks the status after itself nor makes the
+    // status stop being a source. Counted (the pre-fix behavior) it inflated
+    // `originalIndeg`, so a self-loop on the graph's entry status removed the
+    // only relaxation seed and every node collapsed onto rank 0. The DFS below
+    // already classifies it as a back-edge and drops it from `dagAdj`; this
+    // keeps `originalIndeg` consistent with that. Same rule as
+    // {@link stateDegrees} below (the Start/End marker degrees) — one self-loop
+    // semantic for the whole form model.
+    if (t.from === t.to) continue;
     adj.get(t.from)!.push(t.to);
     originalIndeg.set(t.to, (originalIndeg.get(t.to) ?? 0) + 1);
   }
@@ -502,6 +514,83 @@ export function autoLayout(
     });
   }
   return positions;
+}
+
+/**
+ * In-degree + out-degree per state — the single source of truth for the
+ * "entry/exit point" predicates. Pure + framework-free.
+ *
+ * Lives here in the form-model lib rather than in the React Flow layer for the
+ * same reason {@link autoLayout} does: "which statuses are this graph's entry
+ * and exit points" is a property of the graph itself, not of the canvas that
+ * draws it. Three consumers depend on it — the canvas Start/End markers
+ * (`deriveTerminalMarkers`), the End-marker properties panel's "Transisi masuk"
+ * list, and the XML codec's `<initial>` flag — and the codec is a DOM-layer
+ * module that must never import from `state-machine-flow.ts`. One home here
+ * keeps the dependency direction clean (DOM → pure, canvas → pure, never
+ * DOM → canvas) AND keeps the three consumers from drifting apart.
+ *
+ * Two counting rules, both load-bearing:
+ *  1. Only transitions whose `from` AND `to` are BOTH in `states` count — a
+ *     transition referencing an unknown state is ignored, mirroring
+ *     {@link autoLayout}'s defensive guard.
+ *  2. A SELF-LOOP (`from === to`) counts for NEITHER degree. A self-loop is flow
+ *     that leaves a status and returns to the same status: it brings no flow
+ *     INTO the graph and takes none OUT, so it must never change whether a
+ *     status is the flow's entry or exit. Counting it (the pre-fix behavior)
+ *     made a status with a self-loop stop being in-degree 0, which silently
+ *     dropped its `__start → S` terminal arrow — the manager's "WAITING punya
+ *     transisi masuk dari Mulai, lalu aku bikin self-loop dan yang dari Mulai
+ *     hilang" report.
+ *
+ * Consequence (deliberate): a status whose ONLY transition is a self-loop stays
+ * degree 0 on BOTH sides — i.e. ISOLATED — and an isolated status is not an
+ * entry point (see {@link deriveAutoSources}). A self-loop wires the status to
+ * itself, not into the flow.
+ *
+ * The out-degree half has a second consumer: the XML codec picks Kaleo's
+ * `<task>` vs `<state>` tag from `outDeg`, so a self-looping status still
+ * serializes as terminal — matching the canvas, which draws it no exit.
+ */
+export function stateDegrees(
+  states: readonly string[],
+  transitions: readonly { from: string; to: string }[],
+): { inDeg: Map<string, number>; outDeg: Map<string, number> } {
+  const stateSet = new Set(states);
+  const inDeg = new Map<string, number>();
+  const outDeg = new Map<string, number>();
+  for (const s of states) {
+    inDeg.set(s, 0);
+    outDeg.set(s, 0);
+  }
+  for (const t of transitions) {
+    if (!stateSet.has(t.from) || !stateSet.has(t.to)) continue;
+    if (t.from === t.to) continue; // self-loop: no flow in, no flow out
+    inDeg.set(t.to, (inDeg.get(t.to) ?? 0) + 1);
+    outDeg.set(t.from, (outDeg.get(t.from) ?? 0) + 1);
+  }
+  return { inDeg, outDeg };
+}
+
+/**
+ * The graph's real ENTRY states — in-degree 0 AND out-degree > 0 (per
+ * {@link stateDegrees}): nothing flows in, something flows out. An ISOLATED
+ * state (degree 0 on BOTH sides) is excluded: it satisfies the in-degree-0
+ * predicate AND the out-degree-0 one at once, so without the exclusion a stray,
+ * just-added status would be auto-linked to Start AND End at the same time (the
+ * manager's "a stray status with no transisi is automatically linked to Start
+ * and End" feedback) — a not-yet-wired status has no entry/exit semantics yet.
+ *
+ * Shared by the canvas's `deriveTerminalMarkers` (which draws the `__start → S`
+ * arrows) and the XML codec's `<initial>true</initial>` flag, so the diagram and
+ * the Sumber view can never disagree about where the flow starts.
+ */
+export function deriveAutoSources(
+  states: readonly string[],
+  transitions: readonly { from: string; to: string }[],
+): string[] {
+  const { inDeg, outDeg } = stateDegrees(states, transitions);
+  return states.filter((s) => (inDeg.get(s) ?? 0) === 0 && (outDeg.get(s) ?? 0) > 0);
 }
 
 /**

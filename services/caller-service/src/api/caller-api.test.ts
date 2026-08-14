@@ -80,6 +80,42 @@ describe('CallerApi authed fetch (QUE-43)', () => {
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
   });
 
+  it('reads the workflow actions from GET /api/queue/actions with the bearer', async () => {
+    // The panel's action surface (FR-CLR-02): core-api resolves each transition
+    // to the command that runs it, so no routing table lives on this side.
+    writeToken('tok');
+    mockFetch(() =>
+      jsonRes({
+        byStatus: {
+          CALLING: [
+            {
+              from: 'CALLING',
+              to: 'SERVING',
+              actionLabel: 'Mulai Melayani',
+              command: 'SERVE',
+              unavailableReason: null,
+            },
+          ],
+        },
+      }),
+    );
+    const api = new CallerApi();
+    const actions = await api.getWorkflowActions();
+    expect(lastUrl).toContain('/api/queue/actions');
+    expect(headerAuth(lastInit)).toBe('Bearer tok');
+    expect(actions.byStatus.CALLING[0]).toMatchObject({ to: 'SERVING', command: 'SERVE' });
+  });
+
+  it('on 401 from the workflow actions clears the token and fires onUnauthorized', async () => {
+    writeToken('abc123');
+    const onUnauthorized = vi.fn();
+    mockFetch(() => jsonRes({ message: 'no' }, 401, 'Unauthorized'));
+    const api = new CallerApi({ onUnauthorized });
+    await expect(api.getWorkflowActions()).rejects.toThrow(/401/);
+    expect(readToken()).toBeNull();
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+
   it('on 401 POST command clears the token and fires onUnauthorized', async () => {
     writeToken('abc123');
     const onUnauthorized = vi.fn();

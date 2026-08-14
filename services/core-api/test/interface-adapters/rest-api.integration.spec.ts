@@ -174,6 +174,62 @@ describe('Read-only REST surface (integration — QUE-19 + QUE-17)', () => {
       'A-002',
     ]);
     expect(res.body.waitingCount).toBe(2);
+    // The skipped bucket is always present — an empty list, never absent.
+    expect(res.body.skipped).toEqual([]);
+  });
+
+  it('GET /api/queue?counterId=1 returns the tickets this counter skipped in their own bucket', async () => {
+    // A SKIPPED ticket keeps the counter that skipped it (the counter "Panggil
+    // Ulang" re-announces to), so it is counter-scoped like the active bucket.
+    await queue.save(
+      QueueTicket.reconstitute({
+        id: ticketIdGenerate(),
+        ticketNumber: TicketNumber.of('A', 4),
+        categoryId: catAId,
+        status: 'SKIPPED',
+        counterId: 1,
+        createdAt: 40,
+        updatedAt: 60,
+        calledAt: 45,
+        servedAt: null,
+        completedAt: null,
+      }),
+    );
+    // Skipped at a different counter — must not leak into counter 1's bucket.
+    await queue.save(
+      QueueTicket.reconstitute({
+        id: ticketIdGenerate(),
+        ticketNumber: TicketNumber.of('A', 5),
+        categoryId: catAId,
+        status: 'SKIPPED',
+        counterId: 2,
+        createdAt: 41,
+        updatedAt: 61,
+        calledAt: 46,
+        servedAt: null,
+        completedAt: null,
+      }),
+    );
+
+    const res = await request(app.getHttpServer()).get('/api/queue?counterId=1').set(authHeader(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body.skipped).toEqual([
+      {
+        ticketId: expect.any(String),
+        ticketNumber: 'A-004',
+        categoryId: catAId,
+        status: 'SKIPPED',
+        counterId: 1,
+      },
+    ]);
+    // The other buckets are untouched by the skipped rows.
+    expect(res.body.active.map((t: { ticketNumber: string }) => t.ticketNumber)).toEqual(['A-003']);
+    expect(res.body.waiting.map((t: { ticketNumber: string }) => t.ticketNumber)).toEqual([
+      'A-001',
+      'A-002',
+    ]);
+    expect(res.body.waitingCount).toBe(2);
   });
 
   it('GET /api/queue without counterId is a 400 client error', async () => {

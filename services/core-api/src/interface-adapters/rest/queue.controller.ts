@@ -1,5 +1,9 @@
 import { BadRequestException, Controller, Get, Query, UseGuards } from '@nestjs/common';
-import { GetBoardStateUseCase, GetQueueSnapshotUseCase } from '../../application/queue';
+import {
+  GetBoardStateUseCase,
+  GetQueueSnapshotUseCase,
+  GetWorkflowActionsUseCase,
+} from '../../application/queue';
 import { Role } from '../../domain/identity';
 import { AuthGuard } from '../auth/auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -14,7 +18,11 @@ import { Public } from '../auth/public.decorator';
  * with no bound counter (today the TV display) reads its full state — active
  * (CALLING/SERVING) tickets to restore `nowServing` on refresh + the global
  * waiting list — via `GET /api/queue/board` and refetches after every lifecycle
- * event. Mutation endpoints arrive in QUE-20.
+ * event. The caller also reads its **dynamic action set** here
+ * (`GET /api/queue/actions`) — the active workflow's edges already resolved to
+ * the queue command that executes each one, so the panel's buttons follow the
+ * configured graph instead of a client-side lookup table. Mutation endpoints
+ * arrive in QUE-20.
  *
  * The snapshot is always counter-scoped — the workspace always has a bound
  * counter — so `counterId` is required. A missing or non-integral `counterId`
@@ -28,6 +36,7 @@ export class QueueController {
   constructor(
     private readonly getSnapshot: GetQueueSnapshotUseCase,
     private readonly getBoardState: GetBoardStateUseCase,
+    private readonly getWorkflowActions: GetWorkflowActionsUseCase,
   ) {}
 
   /** `GET /api/queue?counterId=N` → the counter-scoped queue snapshot. */
@@ -55,5 +64,24 @@ export class QueueController {
   @Public()
   board() {
     return this.getBoardState.execute();
+  }
+
+  /**
+   * `GET /api/queue/actions` → the active state machine's configured edges, keyed
+   * by source status, each already resolved to **the queue command that
+   * realizes it** (FR-CLR-02). The caller panel renders one button per entry and
+   * invokes the named command; it no longer keeps its own client-side map of
+   * which endpoint executes which edge — that is backend knowledge (aggregate
+   * preconditions), and this endpoint is its authority.
+   *
+   * Authenticated (admin or caller-staff) via the controller-level guards — the
+   * same classification as `GET /api/system/state-machine`, which serves the raw
+   * graph this projection is derived from. Pre-setup it 409s
+   * (`SystemNotConfiguredException` from the policy resolver), matching that
+   * endpoint rather than inventing a second pre-setup behavior.
+   */
+  @Get('actions')
+  actions() {
+    return this.getWorkflowActions.execute();
   }
 }

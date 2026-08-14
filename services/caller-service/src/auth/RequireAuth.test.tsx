@@ -17,8 +17,14 @@ function makeApi(opts: { me?: AuthUserDto | null; rejectMe?: Error } = {}): ICal
       ? vi.fn(() => Promise.reject(opts.rejectMe!))
       : vi.fn(() => Promise.resolve(opts.me ?? null)),
     listCounters: vi.fn(async () => []),
-    getQueueSnapshot: vi.fn(async () => ({ counterId: 0, active: [], waiting: [], waitingCount: 0 })),
-    getActiveStateMachine: vi.fn(async () => ({ states: [], transitions: [] })),
+    getQueueSnapshot: vi.fn(async () => ({
+      counterId: 0,
+      active: [],
+      waiting: [],
+      skipped: [],
+      waitingCount: 0,
+    })),
+    getWorkflowActions: vi.fn(async () => ({ byStatus: {} })),
     getBrandColor: vi.fn(async () => ({ brandColor: '', themeMode: 'light' as const })),
     callNext: vi.fn(async () => {}),
     serve: vi.fn(async () => {}),

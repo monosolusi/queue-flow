@@ -62,6 +62,16 @@ const ALLOWED_HOSTS = new Set([
   'reactflow.dev',
   'xyflow.dev',
   '${e}flow.dev',
+  // Liferay Kaleo (`admin-service` Alur Status Tiket "Sumber" view): the XML
+  // codec emits a `<workflow-definition>` whose root carries the Kaleo
+  // `xsi:schemaLocation` hint `http://www.liferay.com/dtd/liferay-workflow-
+  // definition_7_4_0.xsd`. It is an inert literal inside a generated XML
+  // *string* rendered into a textarea — no validating parser runs offline and
+  // the XSD is never fetched (NFR-REL-01). Same class as the SheetJS OOXML
+  // namespace URIs above, which are likewise written into generated XML. The
+  // namespace proper (`urn:liferay.com:liferay-workflow_7.4.0`) is a URN, not
+  // an http URL, so it never reaches this gate at all.
+  'www.liferay.com',
 ]);
 
 /** Extracts the host from an http(s) URL string, or null if not a real URL. */

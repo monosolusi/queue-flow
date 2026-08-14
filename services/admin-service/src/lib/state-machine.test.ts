@@ -9,7 +9,9 @@ import {
   defaultStateMachineForm,
   describeState,
   descriptionFor,
+  deriveAutoSources,
   graphSignature,
+  stateDegrees,
   isDefaultGraph,
   mergeEdgeSides,
   missingCanonicalStates,
@@ -909,6 +911,64 @@ describe('isDefaultGraph with endSources', () => {
     expect(isDefaultGraph(states, transitions, {}, DEFAULT_TERMINAL_NODES, [])).toBe(true);
   });
 });
+
+describe('stateDegrees / deriveAutoSources (the shared degree predicates)', () => {
+  it('counts a normal transition on both ends', () => {
+    const { inDeg, outDeg } = stateDegrees(['A', 'B'], [{ from: 'A', to: 'B' }]);
+    expect(outDeg.get('A')).toBe(1);
+    expect(inDeg.get('A')).toBe(0);
+    expect(inDeg.get('B')).toBe(1);
+    expect(outDeg.get('B')).toBe(0);
+  });
+
+  it('counts a SELF-LOOP toward NEITHER degree', () => {
+    // The core of the fix: flow that leaves a status and returns to it brings
+    // nothing into the graph and takes nothing out.
+    const { inDeg, outDeg } = stateDegrees(['A'], [{ from: 'A', to: 'A' }]);
+    expect(inDeg.get('A')).toBe(0);
+    expect(outDeg.get('A')).toBe(0);
+  });
+
+  it('ignores a transition referencing a state not in the schema', () => {
+    const { inDeg, outDeg } = stateDegrees(['A'], [{ from: 'A', to: 'GONE' }]);
+    expect(outDeg.get('A')).toBe(0);
+    expect(inDeg.get('A')).toBe(0);
+  });
+
+  it('derives the default graph entry state (WAITING)', () => {
+    expect(
+      deriveAutoSources([...DEFAULT_STATE_MACHINE.states], DEFAULT_STATE_MACHINE.transitions),
+    ).toEqual(['WAITING']);
+  });
+
+  it('keeps an entry state an entry state when it grows a self-loop', () => {
+    // The manager's report: WAITING had a Start arrow, drawing WAITING -> WAITING
+    // made it in-degree 1 and the Start arrow silently vanished.
+    const states = ['A', 'B'];
+    const transitions = [
+      { from: 'A', to: 'B' },
+      { from: 'A', to: 'A' },
+      { from: 'B', to: 'B' },
+    ];
+    expect(deriveAutoSources(states, transitions)).toEqual(['A']);
+  });
+
+  it('treats a self-loop-ONLY state as isolated (not an entry point)', () => {
+    const states = ['A', 'B', 'LOOPY'];
+    const transitions = [
+      { from: 'A', to: 'B' },
+      { from: 'LOOPY', to: 'LOOPY' },
+    ];
+    expect(deriveAutoSources(states, transitions)).toEqual(['A']);
+  });
+
+  it('treats a not-yet-wired state as isolated (the PR #103 invariant)', () => {
+    const states = ['A', 'B', 'STRAY'];
+    const transitions = [{ from: 'A', to: 'B' }];
+    expect(deriveAutoSources(states, transitions)).toEqual(['A']);
+  });
+});
+
 describe('reconcileStateNameRefs (canvas delete/rename cascade)', () => {
   // The three fields that reference states BY NAME. The save use case
   // cross-checks all of them and 400s on an entry naming a dead state, and no
