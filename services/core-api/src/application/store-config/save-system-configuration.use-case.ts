@@ -26,6 +26,9 @@ import {
   type ITransactionManager,
   NoOpTransactionManager,
   type PriorityPolicy,
+  type RequeuePolicy,
+  RequeuePolicyKind,
+  requeuePolicyFromWire,
   TransitionAction,
   type TransitionActionValue,
 } from '../../domain/shared';
@@ -72,6 +75,17 @@ export interface WizardStateMachineDto {
     to: string;
     actionLabel: string;
     action?: string;
+    /**
+     * What a `-> WAITING` edge does to the WAITING queue's order — declared by
+     * the manager (the workflow is the source of truth, mirroring `action`).
+     * Optional on the wire: a configuration saved before the field existed
+     * carries none, and every such edge means `KEEP` — `requeuePolicyFromWire`
+     * recovers `undefined` to the default. A non-KEEP policy is allowed ONLY on
+     * an `UPDATE_STATUS` edge whose `to === WAITING` (validated pre-tx below);
+     * a `TRANSFER_CATEGORY` edge re-issues the per-category number and is left
+     * at KEEP.
+     */
+    requeuePolicy?: { kind: string; n?: number | null };
   }[];
   /**
    * Per-state editable descriptions (intrinsic per-state metadata, part of the
@@ -379,6 +393,50 @@ export class SaveSystemConfigurationUseCase {
         );
       }
     }
+    // Re-queue position policy cross-check (anti-corruption): a non-KEEP
+    // `requeuePolicy` is allowed ONLY on an `UPDATE_STATUS` edge whose
+    // `to === WAITING`. `StateTransitionRule` cannot enforce it — the check
+    // needs `TicketStatus` from the Queue context, and a Store-Config VO must
+    // not reach across the boundary (DIP) — so it belongs here, where the Queue
+    // context is already an allowed import (categories). Mirrors the
+    // TRANSFER_CATEGORY-must-target-WAITING rule above.
+    //
+    // This is a rule about what the manager may DECLARE, not an inference about
+    // what an edge means: a re-queue policy on a `TRANSFER_CATEGORY` edge would
+    // race the category re-issue (which keeps the original ordering slot, see
+    // `QueueTicket.transferTo`), and a re-queue policy on a non-WAITING target
+    // would never fire (`returnToQueue` runs only for `-> WAITING`). Refused at
+    // save time, so no flow reaches the counter with a re-queue policy the
+    // runtime ignores.
+    for (const rule of stateMachine.transitions) {
+      const policy: RequeuePolicy = rule.requeuePolicy;
+      if (policy.kind === RequeuePolicyKind.KEEP) {
+        continue;
+      }
+      if (rule.action !== TransitionAction.UPDATE_STATUS) {
+        throw new InvalidValueObjectException(
+          `transition '${rule.from}'->'${rule.to}' declares a re-queue policy ` +
+            `('${policy.kind}') but is not a plain status change ` +
+            `(action='${rule.action}'); re-queue policies apply only to UPDATE_STATUS edges`,
+        );
+      }
+      if (rule.to !== TicketStatus.WAITING) {
+        throw new InvalidValueObjectException(
+          `transition '${rule.from}'->'${rule.to}' declares a re-queue policy ` +
+            `('${policy.kind}') but does not return the ticket to '${TicketStatus.WAITING}'; ` +
+            `a re-queue policy applies only to a -> WAITING edge`,
+        );
+      }
+      if (policy.kind === RequeuePolicyKind.BACK_N && policy.n === null) {
+        // Defensive: `requeuePolicyFromWire` rejects a BACK_N with a missing
+        // `n` (→ 400), so this branch is unreachable in practice — kept so a
+        // future narrowing of the VO cannot silently let a malformed BACK_N
+        // through this cross-check.
+        throw new InvalidValueObjectException(
+          `transition '${rule.from}'->'${rule.to}' declares BACK_N with no n`,
+        );
+      }
+    }
     // Edge-membership cross-check (anti-corruption): the VO deliberately does
     // NOT depend on `StateMachine` (DIP), so it cannot validate that a layout
     // key corresponds to a real transition. That check belongs here, in the use
@@ -594,14 +652,17 @@ export class SaveSystemConfigurationUseCase {
   private buildStateMachine(dto: WizardStateMachineDto): StateMachine {
     const schema = StateSchema.of([...dto.states]);
     const rules = dto.transitions.map((t) =>
-      // `action` arrives as an unvalidated wire string. The cast asserts nothing
-      // the VO does not itself check — `StateTransitionRule.of` rejects any value
-      // outside the enum (→ 400) and recovers `undefined` to `UPDATE_STATUS`.
+      // `action` and `requeuePolicy` arrive as unvalidated wire values. The cast
+      // asserts nothing the VO does not itself check — `StateTransitionRule.of`
+      // rejects any `action` outside the enum (→ 400) and recovers `undefined`
+      // to `UPDATE_STATUS`; `requeuePolicyFromWire` recovers `undefined` to KEEP
+      // (the single backward-compat boundary) and validates a BACK_N's `n`.
       StateTransitionRule.of(
         t.from,
         t.to,
         t.actionLabel,
         t.action as TransitionActionValue | undefined,
+        requeuePolicyFromWire(t.requeuePolicy),
       ),
     );
     // Per-state editable descriptions (intrinsic per-state metadata, part of the

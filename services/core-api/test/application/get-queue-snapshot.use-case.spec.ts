@@ -36,6 +36,7 @@ function active(
     counterId,
     createdAt,
     updatedAt: createdAt,
+    waitingOrder: createdAt,
     calledAt: status === 'CALLING' || status === 'SERVING' ? createdAt : null,
     servedAt: status === 'SERVING' ? createdAt : null,
     completedAt: null,

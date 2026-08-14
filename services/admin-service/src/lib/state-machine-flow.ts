@@ -20,6 +20,7 @@ import {
   autoLayout,
   descriptionFor,
   deriveAutoSources,
+  DEFAULT_REQUEUE_POLICY,
   DEFAULT_SOURCE_SIDE,
   DEFAULT_TRANSITION_ACTION,
   type StateMachineForm,
@@ -29,6 +30,7 @@ import {
   DEFAULT_STATE_MACHINE,
   DEFAULT_TERMINAL_NODES,
   type EdgeSide,
+  type RequeuePolicyDto,
   type TerminalNodesDto,
   type TransitionActionType,
 } from '../api/types';
@@ -96,6 +98,11 @@ export interface FlowEdgeData {
    *  read for them — but keeping the field non-optional means every real edge has
    *  one, and `flowToGraph` needs no fallback that could mask a dropped value. */
   action: TransitionActionType;
+  /** What a `→ WAITING` re-queue does to queue order. Round-tripped through the
+   *  canvas by `flowToGraph` (mirroring `action`), so an edge edit made on the
+   *  canvas cannot silently reset it. Terminal marker edges carry
+   *  `DEFAULT_REQUEUE_POLICY` (canvas-only, never read for them). */
+  requeuePolicy: RequeuePolicyDto;
   [key: string]: unknown;
 }
 
@@ -303,7 +310,7 @@ export function formToFlow(
     source: t.from,
     target: t.to,
     type: 'transition',
-    data: { actionLabel: t.actionLabel, action: t.action },
+    data: { actionLabel: t.actionLabel, action: t.action, requeuePolicy: t.requeuePolicy },
     // Seed from the form sides (the source of truth); a transition with no
     // sides (absent) gets the canonical L→R default.
     sourceHandle: t.sourceSide !== undefined ? sideToHandle(t.sourceSide) : DEFAULT_SOURCE_HANDLE,
@@ -466,7 +473,7 @@ export function deriveTerminalMarkers(
         source: START_NODE_ID,
         target: s,
         type: TERMINAL_EDGE_TYPE,
-        data: { actionLabel: '', action: DEFAULT_TRANSITION_ACTION },
+        data: { actionLabel: '', action: DEFAULT_TRANSITION_ACTION, requeuePolicy: DEFAULT_REQUEUE_POLICY },
         sourceHandle: HANDLE_IDS.right,
         targetHandle: HANDLE_IDS.left,
         markerEnd: EDGE_ARROW_MARKER,
@@ -492,7 +499,7 @@ export function deriveTerminalMarkers(
       source: s,
       target: END_NODE_ID,
       type: TERMINAL_EDGE_TYPE,
-      data: { actionLabel: '', action: DEFAULT_TRANSITION_ACTION },
+      data: { actionLabel: '', action: DEFAULT_TRANSITION_ACTION, requeuePolicy: DEFAULT_REQUEUE_POLICY },
       sourceHandle: HANDLE_IDS.right,
       targetHandle: HANDLE_IDS.left,
       markerEnd: EDGE_ARROW_MARKER,
@@ -631,6 +638,7 @@ export function flowToGraph(
       to: idToName.get(e.target) ?? e.target,
       actionLabel: e.data.actionLabel,
       action: e.data.action,
+      requeuePolicy: e.data.requeuePolicy,
       sourceSide: handleToSide(e.sourceHandle),
       targetSide: handleToSide(e.targetHandle),
     }));

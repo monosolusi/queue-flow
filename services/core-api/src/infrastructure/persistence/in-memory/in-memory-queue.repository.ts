@@ -5,6 +5,7 @@ import {
   QueueTicket,
   TicketId,
   TicketStatus,
+  type WaitingOrderAssignment,
 } from '../../../domain/queue';
 import { PriorityPolicy } from '../../../domain/shared/priority-policy';
 
@@ -28,22 +29,56 @@ export class InMemoryQueueRepository implements IQueueRepository, ITicketArchive
   async findWaitingByCategory(categoryId: string): Promise<QueueTicket[]> {
     return this.waiting()
       .filter((t) => t.categoryId === categoryId)
-      .sort((a, b) => a.createdAt - b.createdAt);
+      .sort((a, b) => a.waitingOrder - b.waitingOrder || a.createdAt - b.createdAt);
   }
 
   async findWaitingByCategories(categoryIds: readonly string[]): Promise<QueueTicket[]> {
     const ids = new Set(categoryIds);
     return this.waiting()
       .filter((t) => ids.has(t.categoryId))
-      .sort((a, b) => a.createdAt - b.createdAt);
+      .sort((a, b) => a.waitingOrder - b.waitingOrder || a.createdAt - b.createdAt);
   }
 
   async findAllWaiting(): Promise<QueueTicket[]> {
-    return this.waiting().sort((a, b) => a.createdAt - b.createdAt);
+    return this.waiting().sort(
+      (a, b) => a.waitingOrder - b.waitingOrder || a.createdAt - b.createdAt,
+    );
   }
 
   async countWaitingByCategory(categoryId: string): Promise<number> {
     return this.waiting().filter((t) => t.categoryId === categoryId).length;
+  }
+
+  async assignWaitingOrders(assignments: readonly WaitingOrderAssignment[]): Promise<void> {
+    // Bulk-write the WAITING queue's ordering key for BACK_N renumber siblings.
+    // No events, no status change, no new mutable setter on the aggregate —
+    // reconstitute each stored ticket with the new `waitingOrder` and replace
+    // the stored instance (mirrors how `save` upserts by id). The in-memory
+    // NoOpTransactionManager is a pure pass-through, so a throw after a partial
+    // renumber is NOT rolled back here — documented dev-only limitation (the
+    // Postgres impl enlists on the ambient tx for true atomicity, NFR-REL-02).
+    for (const assignment of assignments) {
+      const current = this.tickets.get(assignment.id.value);
+      if (!current) {
+        continue;
+      }
+      this.tickets.set(
+        assignment.id.value,
+        QueueTicket.reconstitute({
+          id: current.id,
+          ticketNumber: current.ticketNumber,
+          categoryId: current.categoryId,
+          status: current.currentStatus,
+          counterId: current.counterId,
+          createdAt: current.createdAt,
+          updatedAt: current.updatedAt,
+          waitingOrder: assignment.waitingOrder,
+          calledAt: current.calledAt,
+          servedAt: current.servedAt,
+          completedAt: current.completedAt,
+        }),
+      );
+    }
   }
 
   async findActiveByCounter(counterId: number): Promise<QueueTicket[]> {
@@ -95,10 +130,10 @@ export class InMemoryQueueRepository implements IQueueRepository, ITicketArchive
         if (ai !== bi) {
           return ai - bi;
         }
-        return a.createdAt - b.createdAt;
+        return a.waitingOrder - b.waitingOrder || a.createdAt - b.createdAt;
       });
     } else {
-      candidates.sort((a, b) => a.createdAt - b.createdAt);
+      candidates.sort((a, b) => a.waitingOrder - b.waitingOrder || a.createdAt - b.createdAt);
     }
     return candidates[0];
   }

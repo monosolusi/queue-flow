@@ -269,6 +269,7 @@ describe('System daily-reset REST surface (integration — QUE-2)', () => {
       counterId: null,
       createdAt: yesterdayEnd,
       updatedAt: yesterdayEnd,
+      waitingOrder: yesterdayEnd,
       calledAt: null,
       servedAt: null,
       completedAt: null,

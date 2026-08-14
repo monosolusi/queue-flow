@@ -65,13 +65,15 @@ import { SystemConfigModule } from './config/system-config.module';
       useFactory: (queue, dispatcher) => new ReannounceTicketUseCase(queue, dispatcher),
     },
     {
-      // The single per-ticket state-change command (FR-CLR-02). No tx manager —
-      // a status change reserves no sequence number, so there is nothing to
-      // commit atomically alongside it (unlike the transfer below).
+      // The single per-ticket state-change command (FR-CLR-02). A `-> WAITING`
+      // re-queue may renumber siblings' waiting_order (BACK_N collision
+      // fallback), so the re-queued ticket's save + the sibling writes run in
+      // one tx (NFR-REL-02); other targets are wrapped for uniformity (a no-op
+      // tx manager makes that free). `clock` keeps its `() => Date.now` default.
       provide: ApplyTransitionUseCase,
-      inject: [QUEUE_REPOSITORY, TRANSITION_POLICY_RESOLVER, QueueEventDispatcher],
-      useFactory: (queue, policyResolver, dispatcher) =>
-        new ApplyTransitionUseCase(queue, policyResolver, dispatcher),
+      inject: [QUEUE_REPOSITORY, TRANSITION_POLICY_RESOLVER, QueueEventDispatcher, TRANSACTION_MANAGER],
+      useFactory: (queue, policyResolver, dispatcher, txManager) =>
+        new ApplyTransitionUseCase(queue, policyResolver, dispatcher, undefined, txManager),
     },
     {
       provide: TransferTicketUseCase,

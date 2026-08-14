@@ -22,6 +22,16 @@ export interface NextTicketQuery {
 }
 
 /**
+ * One ticket's new `waiting_order` value, for the BACK_N category-renumber
+ * fallback (see {@link IQueueRepository.assignWaitingOrders}). Carries only the
+ * id + the new ordering key — no status, no events, no aggregate load.
+ */
+export interface WaitingOrderAssignment {
+  readonly id: TicketId;
+  readonly waitingOrder: number;
+}
+
+/**
  * Repository abstraction for the Queue aggregate (LSP: PostgreSQL and
  * InMemory implementations are interchangeable). Consumed by the use case
  * layer; implemented by infrastructure.
@@ -88,4 +98,22 @@ export interface IQueueRepository {
    * inserts, so the count is deterministic.
    */
   countWaitingByCategory(categoryId: string): Promise<number>;
+  /**
+   * Bulk-writes the WAITING queue's ordering key (`waiting_order`) for the
+   * given tickets — the BACK_N category-renumber fallback. Writes ONLY the
+   * ordering key: no status change, no events, no aggregate load, no new
+   * mutable setter on the aggregate. The aggregate owns its *own*
+   * `waitingOrder` (applied in `returnToQueue`); siblings' `waiting_order` is a
+   * persistence-layer ordering key, written here so a re-queue that collides
+   * with a category-mate (kiosk tickets in the same millisecond) lands at the
+   * exact rank the manager declared.
+   *
+   * Enlists on the ambient {@link ITransactionManager} tx (NFR-REL-02) so the
+   * renumber + the re-queued ticket's own save commit atomically — a power cut
+   * between them must not leave the queue with two tickets at the same rank or
+   * a half-renumbered category. The Postgres impl issues one `UPDATE` per
+   * assignment on the tx's client; the in-memory impl reconstitutes each
+   * sibling via `QueueTicket.reconstitute` (no new mutable setter).
+   */
+  assignWaitingOrders(assignments: readonly WaitingOrderAssignment[]): Promise<void>;
 }

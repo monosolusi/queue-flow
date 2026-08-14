@@ -118,6 +118,33 @@ export const DEFAULT_TV_GRID_LAYOUT: TvGridLayout = [
  */
 export type TransitionActionType = 'UPDATE_STATUS' | 'TRANSFER_CATEGORY';
 
+/**
+ * What a `→ WAITING` re-queue does to queue order — declared per edge by the
+ * manager (the same "workflow is source of truth" principle as
+ * {@link TransitionActionType}). Only meaningful on an edge whose
+ * `to === 'WAITING'` AND `action === 'UPDATE_STATUS'`; on any other edge a
+ * non-KEEP policy is invalid (enforced in `validateCustomStateMachine` and at
+ * the core-api save boundary).
+ *
+ * - `KEEP` (default) — the ticket keeps its current queue slot (today's FIFO
+ *   behavior, and what every edge configured before this field existed means).
+ * - `TO_BACK` — "paling belakang": move the ticket to the tail of the waiting
+ *   queue.
+ * - `BACK_N(n)` — "mundur n posisi": move the ticket back `n` positions within
+ *   its own category (`n` is a non-negative integer; `0` = front, large `n` =
+ *   back). `n` is only present when `kind === 'BACK_N'`.
+ *
+ * Mirrors core-api's `RequeuePolicy` VO.
+ */
+export type RequeuePolicyKind = 'KEEP' | 'TO_BACK' | 'BACK_N';
+
+/** The wire shape of a {@link RequeuePolicyKind} declaration. `n` is present
+ *  ONLY when `kind === 'BACK_N'`. */
+export interface RequeuePolicyDto {
+  readonly kind: RequeuePolicyKind;
+  readonly n?: number;
+}
+
 export interface StateTransitionDto {
   readonly from: string;
   readonly to: string;
@@ -126,6 +153,12 @@ export interface StateTransitionDto {
    *  edge configured before this field existed means (core-api's
    *  `StateTransitionRule` default). */
   readonly action?: TransitionActionType;
+  /** Optional on the wire: absent means `KEEP`, which is what every edge
+   *  configured before this field existed means (core-api's
+   *  `StateTransitionRule` default). Only meaningful on an edge whose `to ===
+   *  'WAITING'` AND `action === 'UPDATE_STATUS'`. Mirrors `action`'s
+   *  sparse-on-the-wire, required-in-the-form lifecycle. */
+  readonly requeuePolicy?: RequeuePolicyDto;
 }
 
 export interface StateMachineDto {
@@ -150,7 +183,7 @@ export interface StateMachineDto {
  * Connection-point (handle) routing is now sourced from the form transitions
  * (`Transition.sourceSide`/`targetSide`) and persisted in the separate
  * {@link EdgeRoutingLayoutDto} map — NOT on the wire {@link StateTransitionDto}
- * (which carries `{ from, to, actionLabel, action }` only).
+ * (which carries `{ from, to, actionLabel, action, requeuePolicy }` only).
  */
 export type EdgeSide = 'top' | 'right' | 'bottom' | 'left';
 
@@ -532,11 +565,11 @@ export const DEFAULT_STATE_MACHINE: DefaultStateMachineDto = {
   // move. Stated explicitly rather than left to the wire default so the preset
   // reads as configuration, not as an omission.
   transitions: [
-    { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', action: 'UPDATE_STATUS' },
-    { from: 'CALLING', to: 'SERVING', actionLabel: 'Mulai Melayani', action: 'UPDATE_STATUS' },
-    { from: 'CALLING', to: 'SKIPPED', actionLabel: 'Lewati / Absen', action: 'UPDATE_STATUS' },
-    { from: 'SKIPPED', to: 'CALLING', actionLabel: 'Panggil Ulang', action: 'UPDATE_STATUS' },
-    { from: 'SERVING', to: 'COMPLETED', actionLabel: 'Selesai Layan', action: 'UPDATE_STATUS' },
+    { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
+    { from: 'CALLING', to: 'SERVING', actionLabel: 'Mulai Melayani', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
+    { from: 'CALLING', to: 'SKIPPED', actionLabel: 'Lewati / Absen', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
+    { from: 'SKIPPED', to: 'CALLING', actionLabel: 'Panggil Ulang', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
+    { from: 'SERVING', to: 'COMPLETED', actionLabel: 'Selesai Layan', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
   ],
   // No per-state description overrides — the canonical copy (describeState) is
   // the fallback for each of the 5 PRD §7 default statuses. `{}` = derive.

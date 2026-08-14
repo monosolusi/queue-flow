@@ -34,6 +34,7 @@ import {
 import {
   DEFAULT_STATE_MACHINE,
   type NodeActionDto,
+  type RequeuePolicyDto,
   type TransitionActionType,
 } from '../api/types';
 import { HANDLE_IDS, getSelfLoopPath, type FlowEdgeData, type FlowNodeData } from '../lib/state-machine-flow';
@@ -81,6 +82,16 @@ export interface WorkflowHandlers {
    * its endpoints.
    */
   onEditTransitionAction: (edgeId: string, action: TransitionActionType) => void;
+  /**
+   * Change what a `→ WAITING` re-queue does to queue order (see
+   * {@link RequeuePolicyDto}). Sits beside `onEditTransitionAction` for the same
+   * reason: the edge declares it, and the panel lifts it through the same
+   * canvas-edge `data` path so `flowToGraph` captures it back. Only meaningful
+   * on an edge whose `to === 'WAITING'` AND `action === 'UPDATE_STATUS'`; the
+   * panel renders the control only then, and `validateCustomStateMachine`
+   * rejects a mis-configured edge at save.
+   */
+  onEditTransitionRequeuePolicy: (edgeId: string, policy: RequeuePolicyDto) => void;
   onDeleteTransition: (edgeId: string) => void;
   /**
    * Re-point an edge's `from`/`to` endpoints from the properties panel. Guards

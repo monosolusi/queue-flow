@@ -1,24 +1,34 @@
+import type { RequeuePolicy } from '../shared/requeue-policy';
 import type { TransitionActionValue } from '../shared/transition-action';
 import type { StatusValue } from './value-objects/ticket-status';
 
 /**
  * One directed edge of the active state machine as the Queue context sees it:
  * a `from -> to` pair, the Indonesian caller-panel button label configured for
- * it (PRD §7), and the {@link TransitionAction} the manager declared for it. A
- * transport-agnostic, framework-free shape — deliberately NOT the Store-Config
- * `StateTransitionRule` value object, so enumerating the graph does not leak
- * Store-Config internals into the Queue context.
+ * it (PRD §7), the {@link TransitionAction} the manager declared for it, and
+ * the {@link RequeuePolicy} a `-> WAITING` edge applies to the WAITING queue's
+ * order. A transport-agnostic, framework-free shape — deliberately NOT the
+ * Store-Config `StateTransitionRule` value object, so enumerating the graph does
+ * not leak Store-Config internals into the Queue context.
  *
  * `action` is carried here rather than derived downstream because it is the
  * *only* thing that says what running the edge does. Reading it from the graph is
  * what stops the Queue context from inferring an edge's meaning from the name of
  * its target state (see {@link TransitionAction}).
+ *
+ * `requeuePolicy` is carried for the same reason: it is the only thing that says
+ * what an `-> WAITING` edge does to queue order, and reading it from the graph
+ * is what stops the Queue context from inferring it from the endpoints (a
+ * `CALLING -> WAITING` "Kembalikan ke Antrian" edge used to snap a re-queued
+ * ticket back to its original near-front FIFO slot — the manager never asked
+ * for that). KEEP on every edge that predates the field (backward-compat).
  */
 export interface TransitionDescriptor {
   readonly from: StatusValue;
   readonly to: StatusValue;
   readonly actionLabel: string;
   readonly action: TransitionActionValue;
+  readonly requeuePolicy: RequeuePolicy;
 }
 
 /**

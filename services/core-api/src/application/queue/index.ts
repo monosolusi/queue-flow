@@ -9,5 +9,6 @@ export * from './get-workflow-actions.use-case';
 export * from './list-categories.use-case';
 export * from './reannounce-ticket.use-case';
 export * from './reset-daily-queue.use-case';
+export * from './requeue-position.helper';
 export * from './ticket-state.dto';
 export * from './transfer-ticket.use-case';

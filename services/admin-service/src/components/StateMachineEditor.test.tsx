@@ -100,7 +100,7 @@ describe('StateMachineEditor (shared editor — wizard + AdminPanel)', () => {
     const customForm = { ...defaultStateMachineForm(), mode: 'custom' as const };
     const errors = validateCustomStateMachine({
       ...customForm,
-      transitions: [...customForm.transitions, { from: 'WAITING', to: 'CALLING', actionLabel: '', action: 'UPDATE_STATUS' as const }],
+      transitions: [...customForm.transitions, { from: 'WAITING', to: 'CALLING', actionLabel: '', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
     });
     expect(errors.length).toBeGreaterThan(0);
     renderEditor(customForm, errors);
@@ -141,7 +141,7 @@ describe('StateMachineEditor (shared editor — wizard + AdminPanel)', () => {
     renderEditor({
       mode: 'custom',
       states: ['WAITING', 'CALLING'],
-      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', action: 'UPDATE_STATUS' as const }],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    });
 
     const warning = screen.getByTestId('sm-standard-warning');
@@ -157,7 +157,7 @@ describe('StateMachineEditor (shared editor — wizard + AdminPanel)', () => {
     const value = {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING'],
-      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: '', action: 'UPDATE_STATUS' as const }],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: '', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderEditor(value, validateCustomStateMachine(value));
     expect(screen.getByTestId('sm-editor')).toHaveAttribute(

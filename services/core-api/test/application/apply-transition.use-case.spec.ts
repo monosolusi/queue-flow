@@ -3,7 +3,7 @@ import {
   InvalidArgumentException,
   InvalidStateTransitionException,
 } from '../../src/domain/shared/errors';
-import { TransitionAction } from '../../src/domain/shared';
+import { TransitionAction, RequeuePolicyKind, type RequeuePolicy } from '../../src/domain/shared';
 import { StateMachine, StateSchema, StateTransitionRule } from '../../src/domain/store-config';
 import {
   QueueTicket,
@@ -286,5 +286,240 @@ describe('ApplyTransitionUseCase (the single per-ticket transition command — F
     ).rejects.toBeInstanceOf(InvalidArgumentException);
     expect((await queue.findById(ticket.id))?.currentStatus).toBe('SERVING');
     expect(dispatcher.dispatch).not.toHaveBeenCalled();
+  });
+
+  describe('re-queue position policy (-> WAITING)', () => {
+    /**
+     * A flow whose `SERVING -> WAITING` edge carries a configurable re-queue
+     * position policy. Each test builds its own machine so the policy under test
+     * is on the edge the SERVING ticket transitions along.
+     */
+    function requeueMachine(policy: RequeuePolicy): StateMachine {
+      return new StateMachine(
+        StateSchema.of(['WAITING', 'CALLING', 'SERVING', 'SKIPPED', 'COMPLETED']),
+        [
+          StateTransitionRule.of('WAITING', 'CALLING', 'Panggil Berikutnya'),
+          StateTransitionRule.of('CALLING', 'SERVING', 'Mulai Melayani'),
+          StateTransitionRule.of('CALLING', 'SKIPPED', 'Lewati / Absen'),
+          StateTransitionRule.of('SKIPPED', 'CALLING', 'Panggil Ulang'),
+          StateTransitionRule.of('COMPLETED', 'WAITING', 'Kembalikan ke Antrian'),
+          StateTransitionRule.of(
+            'SERVING',
+            'WAITING',
+            'Kembalikan ke Antrian',
+            TransitionAction.UPDATE_STATUS,
+            policy,
+          ),
+        ],
+      );
+    }
+
+    /** A SERVING ticket in CAT-A, with a given `waitingOrder` from its first WAITING. */
+    function servingTicket(counterId = 1, waitingOrder = FIXED_NOW): QueueTicket {
+      const machine = requeueMachine({ kind: RequeuePolicyKind.KEEP, n: null });
+      const ticket = QueueTicket.create(
+        ticketIdGenerate(),
+        TicketNumber.of('A', 1),
+        'CAT-A',
+        FIXED_NOW,
+      );
+      // Force a specific `waitingOrder` via reconstitute so the test controls the
+      // pre-requeue FIFO slot exactly (the aggregate `create` sets it to `now`).
+      const reconstituted = QueueTicket.reconstitute({
+        id: ticket.id,
+        ticketNumber: ticket.ticketNumber,
+        categoryId: 'CAT-A',
+        status: 'WAITING',
+        counterId: null,
+        createdAt: FIXED_NOW,
+        updatedAt: FIXED_NOW,
+        waitingOrder,
+        calledAt: null,
+        servedAt: null,
+        completedAt: null,
+      });
+      reconstituted.markCalling(counterId, machine, FIXED_NOW + 1);
+      reconstituted.applyTransition('SERVING', machine, FIXED_NOW + 2);
+      return reconstituted;
+    }
+
+    /** A WAITING sibling in CAT-A at a specific `waitingOrder`. */
+    function waitingSibling(label: string, seq: number, waitingOrder: number): QueueTicket {
+      return QueueTicket.reconstitute({
+        id: ticketIdGenerate(),
+        ticketNumber: TicketNumber.of('A', seq),
+        categoryId: 'CAT-A',
+        status: 'WAITING',
+        counterId: null,
+        createdAt: waitingOrder,
+        updatedAt: waitingOrder,
+        waitingOrder,
+        calledAt: null,
+        servedAt: null,
+        completedAt: null,
+      });
+    }
+
+    async function requeueToWaiting(
+      machine: StateMachine,
+      ticket: QueueTicket,
+    ): Promise<void> {
+      const requeueUseCase = new ApplyTransitionUseCase(
+        queue,
+        fakePolicyResolver(machine),
+        dispatcher,
+        clock,
+      );
+      await requeueUseCase.execute({ ticketId: ticket.id, targetStatus: TicketStatus.WAITING });
+    }
+
+    it('KEEP — leaves the ticket in its current FIFO slot (backward-compat default)', async () => {
+      // A pre-existing config has no `requeuePolicy` key on the edge, so the VO
+      // defaults to KEEP — and the use case keeps the ticket's `waitingOrder`.
+      const machine = requeueMachine({ kind: RequeuePolicyKind.KEEP, n: null });
+      const before = [waitingSibling('a', 2, 1_000), waitingSibling('b', 3, 2_000)];
+      for (const t of before) await queue.save(t);
+      const ticket = servingTicket(1, 1_500);
+      await queue.save(ticket);
+
+      await requeueToWaiting(machine, ticket);
+
+      const reloaded = await queue.findById(ticket.id);
+      expect(reloaded?.currentStatus).toBe('WAITING');
+      expect(reloaded?.waitingOrder).toBe(1_500); // unchanged
+      // FIFO order after re-queue: a (1000), ticket (1500), b (2000).
+      const waiting = await queue.findWaitingByCategory('CAT-A');
+      expect(waiting.map((t) => t.ticketNumber.formatted())).toEqual(['A-002', 'A-001', 'A-003']);
+    });
+
+    it('TO_BACK — re-stamps to clock() and lands at the tail of its category', async () => {
+      const machine = requeueMachine({ kind: RequeuePolicyKind.TO_BACK, n: null });
+      const before = [waitingSibling('a', 2, 1_000), waitingSibling('b', 3, 2_000)];
+      for (const t of before) await queue.save(t);
+      const ticket = servingTicket(1, 1_500);
+      await queue.save(ticket);
+
+      await requeueToWaiting(machine, ticket);
+
+      const reloaded = await queue.findById(ticket.id);
+      expect(reloaded?.waitingOrder).toBe(FIXED_NOW + 10); // the clock's first tick
+      // FIFO order: a (1000), b (2000), ticket (FIXED_NOW+10 — largest).
+      const waiting = await queue.findWaitingByCategory('CAT-A');
+      expect(waiting.map((t) => t.ticketNumber.formatted())).toEqual(['A-002', 'A-003', 'A-001']);
+    });
+
+    it('BACK_N(1) — lands at index 1 via a midpoint when there is room', async () => {
+      const machine = requeueMachine({ kind: RequeuePolicyKind.BACK_N, n: 1 });
+      // 3 siblings at 1000-apart spacing — index 1 sits between 1000 and 2000.
+      const before = [
+        waitingSibling('a', 2, 0),
+        waitingSibling('b', 3, 1_000),
+        waitingSibling('c', 4, 2_000),
+      ];
+      for (const t of before) await queue.save(t);
+      const ticket = servingTicket(1, 999);
+      await queue.save(ticket);
+
+      await requeueToWaiting(machine, ticket);
+
+      const reloaded = await queue.findById(ticket.id);
+      expect(reloaded?.waitingOrder).toBe(500); // midpoint of 0 and 1000
+      const waiting = await queue.findWaitingByCategory('CAT-A');
+      expect(waiting.map((t) => t.ticketNumber.formatted())).toEqual([
+        'A-002',
+        'A-001',
+        'A-003',
+        'A-004',
+      ]);
+    });
+
+    it('BACK_N collision — renumbers the category (siblings written via assignWaitingOrders) atomically', async () => {
+      const machine = requeueMachine({ kind: RequeuePolicyKind.BACK_N, n: 1 });
+      // Two siblings at the same ms (100) — gap is 0, no midpoint ⇒ renumber.
+      const before = [
+        waitingSibling('a', 2, 100),
+        waitingSibling('b', 3, 100),
+        waitingSibling('c', 4, 5_000),
+      ];
+      for (const t of before) await queue.save(t);
+      const ticket = servingTicket(1, 50);
+      await queue.save(ticket);
+
+      const assignSpy = jest.spyOn(queue, 'assignWaitingOrders');
+
+      await requeueToWaiting(machine, ticket);
+
+      // The renumber path wrote the 3 siblings' waiting_order in one bulk call.
+      expect(assignSpy).toHaveBeenCalledTimes(1);
+      const assignments = assignSpy.mock.calls[0][0];
+      expect(assignments).toHaveLength(3);
+
+      const reloaded = await queue.findById(ticket.id);
+      // Post-insertion sequence: [a, ticket, b, c] anchored at 100, step 1000.
+      expect(reloaded?.waitingOrder).toBe(100 + 1000);
+      const waiting = await queue.findWaitingByCategory('CAT-A');
+      expect(waiting.map((t) => t.ticketNumber.formatted())).toEqual([
+        'A-002',
+        'A-001',
+        'A-003',
+        'A-004',
+      ]);
+      // Sibling a stayed at 100; b moved to 2100; c moved to 3100.
+      expect(waiting[0].waitingOrder).toBe(100);
+      expect(waiting[2].waitingOrder).toBe(100 + 2 * 1000);
+      expect(waiting[3].waitingOrder).toBe(100 + 3 * 1000);
+
+      assignSpy.mockRestore();
+    });
+
+    it('a non-WAITING target is unaffected by the re-queue policy (no waiting_order write)', async () => {
+      // A re-queue policy on a non-WAITING edge is never consulted. The
+      // `SERVING -> PREPARING` edge in CUSTOM_MACHINE has no requeuePolicy, but
+      // even a policy on it would be inert — only `targetStatus === WAITING`
+      // resolves and applies one.
+      const machine = requeueMachine({ kind: RequeuePolicyKind.TO_BACK, n: null });
+      // Use the custom machine's PREPARING edge (CUSTOM_MACHINE), not the requeue
+      // machine — prove the requeue policy stays inert on a non-WAITING target.
+      useCase = new ApplyTransitionUseCase(
+        queue,
+        fakePolicyResolver(CUSTOM_MACHINE),
+        dispatcher,
+        clock,
+      );
+      const ticket = servingTicket(1, 1_500);
+      await queue.save(ticket);
+
+      await useCase.execute({ ticketId: ticket.id, targetStatus: 'PREPARING' });
+
+      const reloaded = await queue.findById(ticket.id);
+      expect(reloaded?.currentStatus).toBe('PREPARING');
+      // No re-queue: waitingOrder is untouched (still the SERVING ticket's value).
+      expect(reloaded?.waitingOrder).toBe(1_500);
+      expect(dispatcher.dispatch).toHaveBeenCalledTimes(1);
+    });
+
+    it('a pre-existing config (no requeuePolicy key on the edge) reconstitutes as KEEP', async () => {
+      // CUSTOM_MACHINE's `SERVING -> WAITING` edge was built with
+      // `StateTransitionRule.of(from, to, label)` — no requeuePolicy arg — so the
+      // VO defaults it to KEEP (the single backward-compat boundary). Re-queueing
+      // via that flow leaves the ticket in its current FIFO slot.
+      const ticket = servingTicket(1, 1_500);
+      await queue.save(ticket);
+      const before = [waitingSibling('a', 2, 1_000), waitingSibling('b', 3, 2_000)];
+      for (const t of before) await queue.save(t);
+
+      useCase = new ApplyTransitionUseCase(
+        queue,
+        fakePolicyResolver(CUSTOM_MACHINE),
+        dispatcher,
+        clock,
+      );
+      await useCase.execute({ ticketId: ticket.id, targetStatus: TicketStatus.WAITING });
+
+      const reloaded = await queue.findById(ticket.id);
+      expect(reloaded?.waitingOrder).toBe(1_500); // KEEP — unchanged
+      const waiting = await queue.findWaitingByCategory('CAT-A');
+      expect(waiting.map((t) => t.ticketNumber.formatted())).toEqual(['A-002', 'A-001', 'A-003']);
+    });
   });
 });

@@ -4,9 +4,18 @@ import type {
   StatusValue,
   TicketId,
 } from '../../domain/queue';
-import { EntityNotFoundException } from '../../domain/shared';
-import { assertRunnableAsStatusChange } from './declared-transition-action';
+import { TicketStatus } from '../../domain/queue';
+import {
+  EntityNotFoundException,
+  ITransactionManager,
+  NoOpTransactionManager,
+} from '../../domain/shared';
+import { assertRunnableAsStatusChange, declaredRequeuePolicyFor } from './declared-transition-action';
 import { QueueEventDispatcher } from './queue-event-dispatcher';
+import {
+  computeRepositionPlan,
+  type RepositionPlan,
+} from './requeue-position.helper';
 import { TicketStateDto, projectTicketState } from './ticket-state.dto';
 
 /**
@@ -54,12 +63,30 @@ export type ApplyTransitionResult = {
  * transitions surface as {@link InvalidStateTransitionException} from the
  * aggregate (→ 409); a mis-routed one as `InvalidArgumentException` (→ 400).
  *
+ * ## Re-queue position policy (→ WAITING)
+ *
+ * When `targetStatus === WAITING`, the edge's {@link RequeuePolicy} (resolved
+ * from the active flow, never client-supplied — the REST command is unchanged)
+ * decides what the re-queue does to the WAITING queue's order:
+ * - `KEEP` — leave `waiting_order` unchanged (backward-compat).
+ * - `TO_BACK` — re-stamp to `clock()`.
+ * - `BACK_N(n)` — exact-rank insertion within the ticket's category (midpoint, or
+ *   a category-renumber fallback on collision). Siblings' `waiting_order` is
+ *   written via {@link IQueueRepository.assignWaitingOrders}.
+ *
+ * The re-queue + any sibling renumber run inside one
+ * {@link ITransactionManager.runInTransaction} so a durable implementation
+ * commits them atomically (NFR-REL-02 — a power cut between the re-queued
+ * ticket's save and a sibling renumber must not leave two tickets at the same
+ * rank or a half-renumbered category). The realtime broadcast is drained
+ * **after** the tx commits so a rolled-back reposition is never announced —
+ * mirrors `TransferTicketUseCase`. `txManager` defaults to a no-op so unit
+ * specs that construct the use case directly stay unbroken.
+ *
  * Depends only on ports (DIP): the active `StateMachine` is supplied by the
- * interface-adapter layer, not loaded here. No `ITransactionManager` — a status
- * update reserves no sequence number, so there is nothing to make atomic with it
- * (NFR-REL-02); the transfer command, which does reserve one, has one. Not
- * audited — routine queue transitions are out of the NFR-SEC-02 audit scope
- * (manual reset / config / cleanup only).
+ * interface-adapter layer, not loaded here. Not audited — routine queue
+ * transitions are out of the NFR-SEC-02 audit scope (manual reset / config /
+ * cleanup only).
  */
 export class ApplyTransitionUseCase {
   constructor(
@@ -67,28 +94,86 @@ export class ApplyTransitionUseCase {
     private readonly policyResolver: ITransitionPolicyResolver,
     private readonly dispatcher: QueueEventDispatcher,
     private readonly clock: () => number = () => Date.now(),
+    private readonly txManager: ITransactionManager = new NoOpTransactionManager(),
   ) {}
 
   public async execute(command: ApplyTransitionCommand): Promise<ApplyTransitionResult> {
     const transitionPolicy = await this.policyResolver.getActivePolicy();
-    const ticket = await this.queue.findById(command.ticketId);
-    if (!ticket) {
-      throw new EntityNotFoundException('QueueTicket', command.ticketId.value);
-    }
-    assertRunnableAsStatusChange(
-      transitionPolicy.describeGraph(),
-      ticket.currentStatus,
-      command.targetStatus,
-    );
-    ticket.applyTransition(
-      command.targetStatus,
-      transitionPolicy,
-      this.clock(),
-      command.counterId ?? null,
-    );
-    await this.queue.save(ticket);
+
+    // A -> WAITING re-queue resolves the edge's RequeuePolicy and may write
+    // siblings' waiting_order, so it needs the tx + a consistent snapshot of
+    // the ticket + its category-mates inside the tx. Other targets behave as
+    // before (no requeue policy); they are wrapped in the same tx for uniformity
+    // — a no-op tx manager makes that free, and a durable one keeps the snapshot
+    // consistent with the write.
+    const isRequeue = command.targetStatus === TicketStatus.WAITING;
+
+    const ticket = await this.txManager.runInTransaction(async () => {
+      const loaded = await this.queue.findById(command.ticketId);
+      if (!loaded) {
+        throw new EntityNotFoundException('QueueTicket', command.ticketId.value);
+      }
+      assertRunnableAsStatusChange(
+        transitionPolicy.describeGraph(),
+        loaded.currentStatus,
+        command.targetStatus,
+      );
+
+      let plan: RepositionPlan | null = null;
+      let waitingOrder: number | null = null;
+      if (isRequeue) {
+        const policy = declaredRequeuePolicyFor(
+          transitionPolicy.describeGraph(),
+          loaded.currentStatus,
+          TicketStatus.WAITING,
+        );
+        if (policy.kind === 'KEEP') {
+          waitingOrder = loaded.waitingOrder;
+        } else if (policy.kind === 'TO_BACK') {
+          waitingOrder = this.clock();
+        } else {
+          // BACK_N: compute a category-rank insertion plan. Load the category's
+          // waiting tickets (excluding the re-queued ticket) on the ambient tx
+          // client so the snapshot is consistent with the write (NFR-REL-02).
+          const categoryWaiting = (await this.queue.findWaitingByCategory(loaded.categoryId))
+            .filter((t) => t.id.value !== loaded.id.value);
+          plan = computeRepositionPlan(
+            policy,
+            { id: loaded.id.value, categoryId: loaded.categoryId, waitingOrder: loaded.waitingOrder },
+            categoryWaiting.map((t) => ({
+              id: t.id.value,
+              categoryId: t.categoryId,
+              waitingOrder: t.waitingOrder,
+            })),
+            this.clock(),
+          );
+          waitingOrder =
+            plan.kind === 'renumber' ? plan.repositionedWaitingOrder : plan.waitingOrder;
+        }
+      }
+
+      loaded.applyTransition(
+        command.targetStatus,
+        transitionPolicy,
+        this.clock(),
+        command.counterId ?? null,
+        waitingOrder,
+      );
+      await this.queue.save(loaded);
+      // BACK_N renumber fallback: write the siblings' waiting_order on the same
+      // ambient tx (NFR-REL-02 — atomic with the re-queued ticket's save). No
+      // events, no aggregate load — the repo writes only the ordering key.
+      if (plan?.kind === 'renumber') {
+        await this.queue.assignWaitingOrders(plan.siblingAssignments);
+      }
+      return loaded;
+    });
+
     // Drain the recorded events (STATUS_UPDATED, plus TICKET_CALLED when the
-    // ticket landed in CALLING) so they broadcast (FR-ENG-04).
+    // ticket landed in CALLING) so they broadcast (FR-ENG-04). Post-commit by
+    // design — a rolled-back reposition (the tx above would have thrown) never
+    // reaches here, so a rolled-back re-queue is never announced (NFR-REL-02),
+    // mirroring the transfer command.
     await this.dispatcher.dispatch(ticket);
     return { status: 'transitioned', ticket: projectTicketState(ticket) };
   }
