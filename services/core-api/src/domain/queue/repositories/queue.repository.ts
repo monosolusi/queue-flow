@@ -41,6 +41,19 @@ export interface IQueueRepository {
    */
   findActiveByCounter(counterId: number): Promise<QueueTicket[]>;
   /**
+   * Tickets this counter skipped and can still re-call — those in SKIPPED with
+   * that counter assigned, ordered by `updatedAt` asc (oldest skip first, the
+   * order staff work them back through). Scoped by **counter**, not by
+   * category, because `QueueTicket.skip` leaves `counterId` intact and
+   * `QueueTicket.recall` re-announces to that same counter: the counter that
+   * skipped a ticket is the one that can recall it ("Panggil Ulang", PRD §7).
+   * The read-side counterpart to {@link findActiveByCounter} for the caller
+   * workspace's skipped list — without it a SKIPPED ticket belongs to no
+   * snapshot bucket and the configured `SKIPPED -> CALLING` action is
+   * unreachable from the panel.
+   */
+  findSkippedByCounter(counterId: number): Promise<QueueTicket[]>;
+  /**
    * All WAITING tickets whose category is in `categoryIds`, ordered oldest
    * first (FIFO by `createdAt`). The multi-category read counterpart to
    * {@link findWaitingByCategory}; used by the caller workspace to render the

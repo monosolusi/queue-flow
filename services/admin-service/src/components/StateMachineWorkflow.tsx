@@ -85,8 +85,8 @@ import {
   END_NODE_ID,
   START_NODE_ID,
   TERMINAL_EDGE_TYPE,
+  decideConnectEnd,
   isDuplicateTransition,
-  rejectionMessageForConnection,
   type FlowEdge,
   type FlowNode,
 } from '../lib/state-machine-flow';
@@ -100,6 +100,44 @@ import {
 import { StateMachineWorkflowProperties } from './StateMachineWorkflowProperties';
 import { useToast } from '../toast/useToast';
 import './state-machine-workflow.css';
+
+/**
+ * The state node id under the pointer at the end of a connection drag, or
+ * `null` when the release was not over a node.
+ *
+ * **Why this exists.** React Flow reports `connectionState.toNode` only when the
+ * release landed on a HANDLE (it resolves the drop through
+ * `document.elementFromPoint` in `isValidHandle` and keys everything off the
+ * handle element it finds). The manager's actual gesture for a self-loop is
+ * "drag out of the status, drag back onto the status, release" — usually over
+ * the card BODY, not back on the 7px dot they started from. Without this the
+ * fix would exist but be nearly unfindable, and the same bug would be reported
+ * again.
+ *
+ * **The DOM contract used here is React Flow's own** (verified in
+ * `@xyflow/react` 12.11.2): every node wrapper is
+ * `<div class="react-flow__node …" data-id="{nodeId}">` — React Flow itself
+ * queries `.react-flow__node[data-id="…"]` internally, so it is a stable public
+ * surface, unlike `InternalNode.internals.positionAbsolute`.
+ *
+ * `changedTouches[0]` is the lifted finger on `touchend` (`touches` is empty by
+ * then) — the designer runs on a touch kiosk too.
+ *
+ * **This coordinate lookup is REAL-BROWSER-ONLY.** jsdom does not implement
+ * `document.elementFromPoint` at all (verified: it is `undefined`, not a stub),
+ * and it performs no layout, so a hit test cannot be exercised in the test
+ * environment — the `typeof` guard below is what keeps every existing
+ * `onConnectEnd` test from throwing. Tests stub `document.elementFromPoint` to
+ * cover the WIRING (that the resolved id reaches the decision); the hit test
+ * itself is browser-only, like the pointer-geometry drags this suite already
+ * documents as untestable.
+ */
+function nodeIdUnderPointer(event: MouseEvent | TouchEvent): string | null {
+  const point = 'changedTouches' in event ? event.changedTouches[0] : event;
+  if (!point || typeof document.elementFromPoint !== 'function') return null;
+  const target = document.elementFromPoint(point.clientX, point.clientY);
+  return target?.closest('.react-flow__node')?.getAttribute('data-id') ?? null;
+}
 
 export function StateMachineWorkflow({
   value,
@@ -453,28 +491,65 @@ export function StateMachineWorkflow({
     [edges],
   );
 
-  // Surface WHY a draw failed: when the manager drops a connection that
-  // `isValidConnection` rejected (a duplicate), show an info toast naming the
-  // pair — "Transisi dari X ke Y sudah ada." The toast auto-dismisses (info
-  // variant, 6s) so it notices without nagging. `isValid === false` ⟹ duplicate
-  // (our only rejection reason); the no-target (dropped in empty space) and
-  // no-connection cases return null (no toast — nothing was attempted). The
-  // decision is the pure `rejectionMessageForConnection` (unit-tested); this is
-  // the thin side-effect wrapper, kept out of the lib because `onConnectEnd`
-  // itself can't be exercised in jsdom.
+  // Two jobs at the end of a connection drag, both decided by the pure
+  // `decideConnectEnd` (unit-tested; this stays the thin side-effect wrapper
+  // because a real drag needs pointer geometry jsdom cannot provide):
+  //
+  //  1. SELF-LOOP fallback. A drag out of a node's handle and back onto the
+  //     SAME handle — the natural "buat self-loop" gesture — is rejected inside
+  //     React Flow (`isValidHandle` under `ConnectionMode.Loose` requires a
+  //     different node OR a different handle), so `onConnect` never fires and
+  //     the manager sees nothing happen. React Flow reports the landing node
+  //     (`connectionState.toNode`) only when the release was ON A HANDLE, so
+  //     `nodeIdUnderPointer` resolves the release point from the DOM for the
+  //     far more common "released somewhere on my own card" gesture. Either way
+  //     we create the self-loop here with two distinct adjacent handles.
+  //     `isValid === true` means React Flow already committed the edge through
+  //     `onConnect` (a drop on a DIFFERENT handle of the same node is valid),
+  //     and `decideConnectEnd` returns `none` for that — never a double-create.
+  //  2. Surface WHY a draw failed: when the drop was rejected (a duplicate),
+  //     show an info toast naming the pair — "Transisi dari X ke Y sudah ada."
+  //     The toast auto-dismisses (info variant, 6s) so it notices without
+  //     nagging. The no-target (dropped in empty space) and no-connection cases
+  //     produce no toast — nothing was attempted.
   const onConnectEnd = useCallback<OnConnectEnd>(
-    (_event: MouseEvent | TouchEvent, connectionState: FinalConnectionState) => {
-      const message = rejectionMessageForConnection(
+    (event: MouseEvent | TouchEvent, connectionState: FinalConnectionState) => {
+      const toId = connectionState.toNode?.id ?? null;
+      const decision = decideConnectEnd(
         {
           isValid: connectionState.isValid,
           fromId: connectionState.fromNode?.id ?? null,
-          toId: connectionState.toNode?.id ?? null,
+          toId,
+          fromHandleId: connectionState.fromHandle?.id ?? null,
+          // Only consulted when React Flow resolved no target node — i.e. the
+          // release was not on a handle. Skipping the DOM hit-test otherwise
+          // keeps the common path free of an extra layout read.
+          pointerNodeId: toId === null ? nodeIdUnderPointer(event) : null,
         },
         edges,
       );
-      if (message) toast.show(message, { variant: 'info', durationMs: 6000 });
+      if (decision.kind === 'message') {
+        toast.show(decision.message, { variant: 'info', durationMs: 6000 });
+        return;
+      }
+      if (decision.kind === 'self-loop') {
+        const newEdge: FlowEdge = {
+          id: mintEdgeId(),
+          source: decision.source,
+          target: decision.source,
+          type: 'transition',
+          data: { actionLabel: '' },
+          // Two DISTINCT adjacent sides (the dragged-from side + the next one
+          // clockwise) so the loop has two real endpoints and `TransitionEdge`
+          // arcs it around that corner, clear of the card.
+          sourceHandle: decision.sourceHandle,
+          targetHandle: decision.targetHandle,
+          markerEnd: EDGE_ARROW_MARKER,
+        };
+        commit(nodes, [...edges, newEdge]);
+      }
     },
-    [edges, toast],
+    [edges, nodes, commit, mintEdgeId, toast],
   );
 
   // Add a new state node (drag-drop + button share this). When `name` is

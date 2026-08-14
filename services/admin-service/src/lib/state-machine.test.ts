@@ -9,7 +9,10 @@ import {
   defaultStateMachineForm,
   describeState,
   descriptionFor,
+  deriveAutoSinks,
+  deriveAutoSources,
   graphSignature,
+  stateDegrees,
   isDefaultGraph,
   mergeEdgeSides,
   missingCanonicalStates,
@@ -906,5 +909,66 @@ describe('isDefaultGraph with endSources', () => {
     const states = [...DEFAULT_STATE_MACHINE.states];
     const transitions = DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t }));
     expect(isDefaultGraph(states, transitions, {}, DEFAULT_TERMINAL_NODES, [])).toBe(true);
+  });
+});
+
+describe('stateDegrees / deriveAutoSources / deriveAutoSinks (the shared degree predicates)', () => {
+  it('counts a normal transition on both ends', () => {
+    const { inDeg, outDeg } = stateDegrees(['A', 'B'], [{ from: 'A', to: 'B' }]);
+    expect(outDeg.get('A')).toBe(1);
+    expect(inDeg.get('A')).toBe(0);
+    expect(inDeg.get('B')).toBe(1);
+    expect(outDeg.get('B')).toBe(0);
+  });
+
+  it('counts a SELF-LOOP toward NEITHER degree', () => {
+    // The core of the fix: flow that leaves a status and returns to it brings
+    // nothing into the graph and takes nothing out.
+    const { inDeg, outDeg } = stateDegrees(['A'], [{ from: 'A', to: 'A' }]);
+    expect(inDeg.get('A')).toBe(0);
+    expect(outDeg.get('A')).toBe(0);
+  });
+
+  it('ignores a transition referencing a state not in the schema', () => {
+    const { inDeg, outDeg } = stateDegrees(['A'], [{ from: 'A', to: 'GONE' }]);
+    expect(outDeg.get('A')).toBe(0);
+    expect(inDeg.get('A')).toBe(0);
+  });
+
+  it('derives the default graph sources/sinks (WAITING in, COMPLETED out)', () => {
+    expect(deriveAutoSources([...DEFAULT_STATE_MACHINE.states], DEFAULT_STATE_MACHINE.transitions)).toEqual([
+      'WAITING',
+    ]);
+    expect(deriveAutoSinks([...DEFAULT_STATE_MACHINE.states], DEFAULT_STATE_MACHINE.transitions)).toEqual([
+      'COMPLETED',
+    ]);
+  });
+
+  it('keeps a source a source and a sink a sink when either grows a self-loop', () => {
+    const states = ['A', 'B'];
+    const transitions = [
+      { from: 'A', to: 'B' },
+      { from: 'A', to: 'A' },
+      { from: 'B', to: 'B' },
+    ];
+    expect(deriveAutoSources(states, transitions)).toEqual(['A']);
+    expect(deriveAutoSinks(states, transitions)).toEqual(['B']);
+  });
+
+  it('treats a self-loop-ONLY state as isolated (neither a source nor a sink)', () => {
+    const states = ['A', 'B', 'LOOPY'];
+    const transitions = [
+      { from: 'A', to: 'B' },
+      { from: 'LOOPY', to: 'LOOPY' },
+    ];
+    expect(deriveAutoSources(states, transitions)).toEqual(['A']);
+    expect(deriveAutoSinks(states, transitions)).toEqual(['B']);
+  });
+
+  it('treats a not-yet-wired state as isolated (the PR #103 invariant)', () => {
+    const states = ['A', 'B', 'STRAY'];
+    const transitions = [{ from: 'A', to: 'B' }];
+    expect(deriveAutoSources(states, transitions)).toEqual(['A']);
+    expect(deriveAutoSinks(states, transitions)).toEqual(['B']);
   });
 });

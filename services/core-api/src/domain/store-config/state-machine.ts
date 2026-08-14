@@ -1,4 +1,8 @@
-import type { ITransitionPolicy } from '../queue/state-machine.port';
+import type {
+  ITransitionGraphSource,
+  ITransitionPolicy,
+  TransitionGraph,
+} from '../queue/state-machine.port';
 import type { StatusValue } from '../queue/value-objects/ticket-status';
 import { InvalidValueObjectException } from '../shared/errors';
 import { StateSchema } from './value-objects/state-schema';
@@ -12,12 +16,15 @@ import { StateDescriptions } from './value-objects/state-descriptions';
  * metadata that is part of the state-machine definition). Implements the Queue
  * context's {@link ITransitionPolicy} port (DIP) so the QueueTicket aggregate
  * can ask "is this transition allowed?" without depending on Store Config
- * internals beyond this contract. The {@link ITransitionPolicy} methods
+ * internals beyond this contract, plus the segregated
+ * {@link ITransitionGraphSource} the read side enumerates through — two ports,
+ * one implementation, because both views must come from one consistent
+ * configuration. The {@link ITransitionPolicy} methods
  * (`isAllowed`/`actionLabelFor`) do NOT touch `descriptions` — they are an
  * additional member, so the transition-policy contract is unchanged (DIP
- * preserved: the Queue context depends on the port, not on `StateMachine`).
+ * preserved: the Queue context depends on the ports, not on `StateMachine`).
  */
-export class StateMachine implements ITransitionPolicy {
+export class StateMachine implements ITransitionPolicy, ITransitionGraphSource {
   private readonly rulesByEdge: Map<string, StateTransitionRule>;
 
   constructor(
@@ -68,6 +75,24 @@ export class StateMachine implements ITransitionPolicy {
 
   public actionLabelFor(from: StatusValue, to: StatusValue): string | undefined {
     return this.rulesByEdge.get(StateMachine.edgeKey(from, to))?.actionLabel;
+  }
+
+  /**
+   * Projects this machine onto the Queue context's framework-free
+   * {@link TransitionGraph} shape — the node set plus every edge, in
+   * configuration order. `descriptions` / `stateSchema` / `StateTransitionRule`
+   * stay behind the boundary: the read side gets plain `from`/`to`/
+   * `actionLabel` triples, never Store-Config value objects.
+   */
+  public describeGraph(): TransitionGraph {
+    return {
+      states: this.schema.states,
+      transitions: this.rules.map((rule) => ({
+        from: rule.from,
+        to: rule.to,
+        actionLabel: rule.actionLabel,
+      })),
+    };
   }
 
   public get transitions(): readonly StateTransitionRule[] {

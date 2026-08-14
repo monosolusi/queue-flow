@@ -1,5 +1,6 @@
 import { BadRequestException, Body, Controller, Param, Post, UseGuards } from '@nestjs/common';
 import {
+  acceptsGenericTransitionTarget,
   ApplyTransitionUseCase,
   CallNextTicketUseCase,
   CompleteTicketUseCase,
@@ -10,7 +11,7 @@ import {
   TransferTicketUseCase,
 } from '../../application/queue';
 import { toDateKey } from '../../application/shared/date';
-import { isCanonicalStatus, ticketIdOf } from '../../domain/queue';
+import { ticketIdOf } from '../../domain/queue';
 import { Role } from '../../domain/identity';
 import { AuthGuard } from '../auth/auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -121,7 +122,11 @@ export class QueueCommandsController {
    * canonical target is rejected with 400 so a direct API call cannot bypass
    * those named transitions and silently corrupt the QUE-26 analytics data
    * model (e.g. a `COMPLETED` reached via this path would leave `completedAt`
-   * null). The caller mirrors this routing client-side via `COMMAND_BY_TARGET`.
+   * null). That admission rule is {@link acceptsGenericTransitionTarget} — the
+   * same function `GetWorkflowActionsUseCase` consults when it tells the caller
+   * which edges the `APPLY_TRANSITION` command realizes, so the endpoint and the
+   * published routing cannot drift. The caller no longer routes edges itself: it
+   * renders the command `GET /api/queue/actions` names for each edge.
    */
   @Post(':ticketId/transition')
   transition(
@@ -135,7 +140,7 @@ export class QueueCommandsController {
       );
     }
     const target = targetStatus.trim();
-    if (isCanonicalStatus(target)) {
+    if (!acceptsGenericTransitionTarget(target)) {
       throw new BadRequestException(
         `targetStatus '${target}' has a dedicated command endpoint; use that instead`,
       );

@@ -244,6 +244,120 @@ button {
   font-weight: 700;
 }
 
+/* A flow with outgoing WAITING transitions turns each row into a ticket + its
+   action buttons, so the rows need room the number-only grid never did. */
+.waiting-queue__list--actionable {
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+}
+.waiting-queue__item--actionable {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.75rem;
+  text-align: center;
+}
+.waiting-queue__error {
+  color: var(--danger-on-surface);
+  font-size: 0.9rem;
+  font-weight: 400;
+  margin: 1rem 0 0;
+}
+/* A tap turned away because another row's command is still running — a hint,
+   not a failure, so it is muted rather than danger-coloured. */
+.waiting-queue__notice {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-weight: 400;
+  margin: 1rem 0 0;
+}
+
+/* Tickets skipped at this counter ("Lewati / Absen"), kept on screen so the
+   flow's SKIPPED transitions — "Panggil Ulang" in the PRD §7 default — stay
+   tappable. Same shape as the waiting list, dimmer: it is a secondary surface. */
+.skipped-queue {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.5rem;
+}
+.skipped-queue__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.skipped-queue__title {
+  font-size: 1.25rem;
+  margin: 0;
+}
+.skipped-queue__count,
+.skipped-queue__hint {
+  color: var(--text-muted);
+}
+.skipped-queue__hint {
+  font-size: 0.9rem;
+  margin: 0.5rem 0 0;
+}
+.skipped-queue__empty {
+  color: var(--text-muted);
+  padding: 1rem 0;
+  text-align: center;
+}
+.skipped-queue__list {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr));
+  gap: 0.75rem;
+  padding: 0;
+  margin: 1rem 0 0;
+}
+.skipped-queue__list--actionable {
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+}
+.skipped-queue__item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+.skipped-queue__item--actionable {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.75rem;
+  text-align: center;
+}
+.skipped-queue__error {
+  color: var(--danger-on-surface);
+  font-size: 0.9rem;
+  font-weight: 400;
+  margin: 1rem 0 0;
+}
+.skipped-queue__notice {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-weight: 400;
+  margin: 1rem 0 0;
+}
+
+/* The per-row action cluster, shared by every queue list (see
+   TicketRowActions) so the rows cannot drift apart visually. */
+.ticket-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+  font-size: 1rem;
+  font-weight: 400;
+}
+.ticket-actions__button {
+  flex: 1 1 auto;
+}
+.ticket-actions__button--unavailable {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .action-controls {
   display: flex;
   flex-wrap: wrap;
@@ -263,24 +377,71 @@ button {
   font-size: 0.95rem;
   margin: 0;
 }
+/* A tap turned away while another command is in flight — a hint, not a failure. */
+.action-controls__notice {
+  flex-basis: 100%;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  margin: 0;
+}
 
-/* A configured transition whose target state has no backing command endpoint
- * (a custom target like PREPARING). Visible but non-interactive until a
- * generic apply-transition endpoint lands. */
+/* The flow cluster: one button per outgoing transition of the active ticket's
+ * status. Wraps as a row so it reads as one set of choices. */
+.action-controls__flow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+/* "Panggil Lagi" — a utility, not a transition. Separated from the flow cluster
+ * (its own labelled group + a divider) so the flow buttons stay a faithful
+ * picture of the admin-designed graph. */
+.action-controls__utilities {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding-left: 0.75rem;
+  border-left: 1px solid var(--surface-2);
+}
+
+/* A transition the flow configures but the counter panel cannot execute
+ * (e.g. an edge back into "memanggil" from a served ticket — core-api has no
+ * command for it). Rendered disabled with the reason so a configured edge is
+ * never silently missing. */
+.action-controls__unroutable {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-width: 22rem;
+}
+.action-controls__unroutable-note {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin: 0;
+}
 .action-controls__unsupported {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-/* Transfer ("Pindah Kategori") with ≥2 candidate destinations: the button
- * toggles an inline chooser so staff pick the destination category. */
-.action-controls__transfer {
+/* Transfer ("Pindah Kategori"): shared by the action panel and the waiting rows.
+ * With ≥2 candidate destinations the button toggles an inline chooser so staff
+ * pick the destination category. */
+.transfer-action {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
   align-items: stretch;
 }
-.action-controls__transfer-chooser {
+.transfer-action__btn {
+  min-width: 9rem;
+}
+.transfer-action__btn--unavailable {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.transfer-action__chooser {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
@@ -289,7 +450,7 @@ button {
   border-radius: var(--radius);
   background: var(--surface);
 }
-.action-controls__transfer-option {
+.transfer-action__option {
   min-width: 8rem;
 }
 

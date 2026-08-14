@@ -4,8 +4,9 @@
  * (a designer-style visual/source toggle).
  *
  * Purely presentational: it renders a controlled `<textarea>` carrying the
- * serialized graph (an XML document with `<state>` x/y positions + `<transition>`
- * connection sides + from→to direction) plus an inline error region. **All
+ * serialized graph (a Liferay Kaleo `<workflow-definition>` document — one
+ * `<task>`/`<state>` per status with its transitions nested inside, see
+ * `state-machine-xml.ts`) plus an inline error region. **All
  * parsing/validation lives in the designer page** — this component never calls
  * `DOMParser` or `xmlToForm`. Keeping the textarea dumb means a half-typed
  * document can never crash it: the designer live-parses on every `onChange`,
@@ -22,9 +23,10 @@
  *
  * **Connector legend (`connectors`).** Manager feedback: the raw source did
  * not explain which point connects to which (`tidak dijelaskan ini konek pada
- * titik yang mana ke titik yang mana, jadinya ruwet`). The `from`/`to`
- * attributes encode a directed connector (panah) but that direction is
- * invisible in a flat element list. So this view renders a read-only legend of
+ * titik yang mana ke titik yang mana, jadinya ruwet`). In the Kaleo shape the
+ * source status is the CONTAINING element and the destination is `<target>`, so
+ * a connector's direction is spread across two nesting levels and still not
+ * readable at a glance. So this view renders a read-only legend of
  * the connectors — one chip per transition, `from → to · actionLabel` —
  * between the hint and the textarea. The legend is a VIEW over the SAME
  * last-valid draft the diagram shows (passed in as `connectors`); it never
@@ -66,15 +68,21 @@ export function StateMachineSource({
         Sumber XML alur status
       </label>
       <p className="sm-source__hint">
-        Tiap transisi adalah <strong>konektor (panah)</strong> dari satu titik
-        status ke titik status lain: <code>&lt;transition from="…" to="…"
-        actionLabel="…"/&gt;</code>. Atribut <code>sourceSide</code>/{' '}
-        <code>targetSide</code> opsional:{' '}
-        <code>"top"</code>|<code>"right"</code>|<code>"bottom"</code>|<code>"left"</code>{' '}
-        (default <code>right</code>→<code>left</code>); menentukan titik sambungan
-        saat digambar ulang. Tiap <code>&lt;state name="…" x="…" y="…"/&gt;</code>{' '}
-        menyimpan posisi simpul di kanvas. Mengubah sumber ini menyusun alur
-        kustom sendiri.
+        Format mengikuti <strong>Liferay Kaleo</strong> (
+        <code>&lt;workflow-definition&gt;</code>). Tiap status jadi satu blok:{' '}
+        <code>&lt;task&gt;</code> bila masih punya transisi keluar,{' '}
+        <code>&lt;state&gt;</code> bila status akhir — nama statusnya ada di{' '}
+        <code>&lt;name&gt;</code>. Tiap transisi adalah{' '}
+        <strong>konektor (panah)</strong> yang ditulis <em>di dalam</em> status
+        asalnya: <code>&lt;target&gt;</code> menyebut status tujuan, dan{' '}
+        <code>&lt;label&gt;</code> adalah teks tombolnya di layar petugas.
+        Hal-hal yang tidak punya tempat di Kaleo — posisi di kanvas (
+        <code>xy</code>), keterangan status, titik sambungan (
+        <code>sourceSide</code>/<code>targetSide</code>:{' '}
+        <code>"top"</code>|<code>"right"</code>|<code>"bottom"</code>|
+        <code>"left"</code>, default <code>right</code>→<code>left</code>) —
+        disimpan sebagai JSON di dalam <code>&lt;metadata&gt;</code>. Mengubah
+        sumber ini menyusun alur kustom sendiri.
       </p>
 
       {/* Connector legend — the "indikator konektor" (from → to) the manager

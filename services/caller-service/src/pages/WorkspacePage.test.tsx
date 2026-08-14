@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { WorkspacePage } from './WorkspacePage';
 import { AuthProvider } from '../auth/useAuth';
@@ -7,6 +8,7 @@ import { QueueStoreProvider } from '../state/queue-store';
 import type { BoundCounter } from '../state/counter-binding';
 import type { ICallerApi } from '../api/caller-api';
 import type { QueueLifecycleWireEvent, QueueSnapshotDto } from '../api/types';
+import { PRD_DEFAULT_WORKFLOW, edge, workflowActions } from '../test/workflow-fixtures';
 
 /** A controllable WebSocket transport the provider's QueueSocket wraps. */
 class FakeWebSocket {
@@ -49,25 +51,15 @@ const snapshot: QueueSnapshotDto = {
   waiting: [
     { ticketId: 'w1', ticketNumber: 'A-002', categoryId: 'cat-a', status: 'WAITING', counterId: null },
   ],
+  skipped: [],
   waitingCount: 1,
-};
-
-const defaultStateMachine = {
-  states: ['WAITING', 'CALLING', 'SERVING', 'SKIPPED', 'COMPLETED'],
-  transitions: [
-    { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' },
-    { from: 'CALLING', to: 'SERVING', actionLabel: 'Mulai Melayani' },
-    { from: 'CALLING', to: 'SKIPPED', actionLabel: 'Lewati / Absen' },
-    { from: 'SKIPPED', to: 'CALLING', actionLabel: 'Panggil Ulang' },
-    { from: 'SERVING', to: 'COMPLETED', actionLabel: 'Selesai Layan' },
-  ],
 };
 
 function makeApi(snap: QueueSnapshotDto = snapshot): ICallerApi {
   return {
     listCounters: () => Promise.resolve([]),
     getQueueSnapshot: vi.fn(() => Promise.resolve(snap)),
-    getActiveStateMachine: vi.fn(() => Promise.resolve(defaultStateMachine)),
+    getWorkflowActions: vi.fn(() => Promise.resolve(PRD_DEFAULT_WORKFLOW)),
     callNext: vi.fn(() => Promise.resolve()),
     serve: vi.fn(() => Promise.resolve()),
     complete: vi.fn(() => Promise.resolve()),
@@ -175,11 +167,165 @@ describe('WorkspacePage', () => {
     expect(onUnbind).toHaveBeenCalledTimes(1);
   });
 
+  it('drives the waiting rows from the same flow it drives the action panel with', async () => {
+    // The manager's rule end-to-end: one flow fetch feeds both the panel (the
+    // active ticket's outgoing edges) and each waiting row (WAITING's outgoing
+    // edges, minus the counter-level call-next).
+    const api = makeApi(snapshot);
+    api.getWorkflowActions = vi.fn(() =>
+      Promise.resolve(
+        workflowActions(
+          edge('WAITING', 'CALLING', 'Panggil Berikutnya', 'CALL_NEXT'),
+          edge('WAITING', 'BATAL', 'Batalkan Tiket', 'APPLY_TRANSITION'),
+          edge('CALLING', 'SERVING', 'Mulai Melayani', 'SERVE'),
+        ),
+      ),
+    );
+    render(
+      <MemoryRouter>
+        <AuthProvider api={api}>
+          <QueueStoreProvider bound={bound} api={api} socketOptions={socketOptions}>
+            <WorkspacePage bound={bound} onUnbind={vi.fn()} />
+          </QueueStoreProvider>
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+    // The waiting ticket (w1) offers WAITING → BATAL, and only that edge.
+    const cancel = await screen.findByTestId('waiting-action-w1-BATAL');
+    expect(cancel).toHaveTextContent('Batalkan Tiket');
+    // The active ticket (CALLING) offers its own outgoing edge in the panel.
+    expect(screen.getByTestId('action-serve')).toHaveTextContent('Mulai Melayani');
+    // A single fetch serves both.
+    expect(api.getWorkflowActions).toHaveBeenCalledTimes(1);
+
+    await userEvent.click(cancel);
+    expect(api.applyTransition).toHaveBeenCalledWith('w1', 'BATAL');
+  });
+
+  it('keeps a skipped ticket on the panel so staff can actually recall it (the real path)', async () => {
+    // End-to-end through the store, not a hand-built SKIPPED prop: staff taps
+    // "Lewati / Absen", core-api broadcasts the resulting lifecycle event, and
+    // the ticket must land on a surface that offers the flow's SKIPPED edge.
+    // Previously the reducer dropped it and "Panggil Ulang" — published by
+    // `GET /api/queue/actions` — was unreachable from every screen.
+    const { api } = renderWorkspace();
+    await screen.findByText('A-001');
+    await userEvent.click(screen.getByTestId('action-skip'));
+    expect(api.skip).toHaveBeenCalledWith('a1');
+
+    FakeWebSocket.last!.send(wireEvent('STATUS_UPDATED', 'a1', { from: 'CALLING', to: 'SKIPPED' }));
+
+    // It left the counter…
+    expect(await screen.findByText(/Belum ada tiket aktif/i)).toBeInTheDocument();
+    // …onto the skipped list, with the flow's own wording for SKIPPED → CALLING.
+    const skippedList = screen.getByRole('region', { name: 'Tiket Dilewati' });
+    expect(skippedList).toHaveTextContent('A-001');
+    const recall = screen.getByTestId('skipped-action-a1-CALLING');
+    expect(skippedList).toContainElement(recall);
+    expect(recall).toHaveTextContent('Panggil Ulang');
+    expect(recall).not.toBeDisabled();
+
+    // And tapping it issues the recall command for that ticket.
+    await userEvent.click(recall);
+    expect(api.recall).toHaveBeenCalledWith('a1');
+
+    // The recall's own events bring the ticket back to the counter.
+    FakeWebSocket.last!.send(wireEvent('STATUS_UPDATED', 'a1', { from: 'SKIPPED', to: 'CALLING' }));
+    FakeWebSocket.last!.send(wireEvent('TICKET_CALLED', 'a1', { ticketNumber: 'A-001', counterId: 1 }));
+    await waitFor(() =>
+      expect(screen.queryByTestId('skipped-action-a1-CALLING')).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole('region', { name: 'Tiket Dilewati' })).toHaveTextContent(
+      'Tidak ada tiket yang dilewati.',
+    );
+    expect(screen.getByTestId('action-serve')).toBeInTheDocument();
+  });
+
+  it('shows the skipped list empty rather than hiding it', async () => {
+    renderWorkspace();
+    await screen.findByText('A-001');
+    const skippedList = screen.getByRole('region', { name: 'Tiket Dilewati' });
+    expect(skippedList).toHaveTextContent('Tidak ada tiket yang dilewati.');
+    expect(skippedList).toHaveTextContent('0 tiket');
+  });
+
+  it('seeds the skipped list from the snapshot (a reload keeps skipped tickets)', async () => {
+    // A counter reloading its panel must not lose the tickets it skipped —
+    // core-api returns them in the snapshot's third bucket.
+    renderWorkspace({
+      counterId: 1,
+      active: [],
+      waiting: [],
+      skipped: [
+        { ticketId: 's1', ticketNumber: 'A-007', categoryId: 'cat-a', status: 'SKIPPED', counterId: 1 },
+      ],
+      waitingCount: 0,
+    });
+    expect(await screen.findByTestId('skipped-action-s1-CALLING')).toHaveTextContent('Panggil Ulang');
+  });
+
+  it('renders the skipped rows in skip order, not ticket-number order', async () => {
+    // What the staff's finger sees. B-003 is skipped first, so it stays above
+    // A-011 even though the ticket numbers sort the other way — and that is also
+    // the order a reload gets back (the server sends this bucket updatedAt asc).
+    // A row that moves while a finger is reaching for it is a mis-tap onto the
+    // wrong customer's "Panggil Ulang".
+    renderWorkspace({ counterId: 1, active: [], waiting: [], skipped: [], waitingCount: 0 });
+    await screen.findByText(/Belum ada tiket aktif/i);
+    FakeWebSocket.last!.send(wireEvent('TICKET_CALLED', 'sb', { ticketNumber: 'B-003', counterId: 1 }));
+    FakeWebSocket.last!.send(wireEvent('STATUS_UPDATED', 'sb', { from: 'CALLING', to: 'SKIPPED' }));
+    FakeWebSocket.last!.send(wireEvent('TICKET_CALLED', 'sa', { ticketNumber: 'A-011', counterId: 1 }));
+    FakeWebSocket.last!.send(wireEvent('STATUS_UPDATED', 'sa', { from: 'CALLING', to: 'SKIPPED' }));
+
+    const list = screen.getByRole('region', { name: 'Tiket Dilewati' });
+    await waitFor(() => expect(list.querySelectorAll('.skipped-queue__number')).toHaveLength(2));
+    expect(
+      Array.from(list.querySelectorAll('.skipped-queue__number')).map((n) => n.textContent),
+    ).toEqual(['B-003', 'A-011']);
+  });
+
+  it('drives the skipped rows from the same flow as every other surface', async () => {
+    // No special case for recall: the skipped row's buttons are exactly the
+    // outgoing transitions of SKIPPED, with the manager's wording and commands.
+    const api = makeApi({
+      counterId: 1,
+      active: [],
+      waiting: [],
+      skipped: [
+        { ticketId: 's1', ticketNumber: 'A-007', categoryId: 'cat-a', status: 'SKIPPED', counterId: 1 },
+      ],
+      waitingCount: 0,
+    });
+    api.getWorkflowActions = vi.fn(() =>
+      Promise.resolve(
+        workflowActions(
+          edge('SKIPPED', 'CALLING', 'Panggil Lagi Yang Absen', 'RECALL'),
+          edge('SKIPPED', 'BATAL', 'Batalkan Tiket', 'APPLY_TRANSITION'),
+        ),
+      ),
+    );
+    render(
+      <MemoryRouter>
+        <AuthProvider api={api}>
+          <QueueStoreProvider bound={bound} api={api} socketOptions={socketOptions}>
+            <WorkspacePage bound={bound} onUnbind={vi.fn()} />
+          </QueueStoreProvider>
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+    const row = await screen.findByRole('group', { name: 'Aksi untuk tiket A-007' });
+    expect(row).toHaveTextContent('Panggil Lagi Yang Absen');
+    expect(row).toHaveTextContent('Batalkan Tiket');
+    await userEvent.click(screen.getByTestId('skipped-action-s1-BATAL'));
+    expect(api.applyTransition).toHaveBeenCalledWith('s1', 'BATAL');
+  });
+
   it('shows an empty active state for a counter with no active ticket', async () => {
     renderWorkspace({
       counterId: 1,
       active: [],
       waiting: [{ ticketId: 'w1', ticketNumber: 'A-002', categoryId: 'cat-a', status: 'WAITING', counterId: null }],
+      skipped: [],
       waitingCount: 1,
     });
     expect(await screen.findByText(/Belum ada tiket aktif/i)).toBeInTheDocument();

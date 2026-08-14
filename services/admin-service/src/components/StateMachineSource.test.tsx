@@ -33,6 +33,36 @@ describe('StateMachineSource (XML Source view)', () => {
     );
     expect(screen.getByText('Sumber XML alur status')).toBeInTheDocument();
   });
+
+  it('explains the Kaleo shape in the hint (which element is a status, where a transition lives)', () => {
+    // The format changed from the former QMS-custom `<stateMachine>` shape to a
+    // Liferay Kaleo `<workflow-definition>`, so the manager-facing hint has to
+    // explain the new one: a status is a <task> or a <state>, a transition is
+    // nested inside its SOURCE status, and everything Kaleo has no slot for
+    // rides <metadata>. SME-friendly Indonesian — no XPath, no jargon.
+    render(
+      <StateMachineSource
+        sourceText='<?xml version="1.0"?><workflow-definition/>'
+        onSourceChange={() => {}}
+        error={null}
+        connectors={DEFAULT_CONNECTORS}
+      />,
+    );
+    const hint = document.querySelector('.sm-source__hint');
+    expect(hint).not.toBeNull();
+    const text = hint!.textContent ?? '';
+    expect(text).toContain('Liferay Kaleo');
+    expect(text).toContain('<workflow-definition>');
+    expect(text).toContain('<task>');
+    expect(text).toContain('<state>');
+    expect(text).toContain('<target>');
+    expect(text).toContain('<metadata>');
+    // The load-bearing fact: the label IS the Caller's button text.
+    expect(text).toContain('layar petugas');
+    // The former shape's vocabulary is gone.
+    expect(text).not.toContain('actionLabel');
+    expect(text).not.toContain('stateMachine');
+  });
   it('renders one connector chip per transition with from, arrow, to, and label', () => {
     render(
       <StateMachineSource

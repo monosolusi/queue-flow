@@ -1,4 +1,9 @@
-import type { ITransitionPolicy, ITransitionPolicyResolver, StatusValue } from '../../domain/queue';
+import type {
+  ITransitionGraphSource,
+  ITransitionPolicy,
+  ITransitionPolicyResolver,
+  StatusValue,
+} from '../../domain/queue';
 import type { ISystemConfigurationRepository } from '../../domain/store-config';
 import {
   InvalidStateTransitionException,
@@ -34,8 +39,13 @@ export class StateTransitionValidator implements ITransitionPolicyResolver {
    * configuration. Throws {@link SystemNotConfiguredException} when no
    * configuration exists yet (first-run guard, FR-WZD-01) — queue control is
    * unavailable until the wizard completes.
+   *
+   * The persisted `StateMachine` satisfies both the decision port
+   * ({@link ITransitionPolicy}, what the aggregate consumes) and the
+   * enumeration port ({@link ITransitionGraphSource}, what the read side
+   * consumes), so one resolution serves both from the same configuration.
    */
-  public async getActivePolicy(): Promise<ITransitionPolicy> {
+  public async getActivePolicy(): Promise<ITransitionPolicy & ITransitionGraphSource> {
     const system = await this.config.get();
     if (!system) {
       throw new SystemNotConfiguredException();

@@ -5,13 +5,13 @@ import type {
   CounterDto,
   LoginResponseDto,
   QueueSnapshotDto,
-  StateMachineDto,
+  WorkflowActionsDto,
 } from './types';
 
 /**
  * The slice of core-api the caller panel consumes (ISP — never leaks
  * admin/reporting DTOs into the caller). The read surface (counters + queue
- * snapshot + active state machine) feeds the workspace; the command surface
+ * snapshot + workflow actions) feeds the workspace; the command surface
  * drives queue transitions (FR-CLR-02 / FR-ENG-03). Command results are
  * delivered to the workspace over the WebSocket broadcaster (TICKET_CALLED /
  * STATUS_UPDATED / TICKET_TRANSFERRED), so the command methods return
@@ -41,7 +41,11 @@ export interface ICallerApi {
   // Read surface -----------------------------------------------------------
   listCounters(): Promise<CounterDto[]>;
   getQueueSnapshot(counterId: number): Promise<QueueSnapshotDto>;
-  getActiveStateMachine(): Promise<StateMachineDto>;
+  /** The counter panel's action surface (FR-CLR-02): the active flow's
+   *  transitions grouped by source status, each already resolved by core-api to
+   *  the command that runs it. The backend is the authority on that resolution —
+   *  the panel derives only presentation from it. */
+  getWorkflowActions(): Promise<WorkflowActionsDto>;
   /** The manager-configured brand color (QUE-36) applied to `--accent` (QUE-37 AC6). */
   getBrandColor(): Promise<BrandConfigSlice>;
   // Command surface (FR-CLR-02 / FR-ENG-03) -------------------------------
@@ -262,8 +266,8 @@ export class CallerApi implements ICallerApi {
       onUnauthorized: this.onUnauthorized,
     });
   }
-  getActiveStateMachine(): Promise<StateMachineDto> {
-    return getJson<StateMachineDto>('/system/state-machine', { onUnauthorized: this.onUnauthorized });
+  getWorkflowActions(): Promise<WorkflowActionsDto> {
+    return getJson<WorkflowActionsDto>('/queue/actions', { onUnauthorized: this.onUnauthorized });
   }
   getBrandColor(): Promise<BrandConfigSlice> {
     // Reuses the existing `GET /api/system/config` read surface (DRY); the

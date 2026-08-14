@@ -8,12 +8,13 @@
  * to see (`.sm-canvas` was `60vh / min 360px` crammed inside a config card). This
  * page gives the canvas the full `<main>` width + a tall height, and adds a
  * A **Diagram / Source toggle**: a visual editor
- * (React Flow) and an editable XML source view of the same state-machine graph
- * (`<stateMachine>` with `<state>` x/y positions + `<transition>` connection
- * sides + from→to direction). The wire format to core-api stays JSON (via the
- * existing `toStateMachineDto` + `toNodePositionsDto`); the XML source view is
- * just a different VIEW over the same `StateMachineForm`, never a second
- * source of truth.
+ * (React Flow) and an editable XML source view of the same state-machine graph,
+ * serialized as a Liferay Kaleo `<workflow-definition>` (one `<task>`/`<state>`
+ * per status, transitions nested under their source status, everything Kaleo has
+ * no slot for in `<metadata>` CDATA JSON — see `state-machine-xml.ts`). The wire
+ * format to core-api stays JSON (via the existing `toStateMachineDto` +
+ * `toNodePositionsDto`); the XML source view is just a different VIEW over the
+ * same `StateMachineForm`, never a second source of truth and never persisted.
  *
  * **Shared draft.** The page reads the config draft from {@link useConfigDraft}
  * — the SAME draft the `/admin/config` panel edits. The {@link ConfigDraftProvider}
@@ -161,10 +162,11 @@ export function AlurStatusDesigner(): JSX.Element {
       // change and skips the re-serialize (preserves `next` verbatim — no
       // reformat/cursor jump). Mode is forced to 'custom' by `xmlToForm`.
       lastEmittedSig.current = graphSignature(result.form);
-      // `xmlToForm` now returns a COMPLETE form — it parses `<action>` children
-      // → nodeActions and `<start>`/`<end>` → terminalNodes from the XML, so the
-      // former nodeActions merge-back is gone (the source carries every node
-      // facet now — manager feedback: "XML harus memuat semua informasi node").
+      // `xmlToForm` returns a COMPLETE form — nodeActions come from the Kaleo
+      // `<actions>` block and terminalNodes/endSources from the root
+      // `<metadata>`, so there is no merge-back against the previous draft (the
+      // source carries every node facet — manager feedback: "XML harus memuat
+      // semua informasi node").
       setState({
         status: 'ready',
         form: { ...form, stateMachine: result.form },

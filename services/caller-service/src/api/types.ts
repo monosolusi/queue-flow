@@ -49,17 +49,48 @@ export interface BrandConfigSlice {
   readonly themeMode: ThemeMode;
 }
 
-/** One transition in the active state machine (FR-CLR-02). */
-export interface StateTransitionDto {
+/**
+ * A backend command able to realize one workflow transition, named as core-api
+ * names it on the wire. **Which** command (if any) realizes a given edge is the
+ * backend's decision, not this client's — the panel receives it in
+ * {@link WorkflowActionDto.command} and only renders it.
+ */
+export type WorkflowCommand =
+  | 'CALL_NEXT'
+  | 'RECALL'
+  | 'REANNOUNCE'
+  | 'SERVE'
+  | 'COMPLETE'
+  | 'SKIP'
+  | 'TRANSFER'
+  | 'APPLY_TRANSITION';
+
+/**
+ * Why no command realizes a transition — a **code**, not prose: the backend owns
+ * the fact, this client owns the Indonesian wording (see
+ * `lib/workflow-actions.ts`).
+ *
+ * - `NO_COMMAND` — the counter panel has no endpoint for this edge at all.
+ * - `NO_STATUS_CHANGE` — running it would leave the ticket's status untouched.
+ */
+export type WorkflowActionUnavailableReason = 'NO_COMMAND' | 'NO_STATUS_CHANGE';
+
+/** One transition of the active flow (FR-CLR-02), resolved by core-api to the
+ *  command that executes it. `command === null` means nothing can run it — the
+ *  button is still rendered (disabled + the reason) so a configured edge never
+ *  silently disappears. */
+export interface WorkflowActionDto {
   readonly from: string;
   readonly to: string;
   readonly actionLabel: string;
+  readonly command: WorkflowCommand | null;
+  readonly unavailableReason: WorkflowActionUnavailableReason | null;
 }
 
-/** The active state-machine graph, returned by `GET /api/system/state-machine`. */
-export interface StateMachineDto {
-  readonly states: readonly string[];
-  readonly transitions: readonly StateTransitionDto[];
+/** The counter panel's action surface, returned by `GET /api/queue/actions`:
+ *  every transition of the active flow grouped by its **source** status. */
+export interface WorkflowActionsDto {
+  readonly byStatus: Record<string, readonly WorkflowActionDto[]>;
 }
 
 /** Counter master data, returned by `GET /api/counters` (FR-CLR-01). */
@@ -84,6 +115,20 @@ export interface QueueSnapshotDto {
   readonly counterId: number;
   readonly active: readonly TicketStateDto[];
   readonly waiting: readonly TicketStateDto[];
+  /** SKIPPED tickets belonging to this counter. Its own bucket because a skipped
+   *  ticket is neither at the counter (`active`) nor back in line (`waiting`),
+   *  yet it must stay on screen: "Panggil Ulang" is an outgoing transition of
+   *  SKIPPED, so without a surface holding these tickets that PRD action is
+   *  unreachable and an absent customer can never be re-called.
+   *
+   *  Optional on the wire even though core-api always sends it: this DTO
+   *  describes `JSON.parse` output, not a typed literal, so the field is only as
+   *  guaranteed as the response that arrived. The realistic way it goes missing
+   *  is a service-worker-cached client running against a newer API — the whole
+   *  stack ships from one `docker compose up`, so an older API is not the case
+   *  to defend. Declaring it required would invite the reader to delete the
+   *  `?? []` in `queue-store` as dead code. */
+  readonly skipped?: readonly TicketStateDto[];
   readonly waitingCount: number;
 }
 
@@ -121,9 +166,9 @@ export interface TicketTransferredPayload {
 }
 /**
  * `SYSTEM_CONFIG_CHANGED` carries no fields — a pure refetch signal (mirrors
- * `SystemResetPayload`'s signal-then-refetch contract). The caller refetches the
- * active state machine so the admin-designed flow + its `actionLabel` wording
- * applies without a reload (FR-CLR-02).
+ * `SystemResetPayload`'s signal-then-refetch contract). The caller refetches its
+ * action surface so the admin-designed flow + its `actionLabel` wording applies
+ * without a reload (FR-CLR-02).
  */
 export interface SystemConfigChangedPayload {}
 

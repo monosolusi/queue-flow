@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { StateMachineWorkflow } from './StateMachineWorkflow';
 import { type StateMachineForm, type Transition, defaultStateMachineForm, validateCustomStateMachine } from '../lib/state-machine';
 import { DEFAULT_STATE_MACHINE } from '../api/types';
+import { SELF_LOOP_RADIUS } from '../lib/state-machine-flow';
 
 function renderWorkflow(
   value = defaultStateMachineForm(),
@@ -1113,6 +1114,55 @@ describe('StateMachineWorkflow (Start/End terminal markers)', () => {
     expect(screen.getByTestId('rf__edge-COMPLETED->__end')).toBeInTheDocument();
   });
 
+  it('a self-loop on the entry status KEEPS its Start arrow (manager repro)', () => {
+    // Manager feedback: "WAITING memiliki transisi masuk dari Start dan aku mau
+    // bikin self-loop, kemudian yang dari Start hilang." The self-loop used to
+    // count toward WAITING's in-degree, so WAITING stopped being an entry point
+    // and `deriveTerminalMarkers` dropped the `__start → WAITING` arrow —
+    // looking to the manager like their existing connection was deleted.
+    //
+    // Drives the real COMMIT path, not a fresh re-seed: "+ Tambah transisi" on
+    // WAITING picks the first non-duplicate target, which is WAITING itself, so
+    // it adds exactly the self-loop the manager drew.
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
+    expect(screen.getByTestId('rf__edge-__start->WAITING')).toBeInTheDocument();
+
+    selectStateNode('WAITING');
+    fireEvent.click(screen.getByTestId('panel-goto-transitions'));
+    fireEvent.click(screen.getByTestId('panel-add-transition'));
+
+    // The self-loop is on the canvas AND the Start arrow survived.
+    expect(screen.getByTestId('rf__edge-sm-edge-0')).toBeInTheDocument();
+    expect(screen.getByTestId('rf__edge-__start->WAITING')).toBeInTheDocument();
+    expect(screen.getByTestId('sm-node-start')).toBeInTheDocument();
+    // The exit side is untouched: COMPLETED keeps its End arrow.
+    expect(screen.getByTestId('rf__edge-COMPLETED->__end')).toBeInTheDocument();
+  });
+
+  it('draws a self-loop as a long arc clear of the card, not a bezier through it', () => {
+    // Manager feedback: "self-loop garisnya overlap dan jelek sekali, seharusnya
+    // lebih panjang lagi." `getBezierPath` is degenerate when both endpoints sit
+    // on the same card — a short backwards curve running through/behind the node
+    // (edges render beneath nodes) with the label chip on top of it.
+    // `TransitionEdge` branches to `getSelfLoopPath` for `source === target`.
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
+    selectStateNode('WAITING');
+    fireEvent.click(screen.getByTestId('panel-goto-transitions'));
+    fireEvent.click(screen.getByTestId('panel-add-transition'));
+
+    const d = screen
+      .getByTestId('rf__edge-sm-edge-0')
+      .querySelector('path.react-flow__edge-path')!
+      .getAttribute('d')!;
+    // `M sx,sy C c1x,c1y c2x,c2y tx,ty` — pull every y out of the path. The
+    // endpoints share a y (both handles sit at the card's vertical middle for
+    // the seeded right→left routing); both control points must sit a full
+    // SELF_LOOP_RADIUS above them, so the loop swings up and over the card.
+    const ys = [...d.matchAll(/-?[\d.]+,(-?[\d.]+)/g)].map((m) => Number(m[1]));
+    expect(ys).toHaveLength(4);
+    expect(Math.min(...ys)).toBeLessThanOrEqual(ys[0] - SELF_LOOP_RADIUS);
+  });
+
   it('the marker panel reports the pinned position for a pinned marker', () => {
     // The info line surfaces the live pinned coordinates so the manager can see
     // where the marker is willed (vs the auto-derived rank offset).
@@ -1222,6 +1272,36 @@ describe('StateMachineWorkflow (Start/End terminal markers)', () => {
       const panel = screen.getByTestId('sm-properties');
       expect(within(panel).getByTestId('panel-end-incoming-empty')).toBeInTheDocument();
       expect(within(panel).queryByTestId('panel-end-incoming-list')).not.toBeInTheDocument();
+    });
+
+    it('lists exactly the states the canvas draws an auto arrow for (self-loop + stray)', () => {
+      // The "Transisi masuk" list and the canvas's auto sink→End arrows now
+      // share ONE predicate (`deriveAutoSinks`). The panel used to re-implement
+      // the out-degree rule and drifted from the canvas in two ways this fixture
+      // pins:
+      //   - B has an incoming transition AND a self-loop → the self-loop counts
+      //     for no degree, so B IS the exit point and the canvas draws B→End.
+      //     The old rule saw out-degree 1 and left B out of the list.
+      //   - STRAY has no transitions at all → isolated, so the canvas draws NO
+      //     arrow for it. The old rule saw out-degree 0 and listed it anyway.
+      const form: StateMachineForm = {
+        ...defaultStateMachineForm(),
+        mode: 'custom' as const,
+        states: ['A', 'B', 'STRAY'],
+        transitions: [
+          { from: 'A', to: 'B', actionLabel: 'Panggil' },
+          { from: 'B', to: 'B', actionLabel: 'Ulang' },
+        ],
+        endSources: [],
+      };
+      renderWorkflow(form);
+      // The canvas: B→End is drawn, STRAY has no terminal edge.
+      expect(screen.getByTestId('rf__edge-B->__end')).toBeInTheDocument();
+      expect(screen.queryByTestId('rf__edge-STRAY->__end')).not.toBeInTheDocument();
+      selectMarker('end');
+      const panel = screen.getByTestId('sm-properties');
+      expect(within(panel).getByTestId('panel-end-source-B')).toBeInTheDocument();
+      expect(within(panel).queryByTestId('panel-end-source-STRAY')).not.toBeInTheDocument();
     });
 
     it('a stale endSource name not in states is dropped from the panel list', () => {

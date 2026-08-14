@@ -3,8 +3,11 @@ import {
   flowToGraph,
   formToFlow,
   formToFlowWithMarkers,
+  decideConnectEnd,
   deriveTerminalMarkers,
+  getSelfLoopPath,
   hasEndSource,
+  SELF_LOOP_RADIUS,
   isTerminalNodeId,
   handleToSide,
   nextStateName,
@@ -77,6 +80,20 @@ describe('autoLayout', () => {
   it('handles an isolated node (no edges) at rank 0', () => {
     const pos = autoLayout(['LONE'], []);
     expect(pos.LONE).toEqual({ x: 0, y: 0 });
+  });
+
+  it('ignores a SELF-LOOP when ranking (a status pointing at itself is still a source)', () => {
+    // Same root cause as the Start/End marker fix: a self-loop counted toward
+    // in-degree, so a self-loop on the entry status left the graph with NO
+    // relaxation seed and every node collapsed onto rank 0 (all stacked at
+    // x = 0). A self-loop is flow that returns to the same status — it neither
+    // ranks the status after itself nor costs it its source role.
+    const pos = autoLayout(['A', 'B'], [
+      { from: 'A', to: 'B', actionLabel: 'a' },
+      { from: 'A', to: 'A', actionLabel: 'loop' },
+    ]);
+    expect(pos.A.x).toBe(0);
+    expect(pos.B.x).toBeGreaterThan(pos.A.x);
   });
 });
 
@@ -517,10 +534,54 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
   });
 
   it('emits Start only (no End) when the graph has a source but no sink', () => {
-    // A→B→A is a cycle (no source/sink). Construct a graph with a source but no
-    // sink: A→B, B→A would be a cycle. Instead: A→B, B→B (self-loop). A has
-    // in-degree 0 (source); B has out-degree 1 (B→B) so B is NOT a sink; A has
-    // out-degree 1 so A is not a sink either. No sinks → no End marker.
+    // A graph with a real entry but no exit: A→B, B→C, C→B. A has in-degree 0
+    // (source); B and C sit in a 2-cycle so every one of them has an outgoing
+    // transition → no state is a sink → no End marker.
+    // (This case used to be built with a `B→B` self-loop to suppress the End
+    // marker. A self-loop no longer counts toward either degree — see the
+    // self-loop cases below — so the fixture is a real cycle now; the assertion
+    // being pinned here is "source but no sink ⇒ Start only", unchanged.)
+    const { nodes, edges } = deriveTerminalMarkers(
+      ['A', 'B', 'C'],
+      [
+        { from: 'A', to: 'B', actionLabel: 'a' },
+        { from: 'B', to: 'C', actionLabel: 'b' },
+        { from: 'C', to: 'B', actionLabel: 'c' },
+      ],
+      { A: { x: 0, y: 0 }, B: { x: 240, y: 0 }, C: { x: 480, y: 0 } },
+    );
+    const start = nodes.find((n) => n.id === START_NODE_ID);
+    expect(start).toBeDefined();
+    const end = nodes.find((n) => n.id === END_NODE_ID);
+    expect(end).toBeUndefined();
+    // Only the Start→A terminal edge (no sink→End edges).
+    expect(edges.every((e) => e.target !== END_NODE_ID)).toBe(true);
+  });
+
+  /**
+   * Manager feedback: "current node cannot have self-loop, and if the current
+   * node have 2 transisi masuk juga hilang — contoh, WAITING memiliki transisi
+   * masuk dari Start dan aku mau bikin self-loop, kemudian yang dari Start
+   * hilang." A self-loop used to count toward BOTH degrees, so the state it sat
+   * on stopped being in-degree 0 and silently lost its `__start → S` terminal
+   * arrow (symmetrically for a sink's `S → __end`). A self-loop is flow that
+   * leaves a status and returns to it: it must not change the graph's entry or
+   * exit points.
+   */
+  it('a self-loop on the source KEEPS its __start→S edge', () => {
+    const { nodes, edges } = deriveTerminalMarkers(
+      ['A', 'B'],
+      [
+        { from: 'A', to: 'B', actionLabel: 'a' },
+        { from: 'A', to: 'A', actionLabel: 'loop' },
+      ],
+      { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
+    );
+    expect(nodes.find((n) => n.id === START_NODE_ID)).toBeDefined();
+    expect(edges.filter((e) => e.source === START_NODE_ID).map((e) => e.target)).toEqual(['A']);
+  });
+
+  it('a self-loop on the sink KEEPS its S→__end edge', () => {
     const { nodes, edges } = deriveTerminalMarkers(
       ['A', 'B'],
       [
@@ -529,12 +590,28 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
       ],
       { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
     );
-    const start = nodes.find((n) => n.id === START_NODE_ID);
-    expect(start).toBeDefined();
-    const end = nodes.find((n) => n.id === END_NODE_ID);
-    expect(end).toBeUndefined();
-    // Only the Start→A terminal edge (no sink→End edges).
-    expect(edges.every((e) => e.target !== END_NODE_ID)).toBe(true);
+    expect(nodes.find((n) => n.id === END_NODE_ID)).toBeDefined();
+    expect(edges.filter((e) => e.target === END_NODE_ID).map((e) => e.source)).toEqual(['B']);
+  });
+
+  it('a state whose ONLY transition is a self-loop stays isolated (no Start AND no End link)', () => {
+    // The PR #103 invariant still holds through the self-loop fix: a self-loop
+    // wires a status to itself, not into the flow, so the status is still
+    // degree-0 on both sides — and an isolated status links to NEITHER marker
+    // (it must never satisfy both the entry and the exit predicate at once).
+    const { edges } = deriveTerminalMarkers(
+      ['A', 'B', 'LOOPY'],
+      [
+        { from: 'A', to: 'B', actionLabel: 'a' },
+        { from: 'LOOPY', to: 'LOOPY', actionLabel: 'loop' },
+      ],
+      { A: { x: 0, y: 0 }, B: { x: 240, y: 0 }, LOOPY: { x: 240, y: 200 } },
+    );
+    // The real entry/exit still get their arrows.
+    expect(edges.filter((e) => e.source === START_NODE_ID).map((e) => e.target)).toEqual(['A']);
+    expect(edges.filter((e) => e.target === END_NODE_ID).map((e) => e.source)).toEqual(['B']);
+    // LOOPY gets neither.
+    expect(edges.some((e) => e.target === 'LOOPY' || e.source === 'LOOPY')).toBe(false);
   });
 
   it('places Start.x left of min real x and End.x right of max real x', () => {
@@ -1327,6 +1404,17 @@ describe('rejectionMessageForConnection (End-marker duplicate message)', () => {
     );
     expect(msg).toBe('Status A sudah terhubung ke titik akhir.');
   });
+  it('names a duplicate SELF-LOOP as its own case (not "dari X ke X")', () => {
+    // Reachable live: dropping on a DIFFERENT handle of the same node IS a
+    // valid handle pair, so `isValidConnection` runs and rejects the duplicate
+    // (isValid false). "Transisi dari X ke X sudah ada" names the same status
+    // twice and reads like a typo to a manager.
+    const edges: FlowEdge[] = [
+      { id: 'A->A#0', source: 'A', target: 'A', type: 'transition', data: { actionLabel: 'ulang' } },
+    ];
+    const msg = rejectionMessageForConnection({ isValid: false, fromId: 'A', toId: 'A' }, edges);
+    expect(msg).toBe('Status A sudah punya transisi ke dirinya sendiri.');
+  });
   it('falls back to the duplicate-transition message for a non-End duplicate', () => {
     const edges: FlowEdge[] = [
       { id: 'A->B#0', source: 'A', target: 'B', type: 'transition', data: { actionLabel: 'go' } },
@@ -1336,5 +1424,285 @@ describe('rejectionMessageForConnection (End-marker duplicate message)', () => {
       edges,
     );
     expect(msg).toBe('Transisi dari A ke B sudah ada.');
+  });
+});
+
+describe('getSelfLoopPath (self-loop edge geometry)', () => {
+  // A state-node card at (0,0)-(160,50): `min-width: 10rem` (160px) wide and
+  // ~50px tall (icon + title + description rows plus 0.55rem padding). The four
+  // handle anchor points are the side midpoints React Flow resolves for the
+  // typeless per-side handles.
+  const CARD = { left: 0, top: 0, right: 160, bottom: 50 };
+  const HANDLE_POINT: Record<string, { x: number; y: number }> = {
+    top: { x: 80, y: 0 },
+    right: { x: 160, y: 25 },
+    bottom: { x: 80, y: 50 },
+    left: { x: 0, y: 25 },
+  };
+  const SIDES = ['top', 'right', 'bottom', 'left'] as const;
+
+  function loopFor(sourcePosition: string, targetPosition: string) {
+    const s = HANDLE_POINT[sourcePosition];
+    const t = HANDLE_POINT[targetPosition];
+    return getSelfLoopPath({
+      sourceX: s.x,
+      sourceY: s.y,
+      sourcePosition,
+      targetX: t.x,
+      targetY: t.y,
+      targetPosition,
+    });
+  }
+
+  it('draws ONE cubic from the source point to the target point', () => {
+    const [path] = loopFor('right', 'top');
+    // `M sx,sy C c1x,c1y c2x,c2y tx,ty` — the same single-cubic shape
+    // `getBezierPath` returns, so `BaseEdge` renders it unchanged.
+    expect(path).toMatch(/^M 160,25 C -?[\d.]+,-?[\d.]+ -?[\d.]+,-?[\d.]+ 80,0$/);
+  });
+
+  it('puts the label OFF the node card for every handle pair (16 combinations)', () => {
+    // The whole point of BUG B: `getBezierPath` parked the chip on top of the
+    // card. Every pair must land the label outside the card rect — including
+    // the seeded default `right`→`left` (opposite sides) and the same-side
+    // pairs, which are the degenerate cases for a naive rotate-the-normal
+    // tangent. The worst pair (top↔bottom, whose loop swings sideways past the
+    // card's 80px half-width) still clears by 40px.
+    const onTheCard: string[] = [];
+    let worstClearance = Infinity;
+    for (const sourceSide of SIDES) {
+      for (const targetSide of SIDES) {
+        const [, labelX, labelY] = loopFor(sourceSide, targetSide);
+        const clearance = Math.max(
+          CARD.left - labelX,
+          labelX - CARD.right,
+          CARD.top - labelY,
+          labelY - CARD.bottom,
+        );
+        if (clearance <= 0) onTheCard.push(`${sourceSide}->${targetSide} (${labelX},${labelY})`);
+        worstClearance = Math.min(worstClearance, clearance);
+      }
+    }
+    expect(onTheCard).toEqual([]);
+    expect(worstClearance).toBeGreaterThanOrEqual(40);
+  });
+
+  it('arcs an ADJACENT pair around the corner between the two sides', () => {
+    // `right`→`top` (the pair the canvas self-loop fallback creates from a
+    // right-handle drag): the loop must sweep the TOP-RIGHT corner — label
+    // right of the card AND above it.
+    const [, labelX, labelY] = loopFor('right', 'top');
+    expect(labelX).toBeGreaterThan(CARD.right);
+    expect(labelY).toBeLessThan(CARD.top);
+  });
+
+  it('swings the DEFAULT right→left pair up and over the card (not back through it)', () => {
+    // The seeded routing for an edge with no manager-chosen sides is
+    // `right`→`left` — opposite sides, where a naively rotated tangent
+    // S-curves straight through the card. The loop must clear it vertically.
+    const [, labelX, labelY] = loopFor('right', 'left');
+    expect(labelY).toBeLessThan(CARD.top);
+    // Symmetric swing: the apex sits over the middle of the card.
+    expect(labelX).toBe(80);
+  });
+
+  it('opens a SAME-side pair into a round loop off that side', () => {
+    const [, labelX, labelY] = loopFor('right', 'right');
+    expect(labelX).toBeGreaterThan(CARD.right);
+    // Symmetric about the handle, so the apex stays at the handle's height.
+    expect(labelY).toBe(25);
+  });
+
+  it('sizes the loop by SELF_LOOP_RADIUS (a full card-width clear of the card)', () => {
+    // The manager asked for a LONGER loop ("seharusnya lebih panjang lagi").
+    // The radius is the single knob: both control points sit R out along the
+    // normal, so the cubic's apex ((P0 + 3C1 + 3C2 + P3) / 8 with P0 = P3) is
+    // 0.75 * R out from the handle — 120px for a 160px-wide card.
+    expect(SELF_LOOP_RADIUS).toBeGreaterThanOrEqual(160);
+    const [, labelX] = loopFor('right', 'right');
+    expect(labelX).toBe(HANDLE_POINT.right.x + 0.75 * SELF_LOOP_RADIUS);
+  });
+
+  it('falls back to right/left normals for an unknown handle position', () => {
+    // Defensive: a corrupt/legacy handle id must never produce NaN coordinates
+    // (a NaN in the `d` attribute drops the whole path from the canvas).
+    const [path, labelX, labelY] = getSelfLoopPath({
+      sourceX: 10,
+      sourceY: 20,
+      sourcePosition: 'bogus',
+      targetX: 10,
+      targetY: 20,
+      targetPosition: 'bogus',
+    });
+    expect(path).not.toContain('NaN');
+    expect(Number.isFinite(labelX)).toBe(true);
+    expect(Number.isFinite(labelY)).toBe(true);
+  });
+});
+
+describe('decideConnectEnd (self-loop fallback + rejection message)', () => {
+  const edges: FlowEdge[] = [
+    { id: 'A->B#0', source: 'A', target: 'B', type: 'transition', data: { actionLabel: 'go' } },
+  ];
+
+  it('creates a self-loop with two DISTINCT adjacent handles when the drag ended on its own node', () => {
+    // The natural gesture: drag out of A's `right` handle and drop back on the
+    // SAME handle. React Flow rejects that handle pair internally (isValid is
+    // `null`, not `false`) but still reports `toNode` — so the fallback fires.
+    const decision = decideConnectEnd(
+      { isValid: null, fromId: 'A', toId: 'A', fromHandleId: HANDLE_IDS.right, pointerNodeId: null },
+      edges,
+    );
+    expect(decision).toEqual({
+      kind: 'self-loop',
+      source: 'A',
+      sourceHandle: HANDLE_IDS.right,
+      targetHandle: HANDLE_IDS.top,
+    });
+  });
+
+  it('keeps the dragged-from side as the loop SOURCE side', () => {
+    const decision = decideConnectEnd(
+      { isValid: null, fromId: 'A', toId: 'A', fromHandleId: HANDLE_IDS.bottom, pointerNodeId: null },
+      edges,
+    );
+    expect(decision).toEqual({
+      kind: 'self-loop',
+      source: 'A',
+      sourceHandle: HANDLE_IDS.bottom,
+      targetHandle: HANDLE_IDS.right,
+    });
+  });
+
+  it('falls back to the default source side when the from-handle is unknown', () => {
+    const decision = decideConnectEnd(
+      { isValid: null, fromId: 'A', toId: 'A', fromHandleId: null, pointerNodeId: null },
+      edges,
+    );
+    expect(decision).toEqual({
+      kind: 'self-loop',
+      source: 'A',
+      sourceHandle: DEFAULT_SOURCE_HANDLE,
+      targetHandle: HANDLE_IDS.top,
+    });
+  });
+
+  it('does NOT create a second self-loop when React Flow already committed one (isValid true)', () => {
+    // Dropping on a DIFFERENT handle of the same node IS valid under Loose
+    // mode, so `onConnect` already added the edge — the fallback must stay out
+    // of the way or the manager gets two loops from one drag.
+    const decision = decideConnectEnd(
+      { isValid: true, fromId: 'A', toId: 'A', fromHandleId: HANDLE_IDS.right, pointerNodeId: null },
+      edges,
+    );
+    expect(decision).toEqual({ kind: 'none' });
+  });
+
+  it('explains a duplicate self-loop instead of creating a second one', () => {
+    const withLoop: FlowEdge[] = [
+      ...edges,
+      { id: 'A->A#1', source: 'A', target: 'A', type: 'transition', data: { actionLabel: 'ulang' } },
+    ];
+    const decision = decideConnectEnd(
+      { isValid: null, fromId: 'A', toId: 'A', fromHandleId: HANDLE_IDS.right, pointerNodeId: null },
+      withLoop,
+    );
+    expect(decision).toEqual({
+      kind: 'message',
+      message: 'Status A sudah punya transisi ke dirinya sendiri.',
+    });
+  });
+
+  it('never creates a self-loop on a canvas-only terminal marker', () => {
+    const decision = decideConnectEnd(
+      { isValid: null, fromId: START_NODE_ID, toId: START_NODE_ID, fromHandleId: HANDLE_IDS.right, pointerNodeId: null },
+      edges,
+    );
+    expect(decision).toEqual({ kind: 'none' });
+  });
+
+  it('delegates a rejected two-node drop to the rejection message', () => {
+    const decision = decideConnectEnd(
+      { isValid: false, fromId: 'A', toId: 'B', fromHandleId: HANDLE_IDS.right, pointerNodeId: null },
+      edges,
+    );
+    expect(decision).toEqual({ kind: 'message', message: 'Transisi dari A ke B sudah ada.' });
+  });
+
+  it('does nothing for a drag dropped in empty space (no target node)', () => {
+    const decision = decideConnectEnd(
+      { isValid: null, fromId: 'A', toId: null, fromHandleId: HANDLE_IDS.right, pointerNodeId: null },
+      edges,
+    );
+    expect(decision).toEqual({ kind: 'none' });
+  });
+
+  describe('released over the card BODY (pointerNodeId fallback)', () => {
+    // React Flow reports `toNode` only when the release landed on a HANDLE. The
+    // manager's real gesture is "drag out of the status, drag back onto the
+    // status, release" — usually over the card body, where React Flow reports
+    // nothing at all. The component resolves that node from the DOM and passes
+    // it as `pointerNodeId`.
+    it('creates the self-loop when the pointer was over the node the drag started on', () => {
+      const decision = decideConnectEnd(
+        { isValid: null, fromId: 'A', toId: null, fromHandleId: HANDLE_IDS.right, pointerNodeId: 'A' },
+        edges,
+      );
+      expect(decision).toEqual({
+        kind: 'self-loop',
+        source: 'A',
+        sourceHandle: HANDLE_IDS.right,
+        targetHandle: HANDLE_IDS.top,
+      });
+    });
+
+    it('never hijacks a release over a DIFFERENT node (React Flow owns that drop)', () => {
+      const decision = decideConnectEnd(
+        { isValid: null, fromId: 'A', toId: null, fromHandleId: HANDLE_IDS.right, pointerNodeId: 'B' },
+        edges,
+      );
+      expect(decision).toEqual({ kind: 'none' });
+    });
+
+    it('never fires for a release over a canvas-only terminal marker', () => {
+      // The markers are `.react-flow__node` wrappers too, so the DOM lookup CAN
+      // resolve one — the id equality check is what rejects it.
+      const decision = decideConnectEnd(
+        {
+          isValid: null,
+          fromId: 'A',
+          toId: null,
+          fromHandleId: HANDLE_IDS.right,
+          pointerNodeId: END_NODE_ID,
+        },
+        edges,
+      );
+      expect(decision).toEqual({ kind: 'none' });
+    });
+
+    it('explains a duplicate instead of adding a second loop', () => {
+      const withLoop: FlowEdge[] = [
+        ...edges,
+        { id: 'A->A#1', source: 'A', target: 'A', type: 'transition', data: { actionLabel: 'ulang' } },
+      ];
+      const decision = decideConnectEnd(
+        { isValid: null, fromId: 'A', toId: null, fromHandleId: HANDLE_IDS.right, pointerNodeId: 'A' },
+        withLoop,
+      );
+      expect(decision).toEqual({
+        kind: 'message',
+        message: 'Status A sudah punya transisi ke dirinya sendiri.',
+      });
+    });
+
+    it("prefers React Flow's own target over the pointer fallback", () => {
+      // Release on B's handle while the pointer also overlaps A's card: React
+      // Flow evaluated A→B, so that is the drop — not a self-loop on A.
+      const decision = decideConnectEnd(
+        { isValid: null, fromId: 'A', toId: 'B', fromHandleId: HANDLE_IDS.right, pointerNodeId: 'A' },
+        edges,
+      );
+      expect(decision).toEqual({ kind: 'none' });
+    });
   });
 });

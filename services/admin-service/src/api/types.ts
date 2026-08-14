@@ -213,7 +213,8 @@ export type NodeActionsDto = Record<string, NodeActionDto[]>;
  * marker omitted. Mirrors core-api's `TerminalNodeState` VO. The terminal EDGES
  * stay auto-derived from topology (sources = in-degree 0 AND out-degree > 0,
  * sinks = out-degree 0 AND in-degree > 0 — an isolated, not-yet-wired state is
- * neither) — the manager controls marker PRESENCE + POSITION only, not edges.
+ * neither, and a self-loop counts for neither degree) — the manager controls
+ * marker PRESENCE + POSITION only, not edges.
  */
 export type TerminalNodeStateDto = 'auto' | 'hidden' | { readonly x: number; readonly y: number };
 

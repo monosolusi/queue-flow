@@ -26,10 +26,11 @@ const counters: CounterDto[] = [
 function makeApi(list: CounterDto[] = counters, reject?: Error): ICallerApi {
   return {
     listCounters: reject ? () => Promise.reject(reject) : () => Promise.resolve(list),
-    getQueueSnapshot: () => Promise.resolve({ counterId: 0, active: [], waiting: [], waitingCount: 0 }),
+    getQueueSnapshot: () =>
+      Promise.resolve({ counterId: 0, active: [], waiting: [], skipped: [], waitingCount: 0 }),
     // The counter-select page never invokes these (ISP — it only lists
     // counters); stubs satisfy the wider ICallerApi type for the fake.
-    getActiveStateMachine: () => Promise.resolve({ states: [], transitions: [] }),
+    getWorkflowActions: () => Promise.resolve({ byStatus: {} }),
     callNext: () => Promise.resolve(),
     serve: () => Promise.resolve(),
     complete: () => Promise.resolve(),

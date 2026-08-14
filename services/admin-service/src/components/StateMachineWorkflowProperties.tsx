@@ -37,6 +37,7 @@
 import { useEffect, useState } from "react";
 import {
   describeState,
+  deriveAutoSinks,
   NODE_ACTION_TYPE_LABELS,
   type StateMachineForm,
 } from "../lib/state-machine";
@@ -194,8 +195,12 @@ export function StateMachineWorkflowProperties({
         : isHidden
           ? "Tersembunyi."
           : `Posisi ditetapkan: x=${(terminal as { x: number; y: number }).x}, y=${(terminal as { x: number; y: number }).y}`;
-      // End-marker-only: the "Transisi masuk" list. Auto sinks = states with
-      // out-degree 0 (the auto-derived sink→End arrows); explicit = the
+      // End-marker-only: the "Transisi masuk" list. Auto sinks come from the
+      // SHARED `deriveAutoSinks` — the same predicate that draws the canvas's
+      // auto sink→End arrows, so this list can never drift from the arrows the
+      // manager sees (it used to re-implement the out-degree rule here, which
+      // already listed an isolated status the canvas does NOT link to End, and
+      // would have drifted again on the self-loop fix). Explicit = the
       // manager-drawn `endSources` entries that are NOT auto sinks (de-duped on
       // the canvas — an endSource that is also a sink already has an auto arrow
       // and is NOT re-listed as explicit). Each explicit row carries a "Hapus"
@@ -205,13 +210,7 @@ export function StateMachineWorkflowProperties({
       let endIncoming: JSX.Element | null = null;
       if (!isStart) {
         const stateSet = new Set(form.states);
-        const outDeg = new Map<string, number>();
-        for (const s of form.states) outDeg.set(s, 0);
-        for (const t of form.transitions) {
-          if (!stateSet.has(t.from) || !stateSet.has(t.to)) continue;
-          outDeg.set(t.from, (outDeg.get(t.from) ?? 0) + 1);
-        }
-        const autoSinks = form.states.filter((s) => (outDeg.get(s) ?? 0) === 0);
+        const autoSinks = deriveAutoSinks(form.states, form.transitions);
         const autoSinkSet = new Set(autoSinks);
         const explicit = form.endSources.filter(
           (s) => stateSet.has(s) && !autoSinkSet.has(s),
@@ -224,7 +223,11 @@ export function StateMachineWorkflowProperties({
               data-testid={`panel-end-source-${s}`}
             >
               <span className="sm-properties__action-label">{s}</span>
-              <span className="sm-properties__hint">Otomatis — status tanpa transisi keluar</span>
+              {/* "ke status lain" is load-bearing copy: a status whose only
+                  outgoing transition points at ITSELF still counts as an exit
+                  point, so "tanpa transisi keluar" would read as a lie next to
+                  a status that visibly has one. */}
+              <span className="sm-properties__hint">Otomatis — tidak punya transisi ke status lain</span>
             </li>
           )),
           ...explicit.map((s) => (
@@ -277,8 +280,8 @@ export function StateMachineWorkflowProperties({
           <div className="sm-properties__field">
             <p className="sm-properties__hint" data-testid="panel-marker-description">
               {isStart
-                ? "Status awal — status yang punya transisi keluar tapi tidak punya transisi masuk. Panah keluar dari titik ini ke status pertama. Status yang belum punya transisi sama sekali tidak terhubung ke sini."
-                : "Status akhir — status yang punya transisi masuk tapi tidak punya transisi keluar. Panah masuk ke titik ini dari status terakhir. Status yang belum punya transisi sama sekali tidak terhubung ke sini. Seret garis dari sebuah status ke titik akhir untuk menambahkan transisi masuk."}
+                ? "Status awal — status yang punya transisi keluar tapi tidak punya transisi masuk. Panah keluar dari titik ini ke status pertama. Status yang belum punya transisi sama sekali tidak terhubung ke sini. Transisi dari sebuah status ke dirinya sendiri tidak dihitung."
+                : "Status akhir — status yang punya transisi masuk tapi tidak punya transisi keluar. Panah masuk ke titik ini dari status terakhir. Status yang belum punya transisi sama sekali tidak terhubung ke sini. Transisi dari sebuah status ke dirinya sendiri tidak dihitung. Seret garis dari sebuah status ke titik akhir untuk menambahkan transisi masuk."}
             </p>
             <p className="sm-properties__hint" data-testid={`panel-terminal-info-${key}`}>
               {posInfo}

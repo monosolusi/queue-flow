@@ -170,30 +170,35 @@ describe('AlurStatusDesigner (dedicated /config/alur-status page)', () => {
     expect(screen.queryByTestId('sm-source')).not.toBeInTheDocument();
   });
 
-  it('toggles to the Source view showing the serialized XML graph', async () => {
+  it('toggles to the Source view showing the graph as a Kaleo workflow-definition', async () => {
     const { api } = makeApi();
     renderDesignerRoute(api);
     await screen.findByTestId('sm-mode');
 
     await userEvent.click(screen.getByTestId('sm-view-source'));
     expect(screen.getByTestId('sm-view-source')).toHaveAttribute('aria-pressed', 'true');
-    // The source textarea mounts with the default graph serialized as XML.
+    // The source textarea mounts with the default graph serialized as a Liferay
+    // Kaleo <workflow-definition>: one <task>/<state> per status, transitions
+    // nested under their source status.
     const source = screen.getByTestId('sm-source') as HTMLTextAreaElement;
-    expect(source.value).toContain('<stateMachine');
-    expect(source.value).toContain('<state ');
-    expect(source.value).toContain('<transition ');
-    // The first transition's action label is present in the source text.
-    expect(source.value).toContain('Panggil Berikutnya');
+    expect(source.value).toContain('<workflow-definition xmlns="urn:liferay.com:liferay-workflow_7.4.0"');
+    expect(source.value).toContain('<task>');
+    expect(source.value).toContain('<name>WAITING</name>');
+    expect(source.value).toContain('<target>CALLING</target>');
+    // The first transition's action label — the Caller's button text — rides a
+    // <label>, the load-bearing value in the Kaleo shape.
+    expect(source.value).toContain('<label language-id="id_ID">Panggil Berikutnya</label>');
     // The diagram canvas is unmounted in Source view.
     expect(screen.queryByTestId('sm-canvas')).not.toBeInTheDocument();
   });
 
   it('shows a connector legend (from → to · actionLabel) in the Source view', async () => {
-    // Manager feedback: the raw JSON source did not explain which point
-    // connects to which (ruwet). The Source view now renders a read-only
+    // Manager feedback: the raw source did not explain which point connects to
+    // which (ruwet). In the Kaleo shape the source status is the CONTAINING
+    // element and the destination is <target>, so a connector's direction is
+    // spread across two nesting levels. The Source view renders a read-only
     // connector legend derived from the last-valid draft — one chip per
-    // transition, `from → to · actionLabel` — so the connector direction is
-    // visible, not buried in the flat JSON list.
+    // transition, `from → to · actionLabel` — so the direction stays visible.
     const { api } = makeApi();
     renderDesignerRoute(api);
     await screen.findByTestId('sm-mode');
@@ -251,6 +256,52 @@ describe('AlurStatusDesigner (dedicated /config/alur-status page)', () => {
     // The client-only `mode` preset is stripped on the wire (source edits force
     // custom mode, but it never reaches core-api).
     expect((payload.stateMachine as unknown as Record<string, unknown>).mode).toBeUndefined();
+  });
+
+  it('a valid source edit does not re-serialize over the manager’s text (no re-seed loop)', async () => {
+    // The Kaleo shape nests each transition under its SOURCE status, so parsing
+    // REGROUPS `transitions` (the default graph's SKIPPED→CALLING and
+    // SERVING→COMPLETED swap places). That changes `graphSignature`, which is
+    // what the sync effect keys on — so the round-trip guard has to still hold:
+    // `handleSourceChange` stamps `lastEmittedSig` from the SAME parsed form it
+    // hands to `setState`, so the effect sees its own change and skips. If it
+    // did not, the effect would re-serialize on every keystroke, reformat the
+    // textarea under the manager's cursor, and re-seed the canvas in a loop.
+    const { api } = makeApi();
+    renderDesignerRoute(api);
+    await screen.findByTestId('sm-mode');
+    await userEvent.click(screen.getByTestId('sm-view-source'));
+    const source = screen.getByTestId('sm-source') as HTMLTextAreaElement;
+
+    const typed = source.value.replace('Panggil Berikutnya', 'Panggil Cepat');
+    fireEvent.change(source, { target: { value: typed } });
+
+    // The textarea holds EXACTLY what was typed — byte for byte, not a
+    // re-serialization of the regrouped form.
+    expect((screen.getByTestId('sm-source') as HTMLTextAreaElement).value).toBe(typed);
+    expect(screen.queryByTestId('sm-source-error')).not.toBeInTheDocument();
+
+    // A second edit still lands on the manager's own text (the guard holds
+    // across successive edits, not just the first).
+    const typedAgain = typed.replace('Selesai Layan', 'Tutup Layanan');
+    fireEvent.change(screen.getByTestId('sm-source'), { target: { value: typedAgain } });
+    expect((screen.getByTestId('sm-source') as HTMLTextAreaElement).value).toBe(typedAgain);
+  });
+
+  it('re-entering the Source view without typing does not re-parse or re-serialize', async () => {
+    // The sync effect runs on `state` change only, so a bare Diagram↔Sumber
+    // toggle must leave the text untouched — parsing never re-fires on its own
+    // output.
+    const { api } = makeApi();
+    renderDesignerRoute(api);
+    await screen.findByTestId('sm-mode');
+    await userEvent.click(screen.getByTestId('sm-view-source'));
+    const before = (screen.getByTestId('sm-source') as HTMLTextAreaElement).value;
+
+    await userEvent.click(screen.getByTestId('sm-view-diagram'));
+    await userEvent.click(screen.getByTestId('sm-view-source'));
+    expect((screen.getByTestId('sm-source') as HTMLTextAreaElement).value).toBe(before);
+    expect(screen.queryByTestId('sm-source-error')).not.toBeInTheDocument();
   });
 
   it('invalid XML shows an error, blocks save, and keeps the draft at the last valid graph', async () => {

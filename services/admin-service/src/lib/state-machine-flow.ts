@@ -19,6 +19,9 @@
 import {
   autoLayout,
   descriptionFor,
+  deriveAutoSinks,
+  deriveAutoSources,
+  DEFAULT_SOURCE_SIDE,
   type StateMachineForm,
   type Transition,
 } from './state-machine';
@@ -198,7 +201,10 @@ export function sideToHandle(side: EdgeSide): string {
  * Canvas-only terminal markers (Start/End) — auto-derived visual affordances
  * for the graph's real entry (in-degree 0 AND out-degree > 0) and exit
  * (out-degree 0 AND in-degree > 0) states; an isolated, not-yet-wired status is
- * neither. They are NOT in the form, NOT on the wire, NOT in the XML source view —
+ * neither, and a self-loop counts for neither degree (the predicates live in
+ * the pure `state-machine.ts` — `stateDegrees` / {@link deriveAutoSources} /
+ * {@link deriveAutoSinks} — so the XML codec derives Kaleo's `<initial>` from
+ * the SAME rule). They are NOT in the form, NOT on the wire, NOT in the XML source view —
  * `flowToGraph` filters them out (see {@link flowToGraph}'s `type === 'state'`
  * / `type === 'transition'` filters), and the XML codec `state-machine-xml.ts`
  * is untouched. They re-derive on every canvas re-seed so the markers always
@@ -314,18 +320,17 @@ const TERMINAL_SPACING = 240;
  * from the graph topology. Pure + framework-free (unit-testable in isolation,
  * like every other mapper here).
  *
- * - `sources` = states with in-degree 0 AND out-degree > 0 — a real entry point:
- *   nothing flows in, something flows out. (Degrees count only transitions whose
- *   `from` AND `to` are both in `states` — a transition referencing an unknown
- *   state is ignored, mirroring {@link autoLayout}'s defensive guard.)
- * - `sinks` = states with out-degree 0 AND in-degree > 0 — a real exit point:
- *   something flows in, nothing flows out (same counting rule).
- * - An ISOLATED state (degree 0 on BOTH sides) is NEITHER a source nor a sink.
- *   Without that exclusion it satisfies both predicates at once and gets a
- *   `__start → S` edge AND an `S → __end` edge — the manager's "a stray status
- *   with no transisi is automatically linked to Start and End" feedback: a
- *   just-added, not-yet-wired status is not the flow's entry AND exit, it has no
- *   entry/exit semantics yet.
+ * - `sources` = {@link deriveAutoSources} — in-degree 0 AND out-degree > 0: a
+ *   real entry point (nothing flows in, something flows out).
+ * - `sinks` = {@link deriveAutoSinks} — out-degree 0 AND in-degree > 0: a real
+ *   exit point (something flows in, nothing flows out).
+ * - Both predicates live in the PURE `state-machine.ts` (next to `autoLayout`,
+ *   same reason: the DOM-layer XML codec imports them from there and must never
+ *   depend on this React Flow layer). Degrees come from its `stateDegrees`:
+ *   transitions referencing an unknown state are ignored, and a SELF-LOOP counts
+ *   for neither degree (so a self-loop never removes a status's Start/End
+ *   arrow), which also means a self-loop-ONLY status is ISOLATED and links to
+ *   NEITHER marker.
  * - A Start marker is emitted ONLY when `sources.length > 0`; an End marker
  *   ONLY when `sinks.length > 0`. A pure-cycle graph (every state has an
  *   incoming edge) → no markers. A graph of only isolated states → no markers.
@@ -357,28 +362,11 @@ export function deriveTerminalMarkers(
   realPositions: Record<string, { x: number; y: number }>,
 ): { nodes: FlowNode[]; edges: FlowEdge[] } {
   if (states.length === 0) return { nodes: [], edges: [] };
-  const stateSet = new Set(states);
-  const inDeg = new Map<string, number>();
-  const outDeg = new Map<string, number>();
-  for (const s of states) {
-    inDeg.set(s, 0);
-    outDeg.set(s, 0);
-  }
-  for (const t of transitions) {
-    // Ignore edges that reference a state not in the schema (defensive — mirrors
-    // `autoLayout`'s guard so the markers reflect the REAL graph only).
-    if (!stateSet.has(t.from) || !stateSet.has(t.to)) continue;
-    inDeg.set(t.to, (inDeg.get(t.to) ?? 0) + 1);
-    outDeg.set(t.from, (outDeg.get(t.from) ?? 0) + 1);
-  }
-  // An ISOLATED state — degree 0 on BOTH sides — is not yet wired into the flow,
-  // so it is neither an entry nor an exit point (manager feedback: a stray,
-  // just-added status was auto-linked to Start AND End at once). It satisfies
-  // both the in-degree-0 and the out-degree-0 predicate, so it must be excluded
-  // from both lists explicitly.
-  const isIsolated = (s: string) => (inDeg.get(s) ?? 0) === 0 && (outDeg.get(s) ?? 0) === 0;
-  const sources = states.filter((s) => !isIsolated(s) && (inDeg.get(s) ?? 0) === 0);
-  const sinks = states.filter((s) => !isIsolated(s) && (outDeg.get(s) ?? 0) === 0);
+  // The degree predicates live in `deriveAutoSources`/`deriveAutoSinks` (one
+  // source of truth, shared with the End-marker panel's "Transisi masuk" list —
+  // the rule used to be re-implemented there and could drift).
+  const sources = deriveAutoSources(states, transitions);
+  const sinks = deriveAutoSinks(states, transitions);
 
   // X coords of the given states that have a known position. A missing entry is
   // skipped so a name with no position can never produce a NaN bound.
@@ -458,7 +446,8 @@ export function deriveTerminalMarkers(
  * {@link formToFlow} + the canvas-only Start/End terminal markers in one call.
  * The marker EDGES stay auto-derived from topology (sources = in-degree 0 with
  * out-degree > 0, sinks = out-degree 0 with in-degree > 0 — an isolated state is
- * neither) via {@link deriveTerminalMarkers}; the marker NODE presence +
+ * neither, and a self-loop counts for neither degree) via
+ * {@link deriveTerminalMarkers}; the marker NODE presence +
  * position come from `value.terminalNodes` — the manager controls marker
  * PRESENCE + POSITION only, not edges:
  *  - `'hidden'` → omit the marker node (and its edges — an edge with no source
@@ -494,7 +483,7 @@ export function formToFlowWithMarkers(
   const autoEnd = topo.nodes.find((n) => n.id === END_NODE_ID);
   const startEdges = topo.edges.filter((e) => e.source === START_NODE_ID);
   const autoEndEdges = topo.edges.filter((e) => e.target === END_NODE_ID);
-  // The auto sink set — states with out-degree 0 (already drawn by
+  // The auto sink set — the {@link deriveAutoSinks} states (already drawn by
   // `autoEndEdges` as `${s}->${END_NODE_ID}`). An explicit endSource that IS a
   // sink is de-duplicated: the auto arrow already draws, so we do NOT emit a
   // second `${s}->${END_NODE_ID}#x` edge (a duplicate id would collide and a
@@ -777,8 +766,220 @@ export function rejectionMessageForConnection(
   if (to === END_NODE_ID && from && hasEndSource(edges, from)) {
     return `Status ${from} sudah terhubung ke titik akhir.`;
   }
+  // A SELF-LOOP duplicate reads as its own case: "Transisi dari X ke X sudah
+  // ada" names the same status twice and reads like a typo to a manager.
+  if (from && from === to && isDuplicateTransition(edges, from, to)) {
+    return duplicateSelfLoopMessage(from);
+  }
   if (from && isDuplicateTransition(edges, from, to)) {
     return `Transisi dari ${from} ke ${to} sudah ada.`;
   }
   return 'Transisi tidak dapat dibuat.';
+}
+
+/** The manager-facing copy for a self-loop that already exists. Shared by
+ *  {@link rejectionMessageForConnection} (React Flow rejected the drop live)
+ *  and {@link decideConnectEnd} (the same-handle drop React Flow never
+ *  validates), so both paths say the same thing. */
+function duplicateSelfLoopMessage(from: string): string {
+  return `Status ${from} sudah punya transisi ke dirinya sendiri.`;
+}
+
+/**
+ * The next side, clockwise, used as the TARGET side of a programmatically
+ * created self-loop whose SOURCE side is the side the manager dragged from.
+ * Two DISTINCT adjacent sides (never the same one) so the loop has two real
+ * endpoints and reads as an arc over the nearest corner of the card — see
+ * {@link getSelfLoopPath}, whose adjacent-sides branch arcs around exactly that
+ * corner.
+ */
+const SELF_LOOP_TARGET_SIDE: Record<EdgeSide, EdgeSide> = {
+  right: 'top',
+  top: 'left',
+  left: 'bottom',
+  bottom: 'right',
+};
+
+/**
+ * The minimal structural slice of React Flow's `FinalConnectionState` that the
+ * connect-end decision needs, on top of {@link ConnectionOutcome}:
+ *  - `fromHandleId` is `connectionState.fromHandle?.id` — the handle the drag
+ *    STARTED at, used as the self-loop's source side so the loop leaves the card
+ *    where the manager pulled from.
+ *  - `pointerNodeId` is the state node the pointer was OVER at release,
+ *    resolved from the DOM by the component (see `nodeIdUnderPointer`), or
+ *    `null` when the release was not over a node (or could not be resolved).
+ *    React Flow only reports `toNode` when the release landed on a HANDLE; the
+ *    manager releasing over the middle of their own card is the same intent, so
+ *    the decision falls back to this. It is consulted ONLY for the self-loop
+ *    branch — never for the rejection message, which must stay keyed on React
+ *    Flow's own outcome (a "sudah ada" message only makes sense for a
+ *    connection React Flow actually evaluated).
+ */
+export interface ConnectEndOutcome extends ConnectionOutcome {
+  fromHandleId: string | null;
+  pointerNodeId: string | null;
+}
+
+/**
+ * What the canvas should do when a connection drag ends: create a self-loop,
+ * show a message, or nothing.
+ */
+export type ConnectEndDecision =
+  | { kind: 'none' }
+  | { kind: 'self-loop'; source: string; sourceHandle: string; targetHandle: string }
+  | { kind: 'message'; message: string };
+
+/**
+ * The PURE decision for `onConnectEnd` — the SELF-LOOP fallback plus the
+ * existing rejection-message path. Extracted per SRP: the decision is unit-
+ * tested here, the side effects (`commit` / `toast.show`) stay a thin wrapper in
+ * the component (a real drag needs pointer geometry jsdom cannot provide).
+ *
+ * **Why a fallback is needed at all** (verified in `@xyflow/system`'s
+ * `isValidHandle`, v0.0.79): under `ConnectionMode.Loose` a drop is valid only
+ * when `handleNodeId !== fromNodeId || handleId !== fromHandleId`. Dragging out
+ * of a node's `right` handle and back onto that SAME `right` handle — the
+ * natural self-loop gesture — fails that test BEFORE our `isValidConnection`
+ * ever runs, and `getClosestHandle` deliberately skips the from-handle, so
+ * `onConnect` never fires. React Flow does still tell us where the pointer
+ * landed WHEN THE RELEASE WAS ON A HANDLE: `isValidHandle` fills
+ * `result.toHandle` from the handle under the cursor regardless of validity, so
+ * `connectionState.toNode` IS populated on that rejected drop (with `isValid ===
+ * null`, not `false` — `isConnectionValid` returns `null` when no closest handle
+ * was found).
+ *
+ * **Releasing over the card BODY reports nothing**, though — no handle under the
+ * cursor means `toHandle`/`toNode` stay null. That is the majority of real
+ * attempts: the manager's gesture is "drag out, drag back onto the status,
+ * release", not "release precisely on the 7px dot I started from". So the drop
+ * target is `toId ?? pointerNodeId` — React Flow's answer when it has one, else
+ * the node the component resolved from the DOM under the release point.
+ *
+ * Order of checks (load-bearing):
+ *  1. `isValid === true` ⟹ React Flow already committed the connection through
+ *     `onConnect` (dropping on a DIFFERENT handle of the same node IS valid
+ *     under Loose mode) — return `none` so the self-loop is never created twice.
+ *  2. An existing self-loop ⟹ a message, not a second edge.
+ *  3. Otherwise create the self-loop from the dragged-from side.
+ *
+ * The branch is gated on `fromId === dropId`, so it can never hijack a drop onto
+ * a DIFFERENT node (React Flow owns that, and it already works). Terminal
+ * markers (`__start`/`__end`) are excluded: they are canvas-only and must never
+ * gain a transition (a marker cannot even be dragged from — its handle is
+ * `isConnectable={false}` — but guard so the rule is local; the DOM fallback
+ * CAN resolve a marker's wrapper, since markers are `.react-flow__node` too).
+ */
+export function decideConnectEnd(
+  outcome: ConnectEndOutcome,
+  edges: readonly FlowEdge[],
+): ConnectEndDecision {
+  const { fromId, toId } = outcome;
+  // Where the release landed: React Flow's resolved target node when it found a
+  // handle there, else the node the pointer was over (DOM-resolved fallback).
+  const dropId = toId ?? outcome.pointerNodeId;
+  if (fromId && dropId && fromId === dropId && !isTerminalNodeId(fromId)) {
+    if (outcome.isValid === true) return { kind: 'none' };
+    if (isDuplicateTransition(edges, fromId, fromId)) {
+      return { kind: 'message', message: duplicateSelfLoopMessage(fromId) };
+    }
+    const sourceSide = handleToSide(outcome.fromHandleId ?? undefined) ?? DEFAULT_SOURCE_SIDE;
+    return {
+      kind: 'self-loop',
+      source: fromId,
+      sourceHandle: sideToHandle(sourceSide),
+      targetHandle: sideToHandle(SELF_LOOP_TARGET_SIDE[sourceSide]),
+    };
+  }
+  const message = rejectionMessageForConnection(outcome, edges);
+  return message ? { kind: 'message', message } : { kind: 'none' };
+}
+
+/**
+ * How far each self-loop control point is pushed from its endpoint, in flow
+ * units (px at zoom 1). Used for BOTH the outward (normal) and the sideways
+ * (lateral) offset, so the loop's apex lands `0.75 * R` (120px) past the
+ * handle it leaves from — comfortably outside a card that is `min-width: 10rem`
+ * (160px) wide and ~50px tall, on every one of the 16 handle pairs (the
+ * tightest, `top`↔`bottom`, still clears the card edge by 40px). Sized
+ * generously on purpose: the manager's report was "self-loop garisnya overlap
+ * dan jelek sekali, seharusnya lebih panjang lagi".
+ */
+export const SELF_LOOP_RADIUS = 160;
+
+/** The outward unit normal implied by a handle side, in SVG coordinates (y
+ *  grows DOWNWARD, so `top` points to negative y). Keyed by the bare side
+ *  string — the {@link HANDLE_IDS} ids and React Flow's `Position` values are
+ *  the same four strings, and typing the lookup as a plain string keeps this
+ *  module framework-free (React Flow's `Position` is a string ENUM, which TS
+ *  will not assign to a string-literal union). */
+const SIDE_NORMALS: Record<string, { x: number; y: number }> = {
+  top: { x: 0, y: -1 },
+  right: { x: 1, y: 0 },
+  bottom: { x: 0, y: 1 },
+  left: { x: -1, y: 0 },
+};
+
+/**
+ * The SVG path + label anchor for a SELF-LOOP edge (`source === target`), in
+ * the same `[path, labelX, labelY]` tuple shape React Flow's `getBezierPath`
+ * returns, so the edge component can swap one for the other.
+ *
+ * `getBezierPath` is degenerate for a self-loop: the two endpoints are less
+ * than a card apart, so it draws a short backwards curve THROUGH the node card
+ * (edges render beneath nodes) and parks the label chip on top of the card —
+ * the manager's "overlap dan jelek sekali" report.
+ *
+ * Instead each control point is pushed OUT along its endpoint's outward normal
+ * by {@link SELF_LOOP_RADIUS} and SIDEWAYS along a lateral unit vector by the
+ * same amount. The lateral pair is what decides where the loop swings, and it
+ * must be chosen RELATIVE to the other endpoint, not per-endpoint:
+ *  - ADJACENT sides (normals perpendicular, e.g. `top` → `right`): each
+ *    endpoint's lateral is the OTHER endpoint's normal, so both control points
+ *    push toward the corner between the two sides and the loop arcs around it.
+ *  - SAME side (`right` → `right`): laterals are ±the normal's perpendicular —
+ *    opposite signs, so the loop opens into a symmetric round loop off that side.
+ *  - OPPOSITE sides (`right` → `left`, the seeded default routing): both
+ *    laterals are the SAME perpendicular, so the loop swings clear over one
+ *    side of the card instead of S-curving back through it.
+ *
+ * The label anchor is the cubic's midpoint `(P0 + 3C1 + 3C2 + P3) / 8` (t=0.5),
+ * i.e. the apex of the loop — never on the card.
+ */
+export function getSelfLoopPath(params: {
+  sourceX: number;
+  sourceY: number;
+  sourcePosition: string;
+  targetX: number;
+  targetY: number;
+  targetPosition: string;
+}): [path: string, labelX: number, labelY: number] {
+  const { sourceX, sourceY, targetX, targetY } = params;
+  const ns = SIDE_NORMALS[params.sourcePosition] ?? SIDE_NORMALS.right;
+  const nt = SIDE_NORMALS[params.targetPosition] ?? SIDE_NORMALS.left;
+  // 0 = adjacent (perpendicular), 1 = same side, -1 = opposite sides.
+  const dot = ns.x * nt.x + ns.y * nt.y;
+  let ls: { x: number; y: number };
+  let lt: { x: number; y: number };
+  if (dot === 0) {
+    ls = nt;
+    lt = ns;
+  } else {
+    // `ns` rotated a quarter turn (screen coords): the only direction with a
+    // sideways component when the two normals are parallel.
+    const p = { x: ns.y, y: -ns.x };
+    ls = p;
+    lt = dot > 0 ? { x: -p.x, y: -p.y } : p;
+  }
+  const r = SELF_LOOP_RADIUS;
+  const c1x = sourceX + ns.x * r + ls.x * r;
+  const c1y = sourceY + ns.y * r + ls.y * r;
+  const c2x = targetX + nt.x * r + lt.x * r;
+  const c2y = targetY + nt.y * r + lt.y * r;
+  const path = `M ${sourceX},${sourceY} C ${c1x},${c1y} ${c2x},${c2y} ${targetX},${targetY}`;
+  return [
+    path,
+    (sourceX + 3 * c1x + 3 * c2x + targetX) / 8,
+    (sourceY + 3 * c1y + 3 * c2y + targetY) / 8,
+  ];
 }

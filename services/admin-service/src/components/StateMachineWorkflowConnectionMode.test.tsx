@@ -35,9 +35,14 @@
  * same "cover the jsdom-untestable behavior through a focused seam" pattern the
  * suite already uses for the duplicate-toast (`onConnectEnd`) logic.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render } from '@testing-library/react';
-import { ConnectionMode, type Connection, type ReactFlowProps } from '@xyflow/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, render } from '@testing-library/react';
+import {
+  ConnectionMode,
+  type Connection,
+  type FinalConnectionState,
+  type ReactFlowProps,
+} from '@xyflow/react';
 import type { StateMachineForm } from '../lib/state-machine';
 import { defaultStateMachineForm } from '../lib/state-machine';
 import { END_NODE_ID, START_NODE_ID } from '../lib/state-machine-flow';
@@ -67,6 +72,51 @@ describe('StateMachineWorkflow connection mode (every side accepts a drop)', () 
     // Reset so a sibling test added later never reads a stale capture.
     capturedReactFlowProps = null;
   });
+
+  afterEach(() => {
+    // `document.elementFromPoint` does not exist in jsdom, so a stub must be
+    // DELETED rather than restored — leaving one behind would make a later test
+    // resolve a node id it never set up.
+    delete (document as Partial<Document>).elementFromPoint;
+  });
+
+  /**
+   * Stub the one DOM API `nodeIdUnderPointer` depends on. jsdom does not
+   * implement `document.elementFromPoint` (it is `undefined`, not a stub) and
+   * does no layout, so the real hit test is browser-only; the stub covers the
+   * WIRING around it. Returns the spy so a test can assert the coordinates.
+   */
+  function stubElementFromPoint(result: Element | null) {
+    const lookup = vi.fn(() => result);
+    (document as Partial<Document>).elementFromPoint = lookup as Document['elementFromPoint'];
+    return lookup;
+  }
+
+  /** The `FinalConnectionState` React Flow hands `onConnectEnd`, defaulted to
+   *  the rejected same-node drop (`isValid: null`) the self-loop fallback keys
+   *  off. Overrides narrow it to the case under test. */
+  function connectionState(overrides: Record<string, unknown>) {
+    return {
+      isValid: null,
+      fromNode: { id: 'WAITING' },
+      fromHandle: { id: 'right' },
+      toNode: { id: 'WAITING' },
+      ...overrides,
+    } as unknown as FinalConnectionState;
+  }
+
+  /** Drive the captured `onConnectEnd`. Wrapped in `act` because the self-loop
+   *  branch calls `commit`, which sets React state (the rejected branches do
+   *  not — the wrapper keeps both paths warning-free). `event` defaults to a
+   *  mouse release; the touch tests pass their own. */
+  function fireConnectEnd(
+    state: FinalConnectionState,
+    event: MouseEvent | TouchEvent = new MouseEvent('mouseup'),
+  ): void {
+    act(() => {
+      capturedReactFlowProps!.onConnectEnd!(event, state);
+    });
+  }
 
   it('configures React Flow with ConnectionMode.Loose', () => {
     const customForm: StateMachineForm = { ...defaultStateMachineForm(), mode: 'custom' };
@@ -230,6 +280,246 @@ describe('StateMachineWorkflow connection mode (every side accepts a drop)', () 
         targetHandleId: 't-top',
       } as unknown as Connection);
       expect(onChange).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('self-loop drawn on the canvas (onConnectEnd fallback)', () => {
+    /**
+     * Manager feedback: "current node cannot have self-loop". The natural
+     * gesture — drag out of a node's handle and drop back onto the SAME handle
+     * — is rejected INSIDE React Flow: `@xyflow/system`'s `isValidHandle` under
+     * `ConnectionMode.Loose` only accepts a drop when
+     * `handleNodeId !== fromNodeId || handleId !== fromHandleId`, so
+     * `onConnect` never fires and our `isValidConnection` never even runs.
+     * React Flow does still fill `connectionState.toNode` on that rejected drop
+     * (with `isValid === null`), which is what `onConnectEnd` keys off to create
+     * the self-loop programmatically — but ONLY when the release landed on a
+     * handle. For the far more common "released over my own card" gesture React
+     * Flow reports nothing, and the component resolves the node from the DOM
+     * (`nodeIdUnderPointer`); those cases are the sibling describe below.
+     *
+     * A real pointer-geometry drag is jsdom-UNTESTABLE here (no `PointerEvent`
+     * constructor, `fireEvent.pointerDown` strips `isPrimary`), so — as with the
+     * `connectionMode` prop above — the seam is the captured callback, driven
+     * directly with the connection state React Flow builds.
+     */
+    /** A three-state chain in custom mode. WAITING is the entry status the
+     *  manager reported the bug on (it has an outgoing transition and the
+     *  Start marker's arrow). */
+    function loopForm(overrides: Partial<StateMachineForm> = {}): StateMachineForm {
+      return {
+        ...defaultStateMachineForm(),
+        mode: 'custom',
+        states: ['WAITING', 'CALLING', 'SERVING'],
+        transitions: [
+          { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' },
+          { from: 'CALLING', to: 'SERVING', actionLabel: 'Layan' },
+        ],
+        ...overrides,
+      };
+    }
+
+    it('creates the self-loop when the drag ended on the node it started from', () => {
+      const onChange = vi.fn();
+      render(<StateMachineWorkflow value={loopForm()} onChange={onChange} errors={[]} />);
+      fireConnectEnd(connectionState({}));
+      expect(onChange).toHaveBeenCalledOnce();
+      const [next] = onChange.mock.calls[0];
+      const loop = next.transitions.filter(
+        (t: { from: string; to: string }) => t.from === 'WAITING' && t.to === 'WAITING',
+      );
+      expect(loop).toHaveLength(1);
+      // Two DISTINCT adjacent sides: the dragged-from side stays the source, the
+      // next side clockwise takes the arrowhead — so the loop has two real
+      // endpoints and arcs around that corner of the card.
+      expect(loop[0].sourceSide).toBe('right');
+      expect(loop[0].targetSide).toBe('top');
+      // The existing transitions are untouched.
+      expect(next.transitions).toHaveLength(loopForm().transitions.length + 1);
+    });
+
+    it('does NOT double-create when React Flow already committed the connection', () => {
+      // Dropping on a DIFFERENT handle of the same node IS valid under Loose
+      // mode → `onConnect` already added the edge and `isValid` is true. The
+      // fallback must stay out of the way or one drag yields two loops.
+      const onChange = vi.fn();
+      render(<StateMachineWorkflow value={loopForm()} onChange={onChange} errors={[]} />);
+      fireConnectEnd(connectionState({ isValid: true }));
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it('does not add a second loop when the status already has one', () => {
+      const onChange = vi.fn();
+      const form = loopForm({
+        transitions: [
+          { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' },
+          { from: 'WAITING', to: 'WAITING', actionLabel: 'Ulang' },
+          { from: 'CALLING', to: 'SERVING', actionLabel: 'Layan' },
+        ],
+      });
+      render(<StateMachineWorkflow value={form} onChange={onChange} errors={[]} />);
+      fireConnectEnd(connectionState({}));
+      // The manager gets a toast instead (the pure decision is unit-tested in
+      // `state-machine-flow.test.ts`); no edge is added.
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it('does not create a self-loop when the drag ended on a different node', () => {
+      const onChange = vi.fn();
+      render(<StateMachineWorkflow value={loopForm()} onChange={onChange} errors={[]} />);
+      fireConnectEnd(connectionState({ toNode: { id: 'CALLING' } }));
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it('does not create a self-loop when the drag was dropped in empty space', () => {
+      const onChange = vi.fn();
+      render(<StateMachineWorkflow value={loopForm()} onChange={onChange} errors={[]} />);
+      // Nothing under the pointer either — the DOM fallback below resolves null.
+      stubElementFromPoint(null);
+      fireConnectEnd(connectionState({ toNode: null }));
+      expect(onChange).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('self-loop released over the card BODY (DOM pointer fallback)', () => {
+    /**
+     * The gap this closes: React Flow fills `connectionState.toNode` only when
+     * the release landed on a HANDLE (`isValidHandle` keys everything off the
+     * handle element under the cursor). The manager's gesture is "drag out of
+     * the status, drag back onto the status, release" — usually over the card
+     * BODY, where React Flow reports nothing and the drag was a no-op.
+     *
+     * `nodeIdUnderPointer` resolves the release point with
+     * `document.elementFromPoint(...).closest('.react-flow__node')` and reads
+     * `data-id` — React Flow's own DOM contract (it queries
+     * `.react-flow__node[data-id="…"]` internally; verified in @xyflow/react
+     * 12.11.2).
+     *
+     * jsdom does NOT implement `document.elementFromPoint` (it is `undefined`,
+     * not a stub) and performs no layout, so the HIT TEST itself is
+     * real-browser-only. These tests stub the lookup to cover the WIRING — that
+     * the resolved node id reaches the decision, that the coordinates come from
+     * the right place on mouse vs touch, and that the lookup is skipped when
+     * React Flow already answered.
+     */
+    function loopForm(overrides: Partial<StateMachineForm> = {}): StateMachineForm {
+      return {
+        ...defaultStateMachineForm(),
+        mode: 'custom',
+        states: ['WAITING', 'CALLING', 'SERVING'],
+        transitions: [
+          { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' },
+          { from: 'CALLING', to: 'SERVING', actionLabel: 'Layan' },
+        ],
+        ...overrides,
+      };
+    }
+
+    /** A detached stand-in for a React Flow node wrapper's inner content — what
+     *  `elementFromPoint` returns when the manager releases over the card body
+     *  (the `<span>` inside `StateNode`, not the wrapper itself). `closest`
+     *  walks a detached tree fine, which is exactly the lookup under test. */
+    function nodeBodyElement(nodeId: string): Element {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'react-flow__node react-flow__node-state';
+      wrapper.setAttribute('data-id', nodeId);
+      const body = document.createElement('span');
+      wrapper.appendChild(body);
+      return body;
+    }
+
+    function firedSelfLoops(onChange: ReturnType<typeof vi.fn>): { from: string; to: string }[] {
+      if (onChange.mock.calls.length === 0) return [];
+      const [next] = onChange.mock.calls[0];
+      return next.transitions.filter((t: { from: string; to: string }) => t.from === t.to);
+    }
+
+    it('creates the self-loop when the release was over the card body of its own node', () => {
+      const onChange = vi.fn();
+      render(<StateMachineWorkflow value={loopForm()} onChange={onChange} errors={[]} />);
+      stubElementFromPoint(nodeBodyElement('WAITING'));
+      // React Flow reports NO target node: the release was not on a handle.
+      fireConnectEnd(connectionState({ toNode: null }));
+      expect(firedSelfLoops(onChange)).toEqual([
+        expect.objectContaining({ from: 'WAITING', to: 'WAITING' }),
+      ]);
+    });
+
+    it('reads the release point from clientX/clientY on a mouse release', () => {
+      render(<StateMachineWorkflow value={loopForm()} onChange={vi.fn()} errors={[]} />);
+      const lookup = stubElementFromPoint(nodeBodyElement('WAITING'));
+      fireConnectEnd(
+        connectionState({ toNode: null }),
+        new MouseEvent('mouseup', { clientX: 120, clientY: 240 }),
+      );
+      expect(lookup).toHaveBeenCalledWith(120, 240);
+    });
+
+    it('reads the release point from changedTouches on a touch release (kiosk)', () => {
+      // On `touchend` the `touches` list is EMPTY — the lifted finger is only in
+      // `changedTouches`, so reading `touches[0]` would lose the coordinates and
+      // the gesture would silently do nothing on the touch kiosk.
+      render(<StateMachineWorkflow value={loopForm()} onChange={vi.fn()} errors={[]} />);
+      const lookup = stubElementFromPoint(nodeBodyElement('WAITING'));
+      const touchEnd = {
+        changedTouches: [{ clientX: 33, clientY: 44 }],
+        touches: [],
+      } as unknown as TouchEvent;
+      fireConnectEnd(connectionState({ toNode: null }), touchEnd);
+      expect(lookup).toHaveBeenCalledWith(33, 44);
+    });
+
+    it('never hijacks a release over a DIFFERENT node', () => {
+      const onChange = vi.fn();
+      render(<StateMachineWorkflow value={loopForm()} onChange={onChange} errors={[]} />);
+      stubElementFromPoint(nodeBodyElement('CALLING'));
+      fireConnectEnd(connectionState({ toNode: null }));
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it('never fires for a release over a canvas-only terminal marker', () => {
+      // The Start/End markers render as `.react-flow__node` wrappers too, so the
+      // DOM lookup CAN resolve one — the id equality check is what rejects it.
+      const onChange = vi.fn();
+      render(<StateMachineWorkflow value={loopForm()} onChange={onChange} errors={[]} />);
+      stubElementFromPoint(nodeBodyElement(END_NODE_ID));
+      fireConnectEnd(connectionState({ toNode: null }));
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it('does not add a second loop when the status already has one', () => {
+      const onChange = vi.fn();
+      const form = loopForm({
+        transitions: [
+          { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' },
+          { from: 'WAITING', to: 'WAITING', actionLabel: 'Ulang' },
+          { from: 'CALLING', to: 'SERVING', actionLabel: 'Layan' },
+        ],
+      });
+      render(<StateMachineWorkflow value={form} onChange={onChange} errors={[]} />);
+      stubElementFromPoint(nodeBodyElement('WAITING'));
+      fireConnectEnd(connectionState({ toNode: null }));
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it('tolerates an environment with no elementFromPoint instead of throwing', () => {
+      // jsdom does not implement it at all. Without the `typeof` guard in
+      // `nodeIdUnderPointer`, EVERY rejected drag in this suite (and any future
+      // test that fires `onConnectEnd` without stubbing) would blow up on a
+      // TypeError inside a React event handler. No stub here on purpose.
+      const onChange = vi.fn();
+      render(<StateMachineWorkflow value={loopForm()} onChange={onChange} errors={[]} />);
+      expect(() => fireConnectEnd(connectionState({ toNode: null }))).not.toThrow();
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it('skips the DOM lookup entirely when React Flow already resolved a target', () => {
+      // The hit test is an extra layout read on every connect-end; the common
+      // path (released on a handle) must not pay for it.
+      render(<StateMachineWorkflow value={loopForm()} onChange={vi.fn()} errors={[]} />);
+      const lookup = stubElementFromPoint(nodeBodyElement('WAITING'));
+      fireConnectEnd(connectionState({ toNode: { id: 'WAITING' } }));
+      expect(lookup).not.toHaveBeenCalled();
     });
   });
 });
