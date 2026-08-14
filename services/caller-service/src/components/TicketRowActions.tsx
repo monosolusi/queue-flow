@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import type { TicketStateDto } from '../api/types';
 import { actionRunKey, transferCandidates, type WorkflowAction } from '../lib/workflow-actions';
 import type { BoundCounter } from '../state/counter-binding';
@@ -42,6 +43,11 @@ export function TicketRowActions({
   testIdStem,
   onAction,
 }: TicketRowActionsProps) {
+  // Stem for the per-edge explanation ids (`aria-describedby` on the disabled
+  // unroutable buttons). One per row, so two rows offering the same edge never
+  // share an id.
+  const noteId = useId();
+
   return (
     <div
       className="ticket-actions"
@@ -60,18 +66,26 @@ export function TicketRowActions({
         if (action.command === null) {
           // Configured in the flow but unexecutable from the counter panel (or
           // named by a command newer than this build). Rendered disabled with
-          // the reason rather than as a button that would reject on tap.
+          // the reason rather than as a button that would reject on tap — and
+          // the reason is VISIBLE text, mirroring `ActionControls`: a `title`
+          // tooltip needs a hover the counter's touch screen cannot produce, so
+          // the row read as a dead button with no explanation at all.
+          const describedBy = `${noteId}-${action.to}`;
           return (
-            <button
-              key={key}
-              type="button"
-              className="btn btn--secondary ticket-actions__button ticket-actions__button--unavailable"
-              data-testid={testId}
-              disabled
-              title={action.unavailableReason ?? undefined}
-            >
-              {action.actionLabel} (tidak tersedia)
-            </button>
+            <div key={key} className="ticket-actions__unroutable">
+              <button
+                type="button"
+                className="btn btn--secondary ticket-actions__button ticket-actions__button--unavailable"
+                data-testid={testId}
+                disabled
+                aria-describedby={describedBy}
+              >
+                {action.actionLabel} (tidak tersedia)
+              </button>
+              <p id={describedBy} className="ticket-actions__note">
+                {action.unavailableReason}
+              </p>
+            </div>
           );
         }
 

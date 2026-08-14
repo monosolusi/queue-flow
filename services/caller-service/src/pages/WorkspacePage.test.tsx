@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { WorkspacePage } from './WorkspacePage';
@@ -55,6 +55,16 @@ const snapshot: QueueSnapshotDto = {
   waitingCount: 1,
 };
 
+/** A ticket already in the skipped bucket, as `GET /api/queue/snapshot` returns
+ *  it (`findSkippedByCounter` — counter-scoped, oldest skip first). */
+const skippedTicket = {
+  ticketId: 's9',
+  ticketNumber: 'A-009',
+  categoryId: 'cat-a',
+  status: 'SKIPPED',
+  counterId: 1,
+} as const;
+
 function makeApi(snap: QueueSnapshotDto = snapshot): ICallerApi {
   return {
     listCounters: () => Promise.resolve([]),
@@ -87,8 +97,11 @@ function wireEvent(
   return JSON.stringify({ type, aggregateId, occurredAt: 1, version: 1, payload });
 }
 
-function renderWorkspace(snap: QueueSnapshotDto = snapshot, onUnbind = vi.fn()) {
-  const api = makeApi(snap);
+function renderWorkspace(
+  snap: QueueSnapshotDto = snapshot,
+  onUnbind = vi.fn(),
+  api: ICallerApi = makeApi(snap),
+) {
   render(
     <MemoryRouter>
       <AuthProvider api={api}>
@@ -318,6 +331,109 @@ describe('WorkspacePage', () => {
     expect(row).toHaveTextContent('Batalkan Tiket');
     await userEvent.click(screen.getByTestId('skipped-action-s1-BATAL'));
     expect(api.applyTransition).toHaveBeenCalledWith('s1', 'BATAL');
+  });
+
+  it('keeps the primary controls above the queue lists, however many tickets are skipped', async () => {
+    // Manager feedback: "pada /caller ketika tiket dilewati banyak tampilan jadi
+    // semakin kebawah" — the queue lists rendered above the action panel, so
+    // every skipped ticket pushed "Panggil Berikutnya" further down the page.
+    // The panel now sits directly under the active ticket, and no amount of
+    // queue depth may move it. (The other half of the fix — the lists' own
+    // max-height + overflow-y — is CSS, guarded in src/styles.test.ts, since
+    // jsdom runs with `css: false`.)
+    const sectionOrder = () =>
+      Array.from(document.querySelector('.workspace__body')!.children).map((el) =>
+        el.getAttribute('aria-label'),
+      );
+    const expectCallNextAboveTheQueues = () => {
+      const callNext = screen.getByRole('button', { name: 'Panggil Berikutnya' });
+      for (const name of ['Antrian Menunggu', 'Tiket Dilewati']) {
+        const list = screen.getByRole('region', { name });
+        expect(
+          callNext.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING,
+          `${name} must come after the call-next button`,
+        ).toBeTruthy();
+      }
+    };
+
+    renderWorkspace({ counterId: 1, active: [], waiting: [], skipped: [], waitingCount: 0 });
+    await screen.findByText(/Belum ada tiket aktif/i);
+    expect(sectionOrder()).toEqual(['Tiket Aktif', 'Aksi', 'Antrian Menunggu', 'Tiket Dilewati']);
+    expectCallNextAboveTheQueues();
+
+    // Six skips down the real event path (call, then skip) — the depth that used
+    // to bury the button below the fold.
+    for (let i = 1; i <= 6; i += 1) {
+      FakeWebSocket.last!.send(
+        wireEvent('TICKET_CALLED', `sk${i}`, { ticketNumber: `A-10${i}`, counterId: 1 }),
+      );
+      FakeWebSocket.last!.send(
+        wireEvent('STATUS_UPDATED', `sk${i}`, { from: 'CALLING', to: 'SKIPPED' }),
+      );
+    }
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole('region', { name: 'Tiket Dilewati' })
+          .querySelectorAll('.skipped-queue__number'),
+      ).toHaveLength(6),
+    );
+
+    expect(sectionOrder()).toEqual(['Tiket Aktif', 'Aksi', 'Antrian Menunggu', 'Tiket Dilewati']);
+    expectCallNextAboveTheQueues();
+  });
+
+  it('tells the skipped list the flow could not be READ, not that it is empty', async () => {
+    // The wiring half of the honest-copy fix. Without `workflowError` reaching
+    // the list, a failed action fetch looks exactly like a flow with no way out
+    // of "Dilewati", and the panel sends staff off to edit an alur status that
+    // is not the problem — while call-next stays alive on its PRD fallback, so
+    // only recall appears to have vanished.
+    const api = makeApi({ ...snapshot, active: [], skipped: [skippedTicket] });
+    api.getWorkflowActions = vi.fn(() => Promise.reject(new Error('jaringan putus')));
+    renderWorkspace(snapshot, vi.fn(), api);
+
+    const hint = await screen.findByTestId('skipped-hint');
+    expect(hint).toHaveTextContent(/belum bisa dibaca/i);
+    expect(hint).not.toHaveTextContent(/Alur Status Tiket/);
+  });
+
+  it('keeps the flow-driven hint when a REFETCH fails but the last graph stands', async () => {
+    // The other half of the same distinction, and the reason the gate lives on
+    // this page: `useWorkflowActions` keeps the last good surface when a refetch
+    // fails, so telling staff to reload would be advice that cannot help — the
+    // graph in hand is already the right one. Driven the way it really happens:
+    // a config change bumps `configVersion`, and that refetch is what fails.
+    const api = makeApi({ ...snapshot, active: [], skipped: [skippedTicket] });
+    let calls = 0;
+    api.getWorkflowActions = vi.fn(() => {
+      calls += 1;
+      return calls === 1
+        ? Promise.resolve(PRD_DEFAULT_WORKFLOW)
+        : Promise.reject(new Error('jaringan putus'));
+    });
+    renderWorkspace(snapshot, vi.fn(), api);
+    await screen.findByTestId('skipped-action-s9-CALLING');
+
+    FakeWebSocket.last!.send(wireEvent('SYSTEM_CONFIG_CHANGED', 'system', {}));
+    await waitFor(() => expect(api.getWorkflowActions).toHaveBeenCalledTimes(2));
+
+    // Buttons survive the blip, and so does the wording that describes them.
+    expect(screen.getByTestId('skipped-action-s9-CALLING')).toBeInTheDocument();
+    expect(screen.getByTestId('skipped-hint')).toHaveTextContent(/kalau orangnya sudah datang/i);
+    expect(screen.getByTestId('skipped-hint')).not.toHaveTextContent(/belum bisa dibaca/i);
+  });
+
+  it('makes both capped queue lists reachable by keyboard', async () => {
+    // The lists scroll internally now (styles.test.ts). A scroll container whose
+    // content is not focusable is unreachable without a pointer on engines that
+    // do not focus scrollers themselves (WCAG 2.1.1).
+    renderWorkspace({ ...snapshot, skipped: [skippedTicket] });
+    await screen.findByText('A-002');
+    for (const name of ['Antrian Menunggu', 'Tiket Dilewati']) {
+      const list = within(screen.getByRole('region', { name })).getByRole('list');
+      expect(list).toHaveAttribute('tabindex', '0');
+    }
   });
 
   it('shows an empty active state for a counter with no active ticket', async () => {

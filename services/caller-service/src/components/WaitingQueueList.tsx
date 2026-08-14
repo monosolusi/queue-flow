@@ -60,7 +60,16 @@ export function WaitingQueueList({
       {tickets.length === 0 ? (
         <p className="waiting-queue__empty">Tidak ada antrian menunggu.</p>
       ) : (
-        <ol className={`waiting-queue__list${actionable ? ' waiting-queue__list--actionable' : ''}`}>
+        // The list is a capped scroll container (styles.css), and a scroller
+        // whose contents hold no focusable element is unreachable by keyboard
+        // (WCAG 2.1.1). Chrome 127+/Firefox make scrollers focusable on their
+        // own; `tabIndex={0}` makes that guarantee universal here. The
+        // surrounding <section> carries the accessible name, so the <ol> needs
+        // no label of its own — it is a scroll stop, not a widget.
+        <ol
+          className={`waiting-queue__list${actionable ? ' waiting-queue__list--actionable' : ''}`}
+          tabIndex={0}
+        >
           {tickets.map((t) => (
             <li
               key={t.ticketId}
