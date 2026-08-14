@@ -128,8 +128,10 @@ describe('SkippedQueueList (FR-CLR-02 — a skipped ticket stays recallable)', (
  */
 describe('SkippedQueueList hint follows the flow, never promises a missing action', () => {
   const hint = () => screen.getByTestId('skipped-hint');
-  /** The old, unconditional copy — the sentence the manager read as a promise. */
-  const RECALL_PROMISE = 'Panggil ulang kalau orangnya sudah datang.';
+  /** The tail of the recall wording. Whatever the flow calls the action, the
+   *  sentence must not appear when no recall is on offer — that promise, made
+   *  unconditionally, is what the manager read and could not act on. */
+  const RECALL_PROMISE = 'kalau orangnya sudah datang.';
 
   function renderWith(
     actions: ReturnType<typeof ticketActionsFor>,
@@ -179,7 +181,7 @@ describe('SkippedQueueList hint follows the flow, never promises a missing actio
     renderWith(ticketActionsFor(PRD_DEFAULT_WORKFLOW, 'SKIPPED'));
 
     expect(hint()).toHaveTextContent(
-      'Tiket yang tidak hadir saat dipanggil. Panggil ulang kalau orangnya sudah datang.',
+      'Tiket yang tidak hadir saat dipanggil. Tekan "Panggil Ulang" kalau orangnya sudah datang.',
     );
     expect(hint()).not.toHaveClass('skipped-queue__hint--notice');
   });
@@ -244,14 +246,20 @@ describe('SkippedQueueList hint follows the flow, never promises a missing actio
     expect(hint().textContent).not.toMatch(/SKIPPED|CALLING|WAITING/);
   });
 
-  it('keeps the flow-driven hint when a refetch failed but the last known flow stands', () => {
-    // `useWorkflowActions` deliberately keeps the last good surface when a
-    // REFETCH fails — a blip must not strip the staff's buttons, so it must not
-    // strip the wording that describes them either. Only an error with NO
-    // actions to fall back on switches the copy.
-    renderWith(ticketActionsFor(PRD_DEFAULT_WORKFLOW, 'SKIPPED'), 'Daftar aksi gagal dimuat.');
+  it("names the recall in the manager's own wording, not ours", () => {
+    // The buttons carry the flow's `actionLabel`, so the sentence describing
+    // them must too — hardcoding "Panggil Ulang" over a button that reads
+    // "Panggil Lagi Yang Absen" is this very bug in miniature.
+    const renamed = workflowActions(
+      edge('SKIPPED', 'CALLING', 'Panggil Lagi Yang Absen', 'RECALL'),
+    );
+    renderWith(ticketActionsFor(renamed, 'SKIPPED'));
 
-    expect(hint()).toHaveTextContent(RECALL_PROMISE);
-    expect(hint()).not.toHaveClass('skipped-queue__hint--notice');
+    expect(hint()).toHaveTextContent('Panggil Lagi Yang Absen');
+    // Our default wording must not survive the manager's rename.
+    expect(hint()).not.toHaveTextContent('Panggil Ulang');
+    expect(screen.getByTestId('skipped-action-s1-CALLING')).toHaveTextContent(
+      'Panggil Lagi Yang Absen',
+    );
   });
 });

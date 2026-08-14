@@ -398,6 +398,32 @@ describe('WorkspacePage', () => {
     expect(hint).not.toHaveTextContent(/Alur Status Tiket/);
   });
 
+  it('keeps the flow-driven hint when a REFETCH fails but the last graph stands', async () => {
+    // The other half of the same distinction, and the reason the gate lives on
+    // this page: `useWorkflowActions` keeps the last good surface when a refetch
+    // fails, so telling staff to reload would be advice that cannot help — the
+    // graph in hand is already the right one. Driven the way it really happens:
+    // a config change bumps `configVersion`, and that refetch is what fails.
+    const api = makeApi({ ...snapshot, active: [], skipped: [skippedTicket] });
+    let calls = 0;
+    api.getWorkflowActions = vi.fn(() => {
+      calls += 1;
+      return calls === 1
+        ? Promise.resolve(PRD_DEFAULT_WORKFLOW)
+        : Promise.reject(new Error('jaringan putus'));
+    });
+    renderWorkspace(snapshot, vi.fn(), api);
+    await screen.findByTestId('skipped-action-s9-CALLING');
+
+    FakeWebSocket.last!.send(wireEvent('SYSTEM_CONFIG_CHANGED', 'system', {}));
+    await waitFor(() => expect(api.getWorkflowActions).toHaveBeenCalledTimes(2));
+
+    // Buttons survive the blip, and so does the wording that describes them.
+    expect(screen.getByTestId('skipped-action-s9-CALLING')).toBeInTheDocument();
+    expect(screen.getByTestId('skipped-hint')).toHaveTextContent(/kalau orangnya sudah datang/i);
+    expect(screen.getByTestId('skipped-hint')).not.toHaveTextContent(/belum bisa dibaca/i);
+  });
+
   it('makes both capped queue lists reachable by keyboard', async () => {
     // The lists scroll internally now (styles.test.ts). A scroll container whose
     // content is not focusable is unreachable without a pointer on engines that

@@ -18,9 +18,10 @@ export interface SkippedQueueListProps {
   readonly error?: string | null;
   /** Hint from a tap turned away because another row's command was in flight. */
   readonly notice?: string | null;
-  /** Why the flow surface could not be read, when it could not (see
-   *  `useWorkflowActions`). Distinct from {@link error}, which reports a failed
-   *  command: this one explains why the rows have no buttons at all. */
+  /** Why the flow surface could not be read **at all** — never set while a last
+   *  known graph is still in hand (the workspace owns that distinction). Unlike
+   *  {@link error}, which reports a failed command, this explains why the rows
+   *  have no buttons whatsoever. */
   readonly workflowError?: string | null;
   readonly onAction?: (
     ticket: TicketStateDto,
@@ -38,9 +39,13 @@ interface SkippedListHint {
 }
 
 /** The flow published a recall the panel can run — the promise the copy has
- *  always made, now only made when it is true. */
-const RECALL_HINT =
-  'Tiket yang tidak hadir saat dipanggil. Panggil ulang kalau orangnya sudah datang.';
+ *  always made, now only made when it is true, and **in the manager's own
+ *  wording**: the recall edge's `actionLabel` is what the button says, so a flow
+ *  that labels it "Panggil Lagi Yang Absen" must not be described as "Panggil
+ *  Ulang". Naming a button that is not on screen is the same defect this whole
+ *  derivation exists to remove, one word smaller. */
+const recallHint = (actionLabel: string) =>
+  `Tiket yang tidak hadir saat dipanggil. Tekan "${actionLabel}" kalau orangnya sudah datang.`;
 /** Runnable actions, but none of them re-calls the ticket: point at the row
  *  buttons instead of promising a recall that this flow does not have. */
 const OTHER_ACTIONS_HINT =
@@ -101,7 +106,8 @@ function skippedListHint(
   }
   const tappable = (a: WorkflowAction) =>
     a.command !== null && (a.command !== 'TRANSFER' || transferPossible);
-  if (rendered.some((a) => a.command === 'RECALL')) return { text: RECALL_HINT, tone: 'muted' };
+  const recall = rendered.find((a) => a.command === 'RECALL');
+  if (recall) return { text: recallHint(recall.actionLabel), tone: 'muted' };
   if (rendered.some(tappable)) return { text: OTHER_ACTIONS_HINT, tone: 'muted' };
   // Configured, but nothing here can run it. Point at the per-button reasons
   // only when there are buttons to point at.

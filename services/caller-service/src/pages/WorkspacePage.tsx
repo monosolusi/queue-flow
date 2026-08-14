@@ -129,7 +129,15 @@ export function WorkspacePage({ bound, onUnbind }: WorkspacePageProps) {
             pending={skippedCommands.runner.pending}
             error={skippedCommands.runner.error}
             notice={skippedCommands.runner.notice}
-            workflowError={flowError}
+            // Only when the surface was NEVER read. `useWorkflowActions` keeps
+            // the last known graph when a REFETCH fails, so a flow that
+            // genuinely has no way out of "Dilewati" plus a later blip would
+            // otherwise tell staff to reload — advice that can never help,
+            // because the graph in hand is already the right one. This page is
+            // the only place that can tell the two apart. `ActionControls`
+            // deliberately keeps the unconditional `flowError`: its warning is
+            // "these buttons may be out of date", which is true either way.
+            workflowError={workflow === null ? flowError : null}
             onAction={skippedCommands.onAction}
           />
         </div>

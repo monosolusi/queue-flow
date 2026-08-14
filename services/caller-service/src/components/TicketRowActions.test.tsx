@@ -41,9 +41,12 @@ describe('TicketRowActions explains an action it cannot run', () => {
     const button = screen.getByTestId('skipped-action-s1-SKIPPED');
     expect(button).toBeDisabled();
     expect(button).toHaveTextContent('Tandai Ulang (tidak tersedia)');
-    // Visible on the panel…
+    // Visible on the panel — which is what carries the meaning here: a disabled
+    // button is not focusable, so the association below only pays off in a
+    // screen reader's virtual cursor. Kept anyway, and kept identical to the
+    // long-standing ActionControls pattern.
     expect(screen.getByText(/tidak mengubah status tiket/i)).toBeInTheDocument();
-    // …and announced with the button, not stranded next to it.
+    // …tied to its own button rather than stranded beside it.
     const describedBy = button.getAttribute('aria-describedby')!;
     expect(document.getElementById(describedBy)).toHaveTextContent(
       /tidak mengubah status tiket/i,

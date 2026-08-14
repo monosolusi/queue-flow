@@ -37,11 +37,16 @@ function rule(sel: string): string {
   return blocks.join(' ');
 }
 
-/** The `max-height` cap of a list rule, in rem. */
-function capRem(sel: string): number {
-  const m = rule(sel).match(/max-height:\s*([\d.]+)rem/);
-  expect(m, `${sel} must declare a rem max-height`).not.toBeNull();
-  return parseFloat(m![1]);
+/**
+ * The two arms of a list's `max-height: min(<n>rem, <n>vh)` cap. Both are
+ * required: the rem arm bounds the list on a tall screen, the vh arm bounds it
+ * on a short one (these counters run on landscape tablets, where a fixed rem cap
+ * is most of the screen).
+ */
+function cap(sel: string): { rem: number; vh: number } {
+  const m = rule(sel).match(/max-height:\s*min\(\s*([\d.]+)rem\s*,\s*([\d.]+)vh\s*\)/);
+  expect(m, `${sel} must cap with min(<n>rem, <n>vh)`).not.toBeNull();
+  return { rem: parseFloat(m![1]), vh: parseFloat(m![2]) };
 }
 
 const QUEUE_LISTS = ['.waiting-queue__list', '.skipped-queue__list'] as const;
@@ -53,13 +58,22 @@ describe('caller queue lists are capped and scrollable', () => {
   it.each(QUEUE_LISTS)('%s caps its height to about three actionable row bands', (sel) => {
     // ~8rem per actionable band (padding + number line + gap + action button),
     // so the cap must stay at or under 24rem to keep the page from growing.
-    const cap = capRem(sel);
-    expect(cap).toBeGreaterThan(0);
-    expect(cap).toBeLessThanOrEqual(24);
+    const { rem } = cap(sel);
+    expect(rem).toBeGreaterThan(0);
+    expect(rem).toBeLessThanOrEqual(24);
+  });
+
+  it.each(QUEUE_LISTS)('%s also caps against the VIEWPORT, for short screens', (sel) => {
+    // A rem-only cap is most of the screen on the landscape tablets these
+    // counters run on: two lists would fill it and the page would grow again,
+    // which is the whole complaint. Well under half the viewport per list.
+    const { vh } = cap(sel);
+    expect(vh).toBeGreaterThan(0);
+    expect(vh).toBeLessThanOrEqual(40);
   });
 
   it('both lists share one cap (a taller waiting list would push the skipped one down again)', () => {
-    expect(capRem('.waiting-queue__list')).toBe(capRem('.skipped-queue__list'));
+    expect(cap('.waiting-queue__list')).toEqual(cap('.skipped-queue__list'));
   });
 
   it.each(QUEUE_LISTS)('%s scrolls rather than clipping (reachability is the invariant)', (sel) => {
