@@ -38,6 +38,8 @@ import { useEffect, useState } from "react";
 import {
   describeState,
   NODE_ACTION_TYPE_LABELS,
+  REQUEUE_POLICY_LABELS,
+  REQUEUE_POLICIES,
   TRANSITION_ACTION_LABELS,
   TRANSITION_ACTIONS,
   type StateMachineForm,
@@ -48,7 +50,12 @@ import {
   type FlowNode,
 } from "../lib/state-machine-flow";
 import type { WorkflowHandlers } from "./StateMachineWorkflowNodes";
-import type { NodeActionType, TransitionActionType } from "../api/types";
+import type {
+  NodeActionType,
+  RequeuePolicyDto,
+  RequeuePolicyKind,
+  TransitionActionType,
+} from "../api/types";
 
 /** The action-type options shown in the "Aksi" dropdown, built from the shared
  *  `NODE_ACTION_TYPE_LABELS` map (the single source of truth in the pure
@@ -67,6 +74,30 @@ const NODE_ACTION_TYPE_OPTIONS: ReadonlyArray<{ value: NodeActionType; label: st
  *  dropdown can never offer a value the wire does not accept — nor omit one it
  *  does. The XML codec validates against the same list. */
 const TRANSITION_ACTION_OPTIONS = TRANSITION_ACTIONS;
+
+/** The options for a transition's "Kebijakan Antrian Ulang" dropdown — what a
+ *  `→ WAITING` re-queue does to queue order. The shared `REQUEUE_POLICIES`
+ *  list (the single source of truth in the pure `state-machine.ts`,
+ *  exhaustiveness-guarded against the union), so the dropdown can never offer a
+ *  value the wire does not accept — nor omit one it does. The XML codec
+ *  validates against the same list. Shown only on an edge whose
+ *  `to === 'WAITING'` AND `action === 'UPDATE_STATUS'`. */
+const REQUEUE_POLICY_OPTIONS = REQUEUE_POLICIES;
+
+/**
+ * The next policy when the manager switches the `kind` in the "Kebijakan Antrian
+ * Ulang" dropdown. A UI affordance, not a form-model invariant:
+ *  - switching TO `BACK_N` with no `n` present defaults `n` to 1 (a sensible
+ *    non-zero move-back so the field is not empty on reveal);
+ *  - switching AWAY from `BACK_N` drops `n` (it is meaningless on KEEP/TO_BACK,
+ *    and dropping it keeps the wire sparse — `{ kind }` only).
+ * The `n`-number input edits `n` in place via a separate handler call (it
+ * passes `{ kind: 'BACK_N', n }`), so this helper owns only the `kind`-switch.
+ */
+function nextRequeuePolicy(current: RequeuePolicyDto, kind: RequeuePolicyKind): RequeuePolicyDto {
+  if (kind === 'BACK_N') return { kind: 'BACK_N', n: current.kind === 'BACK_N' && current.n !== undefined ? current.n : 1 };
+  return { kind };
+}
 
 export interface WorkflowPropertiesPanelProps {
   mode: "default" | "custom";
@@ -381,6 +412,10 @@ export function StateMachineWorkflowProperties({
                   const labelId = `panel-transition-label-${edge.id}`;
                   const toId = `panel-transition-to-${edge.id}`;
                   const actionId = `panel-transition-action-${edge.id}`;
+                  const showRequeue = edge.target === "WAITING" && edge.data.action === "UPDATE_STATUS";
+                  const requeueId = `panel-transition-requeue-${edge.id}`;
+                  const requeueNId = `panel-transition-requeue-n-${edge.id}`;
+                  const policy = edge.data.requeuePolicy;
                   return (
                     <li key={edge.id} className="sm-properties__action">
                       <label className="sm-properties__action-label" htmlFor={labelId}>
@@ -434,6 +469,57 @@ export function StateMachineWorkflowProperties({
                           </option>
                         ))}
                       </select>
+                      {showRequeue && (
+                        <>
+                          <label className="sm-properties__action-label" htmlFor={requeueId}>
+                            Antrian ulang
+                          </label>
+                          <select
+                            id={requeueId}
+                            className="sm-properties__input"
+                            data-testid={`panel-transition-requeue-${edge.id}`}
+                            aria-describedby="panel-transition-requeue-hint"
+                            value={policy.kind}
+                            onChange={(e) =>
+                              handlers.onEditTransitionRequeuePolicy(
+                                edge.id,
+                                nextRequeuePolicy(policy, e.target.value as RequeuePolicyKind),
+                              )
+                            }
+                          >
+                            {REQUEUE_POLICY_OPTIONS.map((k) => (
+                              <option key={k} value={k}>
+                                {REQUEUE_POLICY_LABELS[k]}
+                              </option>
+                            ))}
+                          </select>
+                          {policy.kind === "BACK_N" && (
+                            <>
+                              <label className="sm-properties__action-label" htmlFor={requeueNId}>
+                                Mundur
+                              </label>
+                              <input
+                                id={requeueNId}
+                                type="number"
+                                min={0}
+                                step={1}
+                                className="sm-properties__input"
+                                data-testid={`panel-transition-requeue-n-${edge.id}`}
+                                value={policy.n ?? 0}
+                                aria-describedby="panel-transition-requeue-hint"
+                                onChange={(e) =>
+                                  handlers.onEditTransitionRequeuePolicy(edge.id, {
+                                    kind: "BACK_N",
+                                    n: Number.isFinite(e.target.valueAsNumber)
+                                      ? Math.max(0, Math.floor(e.target.valueAsNumber))
+                                      : 0,
+                                  })
+                                }
+                              />
+                            </>
+                          )}
+                        </>
+                      )}
                       <button
                         type="button"
                         className="sm-properties__action-delete"
@@ -457,6 +543,13 @@ export function StateMachineWorkflowProperties({
               tujuan — nomor dan kategorinya tetap. <strong>Pindah Kategori</strong> memindahkannya
               ke kategori lain sekaligus, dan petugas memilih kategori tujuannya saat menekan
               tombol.
+            </p>
+            <p id="panel-transition-requeue-hint" className="sm-properties__hint">
+              Hanya untuk transisi yang menuju <strong>WAITING</strong> dengan aksi{" "}
+              <strong>Ubah Status</strong>. <strong>Tetap di posisi</strong> = tiket tetap di
+              urutan lamanya. <strong>Paling belakang</strong> = tiket dipindah ke antrian paling
+              akhir. <strong>Mundur n posisi</strong> = tiket mundur n antrian di kategori yang
+              sama.
             </p>
             <button
               type="button"
@@ -763,6 +856,65 @@ export function StateMachineWorkflowProperties({
             kategori lain sekaligus, dan petugas memilih kategori tujuannya saat menekan tombol.
           </p>
         </div>
+        {to === "WAITING" && selectedEdge.data.action === "UPDATE_STATUS" && (
+          <div className="sm-properties__field">
+            <label className="sm-properties__label" htmlFor="panel-transition-requeue">
+              Antrian ulang
+            </label>
+            <select
+              id="panel-transition-requeue"
+              className="sm-properties__input"
+              data-testid={`panel-transition-requeue-${selectedEdge.id}`}
+              aria-describedby="panel-transition-requeue-hint-edge"
+              value={selectedEdge.data.requeuePolicy.kind}
+              onChange={(e) =>
+                handlers.onEditTransitionRequeuePolicy(
+                  selectedEdge.id,
+                  nextRequeuePolicy(
+                    selectedEdge.data.requeuePolicy,
+                    e.target.value as RequeuePolicyKind,
+                  ),
+                )
+              }
+            >
+              {REQUEUE_POLICY_OPTIONS.map((k) => (
+                <option key={k} value={k}>
+                  {REQUEUE_POLICY_LABELS[k]}
+                </option>
+              ))}
+            </select>
+            {selectedEdge.data.requeuePolicy.kind === "BACK_N" && (
+              <>
+                <label className="sm-properties__label" htmlFor="panel-transition-requeue-n">
+                  Mundur
+                </label>
+                <input
+                  id="panel-transition-requeue-n"
+                  type="number"
+                  min={0}
+                  step={1}
+                  className="sm-properties__input"
+                  data-testid={`panel-transition-requeue-n-${selectedEdge.id}`}
+                  value={selectedEdge.data.requeuePolicy.n ?? 0}
+                  aria-describedby="panel-transition-requeue-hint-edge"
+                  onChange={(e) =>
+                    handlers.onEditTransitionRequeuePolicy(selectedEdge.id, {
+                      kind: "BACK_N",
+                      n: Number.isFinite(e.target.valueAsNumber)
+                        ? Math.max(0, Math.floor(e.target.valueAsNumber))
+                        : 0,
+                    })
+                  }
+                />
+              </>
+            )}
+            <p id="panel-transition-requeue-hint-edge" className="sm-properties__hint">
+              <strong>Tetap di posisi</strong> = tiket tetap di urutan lamanya.{" "}
+              <strong>Paling belakang</strong> = tiket dipindah ke antrian paling akhir.{" "}
+              <strong>Mundur n posisi</strong> = tiket mundur n antrian di kategori yang sama.
+            </p>
+          </div>
+        )}
         <button
           type="button"
           className="btn btn--ghost sm-properties__delete"

@@ -28,6 +28,15 @@ export class QueueTicket extends AggregateRoot<TicketId> {
   private _counterId: number | null;
   private _createdAt: number;
   private _updatedAt: number;
+  // The WAITING queue's ordering key. Replaces `createdAt` as the sort key for
+  // every waiting read + `findNextWaiting` (the SQL index is `waiting_order ASC,
+  // created_at ASC`); `createdAt` keeps its existing role (analytics, archive,
+  // receipt position) and is never reset. `= createdAt` on `create` preserves
+  // the exact current FIFO on the new key (first deploy backfills
+  // `waiting_order = created_at`). A re-queue may re-stamp it (KEEP leaves it,
+  // TO_BACK re-stamps to `now`, BACK_N inserts at a category-rank midpoint or
+  // re-packs the category) — see `returnToQueue`.
+  private _waitingOrder: number;
   // Lifecycle timestamps (QUE-26). The wait-time metric (WAITING → CALLING)
   // is `calledAt - createdAt`; the service-time metric (SERVING → COMPLETED) is
   // `completedAt - servedAt`. `null` until the transition fires, and the
@@ -46,6 +55,7 @@ export class QueueTicket extends AggregateRoot<TicketId> {
     counterId: number | null,
     createdAt: number,
     updatedAt: number,
+    waitingOrder: number,
     calledAt: number | null,
     servedAt: number | null,
     completedAt: number | null,
@@ -57,6 +67,7 @@ export class QueueTicket extends AggregateRoot<TicketId> {
     this._counterId = counterId;
     this._createdAt = createdAt;
     this._updatedAt = updatedAt;
+    this._waitingOrder = waitingOrder;
     this._calledAt = calledAt;
     this._servedAt = servedAt;
     this._completedAt = completedAt;
@@ -64,7 +75,9 @@ export class QueueTicket extends AggregateRoot<TicketId> {
 
   /**
    * Factory for a brand-new ticket taken at the kiosk. Starts in WAITING and
-   * records a {@link TicketCreatedEvent}.
+   * records a {@link TicketCreatedEvent}. `waitingOrder` is initialized to
+   * `now` (= `createdAt`) so the new key preserves the exact current FIFO on
+   * first deploy (`waiting_order = created_at` backfill in migration 0017).
    */
   public static create(
     id: TicketId,
@@ -78,6 +91,7 @@ export class QueueTicket extends AggregateRoot<TicketId> {
       categoryId,
       TicketStatus.WAITING,
       null,
+      now,
       now,
       now,
       null,
@@ -102,6 +116,7 @@ export class QueueTicket extends AggregateRoot<TicketId> {
     counterId: number | null;
     createdAt: number;
     updatedAt: number;
+    waitingOrder: number;
     calledAt: number | null;
     servedAt: number | null;
     completedAt: number | null;
@@ -114,6 +129,7 @@ export class QueueTicket extends AggregateRoot<TicketId> {
       params.counterId,
       params.createdAt,
       params.updatedAt,
+      params.waitingOrder,
       params.calledAt,
       params.servedAt,
       params.completedAt,
@@ -142,6 +158,13 @@ export class QueueTicket extends AggregateRoot<TicketId> {
 
   public get updatedAt(): number {
     return this._updatedAt;
+  }
+
+  /** The WAITING queue's ordering key. Replaces `createdAt` as the sort key for
+   *  every waiting read; `createdAt` keeps its analytics role and is never
+   *  reset. Re-stamped by `returnToQueue` per the edge's `RequeuePolicy`. */
+  public get waitingOrder(): number {
+    return this._waitingOrder;
   }
 
   /** Epoch-ms the ticket was first called to a counter, or `null` if never called. */
@@ -248,13 +271,14 @@ export class QueueTicket extends AggregateRoot<TicketId> {
     policy: ITransitionPolicy,
     now = Date.now(),
     counterId: number | null = null,
+    waitingOrder: number | null = null,
   ): void {
     switch (target) {
       case TicketStatus.CALLING:
         this.callToCounter(counterId, policy, now);
         return;
       case TicketStatus.WAITING:
-        this.returnToQueue(policy, now);
+        this.returnToQueue(policy, now, waitingOrder);
         return;
       case TicketStatus.SERVING:
         this.startServing(policy, now);
@@ -336,10 +360,29 @@ export class QueueTicket extends AggregateRoot<TicketId> {
    * would report a wait that already ended, and leaving `servedAt` set would
    * pair a fresh completion with an abandoned service (QUE-26).
    *
+   * `waitingOrder` re-stamps the WAITING queue's ordering key per the edge's
+   * `RequeuePolicy` (resolved by the use case, which reads it from the active
+   * flow — never client-supplied). The aggregate owns its own `waitingOrder`
+   * (mirrors the `counterId` "use-case-supplies, aggregate-applies" pattern):
+   * `null` ⇒ keep the current value (the KEEP default — a re-queue leaves the
+   * ticket in its current FIFO slot exactly as before; backward-compat); a
+   * number ⇒ re-stamp to it (TO_BACK re-stamps to `now`; BACK_N re-stamps to a
+   * category-rank midpoint, computed by the use case). Siblings' `waiting_order`
+   * (the BACK_N renumber fallback) is a persistence-layer ordering key written
+   * via a dedicated repo port method — not here, and no new mutable setter.
+   *
+   * `_createdAt` is NOT re-stamped — it is the wait-time metric origin and the
+   * analytics/archive/receipt position; resetting it would corrupt FR-ADM-03
+   * reporting. The new ordering key takes the re-stamp instead.
+   *
    * This is the transition the manager draws as "Kembalikan ke Antrian" and the
    * one that used to be executed as a category move.
    */
-  private returnToQueue(policy: ITransitionPolicy, now: number): void {
+  private returnToQueue(
+    policy: ITransitionPolicy,
+    now: number,
+    waitingOrder: number | null = null,
+  ): void {
     if (!this.transitionTo(TicketStatus.WAITING, policy, now)) {
       return;
     }
@@ -347,6 +390,10 @@ export class QueueTicket extends AggregateRoot<TicketId> {
     this._calledAt = null;
     this._servedAt = null;
     this._completedAt = null;
+    // null ⇒ keep the current waitingOrder (the KEEP default — backward-compat).
+    // The aggregate owns its own ordering key; the use case supplies the value
+    // the active flow's edge policy resolves to (mirrors counterId).
+    this._waitingOrder = waitingOrder ?? this._waitingOrder;
   }
 
   /** Begin serving. `-> SERVING` ("Mulai Melayani") — starts the service clock. */
@@ -435,6 +482,12 @@ export class QueueTicket extends AggregateRoot<TicketId> {
     this._calledAt = null;
     this._servedAt = null;
     this._completedAt = null;
+    // Intentionally leave `_waitingOrder` alone (out of scope for the re-queue
+    // position policy — a `TRANSFER_CATEGORY` edge's policy is KEEP by rule, and
+    // the manager cannot declare otherwise). Mirrors the kept-`createdAt` quirk:
+    // a transferred ticket keeps its original ordering slot. This may be
+    // revisited when transfer joins the policy scope; for now it preserves
+    // the existing behavior.
     this._updatedAt = now;
     this.record(
       new TicketStatusChangedEvent(

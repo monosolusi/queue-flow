@@ -82,7 +82,9 @@ export class StateMachine implements ITransitionPolicy, ITransitionGraphSource {
    * {@link TransitionGraph} shape — the node set plus every edge, in
    * configuration order. `descriptions` / `stateSchema` / `StateTransitionRule`
    * stay behind the boundary: the read side gets plain `from`/`to`/
-   * `actionLabel`/`action` records, never Store-Config value objects.
+   * `actionLabel`/`action`/`requeuePolicy` records, never Store-Config value
+   * objects. `requeuePolicy` is KEEP on every edge that predates the field
+   * (backward-compat — see {@link StateTransitionRule}).
    */
   public describeGraph(): TransitionGraph {
     return {
@@ -92,6 +94,7 @@ export class StateMachine implements ITransitionPolicy, ITransitionGraphSource {
         to: rule.to,
         actionLabel: rule.actionLabel,
         action: rule.action,
+        requeuePolicy: rule.requeuePolicy,
       })),
     };
   }

@@ -45,7 +45,11 @@ import { StateMachine } from '../../../domain/store-config/state-machine';
 import { StateSchema } from '../../../domain/store-config/value-objects/state-schema';
 import { StateDescriptions } from '../../../domain/store-config/value-objects/state-descriptions';
 import { StateTransitionRule } from '../../../domain/store-config/value-objects/state-transition-rule';
-import { Identifier, type TransitionActionValue } from '../../../domain/shared';
+import {
+  Identifier,
+  requeuePolicyFromWire,
+  type TransitionActionValue,
+} from '../../../domain/shared';
 import { withDbClient } from './transaction-context';
 
 interface ConfigRow {
@@ -62,6 +66,12 @@ interface ConfigRow {
        *  defaults to `UPDATE_STATUS`). Same lazy-key pattern as `descriptions`
        *  below: no SQL migration, the key appears on the next save. */
       action?: TransitionActionValue;
+      /** What an `-> WAITING` edge does to the WAITING queue's order — lazy
+       *  key (absent on pre-feature rows, defaults to KEEP via
+       *  `requeuePolicyFromWire`). Same lazy-key pattern as `action` above:
+       *  no SQL migration (the field lives inside the `state_machine` JSONB
+       *  document), the key appears on the next save. */
+      requeuePolicy?: { kind: string; n?: number };
     }[];
     /** Per-state description overrides — lazy key (absent on pre-feature rows,
      *  defaults to `{}`). Mirrors the `timezone`-in-`daily_reset_policy` lazy-
@@ -155,6 +165,7 @@ function serializeStateMachine(sm: StateMachine) {
       to: t.to,
       actionLabel: t.actionLabel,
       action: t.action,
+      requeuePolicy: t.requeuePolicy,
     })),
     // Per-state description overrides, materialized from the VO. Always written
     // (the VO defaults to `{}` = no overrides) so the `descriptions` key appears
@@ -172,10 +183,21 @@ function toConfig(row: ConfigRow): SystemConfiguration {
     isInitialSetupCompleted: row.is_initial_setup_completed,
     stateMachine: new StateMachine(
       StateSchema.of(sm.states),
-      // `action` is a lazy key: a pre-feature row carries none, and
-      // `StateTransitionRule.of` recovers `undefined` to `UPDATE_STATUS` — the
-      // meaning every edge configured before the field existed had.
-      sm.transitions.map((t) => StateTransitionRule.of(t.from, t.to, t.actionLabel, t.action)),
+      // `action` and `requeuePolicy` are lazy keys: a pre-feature row carries
+      // neither, and `StateTransitionRule.of` recovers `undefined` action to
+      // `UPDATE_STATUS` while `requeuePolicyFromWire` recovers `undefined`
+      // policy to KEEP — the meaning every edge configured before either field
+      // existed had. No SQL migration — both live inside the `state_machine`
+      // JSONB document and appear lazily on the next save.
+      sm.transitions.map((t) =>
+        StateTransitionRule.of(
+          t.from,
+          t.to,
+          t.actionLabel,
+          t.action,
+          requeuePolicyFromWire(t.requeuePolicy),
+        ),
+      ),
       // Lazy-key backward-compat: a pre-feature row's `state_machine` JSONB
       // carries no `descriptions` key, so `sm.descriptions` is `undefined`.
       // `StateDescriptions.of(undefined)` recovers to the empty default (derive

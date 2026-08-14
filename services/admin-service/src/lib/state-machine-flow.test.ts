@@ -57,9 +57,9 @@ describe('autoLayout', () => {
     const pos = autoLayout(
       ['WAITING', 'CALLING', 'SKIPPED', 'SERVING'],
       [
-        { from: 'WAITING', to: 'CALLING', actionLabel: 'a', action: 'UPDATE_STATUS' },
-        { from: 'CALLING', to: 'SKIPPED', actionLabel: 'b', action: 'UPDATE_STATUS' },
-        { from: 'CALLING', to: 'SERVING', actionLabel: 'c', action: 'UPDATE_STATUS' },
+        { from: 'WAITING', to: 'CALLING', actionLabel: 'a', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
+        { from: 'CALLING', to: 'SKIPPED', actionLabel: 'b', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
+        { from: 'CALLING', to: 'SERVING', actionLabel: 'c', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
       ],
     );
     // SKIPPED precedes SERVING in the states array → lower y within rank 2.
@@ -69,8 +69,8 @@ describe('autoLayout', () => {
 
   it('puts pure-cycle nodes at rank 0 (unreachable from any source)', () => {
     const pos = autoLayout(['A', 'B'], [
-      { from: 'A', to: 'B', actionLabel: 'a', action: 'UPDATE_STATUS' },
-      { from: 'B', to: 'A', actionLabel: 'b', action: 'UPDATE_STATUS' },
+      { from: 'A', to: 'B', actionLabel: 'a', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
+      { from: 'B', to: 'A', actionLabel: 'b', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
     ]);
     // No source (both have incoming edges) → both keep rank 0.
     expect(pos.A.x).toBe(0);
@@ -89,8 +89,8 @@ describe('autoLayout', () => {
     // x = 0). A self-loop is flow that returns to the same status — it neither
     // ranks the status after itself nor costs it its source role.
     const pos = autoLayout(['A', 'B'], [
-      { from: 'A', to: 'B', actionLabel: 'a', action: 'UPDATE_STATUS' },
-      { from: 'A', to: 'A', actionLabel: 'loop', action: 'UPDATE_STATUS' },
+      { from: 'A', to: 'B', actionLabel: 'a', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
+      { from: 'A', to: 'A', actionLabel: 'loop', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
     ]);
     expect(pos.A.x).toBe(0);
     expect(pos.B.x).toBeGreaterThan(pos.A.x);
@@ -166,7 +166,7 @@ describe('formToFlow', () => {
     const form: StateMachineForm = {
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS', sourceSide: 'bottom' }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' }, sourceSide: 'bottom' }],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const { edges } = formToFlow(form, {});
     expect(edges[0].sourceHandle).toBe(HANDLE_IDS.bottom);
@@ -235,12 +235,18 @@ describe('flowToGraph', () => {
     const { nodes, edges } = formToFlow(form, {});
     const { states, transitions } = flowToGraph(nodes, edges);
     expect(states).toEqual([...DEFAULT_STATE_MACHINE.states]);
-    // The structural fields round-trip — including each edge's `action`, which
-    // lives on the canvas edge's `data` and so must survive a canvas commit;
-    // `flowToGraph` now also captures the default sides (right→left) from the
-    // default handles `formToFlow` seeds.
+    // The structural fields round-trip — including each edge's `action` AND
+    // `requeuePolicy`, both of which live on the canvas edge's `data` and so
+    // must survive a canvas commit; `flowToGraph` now also captures the default
+    // sides (right→left) from the default handles `formToFlow` seeds.
     expect(
-      transitions.map(({ from, to, actionLabel, action }) => ({ from, to, actionLabel, action })),
+      transitions.map(({ from, to, actionLabel, action, requeuePolicy }) => ({
+        from,
+        to,
+        actionLabel,
+        action,
+        requeuePolicy,
+      })),
     ).toEqual(DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })));
     for (const t of transitions) {
       expect(t.sourceSide).toBe('right');
@@ -291,7 +297,7 @@ describe('flowToGraph', () => {
         source: 'A',
         target: 'B',
         type: 'transition',
-        data: { actionLabel: 'go', action: 'UPDATE_STATUS' },
+        data: { actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
         sourceHandle: HANDLE_IDS.bottom,
         targetHandle: HANDLE_IDS.top,
       },
@@ -320,7 +326,7 @@ describe('flowToGraph', () => {
         source: 'A',
         target: 'B',
         type: 'transition',
-        data: { actionLabel: 'go', action: 'UPDATE_STATUS' },
+        data: { actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
         sourceHandle: DEFAULT_SOURCE_HANDLE,
         targetHandle: DEFAULT_TARGET_HANDLE,
       },
@@ -345,7 +351,7 @@ describe('flowToGraph', () => {
         source: 'A',
         target: 'B',
         type: 'transition',
-        data: { actionLabel: 'go', action: 'UPDATE_STATUS' },
+        data: { actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
         sourceHandle: HANDLE_IDS.bottom,
         targetHandle: HANDLE_IDS.top,
         markerEnd: EDGE_ARROW_MARKER,
@@ -404,8 +410,8 @@ describe('flowToGraph', () => {
       mode: 'custom',
       states: ['WAITING', 'ONHOLD', 'CALLING'],
       transitions: [
-        { from: 'ONHOLD', to: 'WAITING', actionLabel: 'Kembali', action: 'UPDATE_STATUS' },
-        { from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut', action: 'UPDATE_STATUS' },
+        { from: 'ONHOLD', to: 'WAITING', actionLabel: 'Kembali', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
+        { from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
       ],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const nodes: import('./state-machine-flow').FlowNode[] = [
@@ -447,7 +453,7 @@ describe('nextStateName', () => {
 describe('isDuplicateTransition', () => {
   it('returns true when an edge source→target already exists', () => {
     const edges: FlowEdge[] = [
-      { id: 'A->B#0', source: 'A', target: 'B', type: 'transition', data: { actionLabel: 'go', action: 'UPDATE_STATUS' } },
+      { id: 'A->B#0', source: 'A', target: 'B', type: 'transition', data: { actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } } },
     ];
     expect(isDuplicateTransition(edges, 'A', 'B')).toBe(true);
     // Direction matters: B→A is a different edge (not a duplicate of A→B).
@@ -462,7 +468,7 @@ describe('isDuplicateTransition', () => {
 
   it('detects a self-edge duplicate', () => {
     const edges: FlowEdge[] = [
-      { id: 'A->A#0', source: 'A', target: 'A', type: 'transition', data: { actionLabel: 'loop', action: 'UPDATE_STATUS' } },
+      { id: 'A->A#0', source: 'A', target: 'A', type: 'transition', data: { actionLabel: 'loop', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } } },
     ];
     expect(isDuplicateTransition(edges, 'A', 'A')).toBe(true);
   });
@@ -553,8 +559,8 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     const { nodes, edges } = deriveTerminalMarkers(
       ['A', 'B'],
       [
-        { from: 'A', to: 'B', actionLabel: 'a', action: 'UPDATE_STATUS' },
-        { from: 'B', to: 'A', actionLabel: 'b', action: 'UPDATE_STATUS' },
+        { from: 'A', to: 'B', actionLabel: 'a', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
+        { from: 'B', to: 'A', actionLabel: 'b', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
       ],
       { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
       [],
@@ -584,8 +590,8 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     const { nodes, edges } = deriveTerminalMarkers(
       ['A', 'B'],
       [
-        { from: 'A', to: 'B', actionLabel: 'a', action: 'UPDATE_STATUS' },
-        { from: 'B', to: 'B', actionLabel: 'loop', action: 'UPDATE_STATUS' },
+        { from: 'A', to: 'B', actionLabel: 'a', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
+        { from: 'B', to: 'B', actionLabel: 'loop', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
       ],
       { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
       [],
@@ -601,7 +607,7 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     // React would render duplicate arrows on top of each other.
     const { edges } = deriveTerminalMarkers(
       ['A', 'B'],
-      [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' }],
+      [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } }],
       { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
       ['A', 'B', 'A'],
     );
@@ -612,7 +618,7 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
   it('skips an endSource with no real position (a stale name draws nothing)', () => {
     const { nodes, edges } = deriveTerminalMarkers(
       ['A', 'B'],
-      [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' }],
+      [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } }],
       { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
       ['GONE'],
     );
@@ -625,7 +631,7 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     const real = { A: { x: 100, y: 0 }, B: { x: 300, y: 0 } };
     const { nodes } = deriveTerminalMarkers(
       ['A', 'B'],
-      [{ from: 'A', to: 'B', actionLabel: 'a', action: 'UPDATE_STATUS' }],
+      [{ from: 'A', to: 'B', actionLabel: 'a', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } }],
       real,
       ['B'],
     );
@@ -648,7 +654,7 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     // source A, so the Start bound is unaffected here — asserted for symmetry).
     const { nodes } = deriveTerminalMarkers(
       ['A', 'B', 'STRAY'],
-      [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' }],
+      [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } }],
       { A: { x: 0, y: 0 }, B: { x: 240, y: 0 }, STRAY: { x: 900, y: 0 } },
       ['B'],
     );
@@ -670,7 +676,7 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     // and reachable: it is the drop target for the first manual link.
     const { nodes } = deriveTerminalMarkers(
       ['A', 'B', 'STRAY'],
-      [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' }],
+      [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } }],
       { A: { x: 0, y: 0 }, B: { x: 240, y: 0 }, STRAY: { x: 900, y: 0 } },
       [],
     );
@@ -683,7 +689,7 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     // vertical middle. A stray at y=400 pulls the center down accordingly.
     const { nodes } = deriveTerminalMarkers(
       ['A', 'B', 'STRAY'],
-      [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' }],
+      [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } }],
       { A: { x: 0, y: 0 }, B: { x: 240, y: 0 }, STRAY: { x: 120, y: 400 } },
       ['B'],
     );
@@ -697,7 +703,7 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     // realPositions empty → minX/maxX/minY/maxY default to 0. Every bound list
     // is empty here — the source X list, the endSource X list AND the
     // all-real-nodes fallback — so this exercises every NaN guard at once.
-    const { nodes } = deriveTerminalMarkers(['A', 'B'], [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' }], {}, []);
+    const { nodes } = deriveTerminalMarkers(['A', 'B'], [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } }], {}, []);
     const start = nodes.find((n) => n.id === START_NODE_ID)!;
     const end = nodes.find((n) => n.id === END_NODE_ID)!;
     expect(start.position).toEqual({ x: 0 - 240, y: 0 });
@@ -708,7 +714,7 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     // The endSource is a real state name but carries no position, so it is
     // skipped for the edge AND drops out of the X bound; the all-real-nodes
     // fallback is empty too → 0, never NaN.
-    const { nodes } = deriveTerminalMarkers(['A', 'B'], [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' }], {}, ['B']);
+    const { nodes } = deriveTerminalMarkers(['A', 'B'], [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } }], {}, ['B']);
     expect(nodes.find((n) => n.id === END_NODE_ID)!.position).toEqual({ x: 240, y: 0 });
   });
 
@@ -718,8 +724,8 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     const { nodes, edges } = deriveTerminalMarkers(
       ['A', 'B'],
       [
-        { from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' },
-        { from: 'B', to: 'C', actionLabel: 'x', action: 'UPDATE_STATUS' },
+        { from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
+        { from: 'B', to: 'C', actionLabel: 'x', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
       ],
       { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
       ['B'],
@@ -742,7 +748,7 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     // target, with no edge (and none referencing C).
     const { nodes, edges } = deriveTerminalMarkers(
       ['A'],
-      [{ from: 'A', to: 'C', actionLabel: 'x', action: 'UPDATE_STATUS' }],
+      [{ from: 'A', to: 'C', actionLabel: 'x', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } }],
       { A: { x: 0, y: 0 } },
       [],
     );
@@ -759,7 +765,7 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     // leaf) reaches End only because it is listed as an endSource.
     const { nodes, edges } = deriveTerminalMarkers(
       ['A', 'B', 'C'],
-      [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' }],
+      [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } }],
       { A: { x: 0, y: 0 }, B: { x: 240, y: 0 }, C: { x: 240, y: 200 } },
       ['B'],
     );
@@ -796,8 +802,8 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     const chain = deriveTerminalMarkers(
       ['A', 'B', 'C'],
       [
-        { from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' },
-        { from: 'B', to: 'C', actionLabel: 'next', action: 'UPDATE_STATUS' },
+        { from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
+        { from: 'B', to: 'C', actionLabel: 'next', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
       ],
       { A: { x: 0, y: 0 }, B: { x: 240, y: 0 }, C: { x: 480, y: 0 } },
       ['C'],
@@ -809,8 +815,8 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     const cycle = deriveTerminalMarkers(
       ['A', 'B'],
       [
-        { from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' },
-        { from: 'B', to: 'A', actionLabel: 'back', action: 'UPDATE_STATUS' },
+        { from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
+        { from: 'B', to: 'A', actionLabel: 'back', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
       ],
       { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
       [],
@@ -825,7 +831,7 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     // the transition was drawn. Now it reaches End only on an explicit link.
     const auto = deriveTerminalMarkers(
       ['A', 'B'],
-      [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' }],
+      [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } }],
       { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
       [],
     );
@@ -835,7 +841,7 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     // edge — so the emptiness above is a real absence, not an unreachable id.
     const manual = deriveTerminalMarkers(
       ['A', 'B'],
-      [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' }],
+      [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } }],
       { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
       ['B'],
     );
@@ -858,8 +864,8 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     const { nodes, edges } = deriveTerminalMarkers(
       ['A', 'B'],
       [
-        { from: 'A', to: 'B', actionLabel: 'a', action: 'UPDATE_STATUS' },
-        { from: 'A', to: 'A', actionLabel: 'loop', action: 'UPDATE_STATUS' },
+        { from: 'A', to: 'B', actionLabel: 'a', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
+        { from: 'A', to: 'A', actionLabel: 'loop', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
       ],
       { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
       [],
@@ -876,8 +882,8 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     const { edges } = deriveTerminalMarkers(
       ['A', 'B', 'LOOPY'],
       [
-        { from: 'A', to: 'B', actionLabel: 'a', action: 'UPDATE_STATUS' },
-        { from: 'LOOPY', to: 'LOOPY', actionLabel: 'loop', action: 'UPDATE_STATUS' },
+        { from: 'A', to: 'B', actionLabel: 'a', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
+        { from: 'LOOPY', to: 'LOOPY', actionLabel: 'loop', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
       ],
       { A: { x: 0, y: 0 }, B: { x: 240, y: 0 }, LOOPY: { x: 240, y: 200 } },
       [],
@@ -951,9 +957,9 @@ describe('flowToGraph filters terminal markers', () => {
       { id: END_NODE_ID, type: END_NODE_TYPE, position: { x: 480, y: 0 }, data: { name: END_NODE_ID, description: '' } },
     ];
     const edges: FlowEdge[] = [
-      { id: 'A->B#0', source: 'A', target: 'B', type: 'transition', data: { actionLabel: 'go', action: 'UPDATE_STATUS' } },
-      { id: `${START_NODE_ID}->A`, source: START_NODE_ID, target: 'A', type: TERMINAL_EDGE_TYPE, data: { actionLabel: '', action: 'UPDATE_STATUS' } },
-      { id: `B->${END_NODE_ID}`, source: 'B', target: END_NODE_ID, type: TERMINAL_EDGE_TYPE, data: { actionLabel: '', action: 'UPDATE_STATUS' } },
+      { id: 'A->B#0', source: 'A', target: 'B', type: 'transition', data: { actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } } },
+      { id: `${START_NODE_ID}->A`, source: START_NODE_ID, target: 'A', type: TERMINAL_EDGE_TYPE, data: { actionLabel: '', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } } },
+      { id: `B->${END_NODE_ID}`, source: 'B', target: END_NODE_ID, type: TERMINAL_EDGE_TYPE, data: { actionLabel: '', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } } },
     ];
     const { states, transitions, positions } = flowToGraph(nodes, edges);
     expect(states).toEqual(['A', 'B']);
@@ -972,7 +978,7 @@ describe('formToFlowWithMarkers terminal-node three-state model', () => {
   const abForm = (): StateMachineForm => ({
     mode: 'custom',
     states: ['A', 'B'],
-    transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' }],
+    transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } }],
     positions: { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
     nodeActions: {},
     descriptions: {},
@@ -1032,8 +1038,8 @@ describe('formToFlowWithMarkers terminal-node three-state model', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [
-        { from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' },
-        { from: 'B', to: 'A', actionLabel: 'back', action: 'UPDATE_STATUS' },
+        { from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
+        { from: 'B', to: 'A', actionLabel: 'back', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
       ],
       positions: { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
       nodeActions: {},
@@ -1057,8 +1063,8 @@ describe('formToFlowWithMarkers terminal-node three-state model', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [
-        { from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' },
-        { from: 'B', to: 'A', actionLabel: 'back', action: 'UPDATE_STATUS' },
+        { from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
+        { from: 'B', to: 'A', actionLabel: 'back', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
       ],
       positions: { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
       nodeActions: {},
@@ -1123,8 +1129,8 @@ describe('formToFlowWithMarkers terminal-node three-state model', () => {
       ...abForm(),
       states: ['A', 'B', 'STATUS_1'],
       transitions: [
-        { from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' },
-        { from: 'B', to: 'STATUS_1', actionLabel: 'next', action: 'UPDATE_STATUS' },
+        { from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
+        { from: 'B', to: 'STATUS_1', actionLabel: 'next', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
       ],
       positions: { A: { x: 0, y: 0 }, B: { x: 240, y: 0 }, STATUS_1: { x: 480, y: 0 } },
     };
@@ -1283,15 +1289,15 @@ describe('isDuplicateTransition excludes terminal edges', () => {
     // defensive `type !== 'terminal'` filter keeps the predicate honest when the
     // full canvas edge list (which now includes the markers) is passed.
     const edges: FlowEdge[] = [
-      { id: `${START_NODE_ID}->A`, source: START_NODE_ID, target: 'A', type: TERMINAL_EDGE_TYPE, data: { actionLabel: '', action: 'UPDATE_STATUS' } },
-      { id: `A->${END_NODE_ID}`, source: 'A', target: END_NODE_ID, type: TERMINAL_EDGE_TYPE, data: { actionLabel: '', action: 'UPDATE_STATUS' } },
+      { id: `${START_NODE_ID}->A`, source: START_NODE_ID, target: 'A', type: TERMINAL_EDGE_TYPE, data: { actionLabel: '', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } } },
+      { id: `A->${END_NODE_ID}`, source: 'A', target: END_NODE_ID, type: TERMINAL_EDGE_TYPE, data: { actionLabel: '', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } } },
     ];
     // No real A→A edge exists; the terminal edges do NOT make it a duplicate.
     expect(isDuplicateTransition(edges, 'A', 'A')).toBe(false);
     // A real transition edge IS a duplicate.
     const withReal: FlowEdge[] = [
       ...edges,
-      { id: 'A->B#0', source: 'A', target: 'B', type: 'transition', data: { actionLabel: 'go', action: 'UPDATE_STATUS' } },
+      { id: 'A->B#0', source: 'A', target: 'B', type: 'transition', data: { actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } } },
     ];
     expect(isDuplicateTransition(withReal, 'A', 'B')).toBe(true);
   });
@@ -1304,7 +1310,7 @@ describe('rejectionMessageForConnection', () => {
     // scenario: `isValidConnection` returns false (duplicate), `onConnectEnd`
     // surfaces this message so the silent no-op becomes a visible reason.
     const edges: FlowEdge[] = [
-      { id: 'SKIPPED->CALLING#0', source: 'SKIPPED', target: 'CALLING', type: 'transition', data: { actionLabel: 'Panggil Ulang', action: 'UPDATE_STATUS' } },
+      { id: 'SKIPPED->CALLING#0', source: 'SKIPPED', target: 'CALLING', type: 'transition', data: { actionLabel: 'Panggil Ulang', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } } },
     ];
     expect(
       rejectionMessageForConnection(
@@ -1356,7 +1362,7 @@ describe('rejectionMessageForConnection', () => {
     // re-checked, so an unknown rejection surfaces a generic message instead of
     // a wrong "sudah ada" claim.
     const edges: FlowEdge[] = [
-      { id: 'A->B#0', source: 'A', target: 'B', type: 'transition', data: { actionLabel: 'go', action: 'UPDATE_STATUS' } },
+      { id: 'A->B#0', source: 'A', target: 'B', type: 'transition', data: { actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } } },
     ];
     expect(
       rejectionMessageForConnection(
@@ -1408,7 +1414,7 @@ describe('side ↔ handle mappers', () => {
     const form: StateMachineForm = {
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS', sourceSide: 'bottom', targetSide: 'top' }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' }, sourceSide: 'bottom', targetSide: 'top' }],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const { nodes, edges } = formToFlow(form, {});
     const { transitions } = flowToGraph(nodes, edges);
@@ -1428,7 +1434,7 @@ describe('formToFlowWithMarkers End connections (endSources)', () => {
   const abForm = (endSources: string[]): StateMachineForm => ({
     mode: 'custom',
     states: ['A', 'B'],
-    transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' }],
+    transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } }],
     positions: { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
     nodeActions: {},
     descriptions: {},
@@ -1506,9 +1512,9 @@ describe('formToFlowWithMarkers End connections (endSources)', () => {
 
 describe('hasEndSource (duplicate End-connection predicate)', () => {
   const edges: FlowEdge[] = [
-    { id: 'A->__end', source: 'A', target: END_NODE_ID, type: TERMINAL_EDGE_TYPE, data: { actionLabel: '', action: 'UPDATE_STATUS' } },
-    { id: 'B->__end', source: 'B', target: END_NODE_ID, type: TERMINAL_EDGE_TYPE, data: { actionLabel: '', action: 'UPDATE_STATUS' } },
-    { id: 'A->B#0', source: 'A', target: 'B', type: 'transition', data: { actionLabel: 'go', action: 'UPDATE_STATUS' } },
+    { id: 'A->__end', source: 'A', target: END_NODE_ID, type: TERMINAL_EDGE_TYPE, data: { actionLabel: '', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } } },
+    { id: 'B->__end', source: 'B', target: END_NODE_ID, type: TERMINAL_EDGE_TYPE, data: { actionLabel: '', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } } },
+    { id: 'A->B#0', source: 'A', target: 'B', type: 'transition', data: { actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } } },
   ];
   it('returns true for a source already linked to End', () => {
     expect(hasEndSource(edges, 'A')).toBe(true);
@@ -1523,7 +1529,7 @@ describe('hasEndSource (duplicate End-connection predicate)', () => {
     // this predicate refuse the very link the manager wanted to draw. With no
     // auto arrow on the canvas, the leaf is free to be linked.
     const leafEdges: FlowEdge[] = [
-      { id: 'A->B#0', source: 'A', target: 'B', type: 'transition', data: { actionLabel: 'go', action: 'UPDATE_STATUS' } },
+      { id: 'A->B#0', source: 'A', target: 'B', type: 'transition', data: { actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } } },
     ];
     expect(hasEndSource(leafEdges, 'B')).toBe(false);
   });
@@ -1533,7 +1539,7 @@ describe('hasEndSource (duplicate End-connection predicate)', () => {
     expect(hasEndSource(edges, 'A')).toBe(true); // A has a terminal edge
     // A real transition A→B does NOT make hasEndSource(edges, 'A') true via B.
     const onlyTrans: FlowEdge[] = [
-      { id: 'A->B#0', source: 'A', target: 'B', type: 'transition', data: { actionLabel: 'go', action: 'UPDATE_STATUS' } },
+      { id: 'A->B#0', source: 'A', target: 'B', type: 'transition', data: { actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } } },
     ];
     expect(hasEndSource(onlyTrans, 'A')).toBe(false);
   });
@@ -1542,7 +1548,7 @@ describe('hasEndSource (duplicate End-connection predicate)', () => {
 describe('rejectionMessageForConnection (End-marker duplicate message)', () => {
   it('returns a manager-facing message when dropping onto End from an already-connected source', () => {
     const edges: FlowEdge[] = [
-      { id: 'A->__end', source: 'A', target: END_NODE_ID, type: TERMINAL_EDGE_TYPE, data: { actionLabel: '', action: 'UPDATE_STATUS' } },
+      { id: 'A->__end', source: 'A', target: END_NODE_ID, type: TERMINAL_EDGE_TYPE, data: { actionLabel: '', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } } },
     ];
     const msg = rejectionMessageForConnection(
       { isValid: false, fromId: 'A', toId: END_NODE_ID },
@@ -1556,14 +1562,14 @@ describe('rejectionMessageForConnection (End-marker duplicate message)', () => {
     // (isValid false). "Transisi dari X ke X sudah ada" names the same status
     // twice and reads like a typo to a manager.
     const edges: FlowEdge[] = [
-      { id: 'A->A#0', source: 'A', target: 'A', type: 'transition', data: { actionLabel: 'ulang', action: 'UPDATE_STATUS' } },
+      { id: 'A->A#0', source: 'A', target: 'A', type: 'transition', data: { actionLabel: 'ulang', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } } },
     ];
     const msg = rejectionMessageForConnection({ isValid: false, fromId: 'A', toId: 'A' }, edges);
     expect(msg).toBe('Status A sudah punya transisi ke dirinya sendiri.');
   });
   it('falls back to the duplicate-transition message for a non-End duplicate', () => {
     const edges: FlowEdge[] = [
-      { id: 'A->B#0', source: 'A', target: 'B', type: 'transition', data: { actionLabel: 'go', action: 'UPDATE_STATUS' } },
+      { id: 'A->B#0', source: 'A', target: 'B', type: 'transition', data: { actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } } },
     ];
     const msg = rejectionMessageForConnection(
       { isValid: false, fromId: 'A', toId: 'B' },
@@ -1688,7 +1694,7 @@ describe('getSelfLoopPath (self-loop edge geometry)', () => {
 
 describe('decideConnectEnd (self-loop fallback + rejection message)', () => {
   const edges: FlowEdge[] = [
-    { id: 'A->B#0', source: 'A', target: 'B', type: 'transition', data: { actionLabel: 'go', action: 'UPDATE_STATUS' } },
+    { id: 'A->B#0', source: 'A', target: 'B', type: 'transition', data: { actionLabel: 'go', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } } },
   ];
 
   it('creates a self-loop with two DISTINCT adjacent handles when the drag ended on its own node', () => {
@@ -1747,7 +1753,7 @@ describe('decideConnectEnd (self-loop fallback + rejection message)', () => {
   it('explains a duplicate self-loop instead of creating a second one', () => {
     const withLoop: FlowEdge[] = [
       ...edges,
-      { id: 'A->A#1', source: 'A', target: 'A', type: 'transition', data: { actionLabel: 'ulang', action: 'UPDATE_STATUS' } },
+      { id: 'A->A#1', source: 'A', target: 'A', type: 'transition', data: { actionLabel: 'ulang', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } } },
     ];
     const decision = decideConnectEnd(
       { isValid: null, fromId: 'A', toId: 'A', fromHandleId: HANDLE_IDS.right, pointerNodeId: null },
@@ -1829,7 +1835,7 @@ describe('decideConnectEnd (self-loop fallback + rejection message)', () => {
     it('explains a duplicate instead of adding a second loop', () => {
       const withLoop: FlowEdge[] = [
         ...edges,
-        { id: 'A->A#1', source: 'A', target: 'A', type: 'transition', data: { actionLabel: 'ulang', action: 'UPDATE_STATUS' } },
+        { id: 'A->A#1', source: 'A', target: 'A', type: 'transition', data: { actionLabel: 'ulang', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } } },
       ];
       const decision = decideConnectEnd(
         { isValid: null, fromId: 'A', toId: null, fromHandleId: HANDLE_IDS.right, pointerNodeId: 'A' },

@@ -2,9 +2,15 @@ import {
   assertRunnableAsCategoryTransfer,
   assertRunnableAsStatusChange,
   declaredActionFor,
+  declaredRequeuePolicyFor,
 } from '../../src/application/queue';
 import type { TransitionGraph } from '../../src/domain/queue';
-import { InvalidArgumentException, TransitionAction } from '../../src/domain/shared';
+import {
+  DEFAULT_REQUEUE_POLICY,
+  InvalidArgumentException,
+  RequeuePolicyKind,
+  TransitionAction,
+} from '../../src/domain/shared';
 
 /**
  * The pairing the two queue commands share. Both guards read the same declared
@@ -22,12 +28,14 @@ const GRAPH: TransitionGraph = {
       to: 'WAITING',
       actionLabel: 'Kembalikan ke Antrian',
       action: TransitionAction.UPDATE_STATUS,
+      requeuePolicy: { kind: RequeuePolicyKind.KEEP, n: null },
     },
     {
       from: 'SERVING',
       to: 'WAITING',
       actionLabel: 'Pindah Kategori',
       action: TransitionAction.TRANSFER_CATEGORY,
+      requeuePolicy: { kind: RequeuePolicyKind.KEEP, n: null },
     },
   ],
 };
@@ -84,6 +92,22 @@ describe('the two guards mirror each other', () => {
     expect(() => assertRunnableAsCategoryTransfer(GRAPH, 'WAITING', 'SERVING')).toThrow(
       InvalidArgumentException,
     );
+  });
+});
+
+describe('declaredRequeuePolicyFor', () => {
+  it('reads the policy off the matching edge', () => {
+    expect(declaredRequeuePolicyFor(GRAPH, 'CALLING', 'WAITING')).toEqual({
+      kind: RequeuePolicyKind.KEEP,
+      n: null,
+    });
+  });
+
+  it('defaults to KEEP for an edge the flow does not contain (belt-and-suspenders)', () => {
+    // The VO already defaults a missing policy to KEEP; the `??` here covers a
+    // future narrowing decorator that drops the field. A missing edge is still
+    // a 409 from the aggregate — this default is the policy leg only.
+    expect(declaredRequeuePolicyFor(GRAPH, 'WAITING', 'SERVING')).toEqual(DEFAULT_REQUEUE_POLICY);
   });
 });
 

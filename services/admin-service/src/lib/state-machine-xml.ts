@@ -64,6 +64,7 @@
  * | `transitions[].from` | the CONTAINING node's `<name>` (nesting) |
  * | `transitions[].sourceSide`/`targetSide` | transition `<metadata>` JSON (sparse) |
  * | `transitions[].action` | transition `<metadata>` JSON `action` (sparse) |
+ * | `transitions[].requeuePolicy` | transition `<metadata>` JSON `requeuePolicy` (sparse) |
  * | `positions[name]` | node `<metadata>` JSON `xy` |
  * | `descriptions[name]` | node `<metadata>` JSON `description` (sparse) |
  * | `nodeActions[name]` | `<actions><action>` + action `<metadata>` JSON |
@@ -95,12 +96,14 @@
  */
 import {
   autoLayout,
+  DEFAULT_REQUEUE_POLICY,
   DEFAULT_SOURCE_SIDE,
   DEFAULT_TARGET_SIDE,
   DEFAULT_TRANSITION_ACTION,
   deriveAutoSources,
   EDGE_SIDES,
   isDefaultSides,
+  REQUEUE_POLICIES,
   stateDegrees,
   TRANSITION_ACTIONS,
   validateCustomStateMachine,
@@ -112,6 +115,8 @@ import type {
   NodeActionDto,
   NodeActionExecutionType,
   NodeActionType,
+  RequeuePolicyDto,
+  RequeuePolicyKind,
   TerminalNodeStateDto,
   TransitionActionType,
 } from '../api/types';
@@ -469,6 +474,18 @@ export function formToXml(form: StateMachineForm): string {
         // default edge and breaking the sparse-emission contract.
         const action = t.action ?? DEFAULT_TRANSITION_ACTION;
         if (action !== DEFAULT_TRANSITION_ACTION) transitionMeta.action = action;
+        // `requeuePolicy` rides the same sparse metadata slot as `action` —
+        // omitted for KEEP (the default), exactly like `action` is omitted for
+        // `UPDATE_STATUS`. When BACK_N, the `n` is carried so the round-trip is
+        // lossless; `?? DEFAULT` is defensive against a partially-built fixture
+        // (the field is required in `Transition`).
+        const policy = t.requeuePolicy ?? DEFAULT_REQUEUE_POLICY;
+        if (policy.kind !== 'KEEP') {
+          transitionMeta.requeuePolicy =
+            policy.kind === 'BACK_N' && policy.n !== undefined
+              ? { kind: 'BACK_N', n: policy.n }
+              : { kind: policy.kind };
+        }
         if (Object.keys(transitionMeta).length > 0) {
           lines.push(`        ${metadataElement(transitionMeta)}`);
         }
@@ -693,6 +710,48 @@ function parseTransitionAction(value: unknown, from: string): Parsed<TransitionA
   };
 }
 
+/**
+ * Validates the `requeuePolicy` out of a transition's metadata — what a
+ * `→ WAITING` re-queue does to queue order. Absent → the
+ * {@link DEFAULT_REQUEUE_POLICY} the serializer omits it for, which is also what
+ * every edge authored before the field existed means.
+ *
+ * The accepted `kind` set is DERIVED from {@link REQUEUE_POLICIES}, the same list
+ * the dropdown derives its options from — so widening the union teaches the
+ * codec and the UI in one edit (mirrors {@link parseTransitionAction}). A
+ * `BACK_N` payload must carry a present, finite, non-negative integer `n`; a
+ * malformed `n` is rejected here so the parse surfaces it as a clear Indonesian
+ * error rather than a silent `NaN` downstream. `KEEP`/`TO_BACK` ignore `n`.
+ */
+function parseRequeuePolicy(value: unknown, from: string): Parsed<RequeuePolicyDto> {
+  if (value === undefined) return { ok: true, value: DEFAULT_REQUEUE_POLICY };
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return {
+      ok: false,
+      error: `"requeuePolicy" pada transisi dari status '${from}' harus berupa objek JSON, contoh {"kind":"TO_BACK"} atau {"kind":"BACK_N","n":2}.`,
+    };
+  }
+  const { kind, n } = value as { kind?: unknown; n?: unknown };
+  if (typeof kind !== 'string' || !(REQUEUE_POLICIES as readonly string[]).includes(kind)) {
+    return {
+      ok: false,
+      error: `"kind" pada requeuePolicy transisi dari status '${from}' harus salah satu dari ${REQUEUE_POLICIES
+        .map((k) => `"${k}"`)
+        .join(', ')}.`,
+    };
+  }
+  if (kind === 'BACK_N') {
+    if (n === undefined || typeof n !== 'number' || !Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
+      return {
+        ok: false,
+        error: `"n" pada requeuePolicy "BACK_N" transisi dari status '${from}' harus berupa bilangan cacah (0, 1, 2, …).`,
+      };
+    }
+    return { ok: true, value: { kind: 'BACK_N', n } };
+  }
+  return { ok: true, value: { kind: kind as RequeuePolicyKind } };
+}
+
 /** Validates one connection-side value out of a transition's metadata. Absent →
  *  `undefined` (default routing). The side enum is validated HERE (the parse
  *  boundary), NOT in `validateCustomStateMachine` — sides are layout, not graph
@@ -738,9 +797,17 @@ function parseNodeTransitions(nodeEl: Element, from: string): Parsed<Transition[
     if (!targetSide.ok) return targetSide;
     const action = parseTransitionAction(meta.value.action, from);
     if (!action.ok) return action;
+    const requeuePolicy = parseRequeuePolicy(meta.value.requeuePolicy, from);
+    if (!requeuePolicy.ok) return requeuePolicy;
     // `<name>` and `<default>` are DERIVED on serialize (a slug of the label /
     // the first-outgoing flag), so they are read back as nothing at all.
-    const transition: Transition = { from, to, actionLabel, action: action.value };
+    const transition: Transition = {
+      from,
+      to,
+      actionLabel,
+      action: action.value,
+      requeuePolicy: requeuePolicy.value,
+    };
     if (sourceSide.value !== undefined) transition.sourceSide = sourceSide.value;
     if (targetSide.value !== undefined) transition.targetSide = targetSide.value;
     transitions.push(transition);

@@ -281,6 +281,113 @@ describe('QueueTicket aggregate', () => {
       expect(ticket.updatedAt).toBe(FIXED_NOW + 1);
       expect(ticket.pendingEventCount).toBe(0);
     });
+
+    describe('waitingOrder (the WAITING queue ordering key)', () => {
+      it('is initialized to createdAt on create (preserves FIFO on the new key)', () => {
+        const ticket = QueueTicket.create(
+          ticketIdGenerate(),
+          TicketNumber.of('A', 1),
+          'CAT-A',
+          FIXED_NOW,
+        );
+        expect(ticket.waitingOrder).toBe(FIXED_NOW);
+        expect(ticket.waitingOrder).toBe(ticket.createdAt);
+      });
+
+      it('KEEP (waitingOrder === null) leaves the ordering key unchanged', () => {
+        // The default — a re-queue keeps the ticket in its current FIFO slot
+        // (backward-compat with every pre-existing config).
+        const ticket = newTicket();
+        ticket.markCalling(3, requeue, FIXED_NOW);
+        const originalWaitingOrder = ticket.waitingOrder;
+        ticket.pullDomainEvents();
+
+        ticket.applyTransition('WAITING', requeue, FIXED_NOW + 1, null, null);
+
+        expect(ticket.waitingOrder).toBe(originalWaitingOrder);
+      });
+
+      it('TO_BACK re-stamps the ordering key to the supplied waitingOrder (now → tail)', () => {
+        const ticket = newTicket();
+        ticket.markCalling(3, requeue, FIXED_NOW);
+        ticket.pullDomainEvents();
+
+        ticket.applyTransition('WAITING', requeue, FIXED_NOW + 1, null, FIXED_NOW + 500);
+
+        expect(ticket.waitingOrder).toBe(FIXED_NOW + 500);
+      });
+
+      it('BACK_N re-stamps the ordering key to the supplied category-rank value', () => {
+        const ticket = newTicket();
+        ticket.markCalling(3, requeue, FIXED_NOW);
+        ticket.pullDomainEvents();
+
+        ticket.applyTransition('WAITING', requeue, FIXED_NOW + 1, null, FIXED_NOW - 100);
+
+        expect(ticket.waitingOrder).toBe(FIXED_NOW - 100);
+      });
+
+      it('does NOT re-stamp createdAt (it is the wait-time metric origin, QUE-26)', () => {
+        const ticket = newTicket();
+        const originalCreatedAt = ticket.createdAt;
+        ticket.markCalling(3, requeue, FIXED_NOW);
+        ticket.pullDomainEvents();
+
+        ticket.applyTransition('WAITING', requeue, FIXED_NOW + 1, null, FIXED_NOW + 999);
+
+        expect(ticket.createdAt).toBe(originalCreatedAt);
+        expect(ticket.waitingOrder).toBe(FIXED_NOW + 999);
+      });
+
+      it('a non-WAITING target ignores the waitingOrder argument', () => {
+        // The waitingOrder arg flows into the WAITING branch only; a transition
+        // into CALLING/SERVING/etc. leaves it untouched.
+        const ticket = newTicket();
+        ticket.markCalling(3, policy, FIXED_NOW);
+        const beforeCall = ticket.waitingOrder;
+        ticket.pullDomainEvents();
+
+        ticket.applyTransition('SERVING', policy, FIXED_NOW + 1, null, FIXED_NOW + 999);
+
+        expect(ticket.waitingOrder).toBe(beforeCall);
+      });
+
+      it('transferTo leaves waitingOrder alone (out of scope; matches the kept-createdAt quirk)', () => {
+        const transferPolicy = machineWith([
+          'CALLING',
+          'WAITING',
+          'Pindah Kategori',
+          TransitionAction.TRANSFER_CATEGORY,
+        ]);
+        const ticket = newTicket('CAT-A');
+        ticket.markCalling(3, transferPolicy, FIXED_NOW);
+        const originalWaitingOrder = ticket.waitingOrder;
+        ticket.pullDomainEvents();
+
+        ticket.transferTo('CAT-B', TicketNumber.of('B', 7), transferPolicy, FIXED_NOW + 40);
+
+        // Transfer re-enters the queue as a fresh ticket under the new category
+        // but keeps its original ordering slot (mirrors the kept-createdAt quirk).
+        expect(ticket.waitingOrder).toBe(originalWaitingOrder);
+      });
+
+      it('reconstitute restores the waitingOrder field', () => {
+        const ticket = QueueTicket.reconstitute({
+          id: ticketIdGenerate(),
+          ticketNumber: TicketNumber.of('A', 1),
+          categoryId: 'CAT-A',
+          status: TicketStatus.WAITING,
+          counterId: null,
+          createdAt: FIXED_NOW,
+          updatedAt: FIXED_NOW,
+          waitingOrder: FIXED_NOW - 50,
+          calledAt: null,
+          servedAt: null,
+          completedAt: null,
+        });
+        expect(ticket.waitingOrder).toBe(FIXED_NOW - 50);
+      });
+    });
   });
 
   describe('reannounce (Panggil Lagi — re-announce a CALLING ticket, no state change)', () => {

@@ -8,6 +8,8 @@ import {
   type NodeActionType,
   type NodeActionsDto,
   type NodePositionsDto,
+  type RequeuePolicyDto,
+  type RequeuePolicyKind,
   type StateMachineDto,
   type StateTransitionDto,
   type TerminalNodesDto,
@@ -71,6 +73,36 @@ export const TRANSITION_ACTION_LABELS: Record<TransitionActionType, string> = {
  *  configured before the field existed is one of these. */
 export const DEFAULT_TRANSITION_ACTION: TransitionActionType = 'UPDATE_STATUS';
 
+/**
+ * Every {@link RequeuePolicyKind}, as the runtime list the compile-time union
+ * cannot provide. The single source of truth for what a `→ WAITING` re-queue
+ * may do to queue order: the "Kebijakan Antrian Ulang" dropdown's options and
+ * the XML codec's accepted set are both derived from it, so neither can drift
+ * from the union or from each other.
+ *
+ * The `satisfies` clause is the exhaustiveness guard — widening the union
+ * without adding the member here fails `tsc`. Mirrors {@link TRANSITION_ACTIONS}.
+ */
+export const REQUEUE_POLICIES = ['KEEP', 'TO_BACK', 'BACK_N'] as const satisfies
+  readonly RequeuePolicyKind[];
+
+/** Manager-facing wording for each re-queue policy. Keyed off
+ *  {@link REQUEUE_POLICIES} rather than the other way round, so the codec's
+ *  validation never has to import presentation copy to know which values are
+ *  legal. Written as an exhaustive `Record`, so a new policy needs wording
+ *  before it compiles. */
+export const REQUEUE_POLICY_LABELS: Record<RequeuePolicyKind, string> = {
+  KEEP: 'Tetap di posisi',
+  TO_BACK: 'Paling belakang',
+  BACK_N: 'Mundur n posisi',
+};
+
+/** The re-queue policy an edge means when none was ever chosen for it. Every
+ *  edge configured before the field existed is one of these — `KEEP`, the
+ *  today/today-FIFO behavior. A bare `{ kind: 'KEEP' }` (no `n`) is the sparse
+ *  wire shape AND the form-required shape: `n` only appears for `BACK_N`. */
+export const DEFAULT_REQUEUE_POLICY: RequeuePolicyDto = { kind: 'KEEP' };
+
 /** The one status a category move may land in — see the rule in
  *  {@link validateCustomStateMachine}. Named rather than inlined so the rule and
  *  its message cannot drift apart. */
@@ -87,6 +119,18 @@ export interface Transition {
    * it is optional) so no code path has to re-decide what an absent value means.
    */
   action: TransitionActionType;
+  /**
+   * What a `→ WAITING` re-queue does to queue order — the manager's own
+   * declaration. Required in the form (always a concrete value, defaulted on
+   * the way in from the wire, where it is optional) so no code path has to
+   * re-decide what an absent value means. Only meaningful on an edge whose
+   * `to === 'WAITING'` AND `action === 'UPDATE_STATUS'`; `validateCustomStateMachine`
+   * rejects a non-KEEP policy on any other edge. Mirrors {@link action}:
+   * sparse on the wire ({@link toStateMachineDto} omits KEEP), lives on the
+   * canvas edge `data` (so `flowToGraph` captures it back), and rides the XML
+   * transition `<metadata>` (sparse — omitted for KEEP).
+   */
+  requeuePolicy: RequeuePolicyDto;
   /**
    * Which side of the source node this edge exits. Optional — absent means
    * the default ({@link DEFAULT_SOURCE_SIDE}). The form is the source of truth
@@ -114,6 +158,22 @@ export function isDefaultSides(
     (sourceSide ?? DEFAULT_SOURCE_SIDE) === DEFAULT_SOURCE_SIDE &&
     (targetSide ?? DEFAULT_TARGET_SIDE) === DEFAULT_TARGET_SIDE
   );
+}
+
+/**
+ * Canonicalize a re-queue policy to a stable string for equality comparison.
+ * An absent policy (`undefined`, e.g. a wire DTO or a PRD §7 default entry
+ * that carries no key) is the KEEP default. A `BACK_N` policy is stable across
+ * the `n`-present vs `n`-undefined boundary only when `n` is a finite number —
+ * a malformed form entry (`n` absent on a BACK_N edge) is normalized to `0`
+ * here so the comparison never NaNs (the validator rejects it elsewhere). Used
+ * by {@link isDefaultGraph} and {@link graphSignature} so a re-queue-policy
+ * edit is detected as an external change (mirrors the `action` normalization).
+ */
+function normalizeRequeuePolicy(policy: RequeuePolicyDto | undefined): string {
+  const p = policy ?? DEFAULT_REQUEUE_POLICY;
+  if (p.kind === 'BACK_N') return `BACK_N:${Number.isFinite(p.n ?? NaN) ? p.n : 0}`;
+  return p.kind;
 }
 
 /**
@@ -254,6 +314,13 @@ export function isDefaultGraph(
       // it back. Both sides are normalized because this predicate is called with
       // wire DTOs too, where `action` is optional.
       (t.action ?? DEFAULT_TRANSITION_ACTION) === (d.action ?? DEFAULT_TRANSITION_ACTION) &&
+      // A default-structure graph whose manager set a non-KEEP re-queue policy
+      // is CUSTOM — it must load editable, not read-only, or they could not
+      // change it back. Both sides are normalized because this predicate is
+      // called with wire DTOs too, where `requeuePolicy` is optional; the PRD §7
+      // default transitions carry no `requeuePolicy` (absent ⇒ KEEP).
+      normalizeRequeuePolicy(t.requeuePolicy) ===
+        normalizeRequeuePolicy(d.requeuePolicy) &&
       isDefaultSides(t.sourceSide, t.targetSide)
     );
   });
@@ -290,12 +357,23 @@ export function toStateMachineDto(form: StateMachineForm): StateMachineDto {
         // Strip the canvas-only `sourceSide`/`targetSide` — they are NOT on the
         // wire {@link StateTransitionDto}; they travel in the separate
         // {@link EdgeRoutingLayoutDto} map (see {@link toEdgeRoutingLayoutDto}).
-        transitions: form.transitions.map((t) => ({
-          from: t.from,
-          to: t.to,
-          actionLabel: t.actionLabel,
-          action: t.action,
-        })),
+        // `requeuePolicy` is sparse — OMIT when KEEP (the default), exactly like
+        // `action` is omitted when `UPDATE_STATUS`; a BACK_N policy carries `n`.
+        transitions: form.transitions.map((t): StateTransitionDto => {
+          const policy = t.requeuePolicy ?? DEFAULT_REQUEUE_POLICY;
+          // `requeuePolicy` is sparse — OMIT when KEEP (the default), exactly
+          // like `action` is omitted when `UPDATE_STATUS`; a BACK_N policy
+          // carries `n`. Built as one object literal (not assign-after) because
+          // the wire DTO's fields are `readonly`.
+          if (policy.kind === 'KEEP') {
+            return { from: t.from, to: t.to, actionLabel: t.actionLabel, action: t.action };
+          }
+          const requeuePolicy: RequeuePolicyDto =
+            policy.kind === 'BACK_N' && policy.n !== undefined
+              ? { kind: 'BACK_N', n: policy.n }
+              : { kind: policy.kind };
+          return { from: t.from, to: t.to, actionLabel: t.actionLabel, action: t.action, requeuePolicy };
+        }),
         // Strip empty/whitespace values defensively so the wire stays lean
         // (`updateStateDescription` already deletes empties, but a corrupt
         // prefill or a direct form edit could leave a blank entry). The VO on
@@ -339,13 +417,16 @@ export function mergeEdgeSides(
   const layout = edgeLayout ?? {};
   return transitions.map((t) => {
     const sides = layout[`${t.from}->${t.to}`];
-    // `action` is optional on the wire and required in the form: this is the one
-    // boundary that resolves an absent value, so nothing downstream has to.
+    // `action`/`requeuePolicy` are optional on the wire and required in the
+    // form: this is the one boundary that resolves an absent value, so nothing
+    // downstream has to. A pre-existing stored config (no `requeuePolicy` key)
+    // reconstitutes as KEEP — the today/today-FIFO behavior.
     const base = {
       from: t.from,
       to: t.to,
       actionLabel: t.actionLabel,
       action: t.action ?? DEFAULT_TRANSITION_ACTION,
+      requeuePolicy: t.requeuePolicy ?? DEFAULT_REQUEUE_POLICY,
     };
     return sides
       ? { ...base, sourceSide: sides.sourceSide, targetSide: sides.targetSide }
@@ -689,6 +770,26 @@ export function validateCustomStateMachine(form: StateMachineForm): string[] {
           `kembali menunggu.`,
       );
     }
+    // A re-queue policy is only meaningful on an edge that returns a ticket to
+    // the queue as a plain status change — a category move re-issues the number
+    // (so queue order is moot), and a non-WAITING target does not re-queue at
+    // all. Mirrors the backend's save-time rule, with the same phrasing as the
+    // TRANSFER_CATEGORY rule above so the two read as one body of guidance.
+    const policy = t.requeuePolicy ?? DEFAULT_REQUEUE_POLICY;
+    if (policy.kind !== 'KEEP') {
+      if (t.to !== WAITING_STATE || t.action !== 'UPDATE_STATUS') {
+        errors.push(
+          `Transisi '${t.from}'→'${t.to}': kebijakan antrian ulang hanya berlaku pada transisi ` +
+            `yang menuju status '${WAITING_STATE}' dengan aksi ` +
+            `"${TRANSITION_ACTION_LABELS.UPDATE_STATUS}".`,
+        );
+      } else if (policy.kind === 'BACK_N' && (policy.n === undefined || !Number.isFinite(policy.n) || policy.n! < 0 || !Number.isInteger(policy.n))) {
+        errors.push(
+          `Transisi '${t.from}'→'${t.to}': kebijakan "${REQUEUE_POLICY_LABELS.BACK_N}" ` +
+            `harus diisi jumlah posisi (bilangan cacah — 0, 1, 2, …).`,
+        );
+      }
+    }
   }
   // De-duplicate identical messages (e.g. several empty labels).
   return [...new Set(errors)];
@@ -955,7 +1056,13 @@ export function reconcileStateNameRefs(
 export function updateTransition(
   form: StateMachineForm,
   i: number,
-  patch: Partial<{ from: string; to: string; actionLabel: string; action: TransitionActionType }>,
+  patch: Partial<{
+    from: string;
+    to: string;
+    actionLabel: string;
+    action: TransitionActionType;
+    requeuePolicy: RequeuePolicyDto;
+  }>,
 ): StateMachineForm {
   const transitions = form.transitions.map((t, idx) => (idx === i ? { ...t, ...patch } : t));
   return { ...form, transitions };
@@ -970,12 +1077,15 @@ export function addTransition(form: StateMachineForm): StateMachineForm {
     transitions: [
       ...form.transitions,
       // A new edge is a plain status change until the manager says otherwise —
-      // the common case, and the one that needs no extra argument.
+      // the common case, and the one that needs no extra argument. The re-queue
+      // policy seeds to KEEP (today's FIFO behavior) — the manager only lifts it
+      // when the edge actually returns to WAITING as an UPDATE_STATUS.
       {
         from: firstState,
         to: firstState,
         actionLabel: '',
         action: DEFAULT_TRANSITION_ACTION,
+        requeuePolicy: DEFAULT_REQUEUE_POLICY,
       },
     ],
   };
@@ -1141,6 +1251,12 @@ export function graphSignature(form: StateMachineForm): string {
       to: t.to,
       actionLabel: t.actionLabel,
       action: t.action,
+      // A re-queue policy edit is a canvas-round-tripped change (it lives on
+      // the edge `data` like `action`), so the guards must detect it. Normalized
+      // so KEEP (absent) and `{ kind: 'KEEP' }` produce the same signature — the
+      // wire round-trip drops KEEP on emit, so the post-save signature equals
+      // the pre-save signature → no spurious re-seed.
+      requeuePolicy: normalizeRequeuePolicy(t.requeuePolicy),
       sourceSide: t.sourceSide ?? DEFAULT_SOURCE_SIDE,
       targetSide: t.targetSide ?? DEFAULT_TARGET_SIDE,
     })),

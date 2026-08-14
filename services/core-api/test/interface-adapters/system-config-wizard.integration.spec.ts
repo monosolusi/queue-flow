@@ -217,7 +217,15 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
     const bad = wizardPayload();
     bad.stateMachine = {
       states: ['WAITING', 'CALLING'],
-      transitions: [{ from: 'WAITING', to: 'NOPE', actionLabel: 'x', action: 'UPDATE_STATUS' }],
+      transitions: [
+        {
+          from: 'WAITING',
+          to: 'NOPE',
+          actionLabel: 'x',
+          action: 'UPDATE_STATUS',
+          requeuePolicy: { kind: 'KEEP', n: null },
+        },
+      ],
       descriptions: {},
     };
     const res = await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad);

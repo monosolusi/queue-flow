@@ -130,6 +130,11 @@ export class DevSeedService implements OnModuleInit {
         counterId: null,
         createdAt: t.createdAt,
         updatedAt: t.createdAt,
+        // `waitingOrder` backs the WAITING queue's sort key (migration 0017).
+        // Seeded tickets initialize it to `createdAt` (the pre-feature FIFO
+        // behavior), so the seeded waiting list renders in the same order the
+        // seed timestamps imply.
+        waitingOrder: t.createdAt,
         calledAt: null,
         servedAt: null,
         completedAt: null,

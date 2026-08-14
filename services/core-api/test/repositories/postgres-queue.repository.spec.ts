@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 // the Nest DI module + migration runner, which this pure repository spec has no
 // need for.
 import { PostgresQueueRepository } from '../../src/infrastructure/persistence/postgres/postgres-queue.repository';
+import { PriorityPolicy } from '../../src/domain/shared';
 
 /**
  * Unit coverage for the PostgreSQL side of the counter-scoped reads, driven by a
@@ -55,6 +56,7 @@ function row(overrides: Record<string, unknown> = {}): Record<string, unknown> {
     counter_id: 3,
     created_at: '100',
     updated_at: '300',
+    waiting_order: '100',
     called_at: '150',
     served_at: null,
     completed_at: null,
@@ -118,5 +120,119 @@ describe('PostgresQueueRepository — counter-scoped reads', () => {
     expect(skipped).toContain('ORDER BY updated_at ASC');
     expect(activePool.queries[0].values).toEqual([7, 'CALLING', 'SERVING']);
     expect(skippedPool.queries[0].values).toEqual([7, 'SKIPPED']);
+  });
+});
+
+describe('PostgresQueueRepository — waiting_order contract (LSP with InMemoryQueueRepository)', () => {
+  it('findWaitingByCategory orders by waiting_order ASC, created_at ASC (not createdAt alone)', async () => {
+    const fake = fakePool();
+    await new PostgresQueueRepository(fake.pool).findWaitingByCategory('CAT-A');
+
+    expect(fake.queries).toHaveLength(1);
+    expect(fake.queries[0].values).toEqual(['WAITING', 'CAT-A']);
+    const s = sql(fake.queries[0].text);
+    expect(s).toContain('WHERE status = $1 AND category_id = $2');
+    expect(s).toContain('ORDER BY waiting_order ASC, created_at ASC');
+  });
+
+  it('findNextWaiting (FIFO_GLOBAL) orders by waiting_order ASC, created_at ASC', async () => {
+    const fake = fakePool();
+    await new PostgresQueueRepository(fake.pool).findNextWaiting({
+      assignedCategoryIds: ['CAT-A', 'CAT-B'],
+      priorityPolicy: PriorityPolicy.FIFO_GLOBAL,
+    });
+
+    expect(fake.queries).toHaveLength(1);
+    expect(fake.queries[0].values).toEqual(['WAITING', ['CAT-A', 'CAT-B']]);
+    const s = sql(fake.queries[0].text);
+    expect(s).toContain('ORDER BY waiting_order ASC, created_at ASC');
+    expect(s).not.toContain('array_position');
+  });
+
+  it('findNextWaiting (CATEGORY_PRIORITY) orders by array_position, then waiting_order ASC, created_at ASC', async () => {
+    const fake = fakePool();
+    await new PostgresQueueRepository(fake.pool).findNextWaiting({
+      assignedCategoryIds: ['CAT-A', 'CAT-B'],
+      priorityPolicy: PriorityPolicy.CATEGORY_PRIORITY,
+    });
+
+    const s = sql(fake.queries[0].text);
+    expect(s).toContain('array_position($2, category_id)');
+    expect(s).toContain('waiting_order ASC, created_at ASC');
+  });
+
+  it('reconstitutes waiting_order (epoch string → number) into the aggregate', async () => {
+    const fake = fakePool([
+      row({ id: '11111111-1111-4111-8111-111111111111', waiting_order: '5000' }),
+    ]);
+    const tickets = await new PostgresQueueRepository(fake.pool).findWaitingByCategory('CAT-A');
+    expect(tickets[0].waitingOrder).toBe(5000);
+  });
+
+  it('save writes waiting_order in the INSERT and the ON CONFLICT update', async () => {
+    const fake = fakePool();
+    const repo = new PostgresQueueRepository(fake.pool);
+    // Use a reconstituted aggregate so `waitingOrder` is distinct from createdAt.
+    const { QueueTicket, TicketNumber, ticketIdGenerate } = await import(
+      '../../src/domain/queue'
+    );
+    const ticket = QueueTicket.reconstitute({
+      id: ticketIdGenerate(),
+      ticketNumber: TicketNumber.of('A', 7),
+      categoryId: 'CAT-A',
+      status: 'WAITING',
+      counterId: null,
+      createdAt: 100,
+      updatedAt: 100,
+      waitingOrder: 5_000,
+      calledAt: null,
+      servedAt: null,
+      completedAt: null,
+    });
+    await repo.save(ticket);
+
+    expect(fake.queries).toHaveLength(1);
+    const text = sql(fake.queries[0].text);
+    expect(text).toContain('waiting_order');
+    expect(text).toContain('INSERT INTO tickets');
+    // The 11 params are id, ticket_number, category_id, status, counter_id,
+    // created_at, updated_at, waiting_order, called_at, served_at, completed_at.
+    expect(fake.queries[0].values[7]).toBe(5_000); // waiting_order is the 8th param
+    // ON CONFLICT update set list includes waiting_order.
+    expect(text).toMatch(/ON CONFLICT.*SET[\s\S]*waiting_order/);
+  });
+
+  describe('assignWaitingOrders (the BACK_N renumber bulk write)', () => {
+    it('issues one UPDATE per assignment with (waiting_order, id) params', async () => {
+      const fake = fakePool();
+      const { ticketIdGenerate } = await import('../../src/domain/queue');
+      const a = ticketIdGenerate();
+      const b = ticketIdGenerate();
+      const c = ticketIdGenerate();
+      await new PostgresQueueRepository(fake.pool).assignWaitingOrders([
+        { id: a, waitingOrder: 100 },
+        { id: b, waitingOrder: 2100 },
+        { id: c, waitingOrder: 3100 },
+      ]);
+
+      expect(fake.queries).toHaveLength(3);
+      for (let i = 0; i < 3; i++) {
+        expect(sql(fake.queries[i].text)).toBe(
+          'UPDATE tickets SET waiting_order = $1 WHERE id = $2',
+        );
+      }
+      expect(fake.queries[0].values).toEqual([100, a.value]);
+      expect(fake.queries[1].values).toEqual([2100, b.value]);
+      expect(fake.queries[2].values).toEqual([3100, c.value]);
+      // One client checkout for the whole batch (not one per assignment).
+      expect(fake.releases()).toBe(1);
+    });
+
+    it('is a no-op when the assignment list is empty (no query, no checkout)', async () => {
+      const fake = fakePool();
+      await new PostgresQueueRepository(fake.pool).assignWaitingOrders([]);
+      expect(fake.queries).toHaveLength(0);
+      expect(fake.releases()).toBe(0);
+    });
   });
 });

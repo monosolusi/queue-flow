@@ -3,6 +3,7 @@ import {
   type IQueueRepository,
   type ITicketArchivePort,
   type NextTicketQuery,
+  type WaitingOrderAssignment,
   QueueTicket,
   type TicketId,
   TicketStatus,
@@ -20,6 +21,11 @@ interface TicketRow {
   counter_id: number | null;
   created_at: string;
   updated_at: string;
+  /** The WAITING queue's ordering key (epoch-ms-equivalent). Backfilled to
+   *  `created_at` by migration 0017; re-stamped by `returnToQueue` per the
+   *  edge's RequeuePolicy. Replaces `created_at` as the sort key for every
+   *  waiting read + `findNextWaiting`; `created_at` keeps its analytics role. */
+  waiting_order: string;
   called_at: string | null;
   served_at: string | null;
   completed_at: string | null;
@@ -40,14 +46,15 @@ export class PostgresQueueRepository implements IQueueRepository, ITicketArchive
   async save(ticket: QueueTicket): Promise<void> {
     await withDbClient(this.pool, async (client) => {
       await client.query(
-        `INSERT INTO tickets (id, ticket_number, category_id, status, counter_id, created_at, updated_at, called_at, served_at, completed_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        `INSERT INTO tickets (id, ticket_number, category_id, status, counter_id, created_at, updated_at, waiting_order, called_at, served_at, completed_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          ON CONFLICT (id) DO UPDATE SET
            ticket_number = EXCLUDED.ticket_number,
            category_id   = EXCLUDED.category_id,
            status        = EXCLUDED.status,
            counter_id    = EXCLUDED.counter_id,
            updated_at    = EXCLUDED.updated_at,
+           waiting_order = EXCLUDED.waiting_order,
            called_at     = EXCLUDED.called_at,
            served_at     = EXCLUDED.served_at,
            completed_at  = EXCLUDED.completed_at`,
@@ -59,6 +66,7 @@ export class PostgresQueueRepository implements IQueueRepository, ITicketArchive
           ticket.counterId,
           ticket.createdAt,
           ticket.updatedAt,
+          ticket.waitingOrder,
           ticket.calledAt,
           ticket.servedAt,
           ticket.completedAt,
@@ -79,7 +87,7 @@ export class PostgresQueueRepository implements IQueueRepository, ITicketArchive
   async findWaitingByCategory(categoryId: string): Promise<QueueTicket[]> {
     return withDbClient(this.pool, async (client) => {
       const { rows } = await client.query<TicketRow>(
-        `SELECT * FROM tickets WHERE status = $1 AND category_id = $2 ORDER BY created_at ASC`,
+        `SELECT * FROM tickets WHERE status = $1 AND category_id = $2 ORDER BY waiting_order ASC, created_at ASC`,
         [TicketStatus.WAITING, categoryId],
       );
       return rows.map(toTicket);
@@ -89,7 +97,7 @@ export class PostgresQueueRepository implements IQueueRepository, ITicketArchive
   async findWaitingByCategories(categoryIds: readonly string[]): Promise<QueueTicket[]> {
     return withDbClient(this.pool, async (client) => {
       const { rows } = await client.query<TicketRow>(
-        `SELECT * FROM tickets WHERE status = $1 AND category_id = ANY($2) ORDER BY created_at ASC`,
+        `SELECT * FROM tickets WHERE status = $1 AND category_id = ANY($2) ORDER BY waiting_order ASC, created_at ASC`,
         [TicketStatus.WAITING, Array.from(categoryIds)],
       );
       return rows.map(toTicket);
@@ -99,7 +107,7 @@ export class PostgresQueueRepository implements IQueueRepository, ITicketArchive
   async findAllWaiting(): Promise<QueueTicket[]> {
     return withDbClient(this.pool, async (client) => {
       const { rows } = await client.query<TicketRow>(
-        `SELECT * FROM tickets WHERE status = $1 ORDER BY created_at ASC`,
+        `SELECT * FROM tickets WHERE status = $1 ORDER BY waiting_order ASC, created_at ASC`,
         [TicketStatus.WAITING],
       );
       return rows.map(toTicket);
@@ -113,6 +121,27 @@ export class PostgresQueueRepository implements IQueueRepository, ITicketArchive
         [TicketStatus.WAITING, categoryId],
       );
       return Number(rows[0]?.count ?? 0);
+    });
+  }
+
+  async assignWaitingOrders(assignments: readonly WaitingOrderAssignment[]): Promise<void> {
+    if (assignments.length === 0) {
+      return;
+    }
+    // One UPDATE per assignment on the ambient tx's client (NFR-REL-02 — the
+    // renumber commits atomically with the re-queued ticket's save). A single
+    // UNNEST batch would be fewer round-trips, but the assignments list is the
+    // ticket's own category (bounded by the category's waiting count, which is
+    // small), and one-statement-per-assignment keeps the SQL trivially
+    // correct and easy to audit. No events, no aggregate load, no status
+    // change — ONLY the ordering key.
+    await withDbClient(this.pool, async (client) => {
+      for (const assignment of assignments) {
+        await client.query(
+          'UPDATE tickets SET waiting_order = $1 WHERE id = $2',
+          [assignment.waitingOrder, assignment.id.value],
+        );
+      }
     });
   }
 
@@ -165,8 +194,8 @@ export class PostgresQueueRepository implements IQueueRepository, ITicketArchive
       const cats = Array.from(query.assignedCategoryIds);
       const orderBy =
         query.priorityPolicy === PriorityPolicy.CATEGORY_PRIORITY
-          ? 'array_position($2, category_id), created_at ASC'
-          : 'created_at ASC';
+          ? 'array_position($2, category_id), waiting_order ASC, created_at ASC'
+          : 'waiting_order ASC, created_at ASC';
       const forUpdate = txStorage.getStore() ? ' FOR UPDATE' : '';
       const { rows } = await client.query<TicketRow>(
         `SELECT * FROM tickets WHERE status = $1 AND category_id = ANY($2) ORDER BY ${orderBy}${forUpdate} LIMIT 1`,
@@ -219,6 +248,7 @@ function toTicket(row: TicketRow): QueueTicket {
     counterId: row.counter_id,
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
+    waitingOrder: Number(row.waiting_order),
     calledAt: row.called_at === null ? null : Number(row.called_at),
     servedAt: row.served_at === null ? null : Number(row.served_at),
     completedAt: row.completed_at === null ? null : Number(row.completed_at),

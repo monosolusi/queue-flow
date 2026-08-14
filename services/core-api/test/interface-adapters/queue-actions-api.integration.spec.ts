@@ -236,13 +236,14 @@ describe('GET /api/queue/actions (integration — caller dynamic actions, FR-CLR
     expect(stateMachine.status).toBe(200);
     expect(stateMachine.body.transitions).toHaveLength(5);
     // The raw graph endpoint returns the graph as configured — including each
-    // edge's declared action, which is part of the definition, not a ruling
-    // layered on top of it.
+    // edge's declared action and re-queue policy, which are part of the
+    // definition, not a ruling layered on top of it.
     expect(stateMachine.body.transitions[0]).toEqual({
       from: 'WAITING',
       to: 'CALLING',
       actionLabel: 'Panggil Berikutnya',
       action: 'UPDATE_STATUS',
+      requeuePolicy: { kind: 'KEEP', n: null },
     });
   });
 });
