@@ -47,8 +47,17 @@ function useListCommands(api: ICallerApi): {
 
 /**
  * The active queue workspace: header (counter identity + WS status + change
- * counter), the prominent active ticket, the live waiting list, the skipped
- * tickets awaiting a re-call, and the dynamic action controls (FR-CLR-02).
+ * counter), the prominent active ticket, the dynamic action controls
+ * (FR-CLR-02) directly beneath it, then the reference lists — the live waiting
+ * queue and the skipped tickets awaiting a re-call.
+ *
+ * That order is load-bearing, not cosmetic. The lists grow with the day: with
+ * them above the panel, every skipped ticket pushed "Panggil Berikutnya"
+ * further down the page until the primary control sat below the fold (manager
+ * feedback: "ketika tiket dilewati banyak tampilan jadi semakin kebawah"). The
+ * actions belong with the ticket they act on; the queues are reference material
+ * under them. Order alone is only half the fix — styles.css also caps both
+ * lists and lets them scroll, so neither can grow the page unbounded.
  *
  * The page owns the action surface (`useWorkflowActions`) because three children
  * derive their buttons from it: {@link ActionControls} for the ticket at the
@@ -56,6 +65,15 @@ function useListCommands(api: ICallerApi): {
  * for the absent ones. A single fetch keeps them in lock-step and refreshes them
  * all on a `SYSTEM_CONFIG_CHANGED` bump. Commands are fire-and-forget — the
  * resulting lifecycle event arrives over the WebSocket and updates the store.
+ *
+ * A failed action fetch is handed to the two surfaces whose buttons then go
+ * missing: {@link ActionControls} and {@link SkippedQueueList}. With
+ * `workflow === null` every skipped row loses its actions, yet call-next falls
+ * back to the PRD default and keeps working — so without the error reaching the
+ * skipped list, "Panggil Ulang" reads as deliberately withdrawn rather than
+ * unavailable. {@link WaitingQueueList} is deliberately left out: the
+ * PRD-default flow gives it no row actions to lose, so a note there would fire
+ * on a surface that looks identical either way.
  */
 export function WorkspacePage({ bound, onUnbind }: WorkspacePageProps) {
   const { state, api } = useQueueStore();
@@ -87,6 +105,13 @@ export function WorkspacePage({ bound, onUnbind }: WorkspacePageProps) {
       {state.loadStatus === 'loaded' && (
         <div className="workspace__body">
           <ActiveTicketCard ticket={active} />
+          <ActionControls
+            api={api}
+            bound={bound}
+            active={active}
+            workflow={workflow}
+            workflowError={flowError}
+          />
           <WaitingQueueList
             tickets={state.waiting}
             waitingCount={state.waitingCount}
@@ -104,14 +129,8 @@ export function WorkspacePage({ bound, onUnbind }: WorkspacePageProps) {
             pending={skippedCommands.runner.pending}
             error={skippedCommands.runner.error}
             notice={skippedCommands.runner.notice}
-            onAction={skippedCommands.onAction}
-          />
-          <ActionControls
-            api={api}
-            bound={bound}
-            active={active}
-            workflow={workflow}
             workflowError={flowError}
+            onAction={skippedCommands.onAction}
           />
         </div>
       )}

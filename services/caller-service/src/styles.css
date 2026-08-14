@@ -225,6 +225,27 @@ button {
   padding: 1.5rem 0;
   text-align: center;
 }
+/* Capped + scrollable. Both queue lists grow with the day, and unbounded they
+   grew the PAGE with it: the panel below them slid further off screen with
+   every ticket (manager feedback: "ketika tiket dilewati banyak tampilan jadi
+   semakin kebawah"). The list scrolls inside its own card instead.
+
+   Why 24rem: an actionable row band is ~8rem (1.25rem padding x2 + the 1.5rem
+   number line + the 0.75rem gap + a ~3rem action button), plus the 0.75rem grid
+   gap between bands — so the cap ends part-way into the third band, and that
+   half-visible row IS the scroll affordance. Number-only rows are ~4.3rem, so
+   the same cap shows about five of them. Depth is never hidden by the cap: the
+   header already prints the total ("N tiket").
+
+   `overflow-y: auto`, never `hidden`, and no fixed `height` — reachability is
+   the invariant, fitting is only the optimization (cf. the admin designer's
+   viewport-lock prelude in services/admin-service/src/styles.css, written after
+   "kenapa jadi tidak bisa scroll ya?"). The <ol> carries `tabIndex={0}` so the
+   scroll container is reachable by keyboard (WCAG 2.1.1) on browsers that do
+   not focus scrollers on their own; the shared interactions baseline already
+   gives `[tabindex]:not([tabindex="-1"])` a :focus-visible ring. Both lists
+   share the cap — a taller waiting list would push the skipped one down again.
+   styles.test.ts pins all of this. */
 .waiting-queue__list {
   list-style: none;
   display: grid;
@@ -232,6 +253,8 @@ button {
   gap: 0.75rem;
   padding: 0;
   margin: 1rem 0 0;
+  max-height: 24rem;
+  overflow-y: auto;
 }
 .waiting-queue__item {
   display: flex;
@@ -295,11 +318,25 @@ button {
   font-size: 0.9rem;
   margin: 0.5rem 0 0;
 }
+/* The hint becomes a notice when the flow publishes nothing runnable from
+   "Dilewati": that is a configuration fact, not a failure, so it reads as an
+   informational panel (full-contrast text on a raised strip) rather than the
+   muted aside — and never as an error. Overrides the muted colour above by
+   source order, like .skipped-queue__list--actionable does. */
+.skipped-queue__hint--notice {
+  color: var(--text);
+  background: var(--surface-2);
+  border-left: 3px solid var(--accent-on-surface);
+  border-radius: var(--radius);
+  padding: 0.65rem 0.85rem;
+}
 .skipped-queue__empty {
   color: var(--text-muted);
   padding: 1rem 0;
   text-align: center;
 }
+/* Same cap + scroll as the waiting list above — see that rule for the why. This
+   is the list the manager was looking at when the page started growing. */
 .skipped-queue__list {
   list-style: none;
   display: grid;
@@ -307,6 +344,8 @@ button {
   gap: 0.75rem;
   padding: 0;
   margin: 1rem 0 0;
+  max-height: 24rem;
+  overflow-y: auto;
 }
 .skipped-queue__list--actionable {
   grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
@@ -356,6 +395,22 @@ button {
 .ticket-actions__button--unavailable {
   opacity: 0.5;
   cursor: not-allowed;
+}
+/* A row action the flow configures but the counter panel cannot execute. Its
+   reason is visible copy under the button (a tooltip is unreachable on a touch
+   panel) — mirrors .action-controls__unroutable-note. The wrapper takes over the
+   button's `flex: 1 1 auto` so the row keeps the same footprint. */
+.ticket-actions__unroutable {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.ticket-actions__note {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 400;
+  margin: 0;
 }
 
 .action-controls {

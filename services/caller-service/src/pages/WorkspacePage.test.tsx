@@ -320,6 +320,56 @@ describe('WorkspacePage', () => {
     expect(api.applyTransition).toHaveBeenCalledWith('s1', 'BATAL');
   });
 
+  it('keeps the primary controls above the queue lists, however many tickets are skipped', async () => {
+    // Manager feedback: "pada /caller ketika tiket dilewati banyak tampilan jadi
+    // semakin kebawah" — the queue lists rendered above the action panel, so
+    // every skipped ticket pushed "Panggil Berikutnya" further down the page.
+    // The panel now sits directly under the active ticket, and no amount of
+    // queue depth may move it. (The other half of the fix — the lists' own
+    // max-height + overflow-y — is CSS, guarded in src/styles.test.ts, since
+    // jsdom runs with `css: false`.)
+    const sectionOrder = () =>
+      Array.from(document.querySelector('.workspace__body')!.children).map((el) =>
+        el.getAttribute('aria-label'),
+      );
+    const expectCallNextAboveTheQueues = () => {
+      const callNext = screen.getByRole('button', { name: 'Panggil Berikutnya' });
+      for (const name of ['Antrian Menunggu', 'Tiket Dilewati']) {
+        const list = screen.getByRole('region', { name });
+        expect(
+          callNext.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING,
+          `${name} must come after the call-next button`,
+        ).toBeTruthy();
+      }
+    };
+
+    renderWorkspace({ counterId: 1, active: [], waiting: [], skipped: [], waitingCount: 0 });
+    await screen.findByText(/Belum ada tiket aktif/i);
+    expect(sectionOrder()).toEqual(['Tiket Aktif', 'Aksi', 'Antrian Menunggu', 'Tiket Dilewati']);
+    expectCallNextAboveTheQueues();
+
+    // Six skips down the real event path (call, then skip) — the depth that used
+    // to bury the button below the fold.
+    for (let i = 1; i <= 6; i += 1) {
+      FakeWebSocket.last!.send(
+        wireEvent('TICKET_CALLED', `sk${i}`, { ticketNumber: `A-10${i}`, counterId: 1 }),
+      );
+      FakeWebSocket.last!.send(
+        wireEvent('STATUS_UPDATED', `sk${i}`, { from: 'CALLING', to: 'SKIPPED' }),
+      );
+    }
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole('region', { name: 'Tiket Dilewati' })
+          .querySelectorAll('.skipped-queue__number'),
+      ).toHaveLength(6),
+    );
+
+    expect(sectionOrder()).toEqual(['Tiket Aktif', 'Aksi', 'Antrian Menunggu', 'Tiket Dilewati']);
+    expectCallNextAboveTheQueues();
+  });
+
   it('shows an empty active state for a counter with no active ticket', async () => {
     renderWorkspace({
       counterId: 1,
