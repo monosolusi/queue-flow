@@ -12,11 +12,7 @@ import { NodeActions, type NodeActionsDto } from '../../domain/store-config';
 import { TerminalNodes, type TerminalNodesDto } from '../../domain/store-config';
 import { EndSources, type EndSourcesDto } from '../../domain/store-config';
 import { PrinterConfiguration, type PrinterConfigurationDto } from '../../domain/store-config';
-import type {
-  PriorityPolicy,
-  RequeuePolicy,
-  TransitionActionValue,
-} from '../../domain/shared';
+import type { PriorityPolicy, RequeuePolicy } from '../../domain/shared';
 
 /**
  * Read-side projection of the active state machine for the caller panel
@@ -30,10 +26,6 @@ export interface StateMachineDto {
     readonly from: string;
     readonly to: string;
     readonly actionLabel: string;
-    /** What running this edge does — always present on the read projection (the
-     *  VO defaults an absent stored value to `UPDATE_STATUS`), so the designer
-     *  round-trips it without having to re-derive it. */
-    readonly action: TransitionActionValue;
     /** What an `-> WAITING` edge does to the WAITING queue's order — always
      *  present on the read projection (the VO defaults an absent stored value
      *  to KEEP), so the designer round-trips it without having to re-derive it.
@@ -127,7 +119,6 @@ export function projectStateMachine(sm: StateMachine): StateMachineDto {
       from: t.from,
       to: t.to,
       actionLabel: t.actionLabel,
-      action: t.action,
       requeuePolicy: t.requeuePolicy,
     })),
     // Materialize the per-state description overrides from the VO. `{}` (no

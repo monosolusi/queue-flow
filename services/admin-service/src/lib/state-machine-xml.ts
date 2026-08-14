@@ -63,7 +63,6 @@
  * | `transitions[].to` | `<transition><target>` |
  * | `transitions[].from` | the CONTAINING node's `<name>` (nesting) |
  * | `transitions[].sourceSide`/`targetSide` | transition `<metadata>` JSON (sparse) |
- * | `transitions[].action` | transition `<metadata>` JSON `action` (sparse) |
  * | `transitions[].requeuePolicy` | transition `<metadata>` JSON `requeuePolicy` (sparse) |
  * | `positions[name]` | node `<metadata>` JSON `xy` |
  * | `descriptions[name]` | node `<metadata>` JSON `description` (sparse) |
@@ -99,13 +98,11 @@ import {
   DEFAULT_REQUEUE_POLICY,
   DEFAULT_SOURCE_SIDE,
   DEFAULT_TARGET_SIDE,
-  DEFAULT_TRANSITION_ACTION,
   deriveAutoSources,
   EDGE_SIDES,
   isDefaultSides,
   REQUEUE_POLICIES,
   stateDegrees,
-  TRANSITION_ACTIONS,
   validateCustomStateMachine,
   type StateMachineForm,
   type Transition,
@@ -118,7 +115,6 @@ import type {
   RequeuePolicyDto,
   RequeuePolicyKind,
   TerminalNodeStateDto,
-  TransitionActionType,
 } from '../api/types';
 
 // `EdgeSide` is the wire enum `'top'|'right'|'bottom'|'left'` (from
@@ -449,36 +445,21 @@ export function formToXml(form: StateMachineForm): string {
         // on parse. Emitted on every transition (not sparse) because Kaleo's
         // sample carries it and its meaning is positional, not optional.
         lines.push(`        <default>${i === 0 ? 'true' : 'false'}</default>`);
-        // The transition `<metadata>` carries the two facets Kaleo has no slot
-        // for, each SPARSE — omitted at its default — so a default-shaped graph
-        // emits no metadata element at all:
-        //
-        // - connection sides, and then BOTH are written so the source never
-        //   shows a half-routed edge. This mirrors the sparse
-        //   {@link toEdgeRoutingLayoutDto} wire map — the source is the
-        //   human-readable twin of the wire map, so they omit the same entries.
-        // - `action`: what running the edge DOES. Omitted for the
-        //   `UPDATE_STATUS` default, so only a manager-declared category move
-        //   appears in the source. It rides metadata rather than a Kaleo element
-        //   because Kaleo has no per-transition action concept — its `<action>`
-        //   lives on nodes.
+        // The transition `<metadata>` carries the one facet Kaleo has no slot
+        // for, SPARSE — omitted at its default — so a default-shaped graph emits no
+        // metadata element at all: connection sides, and then BOTH are written so
+        // the source never shows a half-routed edge. This mirrors the sparse
+        // {@link toEdgeRoutingLayoutDto} wire map — the source is the human-
+        // readable twin of the wire map, so they omit the same entries.
         const transitionMeta: Record<string, unknown> = {};
         if (!isDefaultSides(t.sourceSide, t.targetSide)) {
           transitionMeta.sourceSide = t.sourceSide ?? DEFAULT_SOURCE_SIDE;
           transitionMeta.targetSide = t.targetSide ?? DEFAULT_TARGET_SIDE;
         }
-        // `?? DEFAULT` is defensive against a partially-built fixture form (the
-        // field is required in `Transition`): without it an absent value would
-        // write `action: undefined`, which `JSON.stringify` drops — emitting an
-        // empty `<metadata><![CDATA[{}]]></metadata>` element on an otherwise
-        // default edge and breaking the sparse-emission contract.
-        const action = t.action ?? DEFAULT_TRANSITION_ACTION;
-        if (action !== DEFAULT_TRANSITION_ACTION) transitionMeta.action = action;
-        // `requeuePolicy` rides the same sparse metadata slot as `action` —
-        // omitted for KEEP (the default), exactly like `action` is omitted for
-        // `UPDATE_STATUS`. When BACK_N, the `n` is carried so the round-trip is
-        // lossless; `?? DEFAULT` is defensive against a partially-built fixture
-        // (the field is required in `Transition`).
+        // `requeuePolicy` rides the same sparse metadata slot — omitted for
+        // KEEP (the default). When BACK_N, the `n` is carried so the round-trip
+        // is lossless; `?? DEFAULT` is defensive against a partially-built
+        // fixture (the field is required in `Transition`).
         const policy = t.requeuePolicy ?? DEFAULT_REQUEUE_POLICY;
         if (policy.kind !== 'KEEP') {
           transitionMeta.requeuePolicy =
@@ -686,31 +667,6 @@ function parseNodeActions(nodeEl: Element, stateName: string): Parsed<NodeAction
 }
 
 /**
- * Validates the `action` out of a transition's metadata — what running the edge
- * does. Absent → the {@link DEFAULT_TRANSITION_ACTION} the serializer omits it
- * for, which is also what every edge authored before the field existed means.
- *
- * The accepted set is DERIVED from {@link TRANSITION_ACTIONS}, the same list the
- * dropdown derives its options from — so widening the union teaches the codec and
- * the UI in one edit. An earlier action-type parser here hardcoded its one
- * accepted literal and would have silently rejected a value the dropdown had
- * already started offering. It reads the action LIST rather than the label map, so
- * this codec depends on no presentation copy.
- */
-function parseTransitionAction(value: unknown, from: string): Parsed<TransitionActionType> {
-  if (value === undefined) return { ok: true, value: DEFAULT_TRANSITION_ACTION };
-  if (typeof value === 'string' && (TRANSITION_ACTIONS as readonly string[]).includes(value)) {
-    return { ok: true, value: value as TransitionActionType };
-  }
-  return {
-    ok: false,
-    error: `"action" pada transisi dari status '${from}' harus salah satu dari ${TRANSITION_ACTIONS
-      .map((k) => `"${k}"`)
-      .join(', ')}.`,
-  };
-}
-
-/**
  * Validates the `requeuePolicy` out of a transition's metadata — what a
  * `→ WAITING` re-queue does to queue order. Absent → the
  * {@link DEFAULT_REQUEUE_POLICY} the serializer omits it for, which is also what
@@ -718,10 +674,10 @@ function parseTransitionAction(value: unknown, from: string): Parsed<TransitionA
  *
  * The accepted `kind` set is DERIVED from {@link REQUEUE_POLICIES}, the same list
  * the dropdown derives its options from — so widening the union teaches the
- * codec and the UI in one edit (mirrors {@link parseTransitionAction}). A
- * `BACK_N` payload must carry a present, finite, non-negative integer `n`; a
- * malformed `n` is rejected here so the parse surfaces it as a clear Indonesian
- * error rather than a silent `NaN` downstream. `KEEP`/`TO_BACK` ignore `n`.
+ * codec and the UI in one edit. A `BACK_N` payload must carry a present, finite,
+ * non-negative integer `n`; a malformed `n` is rejected here so the parse
+ * surfaces it as a clear Indonesian error rather than a silent `NaN` downstream.
+ * `KEEP`/`TO_BACK` ignore `n`.
  */
 function parseRequeuePolicy(value: unknown, from: string): Parsed<RequeuePolicyDto> {
   if (value === undefined) return { ok: true, value: DEFAULT_REQUEUE_POLICY };
@@ -795,8 +751,6 @@ function parseNodeTransitions(nodeEl: Element, from: string): Parsed<Transition[
     if (!sourceSide.ok) return sourceSide;
     const targetSide = parseSide(meta.value.targetSide, from);
     if (!targetSide.ok) return targetSide;
-    const action = parseTransitionAction(meta.value.action, from);
-    if (!action.ok) return action;
     const requeuePolicy = parseRequeuePolicy(meta.value.requeuePolicy, from);
     if (!requeuePolicy.ok) return requeuePolicy;
     // `<name>` and `<default>` are DERIVED on serialize (a slug of the label /
@@ -805,7 +759,6 @@ function parseNodeTransitions(nodeEl: Element, from: string): Parsed<Transition[
       from,
       to,
       actionLabel,
-      action: action.value,
       requeuePolicy: requeuePolicy.value,
     };
     if (sourceSide.value !== undefined) transition.sourceSide = sourceSide.value;

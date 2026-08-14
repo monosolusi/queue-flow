@@ -45,11 +45,7 @@ import { StateMachine } from '../../../domain/store-config/state-machine';
 import { StateSchema } from '../../../domain/store-config/value-objects/state-schema';
 import { StateDescriptions } from '../../../domain/store-config/value-objects/state-descriptions';
 import { StateTransitionRule } from '../../../domain/store-config/value-objects/state-transition-rule';
-import {
-  Identifier,
-  requeuePolicyFromWire,
-  type TransitionActionValue,
-} from '../../../domain/shared';
+import { Identifier, requeuePolicyFromWire } from '../../../domain/shared';
 import { withDbClient } from './transaction-context';
 
 interface ConfigRow {
@@ -62,15 +58,16 @@ interface ConfigRow {
       from: string;
       to: string;
       actionLabel: string;
-      /** What running the edge does — lazy key (absent on pre-feature rows,
-       *  defaults to `UPDATE_STATUS`). Same lazy-key pattern as `descriptions`
-       *  below: no SQL migration, the key appears on the next save. */
-      action?: TransitionActionValue;
+      /** Stale `action` key from a pre-feature row — ignored on read, dropped on
+       *  the next save (no migration). Kept loose (`string`, not the deleted
+       *  enum) so a SELECT * on an existing JSONB document does not fail the
+       *  row's type. */
+      action?: string;
       /** What an `-> WAITING` edge does to the WAITING queue's order — lazy
        *  key (absent on pre-feature rows, defaults to KEEP via
-       *  `requeuePolicyFromWire`). Same lazy-key pattern as `action` above:
-       *  no SQL migration (the field lives inside the `state_machine` JSONB
-       *  document), the key appears on the next save. */
+       *  `requeuePolicyFromWire`). Same lazy-key pattern as `descriptions`
+       *  below: no SQL migration (the field lives inside the `state_machine`
+       *  JSONB document), the key appears on the next save. */
       requeuePolicy?: { kind: string; n?: number };
     }[];
     /** Per-state description overrides — lazy key (absent on pre-feature rows,
@@ -164,7 +161,6 @@ function serializeStateMachine(sm: StateMachine) {
       from: t.from,
       to: t.to,
       actionLabel: t.actionLabel,
-      action: t.action,
       requeuePolicy: t.requeuePolicy,
     })),
     // Per-state description overrides, materialized from the VO. Always written
@@ -175,6 +171,13 @@ function serializeStateMachine(sm: StateMachine) {
   };
 }
 
+/**
+ * Canonical label for a `-> WAITING` re-queue edge — the wording the aggregate
+ * itself documents for this transition ("Kembalikan ke Antrian"). Used only to
+ * normalise a stale pre-feature row (see `toConfig`).
+ */
+const REQUEUE_ACTION_LABEL = 'Kembalikan ke Antrian';
+
 function toConfig(row: ConfigRow): SystemConfiguration {
   const sm = row.state_machine;
   return SystemConfiguration.reconstitute({
@@ -183,18 +186,25 @@ function toConfig(row: ConfigRow): SystemConfiguration {
     isInitialSetupCompleted: row.is_initial_setup_completed,
     stateMachine: new StateMachine(
       StateSchema.of(sm.states),
-      // `action` and `requeuePolicy` are lazy keys: a pre-feature row carries
-      // neither, and `StateTransitionRule.of` recovers `undefined` action to
-      // `UPDATE_STATUS` while `requeuePolicyFromWire` recovers `undefined`
-      // policy to KEEP — the meaning every edge configured before either field
-      // existed had. No SQL migration — both live inside the `state_machine`
-      // JSONB document and appear lazily on the next save.
+      // `requeuePolicy` is a lazy key: a pre-feature row carries none, and
+      // `requeuePolicyFromWire` recovers `undefined` to KEEP — the meaning every
+      // edge configured before the field existed had. No SQL migration — it lives
+      // inside the `state_machine` JSONB document and appears lazily on the next
+      // save. A stale `action: 'TRANSFER_CATEGORY'` row authored a *category move*
+      // under the pre-feature model; category moves are now a standalone counter
+      // action, not an edge. The edge survives as a re-queue (`-> WAITING`), but
+      // the label the manager chose for a transfer (often "Pindah Kategori") no
+      // longer fits a re-queue and would duplicate the standalone "Pindah
+      // Kategori" button on the caller — same label, different behaviour.
+      // Normalise it to the canonical re-queue label so the surviving edge says
+      // what it now does. The stale `action` key itself is dropped on the next
+      // save (no migration). Any other stale `action` value (e.g.
+      // 'UPDATE_STATUS') is ignored — the label stands.
       sm.transitions.map((t) =>
         StateTransitionRule.of(
           t.from,
           t.to,
-          t.actionLabel,
-          t.action,
+          t.action === 'TRANSFER_CATEGORY' ? REQUEUE_ACTION_LABEL : t.actionLabel,
           requeuePolicyFromWire(t.requeuePolicy),
         ),
       ),

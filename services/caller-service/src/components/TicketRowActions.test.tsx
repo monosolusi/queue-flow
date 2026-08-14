@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TicketRowActions } from './TicketRowActions';
 import { ticketActionsFor } from '../lib/workflow-actions';
-import type { TicketStateDto, TransitionActionType } from '../api/types';
+import type { TicketStateDto } from '../api/types';
 import { edge, workflowActions } from '../test/workflow-fixtures';
 
 const ticket = (ticketId: string, ticketNumber: string): TicketStateDto => ({
@@ -18,7 +18,7 @@ const ticket = (ticketId: string, ticketNumber: string): TicketStateDto => ({
  *  the ticket exactly where it is — the edge the rows must explain rather than
  *  present as a dead button. */
 const selfLoop = workflowActions(
-  edge('SKIPPED', 'SKIPPED', 'Tandai Ulang', 'UPDATE_STATUS', 'NO_STATUS_CHANGE'),
+  edge('SKIPPED', 'SKIPPED', 'Tandai Ulang', 'NO_STATUS_CHANGE'),
 );
 
 /**
@@ -61,13 +61,13 @@ describe('TicketRowActions explains an action it cannot run', () => {
     //
     // Both dead ends are ones core-api can really produce for a SKIPPED ticket.
     // The only reason code it sends is NO_STATUS_CHANGE (a self-loop), so the
-    // second dead end is the forward-compatibility path instead: an `action`
-    // newer than this build, which `toAction` coerces to `action: null` + the
-    // unknown reason. A fixture for a wire shape the server never sends would
+    // second dead end is the forward-compatibility path instead: a reason code
+    // newer than this build, which `unavailableCopy` degrades through the
+    // unknown wording. A fixture for a wire shape the server never sends would
     // certify nothing.
     const twoDeadEnds = workflowActions(
-      edge('SKIPPED', 'SKIPPED', 'Tandai Ulang', 'UPDATE_STATUS', 'NO_STATUS_CHANGE'),
-      edge('SKIPPED', 'ARSIP', 'Arsipkan', 'ARCHIVE_TICKET' as TransitionActionType),
+      edge('SKIPPED', 'SKIPPED', 'Tandai Ulang', 'NO_STATUS_CHANGE'),
+      edge('SKIPPED', 'ARSIP', 'Arsipkan', 'FUTURE_CODE' as never),
     );
     render(
       <TicketRowActions
@@ -120,7 +120,7 @@ describe('TicketRowActions explains an action it cannot run', () => {
 
   it('leaves a runnable action plain — the note belongs to the dead ends only', async () => {
     const onAction = vi.fn();
-    const recall = workflowActions(edge('SKIPPED', 'CALLING', 'Panggil Ulang', 'UPDATE_STATUS'));
+    const recall = workflowActions(edge('SKIPPED', 'CALLING', 'Panggil Ulang'));
     render(
       <TicketRowActions
         ticket={ticket('s1', 'A-004')}

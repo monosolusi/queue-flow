@@ -4,18 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { SkippedQueueList } from './SkippedQueueList';
 import { ticketActionsFor } from '../lib/workflow-actions';
 import type { TicketStateDto } from '../api/types';
-import type { BoundCounter } from '../state/counter-binding';
 import { PRD_DEFAULT_WORKFLOW, edge, workflowActions } from '../test/workflow-fixtures';
-
-const bound: BoundCounter = {
-  counterId: 1,
-  counterName: 'Loket 1',
-  assignedCategoryIds: ['cat-a', 'cat-b'],
-  assignedCategories: [
-    { id: 'cat-a', code: 'A', name: 'Customer Service' },
-    { id: 'cat-b', code: 'B', name: 'Kasir' },
-  ],
-};
 
 const tickets: readonly TicketStateDto[] = [
   { ticketId: 's1', ticketNumber: 'A-004', categoryId: 'cat-a', status: 'SKIPPED', counterId: 1 },
@@ -29,7 +18,6 @@ describe('SkippedQueueList (FR-CLR-02 — a skipped ticket stays recallable)', (
       <SkippedQueueList
         tickets={tickets}
         actions={ticketActionsFor(PRD_DEFAULT_WORKFLOW, 'SKIPPED')}
-        bound={bound}
         onAction={onAction}
       />,
     );
@@ -40,21 +28,20 @@ describe('SkippedQueueList (FR-CLR-02 — a skipped ticket stays recallable)', (
     await userEvent.click(screen.getByTestId('skipped-action-s2-CALLING'));
     expect(onAction).toHaveBeenCalledTimes(1);
     expect(onAction.mock.calls[0][0]).toMatchObject({ ticketId: 's2' });
-    // No special case for recall: the command is the one the server named.
-    expect(onAction.mock.calls[0][1]).toMatchObject({ to: 'CALLING', action: 'UPDATE_STATUS' });
+    // No special case for recall: the row runs the edge the flow published.
+    expect(onAction.mock.calls[0][1]).toMatchObject({ to: 'CALLING' });
   });
 
   it('renders whatever the flow says, not a hardcoded recall', async () => {
     const onAction = vi.fn();
     const configured = workflowActions(
-      edge('SKIPPED', 'CALLING', 'Panggil Lagi Yang Absen', 'UPDATE_STATUS'),
-      edge('SKIPPED', 'BATAL', 'Batalkan Tiket', 'UPDATE_STATUS'),
+      edge('SKIPPED', 'CALLING', 'Panggil Lagi Yang Absen'),
+      edge('SKIPPED', 'BATAL', 'Batalkan Tiket'),
     );
     render(
       <SkippedQueueList
         tickets={tickets}
         actions={ticketActionsFor(configured, 'SKIPPED')}
-        bound={bound}
         onAction={onAction}
       />,
     );
@@ -62,7 +49,7 @@ describe('SkippedQueueList (FR-CLR-02 — a skipped ticket stays recallable)', (
     expect(row).toHaveTextContent('Panggil Lagi Yang Absen');
     expect(row).toHaveTextContent('Batalkan Tiket');
     await userEvent.click(screen.getByTestId('skipped-action-s1-BATAL'));
-    expect(onAction.mock.calls[0][1]).toMatchObject({ action: 'UPDATE_STATUS' });
+    expect(onAction.mock.calls[0][1]).toMatchObject({ to: 'BATAL' });
   });
 
   it('shows the empty state rather than disappearing', () => {
@@ -70,7 +57,6 @@ describe('SkippedQueueList (FR-CLR-02 — a skipped ticket stays recallable)', (
       <SkippedQueueList
         tickets={[]}
         actions={ticketActionsFor(PRD_DEFAULT_WORKFLOW, 'SKIPPED')}
-        bound={bound}
         onAction={vi.fn()}
       />,
     );
@@ -83,7 +69,6 @@ describe('SkippedQueueList (FR-CLR-02 — a skipped ticket stays recallable)', (
       <SkippedQueueList
         tickets={tickets}
         actions={ticketActionsFor(PRD_DEFAULT_WORKFLOW, 'SKIPPED')}
-        bound={bound}
         pending="s1:SKIPPED->CALLING"
         onAction={vi.fn()}
       />,
@@ -101,7 +86,6 @@ describe('SkippedQueueList (FR-CLR-02 — a skipped ticket stays recallable)', (
       <SkippedQueueList
         tickets={tickets}
         actions={ticketActionsFor(PRD_DEFAULT_WORKFLOW, 'SKIPPED')}
-        bound={bound}
         error="transisi ilegal"
         notice="Tunggu perintah sebelumnya selesai."
         onAction={vi.fn()}
@@ -141,7 +125,6 @@ describe('SkippedQueueList hint follows the flow, never promises a missing actio
       <SkippedQueueList
         tickets={tickets}
         actions={actions}
-        bound={bound}
         workflowError={workflowError}
         onAction={vi.fn()}
       />,
@@ -150,7 +133,7 @@ describe('SkippedQueueList hint follows the flow, never promises a missing actio
 
   it('says so plainly when the flow leads nowhere out of "Dilewati"', () => {
     // A flow the designer can really produce: a way INTO skipped, none back out.
-    const oneWay = workflowActions(edge('CALLING', 'SKIPPED', 'Lewati / Absen', 'UPDATE_STATUS'));
+    const oneWay = workflowActions(edge('CALLING', 'SKIPPED', 'Lewati / Absen'));
     renderWith(ticketActionsFor(oneWay, 'SKIPPED'));
 
     // Answers the manager's question — yes, it is meant to be like that here —
@@ -187,7 +170,7 @@ describe('SkippedQueueList hint follows the flow, never promises a missing actio
   });
 
   it('points at the row buttons when the flow offers actions but no recall', () => {
-    const noRecall = workflowActions(edge('SKIPPED', 'BATAL', 'Batalkan Tiket', 'UPDATE_STATUS'));
+    const noRecall = workflowActions(edge('SKIPPED', 'BATAL', 'Batalkan Tiket'));
     renderWith(ticketActionsFor(noRecall, 'SKIPPED'));
 
     expect(hint()).not.toHaveTextContent(RECALL_PROMISE);
@@ -203,7 +186,7 @@ describe('SkippedQueueList hint follows the flow, never promises a missing actio
     // change nothing — "pilih tindakan yang tersedia" would be the same lie one
     // step further in.
     const selfLoop = workflowActions(
-      edge('SKIPPED', 'SKIPPED', 'Tandai Ulang', 'UPDATE_STATUS', 'NO_STATUS_CHANGE'),
+      edge('SKIPPED', 'SKIPPED', 'Tandai Ulang', 'NO_STATUS_CHANGE'),
     );
     renderWith(ticketActionsFor(selfLoop, 'SKIPPED'));
 
@@ -215,33 +198,8 @@ describe('SkippedQueueList hint follows the flow, never promises a missing actio
     expect(screen.getAllByText(/tidak mengubah status tiket/i)[0]).toBeInTheDocument();
   });
 
-  it('does not point at a category move that has nowhere to go', () => {
-    // A counter serving ONE category renders "Pindah Kategori" disabled — there
-    // is no other category to move to — so "pilih tindakan yang tersedia" would
-    // be the same lie the recall promise was, one button further along.
-    const soloCounter: BoundCounter = {
-      ...bound,
-      assignedCategoryIds: ['cat-a'],
-      assignedCategories: [{ id: 'cat-a', code: 'A', name: 'Customer Service' }],
-    };
-    const onlyTransfer = workflowActions(
-      edge('SKIPPED', 'WAITING', 'Pindah Kategori', 'TRANSFER_CATEGORY'),
-    );
-    render(
-      <SkippedQueueList
-        tickets={tickets}
-        actions={ticketActionsFor(onlyTransfer, 'SKIPPED')}
-        bound={soloCounter}
-        onAction={vi.fn()}
-      />,
-    );
-    expect(screen.getByTestId('skipped-action-s1-WAITING')).toBeDisabled();
-    expect(hint()).toHaveTextContent(/belum bisa dijalankan dari panel loket/i);
-    expect(hint()).toHaveClass('skipped-queue__hint--notice');
-  });
-
   it('never shows staff a raw status name', () => {
-    const oneWay = workflowActions(edge('CALLING', 'SKIPPED', 'Lewati / Absen', 'UPDATE_STATUS'));
+    const oneWay = workflowActions(edge('CALLING', 'SKIPPED', 'Lewati / Absen'));
     renderWith(ticketActionsFor(oneWay, 'SKIPPED'));
     expect(hint().textContent).not.toMatch(/SKIPPED|CALLING|WAITING/);
   });
@@ -251,7 +209,7 @@ describe('SkippedQueueList hint follows the flow, never promises a missing actio
     // them must too — hardcoding "Panggil Ulang" over a button that reads
     // "Panggil Lagi Yang Absen" is this very bug in miniature.
     const renamed = workflowActions(
-      edge('SKIPPED', 'CALLING', 'Panggil Lagi Yang Absen', 'UPDATE_STATUS'),
+      edge('SKIPPED', 'CALLING', 'Panggil Lagi Yang Absen'),
     );
     renderWith(ticketActionsFor(renamed, 'SKIPPED'));
 

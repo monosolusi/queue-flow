@@ -26,7 +26,6 @@ function action(partial: Partial<WorkflowAction>): WorkflowAction {
     from: 'CALLING',
     to: 'SERVING',
     actionLabel: 'Mulai Melayani',
-    action: 'UPDATE_STATUS',
     unavailableReason: null,
     ...partial,
   };
@@ -80,44 +79,6 @@ describe('invokeWorkflowAction', () => {
     const api = makeApi();
     await invokeWorkflowAction(api, action({ to: 'SERVING' }), 't1');
     expect(api.applyTransition).toHaveBeenCalledWith('t1', 'SERVING', undefined);
-  });
-
-  it('passes the chosen destination category to transfer, and nothing else', async () => {
-    // No target status: a transferred ticket always lands back in the queue,
-    // because it gets a new per-category number. The edge's `to` adds nothing the
-    // endpoint needs.
-    const api = makeApi();
-    await invokeWorkflowAction(
-      api,
-      action({ action: 'TRANSFER_CATEGORY', to: 'WAITING', actionLabel: 'Pindah Kategori' }),
-      't1',
-      { counterId: 2, targetCategoryId: 'cat-b' },
-    );
-    expect(api.transfer).toHaveBeenCalledWith('t1', 'cat-b');
-    expect(api.applyTransition).not.toHaveBeenCalled();
-  });
-
-  it('rejects a transfer with no destination rather than calling the endpoint', async () => {
-    const api = makeApi();
-    await expect(
-      invokeWorkflowAction(api, action({ action: 'TRANSFER_CATEGORY', to: 'WAITING' }), 't1', {
-        counterId: 2,
-      }),
-    ).rejects.toThrow(/kategori tujuan/i);
-    expect(api.transfer).not.toHaveBeenCalled();
-  });
-
-  it('rejects an action this build cannot run instead of guessing an endpoint', async () => {
-    // Its button is disabled, so this is defence in depth: a mis-wired caller
-    // must fail loudly, never fall through to a command with the wrong semantics.
-    const api = makeApi();
-    await expect(
-      invokeWorkflowAction(api, action({ action: null, from: 'SERVING', to: 'CALLING' }), 't1', {
-        counterId: 2,
-      }),
-    ).rejects.toThrow(/tidak bisa dijalankan/i);
-    expect(api.applyTransition).not.toHaveBeenCalled();
-    expect(api.transfer).not.toHaveBeenCalled();
   });
 
   it('never reaches the counter-level call-next (it targets a counter, not a ticket)', async () => {

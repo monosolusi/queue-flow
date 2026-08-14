@@ -40,8 +40,6 @@ import {
   NODE_ACTION_TYPE_LABELS,
   REQUEUE_POLICY_LABELS,
   REQUEUE_POLICIES,
-  TRANSITION_ACTION_LABELS,
-  TRANSITION_ACTIONS,
   type StateMachineForm,
 } from "../lib/state-machine";
 import {
@@ -54,7 +52,6 @@ import type {
   NodeActionType,
   RequeuePolicyDto,
   RequeuePolicyKind,
-  TransitionActionType,
 } from "../api/types";
 
 /** The action-type options shown in the "Aksi" dropdown, built from the shared
@@ -68,20 +65,13 @@ const NODE_ACTION_TYPE_OPTIONS: ReadonlyArray<{ value: NodeActionType; label: st
   Object.keys(NODE_ACTION_TYPE_LABELS) as NodeActionType[]
 ).map((value) => ({ value, label: NODE_ACTION_TYPE_LABELS[value] }));
 
-/** The options for a transition's "Aksi" dropdown — what running that button
- *  does. The shared `TRANSITION_ACTIONS` list (the single source of truth in the
- *  pure `state-machine.ts`, exhaustiveness-guarded against the union), so the
- *  dropdown can never offer a value the wire does not accept — nor omit one it
- *  does. The XML codec validates against the same list. */
-const TRANSITION_ACTION_OPTIONS = TRANSITION_ACTIONS;
-
 /** The options for a transition's "Kebijakan Antrian Ulang" dropdown — what a
  *  `→ WAITING` re-queue does to queue order. The shared `REQUEUE_POLICIES`
  *  list (the single source of truth in the pure `state-machine.ts`,
  *  exhaustiveness-guarded against the union), so the dropdown can never offer a
  *  value the wire does not accept — nor omit one it does. The XML codec
  *  validates against the same list. Shown only on an edge whose
- *  `to === 'WAITING'` AND `action === 'UPDATE_STATUS'`. */
+ *  `to === 'WAITING'`. */
 const REQUEUE_POLICY_OPTIONS = REQUEUE_POLICIES;
 
 /**
@@ -411,8 +401,7 @@ export function StateMachineWorkflowProperties({
                 {outgoing.map((edge) => {
                   const labelId = `panel-transition-label-${edge.id}`;
                   const toId = `panel-transition-to-${edge.id}`;
-                  const actionId = `panel-transition-action-${edge.id}`;
-                  const showRequeue = edge.target === "WAITING" && edge.data.action === "UPDATE_STATUS";
+                  const showRequeue = edge.target === "WAITING";
                   const requeueId = `panel-transition-requeue-${edge.id}`;
                   const requeueNId = `panel-transition-requeue-n-${edge.id}`;
                   const policy = edge.data.requeuePolicy;
@@ -444,28 +433,6 @@ export function StateMachineWorkflowProperties({
                         {form.states.map((s) => (
                           <option key={s} value={s}>
                             {s}
-                          </option>
-                        ))}
-                      </select>
-                      <label className="sm-properties__action-label" htmlFor={actionId}>
-                        Aksi
-                      </label>
-                      <select
-                        id={actionId}
-                        className="sm-properties__input"
-                        data-testid={`panel-transition-action-${edge.id}`}
-                        value={edge.data.action}
-                        aria-describedby="panel-transition-action-hint"
-                        onChange={(e) =>
-                          handlers.onEditTransitionAction(
-                            edge.id,
-                            e.target.value as TransitionActionType,
-                          )
-                        }
-                      >
-                        {TRANSITION_ACTION_OPTIONS.map((a) => (
-                          <option key={a} value={a}>
-                            {TRANSITION_ACTION_LABELS[a]}
                           </option>
                         ))}
                       </select>
@@ -538,18 +505,11 @@ export function StateMachineWorkflowProperties({
             <p id="panel-transition-label-hint" className="sm-properties__hint">
               Teks tombol yang muncul di layar petugas.
             </p>
-            <p id="panel-transition-action-hint" className="sm-properties__hint">
-              Yang dikerjakan tombol ini. <strong>Ubah Status</strong> memindahkan tiket ke status
-              tujuan — nomor dan kategorinya tetap. <strong>Pindah Kategori</strong> memindahkannya
-              ke kategori lain sekaligus, dan petugas memilih kategori tujuannya saat menekan
-              tombol.
-            </p>
             <p id="panel-transition-requeue-hint" className="sm-properties__hint">
-              Hanya untuk transisi yang menuju <strong>WAITING</strong> dengan aksi{" "}
-              <strong>Ubah Status</strong>. <strong>Tetap di posisi</strong> = tiket tetap di
-              urutan lamanya. <strong>Paling belakang</strong> = tiket dipindah ke antrian paling
-              akhir. <strong>Mundur n posisi</strong> = tiket mundur n antrian di kategori yang
-              sama.
+              Hanya untuk transisi yang menuju <strong>WAITING</strong>.{" "}
+              <strong>Tetap di posisi</strong> = tiket tetap di urutan lamanya.{" "}
+              <strong>Paling belakang</strong> = tiket dipindah ke antrian paling akhir.{" "}
+              <strong>Mundur n posisi</strong> = tiket mundur n antrian di kategori yang sama.
             </p>
             <button
               type="button"
@@ -827,36 +787,7 @@ export function StateMachineWorkflowProperties({
             Teks tombol yang muncul di layar petugas.
           </p>
         </div>
-        <div className="sm-properties__field">
-          <label className="sm-properties__label" htmlFor="panel-transition-action">
-            Aksi
-          </label>
-          <select
-            id="panel-transition-action"
-            className="sm-properties__input"
-            data-testid="panel-transition-action"
-            value={selectedEdge.data.action}
-            aria-describedby="panel-transition-action-hint-edge"
-            onChange={(e) =>
-              handlers.onEditTransitionAction(
-                selectedEdge.id,
-                e.target.value as TransitionActionType,
-              )
-            }
-          >
-            {TRANSITION_ACTION_OPTIONS.map((a) => (
-              <option key={a} value={a}>
-                {TRANSITION_ACTION_LABELS[a]}
-              </option>
-            ))}
-          </select>
-          <p id="panel-transition-action-hint-edge" className="sm-properties__hint">
-            Yang dikerjakan tombol ini. <strong>Ubah Status</strong> memindahkan tiket ke status
-            tujuan — nomor dan kategorinya tetap. <strong>Pindah Kategori</strong> memindahkannya ke
-            kategori lain sekaligus, dan petugas memilih kategori tujuannya saat menekan tombol.
-          </p>
-        </div>
-        {to === "WAITING" && selectedEdge.data.action === "UPDATE_STATUS" && (
+        {to === "WAITING" && (
           <div className="sm-properties__field">
             <label className="sm-properties__label" htmlFor="panel-transition-requeue">
               Antrian ulang

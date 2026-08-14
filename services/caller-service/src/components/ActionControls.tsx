@@ -30,9 +30,10 @@ export interface ActionControlsProps {
  * The counter panel's action buttons, derived entirely from the admin-designed
  * flow (FR-CLR-02 / QUE-20). The rule: **the buttons for a ticket are exactly
  * the outgoing transitions of its current status**, labelled with each
- * transition's `actionLabel`. The panel adds no workflow steps of its own.
+ * transition's `actionLabel`. Every flow edge is a plain status change ("Ubah
+ * Status"); the panel adds no workflow steps of its own.
  *
- * Three clusters, in order:
+ * Four clusters, in order:
  *
  * 1. **Call next** — the counter-level entry action. It renders only when the
  *    flow actually has a `WAITING -> CALLING` edge it can honour (delete it in the
@@ -42,12 +43,17 @@ export interface ActionControlsProps {
  *    skipped one moves to the skipped list), so `active !== null` means staff
  *    must resolve the current ticket first — calling next on top of it would
  *    strand it in CALLING forever and corrupt analytics.
- * 2. **Flow actions** — one button per outgoing edge of `active.status`, each
- *    running the action **the manager declared** for it. An edge the panel cannot
- *    run (see `isRunnable`) is rendered disabled with the reason, never silently
- *    dropped: a configured transition that simply vanishes is exactly the
- *    complaint this derivation exists to fix.
- * 3. **Utilities** — "Panggil Lagi", the built-in re-announce fallback. Kept
+ * 2. **Flow actions** — one button per outgoing edge of `active.status`, each a
+ *    plain status change. An edge the panel cannot run (see `isRunnable`) is
+ *    rendered disabled with the reason, never silently dropped: a configured
+ *    transition that simply vanishes is exactly the complaint this derivation
+ *    exists to fix.
+ * 3. **Pindah Kategori** — a standalone category-move action (FR-CLR-03), NOT a
+ *    flow edge. Offered on the active ticket only, and only while the bound
+ *    counter serves at least one other category (a single-category counter would
+ *    show a button that can never be tapped, so the cluster is hidden instead).
+ *    It always lands the ticket back in WAITING with a new per-category number.
+ * 4. **Utilities** — "Panggil Lagi", the built-in re-announce fallback. Kept
  *    only while the flow says nothing about it: a re-announce IS a
  *    `CALLING → CALLING` self-loop (it repeats the call without changing the
  *    status, and the endpoint hard-requires CALLING), so a manager who draws
@@ -81,28 +87,24 @@ export function ActionControls({
   // The manager drew the `CALLING → CALLING` self-loop, so re-announce is part
   // of the flow now — the built-in utility button stands down rather than
   // duplicating it under different wording. Recognised by the edge itself (a
-  // runnable self-loop on CALLING) rather than by a command name: core-api no
-  // longer resolves edges to commands, and the announcement is what arriving in
-  // CALLING means.
-  //
-  // The `UPDATE_STATUS` check is not redundant, and mirrors the same check in
-  // `SkippedQueueList`: were that edge declared a category move, what replaced the
-  // utility button would be a destination chooser, which announces nothing — so
-  // staff would lose the only way to repeat an announcement. core-api will not
-  // SAVE such an edge (a category move must target WAITING), so this is
-  // rolling-deploy defence in depth: a panel can outlive the config that produced
-  // its graph. Keep it.
+  // runnable self-loop on CALLING): arriving in CALLING re-announces by design,
+  // and the announcement is what that edge means.
   const flowOwnsReannounce = actions.some(
-    (a) => a.from === 'CALLING' && a.to === 'CALLING' && isRunnable(a) && a.action === 'UPDATE_STATUS',
+    (a) => a.from === 'CALLING' && a.to === 'CALLING' && isRunnable(a),
+  );
+  // Destination categories for the standalone transfer, derived once per active
+  // ticket. Hidden entirely when the counter serves no other category — a
+  // perpetually-disabled button reads as broken, and there is genuinely nowhere
+  // to move.
+  const transferCands = useMemo(
+    () => (active ? transferCandidates(bound, active.categoryId) : []),
+    [bound, active?.categoryId],
   );
 
-  function fire(action: WorkflowAction, targetCategoryId?: string): void {
+  function fire(action: WorkflowAction): void {
     if (!active) return;
     void run(actionRunKey(active.ticketId, action), () =>
-      invokeWorkflowAction(api, action, active.ticketId, {
-        counterId: bound.counterId,
-        targetCategoryId,
-      }),
+      invokeWorkflowAction(api, action, active.ticketId, { counterId: bound.counterId }),
     );
   }
 
@@ -155,22 +157,6 @@ export function ActionControls({
               );
             }
 
-            if (action.action === 'TRANSFER_CATEGORY') {
-              return (
-                <TransferAction
-                  // `key` is ticket-scoped, so a different ticket taking the
-                  // counter remounts the chooser — i.e. collapses it.
-                  key={key}
-                  action={action}
-                  candidates={transferCandidates(bound, active.categoryId)}
-                  busy={busy}
-                  disabled={blocked}
-                  onTransfer={(categoryId) => fire(action, categoryId)}
-                  idPrefix={testId}
-                />
-              );
-            }
-
             return (
               <button
                 key={key}
@@ -184,6 +170,24 @@ export function ActionControls({
               </button>
             );
           })}
+        </div>
+      )}
+
+      {active && transferCands.length > 0 && (
+        <div className="action-controls__transfer" role="group" aria-label="Pindah kategori">
+          <TransferAction
+            // `key` is ticket-scoped, so a different ticket taking the counter
+            // remounts the chooser — i.e. collapses it.
+            key={`transfer-${active.ticketId}`}
+            actionLabel="Pindah Kategori"
+            candidates={transferCands}
+            busy={pending === 'transfer'}
+            disabled={blockedApartFrom('transfer')}
+            onTransfer={(categoryId) =>
+              void run('transfer', () => api.transfer(active.ticketId, categoryId))
+            }
+            idPrefix="action-transfer"
+          />
         </div>
       )}
 

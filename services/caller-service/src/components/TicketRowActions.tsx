@@ -1,13 +1,6 @@
 import { useId } from 'react';
 import type { TicketStateDto } from '../api/types';
-import {
-  actionRunKey,
-  isRunnable,
-  transferCandidates,
-  type WorkflowAction,
-} from '../lib/workflow-actions';
-import type { BoundCounter } from '../state/counter-binding';
-import { TransferAction } from './TransferAction';
+import { actionRunKey, isRunnable, type WorkflowAction } from '../lib/workflow-actions';
 
 export interface TicketRowActionsProps {
   readonly ticket: TicketStateDto;
@@ -15,27 +8,24 @@ export interface TicketRowActionsProps {
    *  by {@link runnableRowActions}, so the list and its rows agree on whether
    *  there is anything to show. */
   readonly actions: readonly WorkflowAction[];
-  /** The counter binding, for the transfer destinations. */
-  readonly bound?: BoundCounter;
   /** Key of the command currently in flight for this list (see `actionRunKey`),
    *  or `null`. Every row of a list shares one runner, so a non-null value that
    *  is not this button's key means another row is busy. */
   readonly pending?: string | null;
   /** Test-id stem, e.g. `waiting-action` → `waiting-action-<ticketId>-<to>`. */
   readonly testIdStem: string;
-  readonly onAction: (
-    ticket: TicketStateDto,
-    action: WorkflowAction,
-    targetCategoryId?: string,
-  ) => void;
+  readonly onAction: (ticket: TicketStateDto, action: WorkflowAction) => void;
 }
 
 /**
  * The per-row cluster of flow actions shared by the queue lists (the waiting
  * list and the skipped list). One place decides how a transition becomes a
- * control — a plain button, the transfer chooser, or a disabled button with its
- * reason — so the two lists cannot drift apart; each list keeps only its own
- * heading, empty state and test-id stem.
+ * control — a plain button, or a disabled button with its reason — so the two
+ * lists cannot drift apart; each list keeps only its own heading, empty state
+ * and test-id stem.
+ *
+ * Row actions are status changes only. "Pindah Kategori" is a standalone action
+ * on the active ticket, not a per-row flow edge, so it never appears here.
  *
  * Purely presentational: it neither fetches the flow nor decides which command
  * runs an action; the workspace resolves both and passes them in.
@@ -43,7 +33,6 @@ export interface TicketRowActionsProps {
 export function TicketRowActions({
   ticket,
   actions,
-  bound,
   pending = null,
   testIdStem,
   onAction,
@@ -69,12 +58,11 @@ export function TicketRowActions({
         const testId = `${testIdStem}-${ticket.ticketId}-${action.to}`;
 
         if (!isRunnable(action)) {
-          // Configured in the flow but would change nothing (or declares an
-          // action newer than this build). Rendered disabled with
-          // the reason rather than as a button that would reject on tap — and
-          // the reason is VISIBLE text, mirroring `ActionControls`: a `title`
-          // tooltip needs a hover the counter's touch screen cannot produce, so
-          // the row read as a dead button with no explanation at all.
+          // Configured in the flow but would change nothing. Rendered disabled
+          // with the reason rather than as a button that would reject on tap —
+          // and the reason is VISIBLE text, mirroring `ActionControls`: a
+          // `title` tooltip needs a hover the counter's touch screen cannot
+          // produce, so the row read as a dead button with no explanation at all.
           const describedBy = `${noteId}-${action.to}`;
           return (
             <div key={key} className="ticket-actions__unroutable">
@@ -91,20 +79,6 @@ export function TicketRowActions({
                 {action.unavailableReason}
               </p>
             </div>
-          );
-        }
-
-        if (action.action === 'TRANSFER_CATEGORY' && bound) {
-          return (
-            <TransferAction
-              key={key}
-              action={action}
-              candidates={transferCandidates(bound, ticket.categoryId)}
-              busy={busy}
-              disabled={blocked}
-              onTransfer={(categoryId) => onAction(ticket, action, categoryId)}
-              idPrefix={testId}
-            />
           );
         }
 
@@ -127,15 +101,12 @@ export function TicketRowActions({
 
 /**
  * The subset of a status's transitions a queue list can actually render.
- * Without a handler there is nothing to run, so a list degrades to plain
- * numbers; a category move needs the binding to know its destinations, so it
- * drops out without one.
+ * Without a handler there is nothing to run, so a list degrades to plain numbers.
  */
 export function runnableRowActions(
   actions: readonly WorkflowAction[],
-  bound: BoundCounter | undefined,
   hasHandler: boolean,
 ): readonly WorkflowAction[] {
   if (!hasHandler) return [];
-  return actions.filter((a) => a.action !== 'TRANSFER_CATEGORY' || bound !== undefined);
+  return actions;
 }

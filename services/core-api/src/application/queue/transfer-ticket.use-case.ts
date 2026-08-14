@@ -2,19 +2,15 @@ import type {
   ICategoryRepository,
   IQueueRepository,
   ISequenceRepository,
-  ITransitionPolicy,
-  ITransitionPolicyResolver,
   TicketId,
 } from '../../domain/queue';
 import { TicketStatus } from '../../domain/queue';
 import {
   EntityNotFoundException,
   InvalidArgumentException,
-  InvalidStateTransitionException,
   ITransactionManager,
   NoOpTransactionManager,
 } from '../../domain/shared';
-import { assertRunnableAsCategoryTransfer } from './declared-transition-action';
 import { QueueEventDispatcher } from './queue-event-dispatcher';
 
 /**
@@ -58,25 +54,23 @@ export type TransferTicketResult = {
 /**
  * Transfers a ticket to a different category — "pindah kategori" (FR-CLR-03).
  *
- * Transfer is a **first-class configurable transition**: the status leg
- * (current -> WAITING) is validated against the active {@link ITransitionPolicy} —
- * the same validator every queue action uses (QUE-10 AC#3). An active state
- * machine without the edge rejects the transfer with an
- * {@link InvalidStateTransitionException} (AC#2).
+ * Transfer is a **standalone counter action**, decoupled from the flow: it is
+ * not a configured edge, needs no `X -> WAITING` edge declared, and consults no
+ * {@link ITransitionPolicy}. The flow only draws state moves; a category move
+ * takes a destination the flow cannot supply (staff pick it per ticket), so it
+ * is its own command. A re-queue `-> WAITING` that keeps the ticket's number and
+ * category is a plain status change (`ApplyTransitionUseCase`), not a transfer.
  *
- * The manager enables transfer by drawing the edge **and declaring its action
- * `TRANSFER_CATEGORY`**. Both halves are required, and the second is the reason
- * this command exists separately: a category move needs a destination the flow
- * cannot supply (staff pick it per ticket), so it has to be declared rather than
- * recognised. It used to be recognised — from the target state alone — which made
- * every `X -> WAITING` edge a category move and turned a plain "back to the
- * queue" step into a button demanding a category the counter may not even serve.
+ * A transfer always lands in WAITING with a re-issued per-category number — that
+ * is what a fresh `B-001` means (a ticket nobody has served). The category is
+ * reassigned, the counter cleared, and the ticket re-enters the queue under the
+ * new category.
  *
- * The transition is pre-checked **before** reserving a new sequence number so
- * an illegal transfer does not burn or gap a per-category ticket number
- * (NFR-REL-02). On success a new number is issued via
- * {@link ISequenceRepository}, the aggregate's `transferTo` re-validates and
- * applies the reassignment, and the ticket is persisted.
+ * Defense-in-depth: a `COMPLETED` ticket cannot be re-queued via transfer, and a
+ * transfer to the ticket's *own* category is rejected — both **before** reserving
+ * a new sequence number so an illegal transfer burns no per-category number
+ * (NFR-REL-02). The caller panel only offers transfer on an active non-terminal
+ * ticket, so these guards are a safety net, not the gate.
  *
  * The sequence reservation + aggregate mutation + persist run inside one
  * {@link ITransactionManager.runInTransaction} so a durable implementation
@@ -87,44 +81,34 @@ export type TransferTicketResult = {
  * `CallNextTicketUseCase`; the `txManager` defaults to a no-op so unit specs
  * that construct the use case directly stay unbroken.
  *
- * Depends only on ports (DIP): the active `StateMachine` is supplied by the
- * interface-adapter layer, not loaded here.
+ * Depends only on ports (DIP): no `ITransitionPolicyResolver` — transfer is
+ * flow-decoupled, so the use case needs no active state machine.
  */
 export class TransferTicketUseCase {
   constructor(
     private readonly queue: IQueueRepository,
     private readonly categories: ICategoryRepository,
     private readonly sequences: ISequenceRepository,
-    private readonly policyResolver: ITransitionPolicyResolver,
     private readonly dispatcher: QueueEventDispatcher,
     private readonly clock: () => number = () => Date.now(),
     private readonly txManager: ITransactionManager = new NoOpTransactionManager(),
   ) {}
 
   public async execute(command: TransferTicketCommand): Promise<TransferTicketResult> {
-    // Resolve the active transition policy per execution (see CallNextTicketUseCase
-    // for the rationale — the aggregate validates transitions synchronously).
-    const transitionPolicy = await this.policyResolver.getActivePolicy();
-
     const ticket = await this.queue.findById(command.ticketId);
     if (!ticket) {
       throw new EntityNotFoundException('QueueTicket', command.ticketId.value);
     }
 
-    // Pre-check before reserving a sequence number so an illegal transfer
-    // does not advance (and thus gap) the per-category sequence (NFR-REL-02).
-    if (!transitionPolicy.isAllowed(ticket.currentStatus, TicketStatus.WAITING)) {
-      throw new InvalidStateTransitionException(ticket.currentStatus, TicketStatus.WAITING);
+    // Defense-in-depth: a completed ticket cannot be re-queued via transfer. The
+    // caller panel only offers transfer on an active non-terminal ticket, so this
+    // is a safety net for a direct API call. Checked before reserving a sequence
+    // number so an illegal transfer burns no per-category number (NFR-REL-02).
+    if (ticket.currentStatus === TicketStatus.COMPLETED) {
+      throw new InvalidArgumentException(
+        'A completed ticket cannot be transferred back to the queue',
+      );
     }
-    // The edge must be the one the manager declared a category move. Checked
-    // after `isAllowed` so a flow that lacks the edge entirely reports the
-    // missing edge (409) rather than a mis-declared one (400) — and still before
-    // any sequence is reserved.
-    assertRunnableAsCategoryTransfer(
-      transitionPolicy.describeGraph(),
-      ticket.currentStatus,
-      TicketStatus.WAITING,
-    );
 
     const category = await this.categories.getById(command.targetCategoryId);
     if (!category) {
@@ -162,7 +146,9 @@ export class TransferTicketUseCase {
       ticket.transferTo(
         command.targetCategoryId,
         newTicketNumber,
-        transitionPolicy,
+        // The event label is a fixed constant (PRD FR-CLR-03), not read from the
+        // flow — transfer is flow-decoupled, so no edge supplies a label.
+        'Pindah Kategori',
         this.clock(),
       );
       await this.queue.save(ticket);

@@ -252,8 +252,8 @@ export class QueueTicket extends AggregateRoot<TicketId> {
    * WAITING` was read as a category move, so a flow drawn to put a ticket back
    * in the queue produced a "Pindah Kategori" button demanding a destination
    * category. A category move is a genuinely different operation — it takes an
-   * argument no flow can supply — and lives in {@link transferTo}, reached only
-   * by an edge the manager declared `TRANSFER_CATEGORY`.
+   * argument no flow can supply — and lives in {@link transferTo} as a standalone
+   * counter action, decoupled from the flow (no edge required).
    *
    * `counterId` is required in practice only for `-> CALLING`, where the ticket
    * must end up announced at a known counter; it falls back to the counter the
@@ -263,8 +263,8 @@ export class QueueTicket extends AggregateRoot<TicketId> {
    * Idempotent for targets with no side effect of their own: `transitionTo`
    * short-circuits when `target` already equals the current status, and the
    * side-effect appliers below are gated on the status having actually changed.
-   * The two self-loops that *do* something — `CALLING -> CALLING`
-   * (re-announce) and a `TRANSFER_CATEGORY` edge — bypass that gate by design.
+   * The one self-loop that *does* something — `CALLING -> CALLING`
+   * (re-announce) — bypasses that gate by design.
    */
   public applyTransition(
     target: StatusValue,
@@ -419,57 +419,39 @@ export class QueueTicket extends AggregateRoot<TicketId> {
 
   /**
    * Transfer this ticket to a different category — "pindah kategori"
-   * (FR-CLR-03). A first-class **configurable** transition: the status leg
-   * (current -> WAITING) is validated against the active
-   * {@link ITransitionPolicy} exactly like any other transition, so an active
-   * state machine without the edge rejects the transfer with
-   * {@link InvalidStateTransitionException}.
-   *
-   * The manager enables transfer by drawing the edge **and declaring its action
-   * `TRANSFER_CATEGORY`** — the flow's own statement that this button moves a
-   * ticket between categories. Nothing about the edge's endpoints implies it:
-   * `CALLING -> WAITING` is a plain re-queue unless the manager says otherwise.
-   * The application layer enforces that pairing (this aggregate is handed the
-   * destination category it was asked for; it does not re-read the
-   * configuration).
+   * (FR-CLR-03). A **standalone counter action**, decoupled from the flow: it
+   * needs no edge and consults no {@link ITransitionPolicy}. The flow only draws
+   * state moves; a category move takes a destination the flow cannot supply
+   * (staff pick it per ticket), so it is its own operation rather than an edge
+   * the manager declares.
    *
    * On success the category is reassigned, a new per-category
    * {@link TicketNumber} is applied, and the counter is cleared — the ticket
    * re-enters the queue under the new category. Records a
-   * {@link TicketStatusChangedEvent} (the status leg) and a
-   * {@link TicketTransferredEvent} (the category/number reassignment) so
-   * downstream can sync on the re-issued number.
+   * {@link TicketStatusChangedEvent} (the status leg, carrying the supplied
+   * `actionLabel`) and a {@link TicketTransferredEvent} (the category/number
+   * reassignment) so downstream can sync on the re-issued number.
    *
    * **The ticket always lands in WAITING**, and that is not a default — it is what
    * a re-issued per-category number means. A fresh `B-001` is a ticket nobody has
    * served, so the states that describe being served cannot describe it: landing
    * in SERVING would leave `servedAt` null (breaking the QUE-26 service-time row)
    * and, with the counter cleared, drop the ticket out of every counter panel with
-   * no way back. Where a *plain* transition lands is the manager's choice; where a
-   * category move lands follows from what it does. The application layer rejects a
-   * `TRANSFER_CATEGORY` edge that targets anything else, so such a flow is refused
-   * at save time rather than half-executed here.
+   * no way back.
    *
-   * Note: unlike {@link transitionTo}, this method intentionally does **not**
-   * short-circuit when the ticket is already WAITING. A transfer is a category
-   * move regardless of whether the status also changes, so the
-   * {@link TicketStatusChangedEvent} may carry `from === to` when a manager
-   * configures the `WAITING -> WAITING` self-edge. Both events converge on the
-   * caller's waiting list: the `STATUS_UPDATED` re-queues the ticket under its old
-   * identity and the `TICKET_TRANSFERRED` replaces that entry with the new one.
-   * The use-case layer additionally rejects a transfer to the ticket's *own*
-   * category, so a no-op category move never reaches here.
+   * The application layer guards this: it rejects a transfer of a `COMPLETED`
+   * ticket and a transfer to the ticket's *own* category (both before any sequence
+   * is reserved, NFR-REL-02). A re-queue `-> WAITING` that keeps the ticket's
+   * number and category is a plain status change via {@link applyTransition}, not
+   * this method.
    */
   public transferTo(
     newCategoryId: string,
     newTicketNumber: TicketNumber,
-    policy: ITransitionPolicy,
+    actionLabel: string,
     now = Date.now(),
   ): void {
     const from = this._currentStatus;
-    if (!policy.isAllowed(from, TicketStatus.WAITING)) {
-      throw new InvalidStateTransitionException(from, TicketStatus.WAITING);
-    }
     const oldCategoryId = this._categoryId;
     const oldTicketNumber = this._ticketNumber;
     this._currentStatus = TicketStatus.WAITING;
@@ -482,19 +464,20 @@ export class QueueTicket extends AggregateRoot<TicketId> {
     this._calledAt = null;
     this._servedAt = null;
     this._completedAt = null;
-    // Intentionally leave `_waitingOrder` alone (out of scope for the re-queue
-    // position policy — a `TRANSFER_CATEGORY` edge's policy is KEEP by rule, and
-    // the manager cannot declare otherwise). Mirrors the kept-`createdAt` quirk:
-    // a transferred ticket keeps its original ordering slot. This may be
-    // revisited when transfer joins the policy scope; for now it preserves
-    // the existing behavior.
+    // Transfer is a standalone counter action, not a flow edge, so it carries no
+    // re-queue position policy: the manager declares no `requeuePolicy` for it.
+    // Intentionally leave `_waitingOrder` alone, mirroring the pre-existing
+    // kept-`createdAt` quirk — a transferred ticket keeps its original ordering
+    // slot in the WAITING queue. This may be revisited if transfer ever gains a
+    // position policy (e.g. always TO_BACK); for now it preserves the behavior
+    // the queue had before the `waiting_order` key existed.
     this._updatedAt = now;
     this.record(
       new TicketStatusChangedEvent(
         this.id.value,
         from,
         TicketStatus.WAITING,
-        policy.actionLabelFor(from, TicketStatus.WAITING),
+        actionLabel,
         now,
       ),
     );

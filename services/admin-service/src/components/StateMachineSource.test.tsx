@@ -14,12 +14,11 @@ import type { Transition } from '../lib/state-machine';
  */
 
 const DEFAULT_CONNECTORS: Transition[] = [
-  { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
-  { from: 'CALLING', to: 'SERVING', actionLabel: 'Mulai Melayani', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
-  { from: 'CALLING', to: 'SKIPPED', actionLabel: 'Lewati / Absen', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
-  { from: 'SKIPPED', to: 'CALLING', actionLabel: 'Panggil Ulang', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
-  { from: 'SERVING', to: 'COMPLETED', actionLabel: 'Selesai Layan', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
-];
+  { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', requeuePolicy: { kind: 'KEEP' } },
+  { from: 'CALLING', to: 'SERVING', actionLabel: 'Mulai Melayani', requeuePolicy: { kind: 'KEEP' } },
+  { from: 'CALLING', to: 'SKIPPED', actionLabel: 'Lewati / Absen', requeuePolicy: { kind: 'KEEP' } },
+  { from: 'SKIPPED', to: 'CALLING', actionLabel: 'Panggil Ulang', requeuePolicy: { kind: 'KEEP' } },
+  { from: 'SERVING', to: 'COMPLETED', actionLabel: 'Selesai Layan', requeuePolicy: { kind: 'KEEP' } },];
 
 describe('StateMachineSource (XML Source view)', () => {
   it('renders the "Sumber XML alur status" label for the textarea', () => {
@@ -191,8 +190,7 @@ describe('StateMachineSource (XML Source view)', () => {
     // non-default connection point, so the routing is visible alongside the
     // from→to direction.
     const connectors: Transition[] = [
-      { from: 'SKIPPED', to: 'CALLING', actionLabel: 'Panggil Ulang', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' }, sourceSide: 'bottom', targetSide: 'top' },
-    ];
+      { from: 'SKIPPED', to: 'CALLING', actionLabel: 'Panggil Ulang', requeuePolicy: { kind: 'KEEP' }, sourceSide: 'bottom', targetSide: 'top' },    ];
     render(
       <StateMachineSource
         sourceText="{}"

@@ -3,7 +3,7 @@ import { InvalidValueObjectException } from './errors';
 /**
  * What a configured `-> WAITING` edge does to the WAITING queue's order — the
  * manager's own declaration, made in the "Alur Status Tiket" designer alongside
- * the edge's target state, button label, and {@link TransitionAction}.
+ * the edge's target state and button label.
  *
  * Today the WAITING queue is ordered by the **immutable** `created_at` (FIFO),
  * and `QueueTicket.returnToQueue` (the `-> WAITING` side effect) keeps
@@ -26,14 +26,11 @@ import { InvalidValueObjectException } from './errors';
  * {@link StateTransitionRule} the manager edits) and the Queue context (the
  * transition graph the queue commands enumerate, and the `returnToQueue`
  * applier) need it — keeping it here avoids either bounded context importing
- * the other (anti-corruption), exactly as {@link TransitionAction} and
- * {@link PriorityPolicy} do.
+ * the other (anti-corruption), exactly as {@link PriorityPolicy} does.
  *
- * Only `UPDATE_STATUS -> WAITING` edges may declare a non-KEEP policy. A
- * `TRANSFER_CATEGORY -> WAITING` edge re-issues the per-category number (a
- * fresh `B-001` is a ticket nobody has served) and is left at KEEP — enforced
- * at save time by `SaveSystemConfigurationUseCase`, not by this VO (DIP — the
- * rule needs `TicketStatus` from the Queue context).
+ * Any `-> WAITING` edge may declare a non-KEEP policy; a non-KEEP policy on a
+ * non-WAITING target is refused at save time by `SaveSystemConfigurationUseCase`,
+ * not by this VO (DIP — the rule needs `TicketStatus` from the Queue context).
  */
 export enum RequeuePolicyKind {
   KEEP = 'KEEP',
@@ -47,7 +44,7 @@ export type RequeuePolicyKindValue = `${RequeuePolicyKind}`;
  * The policy as a set for membership testing. A TS string enum compiles to a
  * plain object, so `'x' in RequeuePolicyKind` is true for every
  * `Object.prototype` key — `kind: "toString"` would pass a naive `in` check and
- * persist. Mirrors the `CANONICAL_STATUSES` / `TRANSITION_ACTIONS` precedent.
+ * persist. Mirrors the `CANONICAL_STATUSES` precedent.
  */
 const REQUEUE_POLICY_KINDS: ReadonlySet<string> = new Set<string>(
   Object.values(RequeuePolicyKind),
@@ -74,7 +71,7 @@ export interface RequeuePolicy {
  * (the wire carries no `requeuePolicy` key) and by every edge the manager has
  * not explicitly configured otherwise. `n: null` because KEEP takes no
  * argument. Declared BEFORE the `requeuePolicyFromWire` helper to avoid a TDZ
- * on any future `static` field that references it (mirrors the transition-action
+ * on any future `static` field that references it (mirrors the `CANONICAL_STATUSES`
  * module-level `const` placement).
  */
 export const DEFAULT_REQUEUE_POLICY: RequeuePolicy = {
@@ -92,7 +89,7 @@ export const DEFAULT_REQUEUE_POLICY: RequeuePolicy = {
  * A present value MUST be a well-formed policy object:
  * - `kind` must name a known {@link RequeuePolicyKind} (the enum membership
  *   check uses a `Set`, not `in`, so `Object.prototype` keys are rejected —
- *   mirrors `TransitionAction`).
+ *   mirrors `CANONICAL_STATUSES`).
  * - `BACK_N` requires a present, non-negative integer `n` (a fractional,
  *   negative, or missing `n` is a malformed value object → 400 via
  *   `DomainExceptionFilter`).

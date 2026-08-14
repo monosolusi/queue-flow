@@ -4,7 +4,6 @@ import type {
   TransitionDescriptor,
 } from '../../domain/queue';
 import { TicketStatus } from '../../domain/queue';
-import { TransitionAction, type TransitionActionValue } from '../../domain/shared';
 
 /**
  * Machine-readable reason a configured edge cannot be run from the counter panel.
@@ -20,22 +19,19 @@ export type WorkflowActionUnavailableReason = 'NO_STATUS_CHANGE';
 
 /**
  * One configured edge of the active state machine, as the counter panel needs it:
- * where it goes, what its button says, and what running it does.
+ * where it goes and what its button says.
  *
- * `action` is the manager's declaration, passed through verbatim — this
- * projection resolves nothing. There is no `command` field: which endpoint an
- * edge uses follows from `action` alone (a status change or a category move), so
- * there is nothing for the backend to rule on. It used to rule, keying on the
- * `(from, to)` pair, and the rule for WAITING read every `X -> WAITING` edge as a
- * category move — which is how a flow drawn to put a ticket back in the queue
- * produced a "Pindah Kategori" button asking for a destination category.
+ * There is no `action`/`command` field. What running an edge does is owned by the
+ * target state (a ticket entering CALLING is announced; one returning to WAITING
+ * leaves its counter); the one operation that needs a runtime argument — "pindah
+ * kategori" (FR-CLR-03) — is a standalone counter action, not a per-edge
+ * declaration, so it does not appear in this projection at all. An edge is purely
+ * `from -> to + actionLabel`.
  */
 export interface WorkflowActionDto {
   readonly from: StatusValue;
   readonly to: StatusValue;
   readonly actionLabel: string;
-  /** What running this edge does — declared by the manager in the flow. */
-  readonly action: TransitionActionValue;
   /** Why this edge cannot be run; `null` (the normal case) when it can. */
   readonly unavailableReason: WorkflowActionUnavailableReason | null;
 }
@@ -54,16 +50,16 @@ export interface WorkflowActionsDto {
 /**
  * Read-side use case: publishes the active state machine as the counter panel's
  * action surface (FR-CLR-02) — every configured edge, grouped by source status,
- * with the label and the action the manager gave it.
+ * with the label the manager gave it.
  *
  * It deliberately decides almost nothing. An earlier version resolved each
  * `(from, to)` pair to one of eight queue commands, and that table was the defect:
  * a pair does not carry enough information to say what the manager meant by the
  * edge, so the table guessed — reading `CALLING -> WAITING` as a category move
- * because the target happened to be WAITING. The flow now states its own
- * intent per edge, so this projection copies it out. What is left here is the one
- * fact the flow cannot state, because it follows from the aggregate rather than
- * the configuration: whether running an edge would actually do anything.
+ * because the target happened to be WAITING. An edge now carries only its
+ * endpoints and label; what is left here is the one fact the flow cannot state,
+ * because it follows from the aggregate rather than the configuration: whether
+ * running an edge would actually do anything.
  *
  * Lives in the Queue context because that fact is Queue knowledge — and because
  * `application/store-config/**` -> `application/queue/**` is forbidden by
@@ -106,7 +102,6 @@ function describeAction(transition: TransitionDescriptor): WorkflowActionDto {
     from: transition.from,
     to: transition.to,
     actionLabel: transition.actionLabel,
-    action: transition.action,
     unavailableReason: unavailableReasonFor(transition),
   };
 }
@@ -117,19 +112,15 @@ function describeAction(transition: TransitionDescriptor): WorkflowActionDto {
  *
  * A self-loop normally does nothing: `applyTransition` short-circuits when the
  * target equals the current status, so the button would return 200, change
- * nothing and broadcast nothing — which reads as a broken panel. Two self-loops
- * are exceptions and must be checked first:
+ * nothing and broadcast nothing — which reads as a broken panel. One self-loop
+ * is an exception and must be checked first:
  *
- * - a `TRANSFER_CATEGORY` edge moves the ticket to another category, which is a
- *   real change whether or not the status also moves (`transferTo` deliberately
- *   does not short-circuit);
  * - `CALLING -> CALLING` repeats the announcement, which is the entire point of
  *   drawing it — the customer did not hear the first one.
  */
 function unavailableReasonFor(
   transition: TransitionDescriptor,
 ): WorkflowActionUnavailableReason | null {
-  if (transition.action === TransitionAction.TRANSFER_CATEGORY) return null;
   if (transition.from !== transition.to) return null;
   if (transition.to === TicketStatus.CALLING) return null;
   return 'NO_STATUS_CHANGE';

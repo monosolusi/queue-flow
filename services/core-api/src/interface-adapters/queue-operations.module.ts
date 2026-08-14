@@ -81,16 +81,14 @@ import { SystemConfigModule } from './config/system-config.module';
         QUEUE_REPOSITORY,
         CATEGORY_REPOSITORY,
         SEQUENCE_REPOSITORY,
-        TRANSITION_POLICY_RESOLVER,
         QueueEventDispatcher,
         TRANSACTION_MANAGER,
       ],
-      useFactory: (queue, categories, sequences, policyResolver, dispatcher, txManager) =>
+      useFactory: (queue, categories, sequences, dispatcher, txManager) =>
         new TransferTicketUseCase(
           queue,
           categories,
           sequences,
-          policyResolver,
           dispatcher,
           undefined, // clock — keep the () => Date.now default
           txManager,

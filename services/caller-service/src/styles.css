@@ -459,6 +459,16 @@ button {
   align-items: flex-start;
 }
 
+/* The standalone "Pindah Kategori" cluster (FR-CLR-03): not a flow edge, so it
+ * sits in its own labelled group apart from the status-change buttons. Wraps as
+ * a row like the flow cluster; the chooser (when ≥2 destinations) drops below. */
+.action-controls__transfer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
 /* "Panggil Lagi" — a utility, not a transition. Separated from the flow cluster
  * (its own labelled group + a divider) so the flow buttons stay a faithful
  * picture of the admin-designed graph. */

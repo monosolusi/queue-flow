@@ -42,13 +42,13 @@ describe('toStateMachineDto (wire-boundary mapping)', () => {
     const form: StateMachineForm = {
       mode: 'custom',
       states: ['WAITING', 'CALLING'],
-      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', requeuePolicy: { kind: 'KEEP' } as const }],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     expect(toStateMachineDto(form)).toEqual({
       states: ['WAITING', 'CALLING'],
       // `requeuePolicy` is sparse on the wire — OMIT for KEEP (the default),
-      // so the wire transition carries only `{ from, to, actionLabel, action }`.
-      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', action: 'UPDATE_STATUS' as const }],
+      // so the wire transition carries only `{ from, to, actionLabel }`.
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' }],
       // Descriptions travel INSIDE the stateMachine object (full-stack slice);
       // an empty map round-trips as `{}` (the wire payload stays lean).
       descriptions: {},
@@ -64,11 +64,13 @@ describe('toStateMachineDto (wire-boundary mapping)', () => {
     const abandoned: StateMachineForm = {
       mode: 'default',
       states: ['WAITING', 'BOGUS'],
-      transitions: [{ from: 'WAITING', to: 'BOGUS', actionLabel: 'Setengah Jadi', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      transitions: [{ from: 'WAITING', to: 'BOGUS', actionLabel: 'Setengah Jadi', requeuePolicy: { kind: 'KEEP' } as const }],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     expect(toStateMachineDto(abandoned)).toEqual({
       states: [...DEFAULT_STATE_MACHINE.states],
-      transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
+      // Wire is sparse: requeuePolicy is omitted when KEEP (the default), so
+      // the default-graph transitions carry only { from, to, actionLabel }.
+      transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ from: t.from, to: t.to, actionLabel: t.actionLabel })),
       // Default mode force-resets the graph AND the descriptions map (the
       // PRD §7 default machine carries no per-state description overrides).
       descriptions: {},
@@ -100,7 +102,7 @@ describe('validateCustomStateMachine (Indonesian, no internal terms)', () => {
     const errors = validateCustomStateMachine({
       mode: 'custom',
       states: ['WAITING', 'WAITING', ' '],
-      transitions: [{ from: 'WAITING', to: 'GHOST', actionLabel: 'Panggil', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      transitions: [{ from: 'WAITING', to: 'GHOST', actionLabel: 'Panggil', requeuePolicy: { kind: 'KEEP' } as const }],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    });
     expect(errors).toContain("Status 'WAITING' duplikat.");
     expect(errors).toContain('Nama status tidak boleh kosong.');
@@ -108,48 +110,13 @@ describe('validateCustomStateMachine (Indonesian, no internal terms)', () => {
     expect(errors.join(' ')).not.toMatch(/\bstate\b/i);
   });
 
-  it('rejects a category move that does not return the ticket to the queue', () => {
-    // A category move re-issues the ticket's number, and a fresh number describes
-    // a ticket nobody has served — so it can only land back in WAITING. Landing in
-    // SERVING would leave no `servedAt` and no counter: gone from every panel.
-    // Mirrors the backend's save-time rule so the manager reads it here, in their
-    // own words, instead of getting a 400.
-    const errors = validateCustomStateMachine({
-      mode: 'custom',
-      states: ['WAITING', 'CALLING', 'SERVING'],
-      transitions: [
-        { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const },
-        { from: 'CALLING', to: 'SERVING', actionLabel: 'Pindah Kategori', action: 'TRANSFER_CATEGORY' as const, requeuePolicy: { kind: 'KEEP' } as const },
-      ],
-      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    });
-    expect(errors).toContain(
-      "Transisi 'CALLING'→'SERVING': aksi \"Pindah Kategori\" harus menuju status 'WAITING', " +
-        'karena tiket dapat nomor baru dan kembali menunggu.',
-    );
-    // Developer vocabulary must not leak into the manager-facing copy.
-    expect(errors.join(' ')).not.toMatch(/TRANSFER_CATEGORY/);
-  });
-
-  it('accepts a category move that targets WAITING, including the self-loop', () => {
-    // Non-vacuous counterpart: the rule rejects a target, not the action itself.
-    const errors = validateCustomStateMachine({
-      mode: 'custom',
-      states: ['WAITING', 'CALLING'],
-      transitions: [
-        { from: 'CALLING', to: 'WAITING', actionLabel: 'Pindah Kategori', action: 'TRANSFER_CATEGORY' as const, requeuePolicy: { kind: 'KEEP' } as const },
-        { from: 'WAITING', to: 'WAITING', actionLabel: 'Pindah Kategori', action: 'TRANSFER_CATEGORY' as const, requeuePolicy: { kind: 'KEEP' } as const },
-      ],
-      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    });
-    expect(errors).toEqual([]);
-  });
-
   it('reports a duplicate edge and an empty action label', () => {
     const errors = validateCustomStateMachine({
       mode: 'custom',
       states: ['WAITING', 'CALLING'],
       transitions: [
-        { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const },
-        { from: 'WAITING', to: 'CALLING', actionLabel: '', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const },
+        { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', requeuePolicy: { kind: 'KEEP' } as const },
+        { from: 'WAITING', to: 'CALLING', actionLabel: '', requeuePolicy: { kind: 'KEEP' } as const },
       ],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    });
     expect(errors).toContain("Transisi 'WAITING'→'CALLING' duplikat.");
@@ -163,7 +130,7 @@ describe('validateCustomStateMachine (Indonesian, no internal terms)', () => {
     const noCompleted: StateMachineForm = {
       mode: 'custom',
       states: ['WAITING', 'CALLING'],
-      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', requeuePolicy: { kind: 'KEEP' } as const }],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     expect(validateCustomStateMachine(noCompleted)).toEqual([]);
     expect(missingCanonicalStates(noCompleted).length).toBeGreaterThan(0);
@@ -187,7 +154,7 @@ describe('missingCanonicalStates (non-blocking dropped-standard-status warning)'
     const missing = missingCanonicalStates({
       mode: 'custom',
       states: ['WAITING', 'CALLING'],
-      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', requeuePolicy: { kind: 'KEEP' } as const }],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    });
     expect(missing.map((m) => m.state)).toEqual(['SERVING', 'SKIPPED', 'COMPLETED']);
     // The consequence names the caller BUTTON / the report metric, never the
@@ -204,7 +171,7 @@ describe('missingCanonicalStates (non-blocking dropped-standard-status warning)'
     const padded = missingCanonicalStates({
       mode: 'custom',
       states: [' WAITING ', 'CALLING', 'SERVING', 'SKIPPED', 'COMPLETED'],
-      transitions: [{ from: 'CALLING', to: 'SERVING', actionLabel: 'Mulai Melayani', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      transitions: [{ from: 'CALLING', to: 'SERVING', actionLabel: 'Mulai Melayani', requeuePolicy: { kind: 'KEEP' } as const }],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    });
     expect(padded).toEqual([]);
   });
@@ -225,8 +192,8 @@ describe('describeState (client-side description derivation)', () => {
       mode: 'custom',
       states: ['WAITING', 'ONHOLD', 'CALLING'],
       transitions: [
-        { from: 'ONHOLD', to: 'WAITING', actionLabel: 'Kembali', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const },
-        { from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const },
+        { from: 'ONHOLD', to: 'WAITING', actionLabel: 'Kembali', requeuePolicy: { kind: 'KEEP' } as const },
+        { from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut', requeuePolicy: { kind: 'KEEP' } as const },
       ],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     expect(describeState(form, 'ONHOLD')).toBe('2 transisi keluar');
@@ -236,7 +203,7 @@ describe('describeState (client-side description derivation)', () => {
     const form: StateMachineForm = {
       mode: 'custom',
       states: ['WAITING', 'ONHOLD'],
-      transitions: [{ from: 'WAITING', to: 'ONHOLD', actionLabel: 'Tahan', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      transitions: [{ from: 'WAITING', to: 'ONHOLD', actionLabel: 'Tahan', requeuePolicy: { kind: 'KEEP' } as const }],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     // ONHOLD has no outgoing transition (only incoming) — the 0-outgoing branch.
     expect(describeState(form, 'ONHOLD')).toBe('Status kustom');
@@ -259,7 +226,7 @@ describe('describeState (client-side description derivation)', () => {
     const form: StateMachineForm = {
       mode: 'custom',
       states: ['WAITING', 'ONHOLD'],
-      transitions: [{ from: 'WAITING', to: 'ONHOLD', actionLabel: 'Tahan', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      transitions: [{ from: 'WAITING', to: 'ONHOLD', actionLabel: 'Tahan', requeuePolicy: { kind: 'KEEP' } as const }],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     describeState(form, 'ONHOLD'); // derive (no-op on the wire shape)
     const dto = toStateMachineDto(form);
@@ -311,22 +278,19 @@ describe('connection sides (sourceSide / targetSide)', () => {
           from: 'WAITING',
           to: 'CALLING',
           actionLabel: 'Panggil',
-          action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const,
-          sourceSide: 'bottom',
-          targetSide: 'top',
+          requeuePolicy: { kind: 'KEEP' } as const,
+          sourceSide: 'bottom',          targetSide: 'top',
         },
       ],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const dto = toStateMachineDto(form);
-    // `action` DOES reach the wire (it is part of the transition definition);
-    // only the canvas-only connection sides are stripped. `requeuePolicy` is
+    // Only the canvas-only connection sides are stripped. `requeuePolicy` is
     // sparse — OMIT for KEEP — so the wire transition carries only
-    // `{ from, to, actionLabel, action }`.
+    // `{ from, to, actionLabel }`.
     expect(dto.transitions).toEqual([
-      { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', action: 'UPDATE_STATUS' as const },
+      { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' },
     ]);
     expect(Object.keys(dto.transitions[0] as object).sort()).toEqual([
-      'action',
       'actionLabel',
       'from',
       'to',
@@ -338,8 +302,8 @@ describe('connection sides (sourceSide / targetSide)', () => {
       mode: 'custom',
       states: ['A', 'B', 'C'],
       transitions: [
-        { from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }, // default → omitted
-        { from: 'B', to: 'C', actionLabel: 'up', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const, sourceSide: 'bottom', targetSide: 'top' },
+        { from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const }, // default → omitted
+        { from: 'B', to: 'C', actionLabel: 'up', requeuePolicy: { kind: 'KEEP' } as const, sourceSide: 'bottom', targetSide: 'top' },
       ],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     expect(toEdgeRoutingLayoutDto(form)).toEqual({
@@ -356,7 +320,7 @@ describe('connection sides (sourceSide / targetSide)', () => {
     const form: StateMachineForm = {
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const }],
       positions: { A: { x: 10, y: 20 }, B: { x: 30, y: 40 } }, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     expect(toNodePositionsDto(form)).toEqual({
       A: { x: 10, y: 20 },
@@ -378,13 +342,13 @@ describe('connection sides (sourceSide / targetSide)', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [
-        { from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const, sourceSide: DEFAULT_SOURCE_SIDE, targetSide: DEFAULT_TARGET_SIDE },
+        { from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const, sourceSide: DEFAULT_SOURCE_SIDE, targetSide: DEFAULT_TARGET_SIDE },
       ],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const absent: StateMachineForm = {
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const }],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     expect(graphSignature(explicit)).toBe(graphSignature(absent));
   });
@@ -393,12 +357,12 @@ describe('connection sides (sourceSide / targetSide)', () => {
     const vertical: StateMachineForm = {
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const, sourceSide: 'bottom', targetSide: 'top' }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const, sourceSide: 'bottom', targetSide: 'top' }],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const horizontal: StateMachineForm = {
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const }],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     expect(graphSignature(vertical)).not.toBe(graphSignature(horizontal));
   });
@@ -411,12 +375,12 @@ describe('connection sides (sourceSide / targetSide)', () => {
     const positioned: StateMachineForm = {
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const }],
       positions: { A: { x: 10, y: 20 } }, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const moved: StateMachineForm = {
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const }],
       positions: { A: { x: 99, y: 20 } }, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     expect(graphSignature(positioned)).not.toBe(graphSignature(moved));
   });
@@ -427,15 +391,15 @@ describe('connection sides (sourceSide / targetSide)', () => {
     // as `mode: 'custom'` (editable), not `mode: 'default'` (read-only).
     const transitions = DEFAULT_STATE_MACHINE.transitions.map((t, i) =>
       i === 3 // SKIPPED → CALLING back-edge with a vertical routing
-        ? { ...t, sourceSide: 'top' as const, targetSide: 'bottom' as const }
-        : { ...t },
+        ? { ...t, requeuePolicy: t.requeuePolicy ?? DEFAULT_REQUEUE_POLICY, sourceSide: 'top' as const, targetSide: 'bottom' as const }
+        : { ...t, requeuePolicy: t.requeuePolicy ?? DEFAULT_REQUEUE_POLICY },
     );
     expect(isDefaultGraph([...DEFAULT_STATE_MACHINE.states], transitions)).toBe(false);
   });
 
   it('isDefaultGraph returns true for the all-default graph', () => {
     expect(
-      isDefaultGraph([...DEFAULT_STATE_MACHINE.states], DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t }))),
+      isDefaultGraph([...DEFAULT_STATE_MACHINE.states], DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t, requeuePolicy: t.requeuePolicy ?? DEFAULT_REQUEUE_POLICY }))),
     ).toBe(true);
   });
 
@@ -446,7 +410,7 @@ describe('connection sides (sourceSide / targetSide)', () => {
     expect(
       isDefaultGraph(
         [...DEFAULT_STATE_MACHINE.states],
-        DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
+        DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t, requeuePolicy: t.requeuePolicy ?? DEFAULT_REQUEUE_POLICY })),
         { WAITING: { x: 0, y: 0 } },
       ),
     ).toBe(false);
@@ -458,7 +422,7 @@ describe('connection sides (sourceSide / targetSide)', () => {
     // so it loads editable, not as the read-only default canvas. Both the
     // pinned-{x,y} and the 'hidden' cases must trip the guard.
     const states = [...DEFAULT_STATE_MACHINE.states];
-    const transitions = DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t }));
+    const transitions = DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t, requeuePolicy: t.requeuePolicy ?? DEFAULT_REQUEUE_POLICY }));
     expect(
       isDefaultGraph(states, transitions, {}, {
         start: { x: -240, y: 0 },
@@ -480,7 +444,7 @@ describe('connection sides (sourceSide / targetSide)', () => {
     expect(
       isDefaultGraph(
         [...DEFAULT_STATE_MACHINE.states],
-        DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t })),
+        DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t, requeuePolicy: t.requeuePolicy ?? DEFAULT_REQUEUE_POLICY })),
       ),
     ).toBe(true);
   });
@@ -529,7 +493,7 @@ describe('graphSignature with terminalNodes', () => {
     const base = {
       mode: 'custom' as const,
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const }],
       positions: {},
       nodeActions: {},
       descriptions: {},
@@ -544,7 +508,7 @@ describe('graphSignature with terminalNodes', () => {
     const base = {
       mode: 'custom' as const,
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const }],
       positions: {},
       nodeActions: {},
       descriptions: {},
@@ -562,7 +526,7 @@ describe('graphSignature with terminalNodes', () => {
     const base = {
       mode: 'custom' as const,
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const }],
       positions: {},
       nodeActions: {},
       descriptions: {},
@@ -577,7 +541,7 @@ describe('graphSignature with terminalNodes', () => {
     const base = {
       mode: 'custom' as const,
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const }],
       positions: {},
       nodeActions: {},
       descriptions: {},
@@ -604,7 +568,7 @@ describe('transition mutations (updateState / updateTransition / addTransition)'
       mode: 'custom',
       states: ['WAITING', 'CALLING'],
       transitions: [
-        { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const, sourceSide: 'bottom', targetSide: 'top' },
+        { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', requeuePolicy: { kind: 'KEEP' } as const, sourceSide: 'bottom', targetSide: 'top' },
       ],
       positions: { WAITING: { x: 10, y: 20 }, CALLING: { x: 30, y: 40 } }, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const renamed = updateState(form, 0, 'PENDING');
@@ -620,10 +584,9 @@ describe('transition mutations (updateState / updateTransition / addTransition)'
     const form: StateMachineForm = {
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const, sourceSide: 'bottom', targetSide: 'top' }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const, sourceSide: 'bottom', targetSide: 'top' }],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
-    const patched = updateTransition(form, 0, { actionLabel: 'go fast', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const });
-    expect(patched.transitions[0].actionLabel).toBe('go fast');
+    const patched = updateTransition(form, 0, { actionLabel: 'go fast', requeuePolicy: { kind: 'KEEP' } as const });    expect(patched.transitions[0].actionLabel).toBe('go fast');
     expect(patched.transitions[0].sourceSide).toBe('bottom');
     expect(patched.transitions[0].targetSide).toBe('top');
   });
@@ -632,7 +595,7 @@ describe('transition mutations (updateState / updateTransition / addTransition)'
     const form: StateMachineForm = {
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const }],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const added = addTransition(form);
     expect(added.transitions[1].sourceSide).toBeUndefined();
@@ -645,7 +608,7 @@ describe('node actions (node-level, panel-only)', () => {
     const form: StateMachineForm = {
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const }],
       positions: {},
       nodeActions: {
         A: [{ executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'B' }],
@@ -680,7 +643,7 @@ describe('node actions (node-level, panel-only)', () => {
     const base: StateMachineForm = {
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const }],
       positions: {},
       nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
     };
@@ -697,7 +660,7 @@ describe('node actions (node-level, panel-only)', () => {
     const form: StateMachineForm = {
       mode: 'custom',
       states: ['WAITING', 'CALLING'],
-      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', requeuePolicy: { kind: 'KEEP' } as const }],
       positions: { WAITING: { x: 10, y: 20 } },
       nodeActions: {
         WAITING: [{ executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'CALLING' }],
@@ -716,7 +679,7 @@ describe('node actions (node-level, panel-only)', () => {
     const form: StateMachineForm = {
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const }],
       positions: { A: { x: 10, y: 20 }, B: { x: 30, y: 40 } },
       nodeActions: {
         A: [{ executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'B' }],
@@ -776,7 +739,7 @@ describe('descriptionFor / updateStateDescription (per-state override + fallback
     const form: StateMachineForm = {
       mode: 'custom',
       states: ['WAITING', 'CALLING'],
-      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', requeuePolicy: { kind: 'KEEP' } as const }],
       positions: { WAITING: { x: 10, y: 20 } },
       nodeActions: {},
       descriptions: { WAITING: 'Antrian dimulai di sini' },
@@ -791,7 +754,7 @@ describe('descriptionFor / updateStateDescription (per-state override + fallback
     const form: StateMachineForm = {
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const }],
       positions: { A: { x: 10, y: 20 }, B: { x: 30, y: 40 } },
       nodeActions: {},
       descriptions: { A: 'Status A', B: 'Status B' },
@@ -834,13 +797,13 @@ describe('mergeEdgeSides (wire map → form transitions)', () => {
       mode: 'custom',
       states: ['A', 'B', 'C'],
       transitions: [
-        { from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }, // default
-        { from: 'B', to: 'C', actionLabel: 'up', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const, sourceSide: 'bottom', targetSide: 'top' }, // vertical
+        { from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const }, // default
+        { from: 'B', to: 'C', actionLabel: 'up', requeuePolicy: { kind: 'KEEP' } as const, sourceSide: 'bottom', targetSide: 'top' }, // vertical
       ],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const wire = toEdgeRoutingLayoutDto(form);
     const merged = mergeEdgeSides(
-      form.transitions.map((t) => ({ from: t.from, to: t.to, actionLabel: t.actionLabel, action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const })),
+      form.transitions.map((t) => ({ from: t.from, to: t.to, actionLabel: t.actionLabel, requeuePolicy: { kind: 'KEEP' } as const })),
       wire,
     );
     expect(merged[0].sourceSide).toBeUndefined();
@@ -851,18 +814,15 @@ describe('mergeEdgeSides (wire map → form transitions)', () => {
   it('uses explicit fields (not spread) so an EdgeSides widening cannot leak extras', () => {
     // A malicious / future entry with an extra field must NOT leak onto the
     // Transition — only sourceSide/targetSide are copied.
-    const transitions = [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }];
-    const layout = { 'A->B': { sourceSide: 'bottom', targetSide: 'top', extra: 'leak' } as unknown as { sourceSide: 'bottom'; targetSide: 'top' } };
+    const transitions = [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const }];    const layout = { 'A->B': { sourceSide: 'bottom', targetSide: 'top', extra: 'leak' } as unknown as { sourceSide: 'bottom'; targetSide: 'top' } };
     const merged = mergeEdgeSides(transitions, layout);
     expect(merged[0].sourceSide).toBe('bottom');
     expect(merged[0].targetSide).toBe('top');
-    // This boundary also resolves the wire's optional `action`/`requeuePolicy`
-    // to a concrete value, so nothing downstream has to re-decide what an absent
+    // This boundary also resolves the wire's optional `requeuePolicy` to a
+    // concrete value, so nothing downstream has to re-decide what an absent
     // one means.
-    expect(merged[0].action).toBe('UPDATE_STATUS');
     expect(merged[0].requeuePolicy).toEqual({ kind: 'KEEP' });
-    expect(Object.keys(merged[0]).sort()).toEqual(['action', 'actionLabel', 'from', 'requeuePolicy', 'sourceSide', 'targetSide', 'to']);
-  });
+    expect(Object.keys(merged[0]).sort()).toEqual(['actionLabel', 'from', 'requeuePolicy', 'sourceSide', 'targetSide', 'to']);  });
 });
 
 describe('toEndSourcesDto (wire-boundary mapping)', () => {
@@ -889,7 +849,7 @@ describe('endSources cascade (rename / delete)', () => {
     const form: StateMachineForm = {
       mode: 'custom',
       states: ['WAITING', 'CALLING', 'ONHOLD'],
-      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', requeuePolicy: { kind: 'KEEP' } as const }],
       positions: {},
       nodeActions: {},
       descriptions: {},
@@ -907,7 +867,7 @@ describe('endSources cascade (rename / delete)', () => {
     const form: StateMachineForm = {
       mode: 'custom',
       states: ['WAITING', 'CALLING', 'ONHOLD'],
-      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', requeuePolicy: { kind: 'KEEP' } as const }],
       positions: {},
       nodeActions: {},
       descriptions: {},
@@ -931,7 +891,7 @@ describe('graphSignature with endSources', () => {
     const base = {
       mode: 'custom' as const,
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const }],
       positions: {},
       nodeActions: {},
       descriptions: {},
@@ -946,7 +906,7 @@ describe('graphSignature with endSources', () => {
     const base = {
       mode: 'custom' as const,
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const }],
       positions: {},
       nodeActions: {},
       descriptions: {},
@@ -963,35 +923,13 @@ describe('isDefaultGraph with endSources', () => {
     // A graph that structurally matches the PRD §7 default but has an explicit
     // End connection is CUSTOM — the manager dragged an arrow into End.
     const states = [...DEFAULT_STATE_MACHINE.states];
-    const transitions = DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t }));
+    const transitions = DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t, requeuePolicy: t.requeuePolicy ?? DEFAULT_REQUEUE_POLICY }));
     expect(isDefaultGraph(states, transitions, {}, DEFAULT_TERMINAL_NODES, ['WAITING'])).toBe(false);
   });
 
   it('an empty endSources keeps a default-structure graph default', () => {
     const states = [...DEFAULT_STATE_MACHINE.states];
-    const transitions = DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t }));
-    expect(isDefaultGraph(states, transitions, {}, DEFAULT_TERMINAL_NODES, [])).toBe(true);
-  });
-});
-
-describe('isDefaultGraph with a changed transition action', () => {
-  it('a default-structure graph with a re-declared action is CUSTOM', () => {
-    // Otherwise the graph would load read-only and the manager could not change
-    // the action back — the board they need to edit would be the one they cannot.
-    const states = [...DEFAULT_STATE_MACHINE.states];
-    const transitions = DEFAULT_STATE_MACHINE.transitions.map((t, i) =>
-      i === 0 ? { ...t, action: 'TRANSFER_CATEGORY' as const, requeuePolicy: { kind: 'KEEP' } as const } : { ...t },
-    );
-    expect(isDefaultGraph(states, transitions, {}, DEFAULT_TERMINAL_NODES, [])).toBe(false);
-  });
-
-  it('treats an absent action as the UPDATE_STATUS default (a pre-feature graph is still default)', () => {
-    // A store saved before the field existed sends no `action`; it must keep
-    // loading read-only rather than looking customized.
-    const states = [...DEFAULT_STATE_MACHINE.states];
-    const transitions = DEFAULT_STATE_MACHINE.transitions.map(
-      ({ from, to, actionLabel }) => ({ from, to, actionLabel }) as never,
-    );
+    const transitions = DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t, requeuePolicy: t.requeuePolicy ?? DEFAULT_REQUEUE_POLICY }));
     expect(isDefaultGraph(states, transitions, {}, DEFAULT_TERMINAL_NODES, [])).toBe(true);
   });
 });
@@ -1227,7 +1165,7 @@ describe('requeuePolicy (→ WAITING queue-order declaration)', () => {
     // A pre-existing stored config carries no `requeuePolicy` key — this is the
     // ONE wire-optional → form-required boundary that reconstitutes it as KEEP.
     const merged = mergeEdgeSides(
-      [{ from: 'CALLING', to: 'WAITING', actionLabel: 'Kembali', action: 'UPDATE_STATUS' }],
+      [{ from: 'CALLING', to: 'WAITING', actionLabel: 'Kembali' }],
       {},
     );
     expect(merged[0].requeuePolicy).toEqual({ kind: 'KEEP' });
@@ -1235,7 +1173,7 @@ describe('requeuePolicy (→ WAITING queue-order declaration)', () => {
 
   it('mergeEdgeSides preserves a declared BACK_N policy (with n) from the wire', () => {
     const merged = mergeEdgeSides(
-      [{ from: 'CALLING', to: 'WAITING', actionLabel: 'Kembali', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'BACK_N', n: 2 } }],
+      [{ from: 'CALLING', to: 'WAITING', actionLabel: 'Kembali', requeuePolicy: { kind: 'BACK_N', n: 2 } }],
       {},
     );
     expect(merged[0].requeuePolicy).toEqual({ kind: 'BACK_N', n: 2 });
@@ -1247,7 +1185,6 @@ describe('requeuePolicy (→ WAITING queue-order declaration)', () => {
         from: 'WAITING',
         to: 'CALLING',
         actionLabel: 'Panggil',
-        action: 'UPDATE_STATUS' as const,
         requeuePolicy: { kind: 'KEEP' } as const,
       }),
     );
@@ -1260,7 +1197,6 @@ describe('requeuePolicy (→ WAITING queue-order declaration)', () => {
         from: 'CALLING',
         to: 'WAITING',
         actionLabel: 'Kembalikan',
-        action: 'UPDATE_STATUS' as const,
         requeuePolicy: { kind: 'TO_BACK' } as const,
       }),
     );
@@ -1274,7 +1210,6 @@ describe('requeuePolicy (→ WAITING queue-order declaration)', () => {
         from: 'CALLING',
         to: 'WAITING',
         actionLabel: 'Kembalikan',
-        action: 'UPDATE_STATUS' as const,
         requeuePolicy: { kind: 'BACK_N', n: 3 } as const,
       }),
     );
@@ -1288,7 +1223,6 @@ describe('requeuePolicy (→ WAITING queue-order declaration)', () => {
         from: 'CALLING',
         to: 'WAITING',
         actionLabel: 'Kembalikan',
-        action: 'UPDATE_STATUS' as const,
         requeuePolicy: { kind: 'BACK_N', n: 4 } as const,
       }),
     );
@@ -1301,7 +1235,6 @@ describe('requeuePolicy (→ WAITING queue-order declaration)', () => {
       from: 'CALLING',
       to: 'WAITING',
       actionLabel: 'Kembali',
-      action: 'UPDATE_STATUS' as const,
       requeuePolicy: { kind: 'KEEP' } as const,
     });
     const patched = updateTransition(form, 0, { requeuePolicy: { kind: 'TO_BACK' } });
@@ -1313,21 +1246,18 @@ describe('requeuePolicy (→ WAITING queue-order declaration)', () => {
       from: 'CALLING',
       to: 'WAITING',
       actionLabel: 'Kembali',
-      action: 'UPDATE_STATUS' as const,
       requeuePolicy: { kind: 'KEEP' } as const,
     });
     const toBack = oneEdgeForm({
       from: 'CALLING',
       to: 'WAITING',
       actionLabel: 'Kembali',
-      action: 'UPDATE_STATUS' as const,
       requeuePolicy: { kind: 'TO_BACK' } as const,
     });
     const backN = oneEdgeForm({
       from: 'CALLING',
       to: 'WAITING',
       actionLabel: 'Kembali',
-      action: 'UPDATE_STATUS' as const,
       requeuePolicy: { kind: 'BACK_N', n: 2 } as const,
     });
     expect(graphSignature(keep)).not.toBe(graphSignature(toBack));
@@ -1345,14 +1275,12 @@ describe('requeuePolicy (→ WAITING queue-order declaration)', () => {
       from: 'CALLING',
       to: 'WAITING',
       actionLabel: 'Kembali',
-      action: 'UPDATE_STATUS' as const,
       requeuePolicy: { kind: 'KEEP' } as const,
     });
     const explicit2 = oneEdgeForm({
       from: 'CALLING',
       to: 'WAITING',
       actionLabel: 'Kembali',
-      action: 'UPDATE_STATUS' as const,
       requeuePolicy: { kind: 'KEEP' } as const,
     });
     expect(graphSignature(explicit)).toBe(graphSignature(explicit2));
@@ -1368,13 +1296,13 @@ describe('requeuePolicy (→ WAITING queue-order declaration)', () => {
     const transitions = DEFAULT_STATE_MACHINE.transitions.map((t, i) =>
       i === 0
         ? { ...t, requeuePolicy: { kind: 'TO_BACK' } as const }
-        : { ...t },
+        : { ...t, requeuePolicy: t.requeuePolicy ?? DEFAULT_REQUEUE_POLICY },
     );
     expect(isDefaultGraph([...DEFAULT_STATE_MACHINE.states], transitions, {}, DEFAULT_TERMINAL_NODES, [])).toBe(false);
   });
 
   it('isDefaultGraph returns true for a default-structure graph where every requeuePolicy is KEEP', () => {
-    const transitions = DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t }));
+    const transitions = DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t, requeuePolicy: t.requeuePolicy ?? DEFAULT_REQUEUE_POLICY }));
     expect(isDefaultGraph([...DEFAULT_STATE_MACHINE.states], transitions, {}, DEFAULT_TERMINAL_NODES, [])).toBe(true);
   });
 
@@ -1385,7 +1313,6 @@ describe('requeuePolicy (→ WAITING queue-order declaration)', () => {
           from: 'CALLING',
           to: 'WAITING',
           actionLabel: 'Kembalikan',
-          action: 'UPDATE_STATUS' as const,
           requeuePolicy: { kind: 'KEEP' } as const,
         }),
       );
@@ -1398,7 +1325,6 @@ describe('requeuePolicy (→ WAITING queue-order declaration)', () => {
           from: 'CALLING',
           to: 'WAITING',
           actionLabel: 'Kembalikan',
-          action: 'UPDATE_STATUS' as const,
           requeuePolicy: { kind: 'TO_BACK' } as const,
         }),
       );
@@ -1411,7 +1337,6 @@ describe('requeuePolicy (→ WAITING queue-order declaration)', () => {
           from: 'CALLING',
           to: 'WAITING',
           actionLabel: 'Kembalikan',
-          action: 'UPDATE_STATUS' as const,
           requeuePolicy: { kind: 'BACK_N', n: 0 } as const,
         }),
       );
@@ -1424,32 +1349,9 @@ describe('requeuePolicy (→ WAITING queue-order declaration)', () => {
           from: 'WAITING',
           to: 'CALLING',
           actionLabel: 'Panggil',
-          action: 'UPDATE_STATUS' as const,
           requeuePolicy: { kind: 'TO_BACK' } as const,
         }),
       );
-      expect(errors.some((e) => /kebijakan antrian ulang hanya berlaku/.test(e))).toBe(true);
-    });
-
-    it('rejects a non-KEEP policy on a TRANSFER_CATEGORY edge (even when it targets WAITING)', () => {
-      const errors = validateCustomStateMachine({
-        mode: 'custom',
-        states: ['WAITING', 'CALLING'],
-        transitions: [
-          {
-            from: 'CALLING',
-            to: 'WAITING',
-            actionLabel: 'Pindah Kategori',
-            action: 'TRANSFER_CATEGORY' as const,
-            requeuePolicy: { kind: 'TO_BACK' } as const,
-          },
-        ],
-        positions: {},
-        nodeActions: {},
-        descriptions: {},
-        endSources: [],
-        terminalNodes: { start: 'auto', end: 'auto' } as const,
-      });
       expect(errors.some((e) => /kebijakan antrian ulang hanya berlaku/.test(e))).toBe(true);
     });
 
@@ -1459,7 +1361,6 @@ describe('requeuePolicy (→ WAITING queue-order declaration)', () => {
           from: 'CALLING',
           to: 'WAITING',
           actionLabel: 'Kembalikan',
-          action: 'UPDATE_STATUS' as const,
           requeuePolicy: { kind: 'BACK_N', n: -1 } as const,
         }),
       );
@@ -1472,7 +1373,6 @@ describe('requeuePolicy (→ WAITING queue-order declaration)', () => {
           from: 'CALLING',
           to: 'WAITING',
           actionLabel: 'Kembalikan',
-          action: 'UPDATE_STATUS' as const,
           requeuePolicy: { kind: 'BACK_N', n: 1.5 } as const,
         }),
       );
@@ -1485,7 +1385,6 @@ describe('requeuePolicy (→ WAITING queue-order declaration)', () => {
           from: 'CALLING',
           to: 'WAITING',
           actionLabel: 'Kembalikan',
-          action: 'UPDATE_STATUS' as const,
           requeuePolicy: { kind: 'BACK_N' } as const,
         }),
       );

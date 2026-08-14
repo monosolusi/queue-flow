@@ -10,7 +10,7 @@ import {
   ITransactionManager,
   NoOpTransactionManager,
 } from '../../domain/shared';
-import { assertRunnableAsStatusChange, declaredRequeuePolicyFor } from './declared-transition-action';
+import { declaredRequeuePolicyFor } from './declared-requeue-policy';
 import { QueueEventDispatcher } from './queue-event-dispatcher';
 import {
   computeRepositionPlan,
@@ -58,10 +58,11 @@ export type ApplyTransitionResult = {
  * move and handed a manager who drew `CALLING -> WAITING` a "Pindah Kategori"
  * button for a step they never configured.
  *
- * The one edge this command refuses is a `TRANSFER_CATEGORY` one, which needs a
- * destination category (see {@link assertRunnableAsStatusChange}). Illegal
- * transitions surface as {@link InvalidStateTransitionException} from the
- * aggregate (→ 409); a mis-routed one as `InvalidArgumentException` (→ 400).
+ * It runs any edge the active flow allows, including a `-> WAITING` re-queue
+ * (number and category unchanged). "Pindah Kategori" is a standalone counter
+ * action with its own command, not a per-edge declaration, so no edge is refused
+ * here for its `action`. Illegal transitions surface as
+ * {@link InvalidStateTransitionException} from the aggregate (→ 409).
  *
  * ## Re-queue position policy (→ WAITING)
  *
@@ -113,11 +114,6 @@ export class ApplyTransitionUseCase {
       if (!loaded) {
         throw new EntityNotFoundException('QueueTicket', command.ticketId.value);
       }
-      assertRunnableAsStatusChange(
-        transitionPolicy.describeGraph(),
-        loaded.currentStatus,
-        command.targetStatus,
-      );
 
       let plan: RepositionPlan | null = null;
       let waitingOrder: number | null = null;

@@ -3,7 +3,7 @@ import {
   InvalidArgumentException,
   InvalidStateTransitionException,
 } from '../../src/domain/shared/errors';
-import { TransitionAction, RequeuePolicyKind, type RequeuePolicy } from '../../src/domain/shared';
+import { RequeuePolicyKind, type RequeuePolicy } from '../../src/domain/shared';
 import { StateMachine, StateSchema, StateTransitionRule } from '../../src/domain/store-config';
 import {
   QueueTicket,
@@ -35,25 +35,6 @@ const CUSTOM_MACHINE = new StateMachine(
     ['SERVING', 'COMPLETED', 'Selesai Layan'],
     ['SERVING', 'WAITING', 'Kembalikan ke Antrian'],
   ].map(([from, to, actionLabel]) => StateTransitionRule.of(from, to, actionLabel)),
-);
-
-/**
- * The same flow with one edge declared a category move. Used to prove this
- * command refuses it: the endpoints are identical to a plain re-queue, so only
- * the declaration separates the two.
- */
-const TRANSFER_MACHINE = new StateMachine(
-  StateSchema.of(['WAITING', 'CALLING', 'SERVING', 'SKIPPED', 'COMPLETED']),
-  [
-    StateTransitionRule.of('WAITING', 'CALLING', 'Panggil Berikutnya'),
-    StateTransitionRule.of('CALLING', 'SERVING', 'Mulai Melayani'),
-    StateTransitionRule.of(
-      'SERVING',
-      'WAITING',
-      'Pindah Kategori',
-      TransitionAction.TRANSFER_CATEGORY,
-    ),
-  ],
 );
 
 /** A ticket in SERVING — the source state for the custom `Siapkan Dokumen` edge. */
@@ -260,34 +241,6 @@ describe('ApplyTransitionUseCase (the single per-ticket transition command — F
       expect(dispatcher.dispatch).not.toHaveBeenCalled();
     });
   });
-
-  it('refuses an edge the manager declared a category move', async () => {
-    // Running it here would advance the status and silently skip the category
-    // reassignment + re-issued number the manager configured — the harder half of
-    // the action, missing, with nothing failing.
-    const transferUseCase = new ApplyTransitionUseCase(
-      queue,
-      fakePolicyResolver(TRANSFER_MACHINE),
-      dispatcher,
-      clock,
-    );
-    const ticket = QueueTicket.create(
-      ticketIdGenerate(),
-      TicketNumber.of('A', 5),
-      'CAT-A',
-      FIXED_NOW,
-    );
-    ticket.markCalling(1, TRANSFER_MACHINE, FIXED_NOW + 1);
-    ticket.applyTransition('SERVING', TRANSFER_MACHINE, FIXED_NOW + 2);
-    await queue.save(ticket);
-
-    await expect(
-      transferUseCase.execute({ ticketId: ticket.id, targetStatus: TicketStatus.WAITING }),
-    ).rejects.toBeInstanceOf(InvalidArgumentException);
-    expect((await queue.findById(ticket.id))?.currentStatus).toBe('SERVING');
-    expect(dispatcher.dispatch).not.toHaveBeenCalled();
-  });
-
   describe('re-queue position policy (-> WAITING)', () => {
     /**
      * A flow whose `SERVING -> WAITING` edge carries a configurable re-queue
@@ -307,7 +260,6 @@ describe('ApplyTransitionUseCase (the single per-ticket transition command — F
             'SERVING',
             'WAITING',
             'Kembalikan ke Antrian',
-            TransitionAction.UPDATE_STATUS,
             policy,
           ),
         ],

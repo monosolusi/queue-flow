@@ -184,9 +184,9 @@ describe('WorkspacePage', () => {
     api.getWorkflowActions = vi.fn(() =>
       Promise.resolve(
         workflowActions(
-          edge('WAITING', 'CALLING', 'Panggil Berikutnya', 'UPDATE_STATUS'),
-          edge('WAITING', 'BATAL', 'Batalkan Tiket', 'UPDATE_STATUS'),
-          edge('CALLING', 'SERVING', 'Mulai Melayani', 'UPDATE_STATUS'),
+          edge('WAITING', 'CALLING', 'Panggil Berikutnya'),
+          edge('WAITING', 'BATAL', 'Batalkan Tiket'),
+          edge('CALLING', 'SERVING', 'Mulai Melayani'),
         ),
       ),
     );
@@ -203,7 +203,7 @@ describe('WorkspacePage', () => {
     const cancel = await screen.findByTestId('waiting-action-w1-BATAL');
     expect(cancel).toHaveTextContent('Batalkan Tiket');
     // The active ticket (CALLING) offers its own outgoing edge in the panel.
-    expect(screen.getByTestId('action-update-status-SERVING')).toHaveTextContent('Mulai Melayani');
+    expect(screen.getByTestId('action-status-SERVING')).toHaveTextContent('Mulai Melayani');
     // A single fetch serves both.
     expect(api.getWorkflowActions).toHaveBeenCalledTimes(1);
 
@@ -219,7 +219,7 @@ describe('WorkspacePage', () => {
     // `GET /api/queue/actions` — was unreachable from every screen.
     const { api } = renderWorkspace();
     await screen.findByText('A-001');
-    await userEvent.click(screen.getByTestId('action-update-status-SKIPPED'));
+    await userEvent.click(screen.getByTestId('action-status-SKIPPED'));
     expect(api.applyTransition).toHaveBeenCalledWith('a1', 'SKIPPED', 1);
 
     FakeWebSocket.last!.send(wireEvent('STATUS_UPDATED', 'a1', { from: 'CALLING', to: 'SKIPPED' }));
@@ -248,7 +248,7 @@ describe('WorkspacePage', () => {
     expect(screen.getByRole('region', { name: 'Tiket Dilewati' })).toHaveTextContent(
       'Tidak ada tiket yang dilewati.',
     );
-    expect(screen.getByTestId('action-update-status-SERVING')).toBeInTheDocument();
+    expect(screen.getByTestId('action-status-SERVING')).toBeInTheDocument();
   });
 
   it('shows the skipped list empty rather than hiding it', async () => {
@@ -309,8 +309,8 @@ describe('WorkspacePage', () => {
     api.getWorkflowActions = vi.fn(() =>
       Promise.resolve(
         workflowActions(
-          edge('SKIPPED', 'CALLING', 'Panggil Lagi Yang Absen', 'UPDATE_STATUS'),
-          edge('SKIPPED', 'BATAL', 'Batalkan Tiket', 'UPDATE_STATUS'),
+          edge('SKIPPED', 'CALLING', 'Panggil Lagi Yang Absen'),
+          edge('SKIPPED', 'BATAL', 'Batalkan Tiket'),
         ),
       ),
     );

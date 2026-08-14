@@ -1,9 +1,10 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import type { TransferCandidate, WorkflowAction } from '../lib/workflow-actions';
+import type { TransferCandidate } from '../lib/workflow-actions';
 
 export interface TransferActionProps {
-  /** The resolved `→ WAITING` transition ("Pindah Kategori", FR-CLR-03). */
-  readonly action: WorkflowAction;
+  /** The fixed button label — "Pindah Kategori" (FR-CLR-03), a standalone panel
+   *  action not derived from the flow. */
+  readonly actionLabel: string;
   /** Destination categories (the counter's, minus the ticket's own). */
   readonly candidates: readonly TransferCandidate[];
   /** True while this ticket's transfer is in flight. */
@@ -20,19 +21,24 @@ export interface TransferActionProps {
 }
 
 /**
- * The "Pindah Kategori" button and its destination chooser (FR-CLR-03). Shared
- * by the action panel (active ticket) and the waiting list (queued tickets) so
- * the destination rules live in one place:
+ * The standalone "Pindah Kategori" button and its destination chooser
+ * (FR-CLR-03), used only by the active-ticket action panel. It is no longer a
+ * flow edge, so its label is a fixed string rather than a transition's
+ * `actionLabel`. The destination rules:
  *
- * - no other category on this counter → disabled, with the reason on the button;
- * - exactly one → a direct button (nothing to choose);
+ * - exactly one other category on this counter → a direct button (nothing to
+ *   choose);
  * - two or more → an inline chooser so staff pick by name.
+ *
+ * (No-destination is handled by the caller: the cluster is not rendered when the
+ * counter serves only the ticket's own category, so a perpetually-disabled
+ * button never appears.)
  *
  * Collapsing the chooser when the ticket changes is the caller's job: render
  * this with a `key` that includes the ticket id and React remounts it.
  */
 export function TransferAction({
-  action,
+  actionLabel,
   candidates,
   busy,
   disabled = false,
@@ -63,7 +69,7 @@ export function TransferAction({
         disabled
         title="Tidak ada kategori lain untuk dituju"
       >
-        {action.actionLabel} (tidak ada kategori lain)
+        {actionLabel} (tidak ada kategori lain)
       </button>
     );
   }
@@ -78,7 +84,7 @@ export function TransferAction({
         onClick={() => onTransfer(only.id)}
         disabled={busy || disabled}
       >
-        {busy ? '…' : action.actionLabel}
+        {busy ? '…' : actionLabel}
       </button>
     );
   }
@@ -94,7 +100,7 @@ export function TransferAction({
         onClick={() => setOpen((o) => !o)}
         disabled={busy || disabled}
       >
-        {busy ? '…' : action.actionLabel}
+        {busy ? '…' : actionLabel}
       </button>
       {open && (
         <div

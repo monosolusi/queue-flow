@@ -104,27 +104,10 @@ export const DEFAULT_TV_GRID_LAYOUT: TvGridLayout = [
 ];
 
 /**
- * What running a transition *does*, chosen by the manager per edge. The backend
- * never infers it from the edge's endpoints — it used to, reading every edge into
- * WAITING as a category move, so an edge drawn to put a ticket back in the queue
- * produced a "Pindah Kategori" button demanding a destination category.
- *
- * - `UPDATE_STATUS` — move the ticket to the edge's target state (the default).
- * - `TRANSFER_CATEGORY` — "pindah kategori" (FR-CLR-03): move it to another
- *   category as well, re-issuing its number. The one action that needs an
- *   argument staff supply at the counter, which is why it must be declared.
- *
- * Mirrors core-api's `TransitionAction` enum.
- */
-export type TransitionActionType = 'UPDATE_STATUS' | 'TRANSFER_CATEGORY';
-
-/**
  * What a `→ WAITING` re-queue does to queue order — declared per edge by the
- * manager (the same "workflow is source of truth" principle as
- * {@link TransitionActionType}). Only meaningful on an edge whose
- * `to === 'WAITING'` AND `action === 'UPDATE_STATUS'`; on any other edge a
- * non-KEEP policy is invalid (enforced in `validateCustomStateMachine` and at
- * the core-api save boundary).
+ * manager (the "workflow is source of truth" principle). Meaningful ONLY on an
+ * edge whose `to === 'WAITING'`; on any other edge a non-KEEP policy is invalid
+ * (enforced in `validateCustomStateMachine` and at the core-api save boundary).
  *
  * - `KEEP` (default) — the ticket keeps its current queue slot (today's FIFO
  *   behavior, and what every edge configured before this field existed means).
@@ -149,15 +132,10 @@ export interface StateTransitionDto {
   readonly from: string;
   readonly to: string;
   readonly actionLabel: string;
-  /** Optional on the wire: absent means `UPDATE_STATUS`, which is what every
-   *  edge configured before this field existed means (core-api's
-   *  `StateTransitionRule` default). */
-  readonly action?: TransitionActionType;
   /** Optional on the wire: absent means `KEEP`, which is what every edge
    *  configured before this field existed means (core-api's
    *  `StateTransitionRule` default). Only meaningful on an edge whose `to ===
-   *  'WAITING'` AND `action === 'UPDATE_STATUS'`. Mirrors `action`'s
-   *  sparse-on-the-wire, required-in-the-form lifecycle. */
+   *  'WAITING'`. Mirrors a sparse-on-the-wire, required-in-the-form lifecycle. */
   readonly requeuePolicy?: RequeuePolicyDto;
 }
 
@@ -183,7 +161,7 @@ export interface StateMachineDto {
  * Connection-point (handle) routing is now sourced from the form transitions
  * (`Transition.sourceSide`/`targetSide`) and persisted in the separate
  * {@link EdgeRoutingLayoutDto} map — NOT on the wire {@link StateTransitionDto}
- * (which carries `{ from, to, actionLabel, action, requeuePolicy }` only).
+ * (which carries `{ from, to, actionLabel, requeuePolicy }` only).
  */
 export type EdgeSide = 'top' | 'right' | 'bottom' | 'left';
 
@@ -549,27 +527,22 @@ export const DEFAULT_CATEGORIES: readonly WizardCategoryDto[] = [
 /**
  * The PRD §7 default state machine (prefilled into the wizard designer).
  *
- * Typed with `Required<StateTransitionDto>` transitions: `action` is optional on
- * the *wire* (an absent value means UPDATE_STATUS, which is what stores
- * configured before the field existed carry), but this preset states every field
- * explicitly. That makes each entry a complete `Transition`, so the many places
- * that build a form by copying these edges need no per-field defaulting.
+ * Each transition is a complete `StateTransitionDto` (`from`, `to`,
+ * `actionLabel`) — the per-edge `action` flag was removed, so every edge is a
+ * plain status change and the many places that build a form by copying these
+ * edges need no per-field defaulting. "Pindah Kategori" (FR-CLR-03) is now a
+ * standalone counter action, not a flow edge.
  */
-interface DefaultStateMachineDto extends Omit<StateMachineDto, 'transitions'> {
-  readonly transitions: readonly Required<StateTransitionDto>[];
-}
-
-export const DEFAULT_STATE_MACHINE: DefaultStateMachineDto = {
+export const DEFAULT_STATE_MACHINE: StateMachineDto = {
   states: ['WAITING', 'CALLING', 'SERVING', 'SKIPPED', 'COMPLETED'],
   // Every default edge is a plain status change: the PRD §7 flow has no category
-  // move. Stated explicitly rather than left to the wire default so the preset
-  // reads as configuration, not as an omission.
+  // move.
   transitions: [
-    { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
-    { from: 'CALLING', to: 'SERVING', actionLabel: 'Mulai Melayani', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
-    { from: 'CALLING', to: 'SKIPPED', actionLabel: 'Lewati / Absen', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
-    { from: 'SKIPPED', to: 'CALLING', actionLabel: 'Panggil Ulang', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
-    { from: 'SERVING', to: 'COMPLETED', actionLabel: 'Selesai Layan', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
+    { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' },
+    { from: 'CALLING', to: 'SERVING', actionLabel: 'Mulai Melayani' },
+    { from: 'CALLING', to: 'SKIPPED', actionLabel: 'Lewati / Absen' },
+    { from: 'SKIPPED', to: 'CALLING', actionLabel: 'Panggil Ulang' },
+    { from: 'SERVING', to: 'COMPLETED', actionLabel: 'Selesai Layan' },
   ],
   // No per-state description overrides — the canonical copy (describeState) is
   // the fallback for each of the 5 PRD §7 default statuses. `{}` = derive.

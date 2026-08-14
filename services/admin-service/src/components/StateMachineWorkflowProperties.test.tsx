@@ -7,15 +7,14 @@ import {
 import type { FlowEdge, FlowNode } from '../lib/state-machine-flow';
 import type { WorkflowHandlers } from './StateMachineWorkflowNodes';
 import { StateMachineWorkflowProperties } from './StateMachineWorkflowProperties';
-import type { RequeuePolicyDto, TransitionActionType } from '../api/types';
+import type { RequeuePolicyDto } from '../api/types';
 
 /**
  * Properties-panel tests for the "Kebijakan Antrian Ulang" (re-queue policy)
  * control. The panel is presentational — it receives the form, the canvas
  * nodes/edges, and a `WorkflowHandlers` stub, then renders the edge editor when
- * an edge is selected. The control is shown ONLY on a `→ WAITING` edge whose
- * `action === 'UPDATE_STATUS'`; this is the load-bearing visibility rule, so
- * each branch has a present/absent test.
+ * an edge is selected. The control is shown ONLY on a `→ WAITING` edge; this is
+ * the load-bearing visibility rule, so each branch has a present/absent test.
  */
 
 /** A minimal custom form with the two canonical states a re-queue edge needs. */
@@ -28,7 +27,6 @@ function formWith(states: string[] = ['CALLING', 'WAITING']): StateMachineForm {
         from: 'CALLING',
         to: 'WAITING',
         actionLabel: 'Kembalikan ke Antrian',
-        action: 'UPDATE_STATUS',
         requeuePolicy: { kind: 'KEEP' },
       },
     ],
@@ -42,7 +40,7 @@ function formWith(states: string[] = ['CALLING', 'WAITING']): StateMachineForm {
 
 /** Build a `FlowEdge` for the selected edge with the given data. */
 function edgeWith(
-  data: Partial<FlowEdge['data']> & { actionLabel?: string; action?: TransitionActionType } = {},
+  data: Partial<FlowEdge['data']> & { actionLabel?: string } = {},
   id = 'CALLING->WAITING#0',
   source = 'CALLING',
   target = 'WAITING',
@@ -54,7 +52,6 @@ function edgeWith(
     type: 'transition',
     data: {
       actionLabel: data.actionLabel ?? 'Kembalikan ke Antrian',
-      action: data.action ?? 'UPDATE_STATUS',
       requeuePolicy: data.requeuePolicy ?? { kind: 'KEEP' },
     },
   };
@@ -69,7 +66,6 @@ function handlersStub(): { handlers: WorkflowHandlers; onRequeue: ReturnType<typ
     onRenameState: vi.fn(),
     onDeleteState: vi.fn(),
     onEditTransitionLabel: vi.fn(),
-    onEditTransitionAction: vi.fn(),
     onEditTransitionRequeuePolicy: onRequeue,
     onDeleteTransition: vi.fn(),
     onRerouteTransition: vi.fn(),
@@ -107,7 +103,7 @@ function renderPanel(
 }
 
 describe('StateMachineWorkflowProperties — Kebijakan Antrian Ulang control', () => {
-  it('renders the requeue control for a CALLING → WAITING UPDATE_STATUS edge', () => {
+  it('renders the requeue control for a CALLING → WAITING edge', () => {
     const form = formWith();
     const edge = edgeWith();
     const { handlers } = handlersStub();
@@ -132,7 +128,6 @@ describe('StateMachineWorkflowProperties — Kebijakan Antrian Ulang control', (
           from: 'WAITING',
           to: 'CALLING',
           actionLabel: 'Panggil Berikutnya',
-          action: 'UPDATE_STATUS',
           requeuePolicy: { kind: 'KEEP' },
         },
       ],
@@ -143,31 +138,6 @@ describe('StateMachineWorkflowProperties — Kebijakan Antrian Ulang control', (
       terminalNodes: { start: 'auto', end: 'auto' },
     };
     const edge = edgeWith({}, 'WAITING->CALLING#0', 'WAITING', 'CALLING');
-    const { handlers } = handlersStub();
-    renderPanel(form, edge, handlers);
-    expect(screen.queryByTestId(`panel-transition-requeue-${edge.id}`)).not.toBeInTheDocument();
-  });
-
-  it('does NOT render the requeue control for a TRANSFER_CATEGORY edge (even when it targets WAITING)', () => {
-    const form: StateMachineForm = {
-      mode: 'custom',
-      states: ['WAITING', 'CALLING'],
-      transitions: [
-        {
-          from: 'CALLING',
-          to: 'WAITING',
-          actionLabel: 'Pindah Kategori',
-          action: 'TRANSFER_CATEGORY',
-          requeuePolicy: { kind: 'KEEP' },
-        },
-      ],
-      positions: {},
-      nodeActions: {},
-      descriptions: {},
-      endSources: [],
-      terminalNodes: { start: 'auto', end: 'auto' },
-    };
-    const edge = edgeWith({ action: 'TRANSFER_CATEGORY' });
     const { handlers } = handlersStub();
     renderPanel(form, edge, handlers);
     expect(screen.queryByTestId(`panel-transition-requeue-${edge.id}`)).not.toBeInTheDocument();
@@ -312,7 +282,7 @@ describe('StateMachineWorkflowProperties — node "Transisi keluar" sub-view req
     fireEvent.click(screen.getByTestId('panel-goto-transitions'));
   }
 
-  it('renders the requeue control in the outgoing-transitions row for a → WAITING UPDATE_STATUS edge', () => {
+  it('renders the requeue control in the outgoing-transitions row for a → WAITING edge', () => {
     const form = formWith();
     const edge = edgeWith({}, 'CALLING->WAITING#0', 'CALLING', 'WAITING');
     const { handlers } = handlersStub();
@@ -329,7 +299,6 @@ describe('StateMachineWorkflowProperties — node "Transisi keluar" sub-view req
           from: 'WAITING',
           to: 'CALLING',
           actionLabel: 'Panggil Berikutnya',
-          action: 'UPDATE_STATUS',
           requeuePolicy: { kind: 'KEEP' },
         },
       ],
