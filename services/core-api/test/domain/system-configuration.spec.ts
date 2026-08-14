@@ -230,7 +230,7 @@ describe('SystemConfiguration aggregate', () => {
     expect(config.nodePositions.toDto()).toEqual({});
   });
 
-  it('defaults endSources to the empty default array (zero visual regression — auto-derived sink)', () => {
+  it('defaults endSources to the empty default array (none recorded)', () => {
     const config = SystemConfiguration.create(Identifier.generate());
     expect(config.endSources).toBe(EndSources.DEFAULT);
     expect(config.endSources.toDto()).toEqual([]);

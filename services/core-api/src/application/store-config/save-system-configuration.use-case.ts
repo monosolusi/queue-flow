@@ -147,8 +147,8 @@ export interface SaveSystemConfigurationCommand {
    *  terminal marker (`__end`); multiple allowed. Purely visual canvas metadata
    *  (like `nodePositions`), with NO domain / queue-engine meaning; NOT consumed
    *  by caller / tv / kiosk (ISP). Required on the wire; the VO recovers a
-   *  null/undefined to the empty default (the End marker falls back to the
-   *  auto-derived sink behavior) and rejects a present-but-malformed value
+   *  null/undefined to the empty default (no end sources recorded — how the
+   *  admin canvas renders that is its own concern) and rejects a present-but-malformed value
    *  (non-array, non-string/empty/duplicate entries). State-membership
    *  cross-checked pre-tx (every entry ⊆ the active state schema states),
    *  mirroring `nodePositions`/`nodeActions`. Not change-gated (like

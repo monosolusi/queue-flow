@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -225,11 +226,12 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     // the DOM (regression test queries the DOM).
     //
     // The canvas now also renders canvas-only Start/End terminal markers (one
-    // `right` handle on Start, one `left` handle on End — both
-    // `isConnectable={false}`, non-interactive). SCOPE the per-side count to
-    // STATE nodes (`.react-flow__node-state`) so the marker handles do not
-    // inflate the count and the "one per side per state node" invariant stays
-    // pinned. React Flow stamps `react-flow__node-{type}` on the node wrapper.
+    // non-interactive `right` handle on Start; FOUR typeless handles on End,
+    // connectable in custom mode — dragging into one is the only route to an
+    // End link). SCOPE the per-side count to STATE nodes
+    // (`.react-flow__node-state`) so the marker handles do not inflate the
+    // count and the "one per side per state node" invariant stays pinned.
+    // React Flow stamps `react-flow__node-{type}` on the node wrapper.
     renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
     const stateCount = DEFAULT_STATE_MACHINE.states.length;
     const top = document.querySelectorAll('.react-flow__node-state .react-flow__handle[data-handlepos="top"]');
@@ -812,15 +814,19 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
   });
 
   it('the state panel shows the empty-state hint when the node has no outgoing transitions', () => {
-    // LONELY has no OUTGOING real transition (it is a sink — the End marker
-    // emits a terminal edge LONELY→__end, but terminal edges are filtered by
-    // the panel so the empty hint shows, not a spurious row).
+    // LONELY has no OUTGOING real transition. It IS linked to the End marker
+    // (`endSources: ['LONELY']`), so a LONELY→__end terminal edge really does
+    // render — which is what gives the panel's `e.type !== "terminal"` filter
+    // something to filter. Without that link the assertion below would pass
+    // vacuously (no outgoing edge of any kind to exclude).
     const customForm: StateMachineForm = {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING', 'LONELY'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
-      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: ['LONELY'], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderWorkflow(customForm);
+    // The terminal edge is live on the canvas — the filter has real work to do.
+    expect(screen.getByTestId('rf__edge-LONELY->__end')).toBeInTheDocument();
     selectStateNode('LONELY');
     const panel = screen.getByTestId('sm-properties');
     // Navigate to the "Transisi keluar" sub-view (panel redesign: the node
@@ -1083,16 +1089,24 @@ describe('StateMachineWorkflow (Start/End terminal markers)', () => {
     // `deriveTerminalMarkers` → it got a __start→S edge AND an S→__end edge,
     // reading as the flow's entry AND its exit at once. It is not wired into the
     // flow yet, so it gets neither; the default graph's real entry (WAITING) and
-    // exit (COMPLETED) keep theirs.
+    // the manager's End link (COMPLETED) keep theirs.
     //
     // Drives the COMMIT path (not a fresh re-seed): the palette card sets
     // `application/reactflow: 'state'`, the canvas drop handler calls
     // `addStateAt` → `commit`, which re-derives the marker edges through
     // `formToFlowWithMarkers`. That is the manager's actual repro.
     const onChange = vi.fn();
-    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const }, [], onChange);
-    // Baseline: the PRD §7 default graph's terminal edges are on WAITING (sole
-    // source) and COMPLETED (sole sink).
+    // `endSources: ['COMPLETED']` is the POSITIVE CONTROL for the negative
+    // assertions below: it proves `rf__edge-<state>->__end` testids do render on
+    // this canvas, so the missing `STATUS_1->__end` is a real absence rather
+    // than an id that never existed.
+    renderWorkflow(
+      { ...defaultStateMachineForm(), mode: 'custom' as const, endSources: ['COMPLETED'] },
+      [],
+      onChange,
+    );
+    // Baseline: the Start edge is auto-derived on WAITING (sole source); the End
+    // edge exists only because COMPLETED is a manager-drawn endSource.
     expect(screen.getByTestId('rf__edge-__start->WAITING')).toBeInTheDocument();
     expect(screen.getByTestId('rf__edge-COMPLETED->__end')).toBeInTheDocument();
 
@@ -1106,11 +1120,92 @@ describe('StateMachineWorkflow (Start/End terminal markers)', () => {
     // It carries NO terminal edge in either direction.
     expect(screen.queryByTestId('rf__edge-__start->STATUS_1')).not.toBeInTheDocument();
     expect(screen.queryByTestId('rf__edge-STATUS_1->__end')).not.toBeInTheDocument();
-    // Both markers still render, still wired to the real entry/exit states.
+    // Both markers still render, still wired to the real entry / linked exit.
     expect(screen.getByTestId('sm-node-start')).toBeInTheDocument();
     expect(screen.getByTestId('sm-node-end')).toBeInTheDocument();
     expect(screen.getByTestId('rf__edge-__start->WAITING')).toBeInTheDocument();
     expect(screen.getByTestId('rf__edge-COMPLETED->__end')).toBeInTheDocument();
+  });
+
+  it('the End marker renders with ZERO endSources so it can be dragged into', () => {
+    // The load-bearing UX invariant of the manual-End rule: with nothing linked,
+    // the marker must still be on the canvas — it is the drop target, so hiding
+    // it would make the first manual link impossible. The default graph declares
+    // no endSources, so this is the out-of-the-box state.
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
+    expect(screen.getByTestId('sm-node-end')).toBeInTheDocument();
+    // COMPLETED is a leaf (no outgoing transition) and is NOT auto-linked.
+    expect(screen.queryByTestId('rf__edge-COMPLETED->__end')).not.toBeInTheDocument();
+    // The Start marker's own auto-derivation is untouched by the End change.
+    expect(screen.getByTestId('rf__edge-__start->WAITING')).toBeInTheDocument();
+  });
+
+  it('wiring a NEW status in as a leaf does not auto-link it to End (the manager repro, commit path)', () => {
+    // The exact regression PR #103 left behind: a status is no longer isolated
+    // (so the isolated-state exclusion does not cover it) but has no outgoing
+    // transition — and was auto-linked to End the moment it was wired in.
+    //
+    // Driven through the real COMMIT path on a CONTROLLED harness (the parent
+    // feeds each lifted form back as `value`, like AlurStatusDesigner does), so
+    // the palette drop and the reroute both re-derive markers via
+    // `formToFlowWithMarkers` exactly as they do in production.
+    function Controlled(): JSX.Element {
+      const [form, setForm] = useState<StateMachineForm>({
+        ...defaultStateMachineForm(),
+        mode: 'custom' as const,
+        // Positive control (see below).
+        endSources: ['COMPLETED'],
+      });
+      return <StateMachineWorkflow value={form} onChange={setForm} errors={[]} />;
+    }
+    render(<Controlled />);
+
+    // Positive control: an End edge DOES render on this canvas.
+    expect(screen.getByTestId('rf__edge-COMPLETED->__end')).toBeInTheDocument();
+
+    // 1. Drop a new status from the palette → STATUS_1 (isolated so far).
+    fireEvent.drop(screen.getByTestId('sm-canvas'), { dataTransfer: { getData: () => 'state' } });
+    expect(screen.getByTestId('sm-node-card-STATUS_1')).toBeInTheDocument();
+
+    // 2. Wire it IN: re-point WAITING→CALLING at STATUS_1 via the edge panel's
+    //    "Ke" select. STATUS_1 now has in-degree 1 and out-degree 0 — a leaf.
+    selectEdge('WAITING->CALLING#0');
+    fireEvent.change(screen.getByTestId('panel-transition-to'), { target: { value: 'STATUS_1' } });
+    expect(screen.getByTestId('rf__edge-WAITING->CALLING#0')).toBeInTheDocument();
+
+    // 3. The leaf is NOT auto-linked to End — the manager must draw that line.
+    expect(screen.queryByTestId('rf__edge-STATUS_1->__end')).not.toBeInTheDocument();
+    // No End edge appeared for any other newly-leafed state either (CALLING lost
+    // its only incoming edge but keeps its outgoing one, so it is not a leaf).
+    expect(screen.queryByTestId('rf__edge-CALLING->__end')).not.toBeInTheDocument();
+    // The marker + the manager's own link survive the commits.
+    expect(screen.getByTestId('sm-node-end')).toBeInTheDocument();
+    expect(screen.getByTestId('rf__edge-COMPLETED->__end')).toBeInTheDocument();
+  });
+
+  it('the End marker offers a connection handle on all four sides in custom mode', () => {
+    // Dragging into the End marker is the ONLY route to an End link now, so a
+    // single drop point on one side is a discoverability risk ("selalu tidak
+    // bisa menghubungkan" is a standing complaint about this designer). The
+    // marker mirrors StateNode's four typeless handles.
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
+    const endHandles = document.querySelectorAll('.react-flow__node-end .react-flow__handle');
+    expect(endHandles.length).toBe(4);
+    expect(
+      Array.from(endHandles)
+        .map((h) => h.getAttribute('data-handlepos'))
+        .sort(),
+    ).toEqual(['bottom', 'left', 'right', 'top']);
+    // All four are live drop targets in custom mode (React Flow stamps
+    // `connectable` only on a handle with isConnectable={true}).
+    expect(document.querySelectorAll('.react-flow__node-end .react-flow__handle.connectable').length).toBe(4);
+  });
+
+  it('the End marker handles are NOT connectable in read-only default mode', () => {
+    // The read-only board must stay non-interactive — the four handles are
+    // additive for the editable canvas only.
+    renderWorkflow(defaultStateMachineForm());
+    expect(document.querySelectorAll('.react-flow__node-end .react-flow__handle.connectable').length).toBe(0);
   });
 
   it('the marker panel reports the pinned position for a pinned marker', () => {
@@ -1129,18 +1224,17 @@ describe('StateMachineWorkflow (Start/End terminal markers)', () => {
 
   describe('End marker — "Transisi masuk" list (endSources)', () => {
     /**
-     * Manager feedback: a state should be EXPLICITLY draggable into the End
-     * marker (multiple allowed), persisted as `endSources` on the wire. The End
-     * panel's "Transisi masuk" section lists BOTH the auto-derived sinks (states
-     * with no outgoing transitions — read-only, topology-derived) AND the
-     * explicit `endSources` entries that are NOT auto sinks (each with a "Hapus"
-     * button that lifts via `onRemoveEndSource`, non-stamping). An endSource that
-     * is also an auto sink is de-duped (the auto arrow already represents it).
+     * Manager feedback: "node masih otomatis linked ke end, seharusnya manual
+     * linked." The End panel's "Transisi masuk" section lists ONLY the
+     * manager-drawn `endSources` entries — there are no read-only "otomatis"
+     * rows, because the End marker derives nothing from the graph shape. Every
+     * row carries a "Hapus" button (lifts via `onRemoveEndSource`,
+     * non-stamping), so nothing in the list is beyond the manager's control.
      */
-    it('lists auto sinks (read-only) + explicit endSources (with Hapus) and de-dupes overlap', () => {
-      // Default graph: COMPLETED is the only auto sink (no outgoing). WAITING
-      // has an outgoing transition, so adding it to `endSources` makes it an
-      // EXPLICIT End source (not an auto sink) → it gets a "Hapus" button.
+    it('lists only the manager-drawn endSources, each with a Hapus button', () => {
+      // Default graph: COMPLETED is a leaf (no outgoing transition) and WAITING
+      // is mid-flow. Neither is listed by virtue of its shape — only WAITING,
+      // because the manager drew that link.
       const form: StateMachineForm = {
         ...defaultStateMachineForm(),
         mode: 'custom' as const,
@@ -1152,22 +1246,22 @@ describe('StateMachineWorkflow (Start/End terminal markers)', () => {
       // The "Transisi masuk" section renders.
       expect(within(panel).getByTestId('panel-end-incoming')).toBeInTheDocument();
       expect(within(panel).getByTestId('panel-end-incoming-list')).toBeInTheDocument();
-      // COMPLETED is an auto sink → listed, read-only (no Hapus button).
-      expect(within(panel).getByTestId('panel-end-source-COMPLETED')).toBeInTheDocument();
-      expect(within(panel).queryByTestId('panel-end-source-delete-COMPLETED')).not.toBeInTheDocument();
-      // WAITING is an explicit endSource (not an auto sink) → listed with Hapus.
+      // WAITING is the drawn link → listed WITH a Hapus button.
       expect(within(panel).getByTestId('panel-end-source-WAITING')).toBeInTheDocument();
       expect(within(panel).getByTestId('panel-end-source-delete-WAITING')).toBeInTheDocument();
-      // Non-sink, non-endSource states are NOT listed.
+      // COMPLETED is a LEAF but was never linked → NOT listed. (The positive
+      // assertion above proves `panel-end-source-*` rows do render here.)
+      expect(within(panel).queryByTestId('panel-end-source-COMPLETED')).not.toBeInTheDocument();
+      // Neither are the other unlinked states.
       expect(within(panel).queryByTestId('panel-end-source-CALLING')).not.toBeInTheDocument();
       expect(within(panel).queryByTestId('panel-end-source-SERVING')).not.toBeInTheDocument();
       expect(within(panel).queryByTestId('panel-end-source-SKIPPED')).not.toBeInTheDocument();
     });
 
-    it('an endSource that is also an auto sink is listed ONCE (auto row, no Hapus)', () => {
-      // COMPLETED is an auto sink AND listed in `endSources`. The panel de-dupes:
-      // the auto row wins (the auto arrow already represents the connection), so
-      // no explicit row and no Hapus button renders for COMPLETED.
+    it('a LEAF state that IS an endSource gets a removable row (no read-only auto row)', () => {
+      // COMPLETED is a leaf AND drawn into End. It used to render as a read-only
+      // "Otomatis — status tanpa transisi keluar" row the manager could not
+      // remove; now it is an ordinary manager-owned row with a Hapus button.
       const form: StateMachineForm = {
         ...defaultStateMachineForm(),
         mode: 'custom' as const,
@@ -1176,11 +1270,11 @@ describe('StateMachineWorkflow (Start/End terminal markers)', () => {
       renderWorkflow(form);
       selectMarker('end');
       const panel = screen.getByTestId('sm-properties');
-      // COMPLETED appears once (auto row), no delete button.
       expect(within(panel).getByTestId('panel-end-source-COMPLETED')).toBeInTheDocument();
-      expect(within(panel).queryByTestId('panel-end-source-delete-COMPLETED')).not.toBeInTheDocument();
-      // WAITING is explicit (not an auto sink) → Hapus present.
+      expect(within(panel).getByTestId('panel-end-source-delete-COMPLETED')).toBeInTheDocument();
       expect(within(panel).getByTestId('panel-end-source-delete-WAITING')).toBeInTheDocument();
+      // The old read-only auto-row copy is gone from the panel entirely.
+      expect(panel).not.toHaveTextContent('Otomatis — status tanpa transisi keluar');
     });
 
     it('Hapus on an explicit endSource calls onChange with endSources filtered (non-stamping)', () => {
@@ -1200,28 +1294,119 @@ describe('StateMachineWorkflow (Start/End terminal markers)', () => {
       expect(next.transitions).toEqual(form.transitions);
     });
 
-    it('shows the empty hint when no state is an auto sink and endSources is empty', () => {
-      // A graph where EVERY state has an outgoing transition (no auto sinks)
-      // and no explicit endSources → the "Transisi masuk" list is empty. The
-      // End marker is PINNED so it renders even with no auto sinks and no
-      // endSources (an auto End marker would not emit without a sink/explicit
-      // source — see `formToFlowWithMarkers`'s emit conditions).
+    it('shows the empty hint when endSources is empty (the out-of-the-box state)', () => {
+      // No endSources → the "Transisi masuk" list is empty regardless of graph
+      // shape. This is now the DEFAULT graph's state: COMPLETED is a leaf but is
+      // not listed, because nothing is auto-linked. (The marker no longer needs
+      // to be pinned for this case — an 'auto' End marker always renders.)
       const form: StateMachineForm = {
         ...defaultStateMachineForm(),
         mode: 'custom' as const,
-        states: ['A', 'B'],
-        transitions: [
-          { from: 'A', to: 'B', actionLabel: 'Panggil' },
-          { from: 'B', to: 'A', actionLabel: 'Kembali' },
-        ],
         endSources: [],
-        terminalNodes: { start: 'auto', end: { x: 500, y: 40 } },
       };
       renderWorkflow(form);
       selectMarker('end');
       const panel = screen.getByTestId('sm-properties');
       expect(within(panel).getByTestId('panel-end-incoming-empty')).toBeInTheDocument();
       expect(within(panel).queryByTestId('panel-end-incoming-list')).not.toBeInTheDocument();
+    });
+
+    it('the End marker copy states the manual-only rule; the Start copy still describes auto derivation', () => {
+      // The behaviour change must be legible to the manager in the panel, not
+      // just in the canvas: End says it never links itself, Start still says it
+      // points at entry statuses automatically.
+      renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
+      selectMarker('end');
+      const endCopy = screen.getByTestId('panel-marker-description');
+      expect(endCopy).toHaveTextContent('tidak pernah tersambung otomatis');
+      expect(endCopy).toHaveTextContent('Seret garis dari sebuah status ke titik akhir');
+
+      selectMarker('start');
+      const startCopy = screen.getByTestId('panel-marker-description');
+      expect(startCopy).toHaveTextContent('otomatis menunjuk ke status');
+    });
+
+    /**
+     * Cascade regression (arch review, MAJOR). `commit` rebuilds `states` from
+     * the canvas nodes but used to carry `endSources`/`nodeActions`/
+     * `descriptions` from `value` verbatim, so deleting or renaming a state
+     * that any of them referenced stranded a dead name in the LIFTED FORM.
+     * The save use case cross-checks all three and throws `... is not a state
+     * in the active state machine` → HTTP 400 on every later save, while every
+     * panel lists live states only, so there was no in-app route to clear it.
+     *
+     * These assert on what `onChange` LIFTS (the form that would be sent to the
+     * wire), not on the canvas — the canvas already hid the problem.
+     */
+    it('renaming a linked state REMAPS its endSource (the link survives the rename)', () => {
+      const onChange = vi.fn();
+      const form: StateMachineForm = {
+        ...defaultStateMachineForm(),
+        mode: 'custom' as const,
+        endSources: ['COMPLETED'],
+        descriptions: { COMPLETED: 'Tiket selesai dilayani' },
+        nodeActions: { COMPLETED: [{ executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'COMPLETED' }] },
+      };
+      renderWorkflow(form, [], onChange);
+      selectStateNode('COMPLETED');
+      fireEvent.change(screen.getByTestId('panel-state-name'), { target: { value: 'SELESAI' } });
+
+      expect(onChange).toHaveBeenCalledTimes(1);
+      const next = onChange.mock.calls[0][0];
+      expect(next.states).toContain('SELESAI');
+      expect(next.states).not.toContain('COMPLETED');
+      // The manager's End link FOLLOWS the rename — not pruned, not stranded.
+      expect(next.endSources).toEqual(['SELESAI']);
+      // Same for the name-keyed satellites, including the action's `value`
+      // (also cross-checked by the save use case).
+      expect(next.descriptions).toEqual({ SELESAI: 'Tiket selesai dilayani' });
+      expect(next.nodeActions.SELESAI).toEqual([
+        { executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'SELESAI' },
+      ]);
+      expect(next.nodeActions.COMPLETED).toBeUndefined();
+      // Nothing in the lifted form still names a dead state — this is exactly
+      // what the backend cross-check enforces.
+      const live = new Set<string>(next.states);
+      expect(next.endSources.every((s: string) => live.has(s))).toBe(true);
+      expect(Object.keys(next.descriptions).every((k) => live.has(k))).toBe(true);
+      expect(Object.keys(next.nodeActions).every((k) => live.has(k))).toBe(true);
+    });
+
+    it('deleting a linked state PRUNES its endSource (no stale entry reaches the wire)', () => {
+      const onChange = vi.fn();
+      const form: StateMachineForm = {
+        ...defaultStateMachineForm(),
+        mode: 'custom' as const,
+        endSources: ['COMPLETED', 'SKIPPED'],
+        descriptions: { COMPLETED: 'Tiket selesai dilayani' },
+        nodeActions: {
+          COMPLETED: [{ executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'WAITING' }],
+          // An action on a SURVIVING state whose target is the deleted one:
+          // `nodeActions['SERVING'].value` is cross-checked too.
+          SERVING: [{ executionType: 'ON_EXIT', type: 'UPDATE_STATUS', value: 'COMPLETED' }],
+        },
+      };
+      renderWorkflow(form, [], onChange);
+      selectStateNode('COMPLETED');
+      fireEvent.click(screen.getByTestId('panel-delete-state'));
+
+      expect(onChange).toHaveBeenCalledTimes(1);
+      const next = onChange.mock.calls[0][0];
+      expect(next.states).not.toContain('COMPLETED');
+      // The deleted state's link is gone; the OTHER link is untouched (the
+      // prune is surgical, not a blanket clear).
+      expect(next.endSources).toEqual(['SKIPPED']);
+      expect(next.descriptions.COMPLETED).toBeUndefined();
+      expect(next.nodeActions.COMPLETED).toBeUndefined();
+      // The surviving state's action pointed at the deleted state — dropped,
+      // since "Update Status ke <deleted>" has no meaning left.
+      expect(next.nodeActions.SERVING).toEqual([]);
+      const live = new Set<string>(next.states);
+      expect(next.endSources.every((s: string) => live.has(s))).toBe(true);
+      expect(Object.keys(next.nodeActions).every((k) => live.has(k))).toBe(true);
+      for (const actions of Object.values(next.nodeActions)) {
+        expect((actions as { value: string }[]).every((a) => live.has(a.value))).toBe(true);
+      }
     });
 
     it('a stale endSource name not in states is dropped from the panel list', () => {
