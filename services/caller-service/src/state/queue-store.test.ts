@@ -213,12 +213,17 @@ describe('queueReducer — STATUS_UPDATED', () => {
     expect(next.skipped.map((t) => t.ticketNumber)).toEqual(['B-003', 'A-011']);
   });
 
-  it('moves a re-skipped ticket to the end, matching the server ordering', () => {
+  it('moves a genuinely re-skipped ticket to the end, matching the server ordering', () => {
     // A ticket recalled and then skipped again is the MOST recently skipped, and
     // the server agrees: `findSkippedByCounter` orders by updatedAt ascending,
-    // which a re-skip bumps. Replacing in place would put the client back out of
-    // step with a reload — the very divergence the append fix removes — so the
-    // dedupe must re-append rather than preserve the old position.
+    // which a re-skip bumps.
+    //
+    // Note what actually produces the append here: the recall's TICKET_CALLED
+    // removes the ticket from the bucket on its way out, so by the time the
+    // second SKIPPED arrives the ticket is ABSENT and `dedupeAppend` takes its
+    // append branch. This case therefore does NOT discriminate append-after-
+    // filter from replace-in-place — the test below is the one that pins the
+    // dedupe branch.
     let next = reducer(
       baseState,
       event('TICKET_CALLED', 't-b', { ticketNumber: 'B-003', counterId: COUNTER }),
@@ -231,6 +236,29 @@ describe('queueReducer — STATUS_UPDATED', () => {
     next = reducer(next, event('STATUS_UPDATED', 't-b', { from: 'CALLING', to: 'SKIPPED' }));
 
     expect(next.skipped.map((t) => t.ticketNumber)).toEqual(['A-011', 'B-003']);
+  });
+
+  it('a redelivered SKIPPED does not reorder the bucket', () => {
+    // The only way to reach `dedupeAppend`'s dedupe branch: the same SKIPPED
+    // event arriving twice for a ticket still in the bucket. Nothing changed
+    // server-side (`updatedAt` is unmoved), so the row must not move — appending
+    // after a filter would jump it past tickets skipped later, which is the
+    // reorder-under-a-reaching-finger hazard the skip-order fix exists to
+    // remove. A second ticket is required for the assertion to be able to fail.
+    let next = reducer(
+      baseState,
+      event('TICKET_CALLED', 't-b', { ticketNumber: 'B-003', counterId: COUNTER }),
+    );
+    next = reducer(next, event('STATUS_UPDATED', 't-b', { from: 'CALLING', to: 'SKIPPED' }));
+    next = reducer(next, event('TICKET_CALLED', 't-a', { ticketNumber: 'A-011', counterId: COUNTER }));
+    next = reducer(next, event('STATUS_UPDATED', 't-a', { from: 'CALLING', to: 'SKIPPED' }));
+    expect(next.skipped.map((t) => t.ticketNumber)).toEqual(['B-003', 'A-011']);
+
+    // The B-003 SKIPPED broadcast is redelivered — no intervening recall.
+    next = reducer(next, event('STATUS_UPDATED', 't-b', { from: 'CALLING', to: 'SKIPPED' }));
+
+    expect(next.skipped.map((t) => t.ticketNumber)).toEqual(['B-003', 'A-011']);
+    expect(next.skipped).toHaveLength(2);
   });
 
   it('is idempotent for a repeated SKIPPED', () => {

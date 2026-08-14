@@ -293,13 +293,26 @@ function dedupePrepend(ticket: TicketStateDto, list: readonly TicketStateDto[]):
  * reaching finger on a touch panel is a mis-tap onto the wrong customer's
  * "Panggil Ulang". Appending keeps live and reloaded order identical.
  *
+ * A ticket ALREADY in the bucket is replaced **in place**, not moved to the end.
+ * The two arrival paths differ and both must match the server:
+ *  - A genuine re-skip (recall, then skipped again) reaches here with the ticket
+ *    ABSENT — `TICKET_CALLED` removed it on the way out — so it appends, which
+ *    mirrors the `updatedAt` bump that moves it last server-side.
+ *  - A REDELIVERED `SKIPPED` for a ticket still in the bucket changes nothing
+ *    server-side (`updatedAt` unmoved), so moving the row to the end would
+ *    reorder the list on a duplicate broadcast alone — the same mis-tap hazard
+ *    this function exists to remove, in miniature.
+ *
  * The waiting list keeps its own ticket-number sort (see `byTicketNumber` call
  * sites): its server order is `createdAt` ascending and that pairing predates
  * this bucket — not changed here.
  */
 function dedupeAppend(ticket: TicketStateDto, list: readonly TicketStateDto[]): readonly TicketStateDto[] {
-  const rest = list.filter((t) => t.ticketId !== ticket.ticketId);
-  return [...rest, ticket];
+  const at = list.findIndex((t) => t.ticketId === ticket.ticketId);
+  if (at === -1) return [...list, ticket];
+  const next = [...list];
+  next[at] = ticket;
+  return next;
 }
 
 /**
