@@ -37,7 +37,7 @@ import {
   StateTransitionRule,
   SystemConfiguration,
 } from '../../src/domain/store-config';
-import { Identifier, TransitionAction } from '../../src/domain/shared';
+import { Identifier } from '../../src/domain/shared';
 import { PriorityPolicy } from '../../src/domain/shared/priority-policy';
 import {
   InMemoryCategoryRepository,
@@ -236,45 +236,11 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
     expect(received[0].payload).toMatchObject({ from: 'CALLING', to: 'SERVING' });
   });
 
-  it('POST /api/queue/:id/transfer reassigns the category and broadcasts TICKET_TRANSFERRED (transfer-enabled config)', async () => {
-    // The default state machine has no transfer edge; re-seed a config whose
-    // machine adds CALLING -> WAITING **declared a category move** — what the
-    // designer writes when the manager picks "Pindah Kategori" as that edge's
-    // action (FR-CLR-03). Drawing the edge alone leaves it a plain re-queue.
-    const transferMachine = new StateMachine(
-      StateSchema.of(['WAITING', 'CALLING', 'SERVING', 'SKIPPED', 'COMPLETED']),
-      [
-        StateTransitionRule.of('WAITING', 'CALLING', 'Panggil Berikutnya'),
-        StateTransitionRule.of('CALLING', 'SERVING', 'Mulai Melayani'),
-        StateTransitionRule.of('CALLING', 'SKIPPED', 'Lewati / Absen'),
-        StateTransitionRule.of('SKIPPED', 'CALLING', 'Panggil Ulang'),
-        StateTransitionRule.of('SERVING', 'COMPLETED', 'Selesai Layan'),
-        StateTransitionRule.of(
-          'CALLING',
-          'WAITING',
-          'Pindah Kategori',
-          TransitionAction.TRANSFER_CATEGORY,
-        ),
-      ],
-    );
-    await systemConfig.save(
-      SystemConfiguration.reconstitute({
-        id: Identifier.generate(),
-        storeName: 'QMS Transfer Store',
-        isInitialSetupCompleted: true,
-        stateMachine: transferMachine,
-        dailyResetPolicy: DailyResetPolicy.DEFAULT,
-        brandColor: BrandColor.DEFAULT,
-        serviceThemes: ServiceThemes.DEFAULT,
-        tvPanelLayout: TvPanelLayout.DEFAULT,
-        edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
-        nodePositions: NodePositions.DEFAULT,
-        nodeActions: NodeActions.DEFAULT,
-        terminalNodes: TerminalNodes.DEFAULT,
-        endSources: EndSources.DEFAULT,
-        printerConfiguration: PrinterConfiguration.DEFAULT,
-      }),
-    );
+  it('POST /api/queue/:id/transfer reassigns the category and broadcasts TICKET_TRANSFERRED (flow-decoupled)', async () => {
+    // Transfer is a standalone counter action, flow-decoupled: it needs no
+    // `CALLING -> WAITING` edge, so the beforeEach-seeded default PRD §7 machine
+    // is enough. The /transfer endpoint re-issues the per-category number and
+    // returns the ticket to WAITING regardless of the flow (FR-CLR-03).
 
     // A CALLING ticket under CAT-A at counter 1.
     const calling = QueueTicket.reconstitute({
@@ -502,8 +468,8 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
   });
 
   describe('an edge into WAITING (the reported defect)', () => {
-    /** Re-seeds the active config with a `CALLING -> WAITING` edge carrying `action`. */
-    async function seedCallingToWaiting(action: TransitionAction, label: string): Promise<void> {
+    /** Re-seeds the active config with a `CALLING -> WAITING` re-queue edge. */
+    async function seedCallingToWaiting(label: string): Promise<void> {
       const machine = new StateMachine(
         StateSchema.of(['WAITING', 'CALLING', 'SERVING', 'SKIPPED', 'COMPLETED']),
         [
@@ -512,7 +478,7 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
           StateTransitionRule.of('CALLING', 'SKIPPED', 'Lewati / Absen'),
           StateTransitionRule.of('SKIPPED', 'CALLING', 'Panggil Ulang'),
           StateTransitionRule.of('SERVING', 'COMPLETED', 'Selesai Layan'),
-          StateTransitionRule.of('CALLING', 'WAITING', label, action),
+          StateTransitionRule.of('CALLING', 'WAITING', label),
         ],
       );
       await systemConfig.save(
@@ -535,10 +501,13 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
       );
     }
 
-    it('re-queues the ticket, keeping its number and category, when left on UPDATE_STATUS', async () => {
-      // The manager drew this edge to put a ticket back in the queue. It used to
-      // be executed as a category move purely because the target was WAITING.
-      await seedCallingToWaiting(TransitionAction.UPDATE_STATUS, 'Kembalikan ke Antrian');
+    it('re-queues the ticket via /transition, keeping its number and category', async () => {
+      // The manager drew `CALLING -> WAITING` to put a ticket back in the queue.
+      // It used to be executed as a category move purely because the target was
+      // WAITING; now an edge is purely `from -> to + label`, so /transition runs
+      // it as a plain status change (number and category unchanged). "Pindah
+      // Kategori" is a separate /transfer action, not a per-edge declaration.
+      await seedCallingToWaiting('Kembalikan ke Antrian');
       await seedWaitingTicket(catAId, 'A', 1);
       const callRes = await request(app.getHttpServer())
         .post('/api/queue/call-next').set(authHeader(token))
@@ -556,21 +525,6 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
         categoryId: catAId,
         ticketNumber: 'A-001',
       });
-    });
-
-    it('refuses the same edge through this endpoint when declared a category move', async () => {
-      await seedCallingToWaiting(TransitionAction.TRANSFER_CATEGORY, 'Pindah Kategori');
-      await seedWaitingTicket(catAId, 'A', 1);
-      const callRes = await request(app.getHttpServer())
-        .post('/api/queue/call-next').set(authHeader(token))
-        .send({ counterId: 1 });
-      const ticketId = callRes.body.ticket.ticketId;
-
-      const res = await request(app.getHttpServer())
-        .post(`/api/queue/${ticketId}/transition`).set(authHeader(token))
-        .send({ targetStatus: 'WAITING' });
-
-      expect(res.status).toBe(400);
     });
   });
 });

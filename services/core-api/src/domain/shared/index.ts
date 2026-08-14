@@ -7,6 +7,5 @@ export * from './identifier';
 export * from './priority-policy';
 export * from './requeue-policy';
 export * from './system-aggregate-id';
-export * from './transition-action';
 export * from './unit-of-work.port';
 export * from './value-object';

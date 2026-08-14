@@ -1,6 +1,5 @@
 import type { TicketStateDto } from '../api/types';
 import type { WorkflowAction } from '../lib/workflow-actions';
-import type { BoundCounter } from '../state/counter-binding';
 import { TicketRowActions, runnableRowActions } from './TicketRowActions';
 
 export interface WaitingQueueListProps {
@@ -11,20 +10,13 @@ export interface WaitingQueueListProps {
    *  excluded). Empty — the PRD-default flow's only WAITING edge is `→ CALLING`
    *  — renders the plain list. */
   readonly actions?: readonly WorkflowAction[];
-  /** The counter binding, for the transfer destinations. Required to render
-   *  a `→ WAITING` (Pindah Kategori) action. */
-  readonly bound?: BoundCounter;
   /** Key of the command currently in flight (see `actionRunKey`), or `null`. */
   readonly pending?: string | null;
   /** Message from the last failed waiting-list command. */
   readonly error?: string | null;
   /** Hint from a tap turned away because another row's command was in flight. */
   readonly notice?: string | null;
-  readonly onAction?: (
-    ticket: TicketStateDto,
-    action: WorkflowAction,
-    targetCategoryId?: string,
-  ) => void;
+  readonly onAction?: (ticket: TicketStateDto, action: WorkflowAction) => void;
 }
 
 /**
@@ -33,7 +25,8 @@ export interface WaitingQueueListProps {
  * manager's own example: "dari waiting transisi keluar ada apa saja, itu
  * buttonnya harusnya sesuai". The `→ CALLING` edge is not among them: calling is
  * counter-level (call-next picks by routing/priority), so it lives in the action
- * panel.
+ * panel. Row actions are status changes only; "Pindah Kategori" lives on the
+ * active ticket, not here.
  *
  * Presentational — it neither fetches the flow nor decides which command runs an
  * action; the workspace resolves both and passes them in.
@@ -42,13 +35,12 @@ export function WaitingQueueList({
   tickets,
   waitingCount,
   actions = [],
-  bound,
   pending = null,
   error = null,
   notice = null,
   onAction,
 }: WaitingQueueListProps) {
-  const runnable = runnableRowActions(actions, bound, onAction !== undefined);
+  const runnable = runnableRowActions(actions, onAction !== undefined);
   const actionable = runnable.length > 0;
 
   return (
@@ -80,7 +72,6 @@ export function WaitingQueueList({
                 <TicketRowActions
                   ticket={t}
                   actions={runnable}
-                  bound={bound}
                   pending={pending}
                   testIdStem="waiting-action"
                   onAction={onAction}

@@ -50,43 +50,26 @@ export interface BrandConfigSlice {
 }
 
 /**
- * What running a transition does — declared by the manager in "Alur Status
- * Tiket" and passed through by core-api verbatim, named as it is on the wire.
- *
- * This replaced a `command` field the backend used to *resolve* from each edge's
- * `(from, to)` pair. A pair cannot say what the manager meant by an edge, so that
- * resolution guessed: every edge into WAITING was ruled a category move, and a
- * flow drawn to put a ticket back in the queue produced a "Pindah Kategori"
- * button demanding a destination category. The flow now states its own intent,
- * and this client maps that intent to an endpoint (see `lib/workflow-commands.ts`)
- * — a different mapping, and necessarily a client-side one.
- *
- * - `UPDATE_STATUS` — move the ticket to the transition's target state.
- * - `TRANSFER_CATEGORY` — "pindah kategori" (FR-CLR-03): also move it to another
- *   category, which staff choose per ticket.
- */
-export type TransitionActionType = 'UPDATE_STATUS' | 'TRANSFER_CATEGORY';
-
-/**
  * Why a transition cannot be run — a **code**, not prose: the backend owns the
  * fact, this client owns the Indonesian wording (see `lib/workflow-actions.ts`).
  *
  * - `NO_STATUS_CHANGE` — running it would leave the ticket exactly where it is.
  *
- * There is no `NO_COMMAND` any more: a per-ticket transition reaches any target
- * the flow allows, so no configured edge is unroutable.
+ * A per-ticket transition reaches any target the active flow allows, so the only
+ * reason an edge is unrunnable is that it would change nothing. "Pindah Kategori"
+ * (FR-CLR-03) is no longer a flow edge at all — it is a standalone panel action
+ * on the active ticket, so it never appears in this projection.
  */
 export type WorkflowActionUnavailableReason = 'NO_STATUS_CHANGE';
 
-/** One transition of the active flow (FR-CLR-02), with the action the manager
- *  declared for it. `unavailableReason !== null` means running it would do
- *  nothing — the button is still rendered (disabled + the reason) so a configured
- *  edge never silently disappears. */
+/** One transition of the active flow (FR-CLR-02): a plain status change from
+ *  `from` to `to`, labelled with the manager's `actionLabel`. `unavailableReason
+ *  !== null` means running it would do nothing — the button is still rendered
+ *  (disabled + the reason) so a configured edge never silently disappears. */
 export interface WorkflowActionDto {
   readonly from: string;
   readonly to: string;
   readonly actionLabel: string;
-  readonly action: TransitionActionType;
   readonly unavailableReason: WorkflowActionUnavailableReason | null;
 }
 

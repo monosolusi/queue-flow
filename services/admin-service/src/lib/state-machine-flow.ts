@@ -22,7 +22,6 @@ import {
   deriveAutoSources,
   DEFAULT_REQUEUE_POLICY,
   DEFAULT_SOURCE_SIDE,
-  DEFAULT_TRANSITION_ACTION,
   type StateMachineForm,
   type Transition,
 } from './state-machine';
@@ -32,7 +31,6 @@ import {
   type EdgeSide,
   type RequeuePolicyDto,
   type TerminalNodesDto,
-  type TransitionActionType,
 } from '../api/types';
 
 /** Node payload: the state name (the node id IS the state name — names are
@@ -84,24 +82,18 @@ export interface FlowNode {
   pinned?: boolean;
 }
 
-/** Edge payload: the transition's action label (the Caller UI button text) and
- *  the action it runs. Both are round-tripped through the canvas by
- *  `flowToGraph`, so an edge edit made on the canvas cannot silently reset either.
- *  Index signature for `Record<string, unknown>` compatibility (see
- *  {@link FlowNodeData}). No `explicit` flag: EVERY incoming End edge is now
- *  manager-drawn (there are no topology-derived End arrows left), so a flag
- *  distinguishing the two kinds would be vacuous. */
+/** Edge payload: the transition's action label (the Caller UI button text),
+ *  round-tripped through the canvas by `flowToGraph` so an edge edit made on the
+ *  canvas cannot silently reset it. Index signature for `Record<string, unknown>`
+ *  compatibility (see {@link FlowNodeData}). No `explicit` flag: EVERY incoming
+ *  End edge is now manager-drawn (there are no topology-derived End arrows left),
+ *  so a flag distinguishing the two kinds would be vacuous. */
 export interface FlowEdgeData {
   actionLabel: string;
-  /** Terminal (Start/End) marker edges carry {@link DEFAULT_TRANSITION_ACTION}:
-   *  they are canvas-only decoration with no Caller button, so the value is never
-   *  read for them — but keeping the field non-optional means every real edge has
-   *  one, and `flowToGraph` needs no fallback that could mask a dropped value. */
-  action: TransitionActionType;
   /** What a `→ WAITING` re-queue does to queue order. Round-tripped through the
-   *  canvas by `flowToGraph` (mirroring `action`), so an edge edit made on the
-   *  canvas cannot silently reset it. Terminal marker edges carry
-   *  `DEFAULT_REQUEUE_POLICY` (canvas-only, never read for them). */
+   *  canvas by `flowToGraph`, so an edge edit made on the canvas cannot silently
+   *  reset it. Terminal marker edges carry `DEFAULT_REQUEUE_POLICY` (canvas-only
+   *  decoration with no Caller button, so the value is never read for them). */
   requeuePolicy: RequeuePolicyDto;
   [key: string]: unknown;
 }
@@ -310,7 +302,7 @@ export function formToFlow(
     source: t.from,
     target: t.to,
     type: 'transition',
-    data: { actionLabel: t.actionLabel, action: t.action, requeuePolicy: t.requeuePolicy },
+    data: { actionLabel: t.actionLabel, requeuePolicy: t.requeuePolicy },
     // Seed from the form sides (the source of truth); a transition with no
     // sides (absent) gets the canonical L→R default.
     sourceHandle: t.sourceSide !== undefined ? sideToHandle(t.sourceSide) : DEFAULT_SOURCE_HANDLE,
@@ -473,7 +465,7 @@ export function deriveTerminalMarkers(
         source: START_NODE_ID,
         target: s,
         type: TERMINAL_EDGE_TYPE,
-        data: { actionLabel: '', action: DEFAULT_TRANSITION_ACTION, requeuePolicy: DEFAULT_REQUEUE_POLICY },
+        data: { actionLabel: '', requeuePolicy: DEFAULT_REQUEUE_POLICY },
         sourceHandle: HANDLE_IDS.right,
         targetHandle: HANDLE_IDS.left,
         markerEnd: EDGE_ARROW_MARKER,
@@ -499,7 +491,7 @@ export function deriveTerminalMarkers(
       source: s,
       target: END_NODE_ID,
       type: TERMINAL_EDGE_TYPE,
-      data: { actionLabel: '', action: DEFAULT_TRANSITION_ACTION, requeuePolicy: DEFAULT_REQUEUE_POLICY },
+      data: { actionLabel: '', requeuePolicy: DEFAULT_REQUEUE_POLICY },
       sourceHandle: HANDLE_IDS.right,
       targetHandle: HANDLE_IDS.left,
       markerEnd: EDGE_ARROW_MARKER,
@@ -637,7 +629,6 @@ export function flowToGraph(
       from: idToName.get(e.source) ?? e.source,
       to: idToName.get(e.target) ?? e.target,
       actionLabel: e.data.actionLabel,
-      action: e.data.action,
       requeuePolicy: e.data.requeuePolicy,
       sourceSide: handleToSide(e.sourceHandle),
       targetSide: handleToSide(e.targetHandle),

@@ -2,7 +2,6 @@ export * from './apply-transition.use-case';
 export * from './call-next-ticket.use-case';
 export * from './cleanup-transaction-log.use-case';
 export * from './create-ticket.use-case';
-export * from './declared-transition-action';
 export * from './get-board-state.use-case';
 export * from './get-queue-snapshot.use-case';
 export * from './get-workflow-actions.use-case';

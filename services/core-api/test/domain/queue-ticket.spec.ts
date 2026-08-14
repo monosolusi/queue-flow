@@ -13,7 +13,6 @@ import {
   StateSchema,
   StateTransitionRule,
 } from '../../src/domain/store-config';
-import { TransitionAction } from '../../src/domain/shared';
 import {
   TicketCalledEvent,
   TicketCreatedEvent,
@@ -32,8 +31,8 @@ function newTicket(categoryId = 'CAT-A'): QueueTicket {
   );
 }
 
-/** `[from, to, actionLabel, action?]` — `action` omitted means UPDATE_STATUS. */
-type EdgeSpec = readonly [string, string, string, TransitionAction?];
+/** `[from, to, actionLabel]` — an edge is purely endpoints + a button label. */
+type EdgeSpec = readonly [string, string, string];
 
 const DEFAULT_EDGES: readonly EdgeSpec[] = [
   ['WAITING', 'CALLING', 'Panggil Berikutnya'],
@@ -47,7 +46,7 @@ const DEFAULT_EDGES: readonly EdgeSpec[] = [
 function machineWith(...extra: readonly EdgeSpec[]): StateMachine {
   return new StateMachine(
     StateSchema.of(['WAITING', 'CALLING', 'SERVING', 'SKIPPED', 'COMPLETED']),
-    [...DEFAULT_EDGES, ...extra].map((e) => StateTransitionRule.of(e[0], e[1], e[2], e[3])),
+    [...DEFAULT_EDGES, ...extra].map((e) => StateTransitionRule.of(e[0], e[1], e[2])),
   );
 }
 
@@ -353,18 +352,15 @@ describe('QueueTicket aggregate', () => {
       });
 
       it('transferTo leaves waitingOrder alone (out of scope; matches the kept-createdAt quirk)', () => {
-        const transferPolicy = machineWith([
-          'CALLING',
-          'WAITING',
-          'Pindah Kategori',
-          TransitionAction.TRANSFER_CATEGORY,
-        ]);
+        // Transfer is a standalone counter action — no edge, no policy. A plain
+        // `CALLING -> WAITING` edge is enough for the `markCalling` setup.
+        const callingPolicy = machineWith(['CALLING', 'WAITING', 'Pindah Kategori']);
         const ticket = newTicket('CAT-A');
-        ticket.markCalling(3, transferPolicy, FIXED_NOW);
+        ticket.markCalling(3, callingPolicy, FIXED_NOW);
         const originalWaitingOrder = ticket.waitingOrder;
         ticket.pullDomainEvents();
 
-        ticket.transferTo('CAT-B', TicketNumber.of('B', 7), transferPolicy, FIXED_NOW + 40);
+        ticket.transferTo('CAT-B', TicketNumber.of('B', 7), 'Pindah Kategori', FIXED_NOW + 40);
 
         // Transfer re-enters the queue as a fresh ticket under the new category
         // but keeps its original ordering slot (mirrors the kept-createdAt quirk).
@@ -523,22 +519,11 @@ describe('QueueTicket aggregate', () => {
     });
 
     it('transfer clears all three timestamps (fresh lifecycle under new category)', () => {
-      const transferPolicy = machineWith([
-        'CALLING',
-        'WAITING',
-        'Pindah Kategori',
-        TransitionAction.TRANSFER_CATEGORY,
-      ]);
       const ticket = newTicket('CAT-A');
-      ticket.markCalling(3, transferPolicy, FIXED_NOW); // sets calledAt
+      ticket.markCalling(3, policy, FIXED_NOW); // sets calledAt
       ticket.pullDomainEvents();
 
-      ticket.transferTo(
-        'CAT-B',
-        TicketNumber.of('B', 7),
-        transferPolicy,
-        FIXED_NOW + 40,
-      );
+      ticket.transferTo('CAT-B', TicketNumber.of('B', 7), 'Pindah Kategori', FIXED_NOW + 40);
 
       // Transfer re-enters the queue as a fresh ticket — the prior lifecycle
       // timestamps are cleared (served/completed were never set; called is reset).
@@ -548,33 +533,21 @@ describe('QueueTicket aggregate', () => {
     });
   });
 
-  describe('transferTo (pindah kategori — FR-CLR-03)', () => {
+  describe('transferTo (pindah kategori — FR-CLR-03, flow-decoupled)', () => {
     /**
-     * The default state machine has no transfer edge. A transfer is a
-     * first-class configurable transition, so the legal-transfer test uses a
-     * machine that adds `CALLING -> WAITING` declared `TRANSFER_CATEGORY` —
-     * exactly what the designer writes when the manager picks "Pindah Kategori"
-     * as that edge's action. The endpoints alone would not be enough: the same
-     * pair with the default `UPDATE_STATUS` action is a plain re-queue.
+     * Transfer is a standalone counter action — it needs no edge and consults no
+     * policy, so the default PRD §7 machine (which draws no `CALLING -> WAITING`
+     * edge) is all the setup needs. `markCalling` requires only `WAITING -> CALLING`,
+     * which the default machine provides. The `actionLabel` is a fixed constant,
+     * not read from the flow.
      */
-    const transferPolicy = machineWith([
-      'CALLING',
-      'WAITING',
-      'Pindah Kategori',
-      TransitionAction.TRANSFER_CATEGORY,
-    ]);
 
-    it('reassigns category + ticket number, clears the counter, and returns to WAITING', () => {
+    it('reassigns category + ticket number, clears the counter, and returns to WAITING with no flow edge required', () => {
       const ticket = newTicket('CAT-A');
-      ticket.markCalling(3, transferPolicy, FIXED_NOW);
+      ticket.markCalling(3, policy, FIXED_NOW);
       ticket.pullDomainEvents(); // drop call events to isolate transfer
 
-      ticket.transferTo(
-        'CAT-B',
-        TicketNumber.of('B', 7),
-        transferPolicy,
-        FIXED_NOW + 1,
-      );
+      ticket.transferTo('CAT-B', TicketNumber.of('B', 7), 'Pindah Kategori', FIXED_NOW + 1);
 
       expect(ticket.currentStatus).toBe(TicketStatus.WAITING);
       expect(ticket.categoryId).toBe('CAT-B');
@@ -582,17 +555,12 @@ describe('QueueTicket aggregate', () => {
       expect(ticket.counterId).toBeNull();
     });
 
-    it('emits a STATUS_UPDATED and a TICKET_TRANSFERRED event carrying old/new category + number', () => {
+    it('emits a STATUS_UPDATED (carrying the supplied label) and a TICKET_TRANSFERRED event', () => {
       const ticket = newTicket('CAT-A');
-      ticket.markCalling(1, transferPolicy, FIXED_NOW);
+      ticket.markCalling(1, policy, FIXED_NOW);
       ticket.pullDomainEvents();
 
-      ticket.transferTo(
-        'CAT-B',
-        TicketNumber.of('B', 7),
-        transferPolicy,
-        FIXED_NOW + 1,
-      );
+      ticket.transferTo('CAT-B', TicketNumber.of('B', 7), 'Pindah Kategori', FIXED_NOW + 1);
 
       const events = ticket.pullDomainEvents();
       expect(events.map((e) => e.type)).toEqual([
@@ -600,6 +568,7 @@ describe('QueueTicket aggregate', () => {
         'TICKET_TRANSFERRED',
       ]);
       expect(events[0]).toBeInstanceOf(TicketStatusChangedEvent);
+      // The label is the fixed `actionLabel` argument, not read from the flow.
       expect((events[0] as TicketStatusChangedEvent).actionLabel).toBe(
         'Pindah Kategori',
       );
@@ -609,28 +578,6 @@ describe('QueueTicket aggregate', () => {
       expect(transferred.toCategoryId).toBe('CAT-B');
       expect(transferred.fromTicketNumber).toBe('A-001');
       expect(transferred.toTicketNumber).toBe('B-007');
-    });
-
-    it('throws InvalidStateTransitionException when the active machine has no transfer edge', () => {
-      // StateMachine.DEFAULT has no CALLING -> WAITING edge.
-      const ticket = newTicket();
-      ticket.markCalling(1, policy, FIXED_NOW);
-      ticket.pullDomainEvents();
-
-      expect(() =>
-        ticket.transferTo(
-          'CAT-B',
-          TicketNumber.of('B', 1),
-          policy,
-          FIXED_NOW + 1,
-        ),
-      ).toThrow(InvalidStateTransitionException);
-
-      // State must be unchanged and no event recorded after a rejected transfer.
-      expect(ticket.currentStatus).toBe(TicketStatus.CALLING);
-      expect(ticket.categoryId).toBe('CAT-A');
-      expect(ticket.ticketNumber.formatted()).toBe('A-001');
-      expect(ticket.pendingEventCount).toBe(0);
     });
   });
 });

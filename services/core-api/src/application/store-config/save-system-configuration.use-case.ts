@@ -29,8 +29,6 @@ import {
   type RequeuePolicy,
   RequeuePolicyKind,
   requeuePolicyFromWire,
-  TransitionAction,
-  type TransitionActionValue,
 } from '../../domain/shared';
 import { AuditAction, toSnapshot } from '../../domain/audit';
 import { type RecordAuditEntryUseCase } from '../audit/record-audit-entry.use-case';
@@ -64,26 +62,27 @@ export interface WizardRoutingRuleDto {
 export interface WizardStateMachineDto {
   readonly states: readonly string[];
   /**
-   * The graph edges. `action` is what running the edge *does* (see
-   * {@link TransitionAction}) and is optional on the wire: a configuration saved
-   * before the field existed carries none, and every such edge means
-   * `UPDATE_STATUS` — the `StateTransitionRule` default. Making it required would
-   * 400 every full-save site that has not been taught the field yet.
+   * The graph edges: `from -> to + actionLabel`. An edge is purely a state move
+   * with a button label — what running it does is owned by the target state, and
+   * "pindah kategori" is a standalone counter action, not a per-edge declaration.
+   * A stale `action` key on a pre-existing JSONB row is ignored on read and
+   * dropped on the next save (no migration); the DTO never exposes it.
    */
   readonly transitions: readonly {
     from: string;
     to: string;
     actionLabel: string;
-    action?: string;
     /**
      * What a `-> WAITING` edge does to the WAITING queue's order — declared by
-     * the manager (the workflow is the source of truth, mirroring `action`).
-     * Optional on the wire: a configuration saved before the field existed
-     * carries none, and every such edge means `KEEP` — `requeuePolicyFromWire`
-     * recovers `undefined` to the default. A non-KEEP policy is allowed ONLY on
-     * an `UPDATE_STATUS` edge whose `to === WAITING` (validated pre-tx below);
-     * a `TRANSFER_CATEGORY` edge re-issues the per-category number and is left
-     * at KEEP.
+     * the manager (the workflow is the source of truth). Optional on the wire: a
+     * configuration saved before the field existed carries none, and every such
+     * edge means `KEEP` — `requeuePolicyFromWire` recovers `undefined` to the
+     * default. A non-KEEP policy is allowed ONLY on an edge whose
+     * `to === WAITING` (validated pre-tx below): every `-> WAITING` edge is a
+     * re-queue now ("pindah kategori" is a standalone counter action, not a flow
+     * edge), so the policy applies to any of them, and a policy on a
+     * non-WAITING target would never fire (`returnToQueue` runs only for
+     * `-> WAITING`).
      */
     requeuePolicy?: { kind: string; n?: number | null };
   }[];
@@ -362,63 +361,24 @@ export class SaveSystemConfigurationUseCase {
     const newCategories = this.buildCategories(command.categories);
     const codeToId = new Map(newCategories.map((c) => [c.code, c.id.value]));
     const newRules = this.buildRoutingRules(command.routingRules, codeToId);
-    // Transfer-target cross-check (anti-corruption): a `TRANSFER_CATEGORY` edge
-    // must target WAITING. `StateTransitionRule` cannot enforce it — the check
-    // needs `TicketStatus` from the Queue context, and a Store-Config VO must not
-    // reach across the boundary (DIP) — so it belongs here, where the Queue
-    // context is already an allowed import (categories).
-    //
-    // This is a rule about what the manager may DECLARE, not an inference about
-    // what an edge means: a category move re-issues the ticket's per-category
-    // number, and a fresh `B-001` describes a ticket nobody has served, so the
-    // states that mean "being served" cannot describe it. Declaring
-    // `CALLING -> SERVING` a category move would otherwise produce a SERVING
-    // ticket with no `servedAt` and no counter — invisible on every panel, with
-    // its QUE-26 service-time row silently lost. Refused at save time, so no
-    // flow can reach the counter in that shape.
-    //
-    // **Four sites depend on this holding**, none of which re-check it:
-    // `CallNextTicketUseCase` runs `WAITING -> CALLING` unguarded (disjoint from
-    // any transfer edge only because of this rule), and the caller panel's
-    // counter-level call-next split, its `CALLING -> CALLING` re-announce
-    // hand-off, and its skipped-list re-call detection all assume a
-    // `TRANSFER_CATEGORY` edge cannot be one of theirs. See
-    // `application/queue/declared-transition-action.ts` — relax this and revisit
-    // all four, because nothing will fail on its own.
-    for (const rule of stateMachine.transitions) {
-      if (rule.action === TransitionAction.TRANSFER_CATEGORY && rule.to !== TicketStatus.WAITING) {
-        throw new InvalidValueObjectException(
-          `transition '${rule.from}'->'${rule.to}' is declared a category transfer, ` +
-            `which must return the ticket to '${TicketStatus.WAITING}'`,
-        );
-      }
-    }
     // Re-queue position policy cross-check (anti-corruption): a non-KEEP
-    // `requeuePolicy` is allowed ONLY on an `UPDATE_STATUS` edge whose
-    // `to === WAITING`. `StateTransitionRule` cannot enforce it — the check
-    // needs `TicketStatus` from the Queue context, and a Store-Config VO must
-    // not reach across the boundary (DIP) — so it belongs here, where the Queue
-    // context is already an allowed import (categories). Mirrors the
-    // TRANSFER_CATEGORY-must-target-WAITING rule above.
+    // `requeuePolicy` is allowed ONLY on an edge whose `to === WAITING`.
+    // `StateTransitionRule` cannot enforce it — the check needs `TicketStatus`
+    // from the Queue context, and a Store-Config VO must not reach across the
+    // boundary (DIP) — so it belongs here, where the Queue context is already an
+    // allowed import (categories).
     //
     // This is a rule about what the manager may DECLARE, not an inference about
-    // what an edge means: a re-queue policy on a `TRANSFER_CATEGORY` edge would
-    // race the category re-issue (which keeps the original ordering slot, see
-    // `QueueTicket.transferTo`), and a re-queue policy on a non-WAITING target
-    // would never fire (`returnToQueue` runs only for `-> WAITING`). Refused at
-    // save time, so no flow reaches the counter with a re-queue policy the
-    // runtime ignores.
+    // what an edge means: a re-queue policy on a non-WAITING target would never
+    // fire (`returnToQueue` runs only for `-> WAITING`), so a flow that declared
+    // one would carry a policy the runtime silently ignores. Refused at save
+    // time, so no flow reaches the counter with a re-queue policy the runtime
+    // ignores. (Every `-> WAITING` edge is a re-queue — "Pindah Kategori" is a
+    // standalone counter action, not a flow edge; see `StateTransitionRule`.)
     for (const rule of stateMachine.transitions) {
       const policy: RequeuePolicy = rule.requeuePolicy;
       if (policy.kind === RequeuePolicyKind.KEEP) {
         continue;
-      }
-      if (rule.action !== TransitionAction.UPDATE_STATUS) {
-        throw new InvalidValueObjectException(
-          `transition '${rule.from}'->'${rule.to}' declares a re-queue policy ` +
-            `('${policy.kind}') but is not a plain status change ` +
-            `(action='${rule.action}'); re-queue policies apply only to UPDATE_STATUS edges`,
-        );
       }
       if (rule.to !== TicketStatus.WAITING) {
         throw new InvalidValueObjectException(
@@ -652,18 +612,13 @@ export class SaveSystemConfigurationUseCase {
   private buildStateMachine(dto: WizardStateMachineDto): StateMachine {
     const schema = StateSchema.of([...dto.states]);
     const rules = dto.transitions.map((t) =>
-      // `action` and `requeuePolicy` arrive as unvalidated wire values. The cast
-      // asserts nothing the VO does not itself check — `StateTransitionRule.of`
-      // rejects any `action` outside the enum (→ 400) and recovers `undefined`
-      // to `UPDATE_STATUS`; `requeuePolicyFromWire` recovers `undefined` to KEEP
-      // (the single backward-compat boundary) and validates a BACK_N's `n`.
-      StateTransitionRule.of(
-        t.from,
-        t.to,
-        t.actionLabel,
-        t.action as TransitionActionValue | undefined,
-        requeuePolicyFromWire(t.requeuePolicy),
-      ),
+      // An edge is purely `from -> to + actionLabel` plus an optional
+      // `requeuePolicy` on a `-> WAITING` edge. A stale `action` key on a
+      // pre-existing JSONB row is ignored (the DTO never exposes it) and dropped
+      // on the next save — no migration. `requeuePolicyFromWire` recovers
+      // `undefined` to KEEP (the single backward-compat boundary) and validates
+      // a BACK_N's `n`.
+      StateTransitionRule.of(t.from, t.to, t.actionLabel, requeuePolicyFromWire(t.requeuePolicy)),
     );
     // Per-state editable descriptions (intrinsic per-state metadata, part of the
     // state-machine definition). `StateDescriptions.of` is permissive on a

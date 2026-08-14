@@ -54,14 +54,14 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
     expect(callNextBtn).toBeInTheDocument();
     expect(callNextBtn).toBeDisabled();
     // Edges from CALLING: → SERVING (serve) + → SKIPPED (skip).
-    expect(screen.getByTestId('action-update-status-SERVING')).toHaveTextContent('Mulai Melayani');
-    expect(screen.getByTestId('action-update-status-SKIPPED')).toHaveTextContent('Lewati / Absen');
+    expect(screen.getByTestId('action-status-SERVING')).toHaveTextContent('Mulai Melayani');
+    expect(screen.getByTestId('action-status-SKIPPED')).toHaveTextContent('Lewati / Absen');
     // "Panggil Lagi" is a fixed affordance shown only while a ticket is CALLING
     // (re-announce — distinct from recall, which is the SKIPPED → CALLING edge).
     expect(screen.getByTestId('action-reannounce')).toHaveTextContent('Panggil Lagi');
     // No complete/recall from CALLING.
-    expect(screen.queryByTestId('action-update-status-COMPLETED')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('action-update-status-CALLING')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('action-status-COMPLETED')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('action-status-CALLING')).not.toBeInTheDocument();
   });
 
   it('renders Selesai Layan when the active ticket is SERVING', () => {
@@ -69,8 +69,8 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
     render(
       <ActionControls api={api} bound={bound} active={ticket('SERVING')} workflow={PRD_DEFAULT_WORKFLOW} />,
     );
-    expect(screen.getByTestId('action-update-status-COMPLETED')).toHaveTextContent('Selesai Layan');
-    expect(screen.queryByTestId('action-update-status-SERVING')).not.toBeInTheDocument();
+    expect(screen.getByTestId('action-status-COMPLETED')).toHaveTextContent('Selesai Layan');
+    expect(screen.queryByTestId('action-status-SERVING')).not.toBeInTheDocument();
     // Panggil Lagi is only for CALLING.
     expect(screen.queryByTestId('action-reannounce')).not.toBeInTheDocument();
   });
@@ -83,7 +83,7 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
     const api = makeApi();
     render(<ActionControls api={api} bound={bound} active={null} workflow={PRD_DEFAULT_WORKFLOW} />);
     expect(screen.queryByTestId('action-reannounce')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('action-update-status-CALLING')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('action-status-CALLING')).not.toBeInTheDocument();
   });
 
   it('shows only Panggil Berikutnya when there is no active ticket', () => {
@@ -93,7 +93,7 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
     expect(callNextBtn).toBeInTheDocument();
     // No active ticket → call-next is enabled (the counter is free to call).
     expect(callNextBtn).not.toBeDisabled();
-    expect(screen.queryByTestId('action-update-status-SERVING')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('action-status-SERVING')).not.toBeInTheDocument();
     expect(screen.queryByTestId('action-reannounce')).not.toBeInTheDocument();
   });
 
@@ -122,10 +122,10 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
     render(
       <ActionControls api={api2} bound={bound} active={ticket('CALLING')} workflow={PRD_DEFAULT_WORKFLOW} />,
     );
-    await userEvent.click(screen.getByTestId('action-update-status-SERVING'));
+    await userEvent.click(screen.getByTestId('action-status-SERVING'));
     expect(api2.applyTransition).toHaveBeenCalledWith('t1', 'SERVING', 1);
 
-    await userEvent.click(screen.getByTestId('action-update-status-SKIPPED'));
+    await userEvent.click(screen.getByTestId('action-status-SKIPPED'));
     expect(api2.applyTransition).toHaveBeenCalledWith('t1', 'SKIPPED', 1);
   });
 
@@ -152,48 +152,19 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
     expect(api2.callNext).not.toHaveBeenCalled();
   });
 
-  it('invokes transfer with a target category differing from the active ticket category', async () => {
-    const workflow = workflowActions(
-      edge('CALLING', 'SERVING', 'Mulai Melayani', 'UPDATE_STATUS'),
-      edge('CALLING', 'WAITING', 'Pindah Kategori', 'TRANSFER_CATEGORY'),
-    );
+  it('offers Pindah Kategori as a standalone action on the active ticket (FR-CLR-03)', async () => {
+    // Transfer is no longer a flow edge — it is a fixed action on the active
+    // ticket, offered while the counter serves another category. The flow here
+    // has only a status-change edge; the transfer button comes from the binding.
+    const workflow = workflowActions(edge('CALLING', 'SERVING', 'Mulai Melayani'));
     const api = makeApi();
     render(<ActionControls api={api} bound={bound} active={ticket('CALLING', 'cat-a')} workflow={workflow} />);
-    const transferBtn = screen.getByTestId('action-transfer-category-WAITING');
+    const transferBtn = screen.getByTestId('action-transfer');
     expect(transferBtn).toHaveTextContent('Pindah Kategori');
+    // One other category on this counter → a direct button (nothing to choose).
     await userEvent.click(transferBtn);
-    // The target is the first assigned category that isn't the active one.
     expect(api.transfer).toHaveBeenCalledWith('t1', 'cat-b');
-  });
-
-  it('guards against double-fire while a command is pending', async () => {
-    let resolveServe: (() => void) | undefined;
-    const api = makeApi({
-      applyTransition: vi.fn(() => new Promise<void>((r) => (resolveServe = r))),
-    });
-    render(
-      <ActionControls api={api} bound={bound} active={ticket('CALLING')} workflow={PRD_DEFAULT_WORKFLOW} />,
-    );
-    const serveBtn = screen.getByTestId('action-update-status-SERVING');
-    await userEvent.click(serveBtn);
-    expect(api.applyTransition).toHaveBeenCalledTimes(1);
-    // While pending the button is disabled (double-tap must not fire twice).
-    expect(serveBtn).toBeDisabled();
-    await userEvent.click(serveBtn);
-    expect(api.applyTransition).toHaveBeenCalledTimes(1);
-    resolveServe!();
-    expect(await screen.findByTestId('action-update-status-SERVING')).not.toBeDisabled();
-  });
-
-  it('surfaces an inline error when a command fails', async () => {
-    const api = makeApi({
-      applyTransition: vi.fn(() => Promise.reject(new Error('transisi ilegal'))),
-    });
-    render(
-      <ActionControls api={api} bound={bound} active={ticket('CALLING')} workflow={PRD_DEFAULT_WORKFLOW} />,
-    );
-    await userEvent.click(screen.getByTestId('action-update-status-SERVING'));
-    expect(await screen.findByText(/transisi ilegal/i)).toBeInTheDocument();
+    expect(api.applyTransition).not.toHaveBeenCalled();
   });
 
   it('shows a chooser for transfer when ≥2 other categories and fires the chosen one', async () => {
@@ -207,19 +178,19 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
         { id: 'cat-c', code: 'C', name: 'Informasi' },
       ],
     };
-    const workflow = workflowActions(edge('CALLING', 'WAITING', 'Pindah Kategori', 'TRANSFER_CATEGORY'));
+    const workflow = workflowActions(edge('CALLING', 'SERVING', 'Mulai Melayani'));
     const api = makeApi();
     render(<ActionControls api={api} bound={multiBound} active={ticket('CALLING', 'cat-a')} workflow={workflow} />);
-    const transferBtn = screen.getByTestId('action-transfer-category-WAITING');
+    const transferBtn = screen.getByTestId('action-transfer');
     expect(transferBtn).toHaveTextContent('Pindah Kategori');
     // The toggle programmatically points at the chooser it controls (QUE-40 AC4).
     expect(transferBtn).toHaveAttribute('aria-expanded', 'false');
     expect(transferBtn).toHaveAttribute('aria-controls');
     const controlsId = transferBtn.getAttribute('aria-controls')!;
     // No chooser until toggled open.
-    expect(screen.queryByTestId('action-transfer-category-WAITING-chooser')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('action-transfer-chooser')).not.toBeInTheDocument();
     await userEvent.click(transferBtn);
-    const chooser = await screen.findByTestId('action-transfer-category-WAITING-chooser');
+    const chooser = await screen.findByTestId('action-transfer-chooser');
     // The chooser's id matches the toggle's aria-controls, and it is a labelled group.
     expect(chooser).toHaveAttribute('id', controlsId);
     expect(chooser).toHaveAttribute('role', 'group');
@@ -228,54 +199,82 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
     expect(chooser).toHaveTextContent('Kasir');
     expect(chooser).toHaveTextContent('Informasi');
     expect(chooser).not.toHaveTextContent('Customer Service');
-    await userEvent.click(screen.getByTestId('action-transfer-category-WAITING-target-cat-c'));
+    await userEvent.click(screen.getByTestId('action-transfer-target-cat-c'));
     expect(api.transfer).toHaveBeenCalledWith('t1', 'cat-c');
   });
 
-  it('disables transfer and fires nothing when no other category is available', async () => {
+  it('hides Pindah Kategori entirely when the counter serves no other category', async () => {
+    // A single-category counter would show a button that can never be tapped, so
+    // the cluster is hidden instead of a perpetually-disabled button.
     const singleBound: BoundCounter = {
       counterId: 3,
       counterName: 'Loket 3',
       assignedCategoryIds: ['cat-a'],
       assignedCategories: [{ id: 'cat-a', code: 'A', name: 'Customer Service' }],
     };
-    const workflow = workflowActions(edge('CALLING', 'WAITING', 'Pindah Kategori', 'TRANSFER_CATEGORY'));
+    const workflow = workflowActions(edge('CALLING', 'SERVING', 'Mulai Melayani'));
     const api = makeApi();
     render(<ActionControls api={api} bound={singleBound} active={ticket('CALLING', 'cat-a')} workflow={workflow} />);
-    const transferBtn = screen.getByTestId('action-transfer-category-WAITING');
-    expect(transferBtn).toBeDisabled();
-    await userEvent.click(transferBtn);
-    expect(api.transfer).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('action-transfer')).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Pindah kategori' })).not.toBeInTheDocument();
+  });
+
+  it('guards against double-fire while a command is pending', async () => {
+    let resolveServe: (() => void) | undefined;
+    const api = makeApi({
+      applyTransition: vi.fn(() => new Promise<void>((r) => (resolveServe = r))),
+    });
+    render(
+      <ActionControls api={api} bound={bound} active={ticket('CALLING')} workflow={PRD_DEFAULT_WORKFLOW} />,
+    );
+    const serveBtn = screen.getByTestId('action-status-SERVING');
+    await userEvent.click(serveBtn);
+    expect(api.applyTransition).toHaveBeenCalledTimes(1);
+    // While pending the button is disabled (double-tap must not fire twice).
+    expect(serveBtn).toBeDisabled();
+    await userEvent.click(serveBtn);
+    expect(api.applyTransition).toHaveBeenCalledTimes(1);
+    resolveServe!();
+    expect(await screen.findByTestId('action-status-SERVING')).not.toBeDisabled();
+  });
+
+  it('surfaces an inline error when a command fails', async () => {
+    const api = makeApi({
+      applyTransition: vi.fn(() => Promise.reject(new Error('transisi ilegal'))),
+    });
+    render(
+      <ActionControls api={api} bound={bound} active={ticket('CALLING')} workflow={PRD_DEFAULT_WORKFLOW} />,
+    );
+    await userEvent.click(screen.getByTestId('action-status-SERVING'));
+    expect(await screen.findByText(/transisi ilegal/i)).toBeInTheDocument();
   });
 
   it('fires applyTransition for a custom-target transition (QUE-33)', async () => {
     const workflow = workflowActions(
-      edge('SERVING', 'PREPARING', 'Siapkan Dokumen', 'UPDATE_STATUS'),
-      edge('SERVING', 'COMPLETED', 'Selesai Layan', 'UPDATE_STATUS'),
+      edge('SERVING', 'PREPARING', 'Siapkan Dokumen'),
+      edge('SERVING', 'COMPLETED', 'Selesai Layan'),
     );
     const api = makeApi();
     render(<ActionControls api={api} bound={bound} active={ticket('SERVING')} workflow={workflow} />);
     // A custom target is no different from a canonical one here: same endpoint,
     // a functional button labelled with the transition's own actionLabel.
-    const customBtn = screen.getByTestId('action-update-status-PREPARING');
+    const customBtn = screen.getByTestId('action-status-PREPARING');
     expect(customBtn).toHaveTextContent('Siapkan Dokumen');
     expect(customBtn).not.toBeDisabled();
     await userEvent.click(customBtn);
     expect(api.applyTransition).toHaveBeenCalledWith('t1', 'PREPARING', 1);
     // Its canonical sibling (COMPLETED) is offered the same way.
-    expect(screen.getByTestId('action-update-status-COMPLETED')).not.toBeDisabled();
+    expect(screen.getByTestId('action-status-COMPLETED')).not.toBeDisabled();
   });
 
   it('guards against double-fire on a custom-target transition (QUE-33)', async () => {
-    const workflow = workflowActions(
-      edge('SERVING', 'PREPARING', 'Siapkan Dokumen', 'UPDATE_STATUS'),
-    );
+    const workflow = workflowActions(edge('SERVING', 'PREPARING', 'Siapkan Dokumen'));
     let resolveTransition: (() => void) | undefined;
     const api = makeApi({
       applyTransition: vi.fn(() => new Promise<void>((r) => (resolveTransition = r))),
     });
     render(<ActionControls api={api} bound={bound} active={ticket('SERVING')} workflow={workflow} />);
-    const btn = screen.getByTestId('action-update-status-PREPARING');
+    const btn = screen.getByTestId('action-status-PREPARING');
     await userEvent.click(btn);
     expect(api.applyTransition).toHaveBeenCalledTimes(1);
     // While pending the button is disabled (double-tap must not fire twice).
@@ -283,7 +282,7 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
     await userEvent.click(btn);
     expect(api.applyTransition).toHaveBeenCalledTimes(1);
     resolveTransition!();
-    expect(await screen.findByTestId('action-update-status-PREPARING')).not.toBeDisabled();
+    expect(await screen.findByTestId('action-status-PREPARING')).not.toBeDisabled();
   });
 
   it('labels the call-next button with the admin-configured WAITING→CALLING actionLabel (FR-CLR-02)', () => {
@@ -291,8 +290,8 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
     // pulls a WAITING ticket and the aggregate validates that exact edge), so
     // its label is the admin's wording for that edge — not a hardcoded literal.
     const workflow = workflowActions(
-      edge('WAITING', 'CALLING', 'Panggil Tiket Baru', 'UPDATE_STATUS'),
-      edge('CALLING', 'SERVING', 'Mulai Melayani', 'UPDATE_STATUS'),
+      edge('WAITING', 'CALLING', 'Panggil Tiket Baru'),
+      edge('CALLING', 'SERVING', 'Mulai Melayani'),
     );
     const api = makeApi();
     render(<ActionControls api={api} bound={bound} active={null} workflow={workflow} />);
@@ -304,7 +303,7 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
     // WAITING → CALLING edge means the manager removed that step. call-next
     // would 409 on the backend anyway, so the button must not be offered —
     // previously it rendered with a hardcoded fallback label.
-    const workflow = workflowActions(edge('CALLING', 'SERVING', 'Mulai Melayani', 'UPDATE_STATUS'));
+    const workflow = workflowActions(edge('CALLING', 'SERVING', 'Mulai Melayani'));
     const api = makeApi();
     render(<ActionControls api={api} bound={bound} active={null} workflow={workflow} />);
     expect(screen.queryByRole('button', { name: 'Panggil Berikutnya' })).not.toBeInTheDocument();
@@ -342,7 +341,7 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
     const api = makeApi();
     render(<ActionControls api={api} bound={bound} active={ticket('SERVING')} workflow={workflow} />);
 
-    const pullBack = screen.getByTestId('action-update-status-CALLING');
+    const pullBack = screen.getByTestId('action-status-CALLING');
     expect(pullBack).toHaveTextContent('Panggil Ulang Dari Layanan');
     expect(pullBack).not.toBeDisabled();
     expect(screen.queryByTestId('action-unroutable-CALLING')).not.toBeInTheDocument();
@@ -350,14 +349,16 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
     await userEvent.click(pullBack);
     expect(api.applyTransition).toHaveBeenCalledWith('t1', 'CALLING', 1);
     // Its sibling edge is untouched.
-    expect(screen.getByTestId('action-update-status-COMPLETED')).not.toBeDisabled();
+    expect(screen.getByTestId('action-status-COMPLETED')).not.toBeDisabled();
   });
 
   it('sends a re-queue edge as a status change, not as the category move it was read as', async () => {
     // The manager's report, end to end through the panel: `CALLING → WAITING`
     // labelled "Kembalikan ke Antrian" rendered a "Pindah Kategori" button that
     // demanded a destination category — on a counter serving one category it read
-    // "(tidak ada kategori lain)" and could not be tapped at all.
+    // "(tidak ada kategori lain)" and could not be tapped at all. Now every edge
+    // is a plain status change, and Pindah Kategori is a separate standalone
+    // action that this single-category counter does not even show.
     const workflow = workflowActions(edge('CALLING', 'WAITING', 'Kembalikan ke Antrian'));
     const api = makeApi();
     const singleCategory: BoundCounter = {
@@ -369,7 +370,7 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
       <ActionControls api={api} bound={singleCategory} active={ticket('CALLING')} workflow={workflow} />,
     );
 
-    const requeue = screen.getByTestId('action-update-status-WAITING');
+    const requeue = screen.getByTestId('action-status-WAITING');
     expect(requeue).toHaveTextContent('Kembalikan ke Antrian');
     expect(requeue).not.toHaveTextContent(/kategori lain/i);
     expect(requeue).not.toBeDisabled();
@@ -390,8 +391,8 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
     render(
       <ActionControls api={api} bound={bound} active={ticket('CALLING')} workflow={PRD_DEFAULT_WORKFLOW} />,
     );
-    await userEvent.click(screen.getByTestId('action-update-status-SERVING'));
-    const skipBtn = screen.getByTestId('action-update-status-SKIPPED');
+    await userEvent.click(screen.getByTestId('action-status-SERVING'));
+    const skipBtn = screen.getByTestId('action-status-SKIPPED');
     expect(skipBtn).toBeDisabled();
     expect(screen.getByTestId('action-reannounce')).toBeDisabled();
     // The blocked button keeps its own label — it is not the one running.
@@ -399,7 +400,7 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
     await userEvent.click(skipBtn);
     expect(api.applyTransition).toHaveBeenCalledTimes(1); // still only the serve
     resolveServe!();
-    expect(await screen.findByTestId('action-update-status-SKIPPED')).not.toBeDisabled();
+    expect(await screen.findByTestId('action-status-SKIPPED')).not.toBeDisabled();
   });
 
   it('says so when the guard turns a same-tick tap away', async () => {
@@ -413,8 +414,8 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
     render(
       <ActionControls api={api} bound={bound} active={ticket('CALLING')} workflow={PRD_DEFAULT_WORKFLOW} />,
     );
-    const serveBtn = screen.getByTestId('action-update-status-SERVING');
-    const skipBtn = screen.getByTestId('action-update-status-SKIPPED');
+    const serveBtn = screen.getByTestId('action-status-SERVING');
+    const skipBtn = screen.getByTestId('action-status-SKIPPED');
     // Both taps inside ONE batch: React has not re-rendered in between, so the
     // `disabled` from the test above has not applied yet and the second tap
     // reaches the runner's synchronous ref guard. (Two separate `fireEvent`s
@@ -438,12 +439,12 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
     // without changing the status, and the endpoint hard-requires CALLING. When
     // the manager draws that edge it becomes a flow action with their wording.
     const workflow = workflowActions(
-      edge('CALLING', 'CALLING', 'Panggil Sekali Lagi', 'UPDATE_STATUS'),
-      edge('CALLING', 'SERVING', 'Mulai Melayani', 'UPDATE_STATUS'),
+      edge('CALLING', 'CALLING', 'Panggil Sekali Lagi'),
+      edge('CALLING', 'SERVING', 'Mulai Melayani'),
     );
     const api = makeApi();
     render(<ActionControls api={api} bound={bound} active={ticket('CALLING')} workflow={workflow} />);
-    const btn = screen.getByTestId('action-update-status-CALLING');
+    const btn = screen.getByTestId('action-status-CALLING');
     expect(btn).toHaveTextContent('Panggil Sekali Lagi');
     expect(screen.getByRole('group', { name: 'Aksi sesuai alur status' })).toContainElement(btn);
     // The built-in utility button stands down rather than duplicating the action
@@ -460,11 +461,10 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
   });
 
   it('disables a no-op self-loop rather than offering a button that changes nothing', async () => {
-    // Every self-loop except WAITING → WAITING (category move) and
-    // CALLING → CALLING (re-announce) is short-circuited by the aggregate: a 200
-    // that changes nothing. Shown disabled, with its own reason.
+    // Every self-loop except CALLING → CALLING (re-announce) is short-circuited by
+    // the aggregate: a 200 that changes nothing. Shown disabled, with its reason.
     const workflow = workflowActions(
-      edge('SERVING', 'SERVING', 'Lanjut Melayani', 'UPDATE_STATUS', 'NO_STATUS_CHANGE'),
+      edge('SERVING', 'SERVING', 'Lanjut Melayani', 'NO_STATUS_CHANGE'),
       edge('SERVING', 'COMPLETED', 'Selesai Layan'),
     );
     const api = makeApi();
@@ -478,18 +478,18 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
     // 200-and-do-nothing request is what the reason exists to prevent.
     await userEvent.click(selfLoop);
     expect(api.applyTransition).not.toHaveBeenCalled();
-    expect(screen.getByTestId('action-update-status-COMPLETED')).not.toBeDisabled();
+    expect(screen.getByTestId('action-status-COMPLETED')).not.toBeDisabled();
   });
 
-  it('groups the flow buttons apart from the reannounce utility', () => {
+  it('groups the flow buttons apart from the reannounce utility and the transfer cluster', () => {
     const api = makeApi();
     render(
       <ActionControls api={api} bound={bound} active={ticket('CALLING')} workflow={PRD_DEFAULT_WORKFLOW} />,
     );
     // The flow cluster holds exactly the outgoing edges of CALLING…
     const flow = screen.getByRole('group', { name: 'Aksi sesuai alur status' });
-    expect(flow).toContainElement(screen.getByTestId('action-update-status-SERVING'));
-    expect(flow).toContainElement(screen.getByTestId('action-update-status-SKIPPED'));
+    expect(flow).toContainElement(screen.getByTestId('action-status-SERVING'));
+    expect(flow).toContainElement(screen.getByTestId('action-status-SKIPPED'));
     // …and because this flow has no CALLING → CALLING self-loop, the built-in
     // "Panggil Lagi" fallback applies (the PRD §7 default, i.e. every existing
     // install). It changes no status, so it sits in its own utility group and
@@ -498,5 +498,9 @@ describe('ActionControls (FR-CLR-02 / QUE-20)', () => {
     const utilities = screen.getByRole('group', { name: /Aksi tambahan/ });
     expect(utilities).toContainElement(screen.getByTestId('action-reannounce'));
     expect(screen.getByTestId('action-reannounce')).toHaveTextContent('Panggil Lagi');
+    // Pindah Kategori is its own standalone group, not part of the flow cluster.
+    expect(flow).not.toContainElement(screen.getByTestId('action-transfer'));
+    const transfer = screen.getByRole('group', { name: 'Pindah kategori' });
+    expect(transfer).toContainElement(screen.getByTestId('action-transfer'));
   });
 });

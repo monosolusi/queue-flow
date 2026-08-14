@@ -1,6 +1,5 @@
 import type { TicketStateDto } from '../api/types';
 import { isRunnable, type WorkflowAction } from '../lib/workflow-actions';
-import type { BoundCounter } from '../state/counter-binding';
 import { TicketRowActions, runnableRowActions } from './TicketRowActions';
 
 export interface SkippedQueueListProps {
@@ -9,9 +8,6 @@ export interface SkippedQueueListProps {
    *  server's action surface. In the PRD §7 default flow that is "Panggil Ulang"
    *  (SKIPPED → CALLING); a manager may configure more. */
   readonly actions?: readonly WorkflowAction[];
-  /** The counter binding, for the transfer destinations. Required to render
-   *  a category-move action. */
-  readonly bound?: BoundCounter;
   /** Key of the command currently in flight (see `actionRunKey`), or `null`. */
   readonly pending?: string | null;
   /** Message from the last failed skipped-list command. */
@@ -23,11 +19,7 @@ export interface SkippedQueueListProps {
    *  {@link error}, which reports a failed command, this explains why the rows
    *  have no buttons whatsoever. */
   readonly workflowError?: string | null;
-  readonly onAction?: (
-    ticket: TicketStateDto,
-    action: WorkflowAction,
-    targetCategoryId?: string,
-  ) => void;
+  readonly onAction?: (ticket: TicketStateDto, action: WorkflowAction) => void;
 }
 
 /** How the list explains itself above the rows. */
@@ -51,7 +43,7 @@ const recallHint = (actionLabel: string) =>
 const OTHER_ACTIONS_HINT =
   'Tiket yang tidak hadir saat dipanggil. Pilih tindakan yang tersedia di tombol tiap tiket.';
 /** Transitions are configured but none is executable from the counter (e.g. a
- *  self-loop that would change nothing, or a category move with nowhere to go). */
+ *  self-loop that would change nothing). */
 const UNRUNNABLE_ACTIONS_HINT =
   'Lanjutan dari status Dilewati sudah diatur di alur status, tetapi belum bisa dijalankan ' +
   'dari panel loket.';
@@ -84,36 +76,26 @@ const FLOW_UNREAD_HINT =
  * that no button offers — the manager read the old unconditional hint, found no
  * button, and asked why the description says a skipped ticket can be re-called.
  *
- * Presentation only: it reads the `action` the manager declared for each edge and
- * derives no routing of its own.
+ * Presentation only: it derives no routing of its own.
  */
 function skippedListHint(
-  /** What the rows actually render — `published` minus what this list dropped. */
+  /** What the rows actually render. */
   rendered: readonly WorkflowAction[],
   /** What the flow published for SKIPPED. Only a claim ABOUT THE FLOW may be
    *  made from this one; everything describing buttons reads `rendered`. */
   published: readonly WorkflowAction[],
   workflowError: string | null,
-  /** Whether a category move has anywhere to go: `TransferAction` renders a
-   *  destination-less transfer disabled, so on a single-category counter an edge
-   *  declared "Pindah Kategori" is a button that cannot be tapped. */
-  transferPossible: boolean,
 ): SkippedListHint {
   // Checked first: an unread surface is indistinguishable from an empty one by
   // its actions alone, and only the workspace knows which happened.
   if (workflowError !== null && published.length === 0) {
     return { text: FLOW_UNREAD_HINT, tone: 'notice' };
   }
-  const tappable = (a: WorkflowAction) =>
-    isRunnable(a) && (a.action !== 'TRANSFER_CATEGORY' || transferPossible);
-  // The re-call: a plain status change back into CALLING. Found by its target and
-  // its action, not by a resolved command name — core-api no longer names
-  // commands, and this list only ever holds SKIPPED tickets, so `→ CALLING` from
-  // here IS "panggil ulang". The action check is not redundant: a manager could
-  // declare that same edge a category move, which re-calls nothing.
-  const recall = rendered.find(
-    (a) => a.to === 'CALLING' && a.action === 'UPDATE_STATUS' && tappable(a),
-  );
+  const tappable = (a: WorkflowAction) => isRunnable(a);
+  // The re-call: a plain status change back into CALLING. Found by its target
+  // alone — this list only ever holds SKIPPED tickets, so `→ CALLING` from here
+  // IS "panggil ulang".
+  const recall = rendered.find((a) => a.to === 'CALLING' && tappable(a));
   if (recall) return { text: recallHint(recall.actionLabel), tone: 'muted' };
   if (rendered.some(tappable)) return { text: OTHER_ACTIONS_HINT, tone: 'muted' };
   // Configured, but nothing here can run it. Point at the per-button reasons
@@ -144,24 +126,18 @@ function skippedListHint(
 export function SkippedQueueList({
   tickets,
   actions = [],
-  bound,
   pending = null,
   error = null,
   notice = null,
   workflowError = null,
   onAction,
 }: SkippedQueueListProps) {
-  const runnable = runnableRowActions(actions, bound, onAction !== undefined);
+  const runnable = runnableRowActions(actions, onAction !== undefined);
   const actionable = runnable.length > 0;
-  // Every ticket in this bucket was called at this counter, so its category is
-  // one the counter serves: a second assigned category is exactly the condition
-  // under which `transferCandidates` can yield a destination for any row.
-  const transferPossible = (bound?.assignedCategoryIds.length ?? 0) > 1;
   // Two lists, deliberately: the wording about BUTTONS follows what the rows
-  // rendered (a transfer dropped for want of a binding leaves no button, so it
-  // must not leave a hint pointing at one), while the wording about the FLOW
-  // may only be derived from what the flow published.
-  const hint = skippedListHint(runnable, actions, workflowError, transferPossible);
+  // rendered, while the wording about the FLOW may only be derived from what the
+  // flow published.
+  const hint = skippedListHint(runnable, actions, workflowError);
 
   return (
     <section className="skipped-queue" aria-label="Tiket Dilewati">
@@ -197,7 +173,6 @@ export function SkippedQueueList({
                   <TicketRowActions
                     ticket={t}
                     actions={runnable}
-                    bound={bound}
                     pending={pending}
                     testIdStem="skipped-action"
                     onAction={onAction}

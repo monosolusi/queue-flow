@@ -35,7 +35,6 @@ import {
   DEFAULT_STATE_MACHINE,
   type NodeActionDto,
   type RequeuePolicyDto,
-  type TransitionActionType,
 } from '../api/types';
 import { HANDLE_IDS, getSelfLoopPath, type FlowEdgeData, type FlowNodeData } from '../lib/state-machine-flow';
 
@@ -75,21 +74,12 @@ export interface WorkflowHandlers {
   onDeleteState: (name: string) => void;
   onEditTransitionLabel: (edgeId: string, label: string) => void;
   /**
-   * Change what running the edge DOES (see {@link TransitionActionType}). Sits
-   * beside `onEditTransitionLabel` because the two are the same kind of edit —
-   * one names the button, the other says what it runs — and because the pair is
-   * the whole reason the backend no longer has to guess an edge's meaning from
-   * its endpoints.
-   */
-  onEditTransitionAction: (edgeId: string, action: TransitionActionType) => void;
-  /**
    * Change what a `→ WAITING` re-queue does to queue order (see
-   * {@link RequeuePolicyDto}). Sits beside `onEditTransitionAction` for the same
-   * reason: the edge declares it, and the panel lifts it through the same
-   * canvas-edge `data` path so `flowToGraph` captures it back. Only meaningful
-   * on an edge whose `to === 'WAITING'` AND `action === 'UPDATE_STATUS'`; the
-   * panel renders the control only then, and `validateCustomStateMachine`
-   * rejects a mis-configured edge at save.
+   * {@link RequeuePolicyDto}). The edge declares it, and the panel lifts it
+   * through the canvas-edge `data` path so `flowToGraph` captures it back. Only
+   * meaningful on an edge whose `to === 'WAITING'`; the panel renders the
+   * control only then, and `validateCustomStateMachine` rejects a mis-configured
+   * edge at save.
    */
   onEditTransitionRequeuePolicy: (edgeId: string, policy: RequeuePolicyDto) => void;
   onDeleteTransition: (edgeId: string) => void;

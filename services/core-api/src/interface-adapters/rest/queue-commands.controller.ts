@@ -98,9 +98,11 @@ export class QueueCommandsController {
    * target state meant something upstream had to decide which endpoint a given
    * `(from, to)` pair needed — a decision that cannot be derived from the pair,
    * and whose one rule for WAITING read every `X -> WAITING` edge as a category
-   * move. What runs is now read from the flow, not inferred: the only edges this
-   * endpoint refuses are the ones the manager declared `TRANSFER_CATEGORY`, which
-   * go to {@link transfer} because they need a destination category (400).
+   * move. An edge is now purely `from -> to + actionLabel`: what running it does
+   * is owned by the target state, and "pindah kategori" is a standalone counter
+   * action with its own endpoint ({@link transfer}), not a per-edge declaration.
+   * So this endpoint runs any edge the active flow allows, including a `-> WAITING`
+   * re-queue (number and category unchanged).
    */
   @Post(':ticketId/transition')
   transition(

@@ -69,7 +69,6 @@ import '@xyflow/react/dist/style.css';
 import {
   type StateMachineForm,
   DEFAULT_REQUEUE_POLICY,
-  DEFAULT_TRANSITION_ACTION,
   defaultStateMachineForm,
   graphSignature,
   reconcileStateNameRefs,
@@ -466,7 +465,7 @@ export function StateMachineWorkflow({
         source: from,
         target: to,
         type: 'transition',
-        data: { actionLabel: '', action: DEFAULT_TRANSITION_ACTION, requeuePolicy: DEFAULT_REQUEUE_POLICY },
+        data: { actionLabel: '', requeuePolicy: DEFAULT_REQUEUE_POLICY },
         // Carry the exact handles the manager dragged (which side → which
         // side) so the bezier routes through them — vertical when a top/bottom
         // handle was used. React Flow supplies `sourceHandle`/`targetHandle` on
@@ -570,7 +569,7 @@ export function StateMachineWorkflow({
           source: decision.source,
           target: decision.source,
           type: 'transition',
-          data: { actionLabel: '', action: DEFAULT_TRANSITION_ACTION, requeuePolicy: DEFAULT_REQUEUE_POLICY },
+          data: { actionLabel: '', requeuePolicy: DEFAULT_REQUEUE_POLICY },
           // Two DISTINCT adjacent sides (the dragged-from side + the next one
           // clockwise) so the loop has two real endpoints and `TransitionEdge`
           // arcs it around that corner, clear of the card.
@@ -669,22 +668,14 @@ export function StateMachineWorkflow({
         );
         commit(nodes, nextEdges);
       },
-      // What the edge DOES. Mirrors `onEditTransitionLabel` exactly — both live
-      // on the edge's `data`, so both go through `commit` (the canvas is the
-      // source of truth for edge fields) rather than the form-only `lift` path
-      // the node-level actions use.
-      onEditTransitionAction: (edgeId, action) => {
-        const nextEdges = edges.map((e) =>
-          e.id === edgeId ? { ...e, data: { ...e.data, action } } : e,
-        );
-        commit(nodes, nextEdges);
-      },
       // What a `→ WAITING` re-queue does to queue order. Mirrors
-      // `onEditTransitionAction` exactly — same edge-`data` path, same `commit`
-      // (the canvas is the source of truth for edge fields). The panel passes a
-      // fully-formed policy; the BACK_N-default-`n` and drop-`n`-on-switch-away
-      // logic lives in the panel (it is a UI affordance, not a form-model
-      // invariant), so this handler is a plain field set.
+      // `onEditTransitionLabel` — both live on the edge's `data`, so both go
+      // through `commit` (the canvas is the source of truth for edge fields)
+      // rather than the form-only `lift` path the node-level actions use. The
+      // panel passes a fully-formed policy; the BACK_N-default-`n` and
+      // drop-`n`-on-switch-away logic lives in the panel (it is a UI
+      // affordance, not a form-model invariant), so this handler is a plain
+      // field set.
       onEditTransitionRequeuePolicy: (edgeId, policy) => {
         const nextEdges = edges.map((e) =>
           e.id === edgeId ? { ...e, data: { ...e.data, requeuePolicy: policy } } : e,
@@ -748,7 +739,7 @@ export function StateMachineWorkflow({
           source,
           target,
           type: 'transition',
-          data: { actionLabel: '', action: DEFAULT_TRANSITION_ACTION, requeuePolicy: DEFAULT_REQUEUE_POLICY },
+          data: { actionLabel: '', requeuePolicy: DEFAULT_REQUEUE_POLICY },
           sourceHandle: DEFAULT_SOURCE_HANDLE,
           targetHandle: DEFAULT_TARGET_HANDLE,
           markerEnd: EDGE_ARROW_MARKER,

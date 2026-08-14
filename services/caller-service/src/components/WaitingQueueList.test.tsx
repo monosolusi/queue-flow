@@ -4,18 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { WaitingQueueList } from './WaitingQueueList';
 import { ticketActionsFor } from '../lib/workflow-actions';
 import type { TicketStateDto, WorkflowActionsDto } from '../api/types';
-import type { BoundCounter } from '../state/counter-binding';
 import { PRD_DEFAULT_WORKFLOW, edge, workflowActions } from '../test/workflow-fixtures';
-
-const bound: BoundCounter = {
-  counterId: 1,
-  counterName: 'Loket 1',
-  assignedCategoryIds: ['cat-a', 'cat-b'],
-  assignedCategories: [
-    { id: 'cat-a', code: 'A', name: 'Customer Service' },
-    { id: 'cat-b', code: 'B', name: 'Kasir' },
-  ],
-};
 
 const tickets: readonly TicketStateDto[] = [
   { ticketId: 'w1', ticketNumber: 'A-002', categoryId: 'cat-a', status: 'WAITING', counterId: null },
@@ -24,9 +13,9 @@ const tickets: readonly TicketStateDto[] = [
 
 /** A manager-configured flow that gives waiting tickets their own steps. */
 const configured: WorkflowActionsDto = workflowActions(
-  edge('WAITING', 'CALLING', 'Panggil Berikutnya', 'UPDATE_STATUS'),
-  edge('WAITING', 'SKIPPED', 'Lewati / Absen', 'UPDATE_STATUS'),
-  edge('WAITING', 'BATAL', 'Batalkan Tiket', 'UPDATE_STATUS'),
+  edge('WAITING', 'CALLING', 'Panggil Berikutnya'),
+  edge('WAITING', 'SKIPPED', 'Lewati / Absen'),
+  edge('WAITING', 'BATAL', 'Batalkan Tiket'),
 );
 
 describe('WaitingQueueList (FR-CLR-02 — waiting actions follow the flow)', () => {
@@ -36,7 +25,6 @@ describe('WaitingQueueList (FR-CLR-02 — waiting actions follow the flow)', () 
         tickets={tickets}
         waitingCount={2}
         actions={ticketActionsFor(PRD_DEFAULT_WORKFLOW, 'WAITING')}
-        bound={bound}
         onAction={vi.fn()}
       />,
     );
@@ -53,7 +41,6 @@ describe('WaitingQueueList (FR-CLR-02 — waiting actions follow the flow)', () 
         tickets={tickets}
         waitingCount={2}
         actions={ticketActionsFor(configured, 'WAITING')}
-        bound={bound}
         onAction={onAction}
       />,
     );
@@ -68,7 +55,7 @@ describe('WaitingQueueList (FR-CLR-02 — waiting actions follow the flow)', () 
     await userEvent.click(screen.getByTestId('waiting-action-w2-BATAL'));
     expect(onAction).toHaveBeenCalledTimes(1);
     expect(onAction.mock.calls[0][0]).toMatchObject({ ticketId: 'w2' });
-    expect(onAction.mock.calls[0][1]).toMatchObject({ to: 'BATAL', action: 'UPDATE_STATUS' });
+    expect(onAction.mock.calls[0][1]).toMatchObject({ to: 'BATAL' });
   });
 
   it('disables every row while a command is in flight, marking the one running', () => {
@@ -81,7 +68,6 @@ describe('WaitingQueueList (FR-CLR-02 — waiting actions follow the flow)', () 
         tickets={tickets}
         waitingCount={2}
         actions={ticketActionsFor(configured, 'WAITING')}
-        bound={bound}
         pending="w1:WAITING->SKIPPED"
         onAction={vi.fn()}
       />,
@@ -101,71 +87,11 @@ describe('WaitingQueueList (FR-CLR-02 — waiting actions follow the flow)', () 
         tickets={tickets}
         waitingCount={2}
         actions={ticketActionsFor(configured, 'WAITING')}
-        bound={bound}
         notice="Tunggu perintah sebelumnya selesai."
         onAction={vi.fn()}
       />,
     );
     expect(screen.getByText('Tunggu perintah sebelumnya selesai.')).toBeInTheDocument();
-  });
-
-  it('offers the category move with the destinations this counter serves', async () => {
-    const onAction = vi.fn();
-    const withTransfer = workflowActions(
-      edge('WAITING', 'CALLING', 'Panggil Berikutnya', 'UPDATE_STATUS'),
-      edge('WAITING', 'WAITING', 'Pindah Kategori', 'TRANSFER_CATEGORY'),
-    );
-    render(
-      <WaitingQueueList
-        tickets={tickets}
-        waitingCount={2}
-        actions={ticketActionsFor(withTransfer, 'WAITING')}
-        bound={bound}
-        onAction={onAction}
-      />,
-    );
-    // One other category on this counter → a direct button, nothing to choose.
-    await userEvent.click(screen.getByTestId('waiting-action-w1-WAITING'));
-    expect(onAction).toHaveBeenCalledWith(
-      expect.objectContaining({ ticketId: 'w1' }),
-      expect.objectContaining({ action: 'TRANSFER_CATEGORY' }),
-      'cat-b',
-    );
-  });
-
-  it('expands a chooser when the counter serves ≥2 other categories', async () => {
-    const onAction = vi.fn();
-    const threeCategories: BoundCounter = {
-      ...bound,
-      assignedCategoryIds: ['cat-a', 'cat-b', 'cat-c'],
-      assignedCategories: [
-        ...bound.assignedCategories,
-        { id: 'cat-c', code: 'C', name: 'Informasi' },
-      ],
-    };
-    const withTransfer = workflowActions(edge('WAITING', 'WAITING', 'Pindah Kategori', 'TRANSFER_CATEGORY'));
-    render(
-      <WaitingQueueList
-        tickets={tickets}
-        waitingCount={2}
-        actions={ticketActionsFor(withTransfer, 'WAITING')}
-        bound={threeCategories}
-        onAction={onAction}
-      />,
-    );
-    await userEvent.click(screen.getByTestId('waiting-action-w1-WAITING'));
-    const chooser = await screen.findByTestId('waiting-action-w1-WAITING-chooser');
-    expect(chooser).toHaveAttribute('role', 'group');
-    expect(chooser).toHaveTextContent('Kasir');
-    expect(chooser).toHaveTextContent('Informasi');
-    // Each row owns its own chooser — opening w1's leaves w2 collapsed.
-    expect(screen.queryByTestId('waiting-action-w2-WAITING-chooser')).not.toBeInTheDocument();
-    await userEvent.click(screen.getByTestId('waiting-action-w1-WAITING-target-cat-c'));
-    expect(onAction).toHaveBeenCalledWith(
-      expect.objectContaining({ ticketId: 'w1' }),
-      expect.objectContaining({ action: 'TRANSFER_CATEGORY' }),
-      'cat-c',
-    );
   });
 
   it('surfaces a failed waiting-list command inline', () => {
@@ -174,7 +100,6 @@ describe('WaitingQueueList (FR-CLR-02 — waiting actions follow the flow)', () 
         tickets={tickets}
         waitingCount={2}
         actions={ticketActionsFor(configured, 'WAITING')}
-        bound={bound}
         error="transisi ilegal"
         onAction={vi.fn()}
       />,
@@ -194,7 +119,6 @@ describe('WaitingQueueList (FR-CLR-02 — waiting actions follow the flow)', () 
         tickets={[]}
         waitingCount={0}
         actions={ticketActionsFor(configured, 'WAITING')}
-        bound={bound}
         onAction={vi.fn()}
       />,
     );

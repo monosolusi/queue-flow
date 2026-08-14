@@ -146,9 +146,8 @@ describe('StateMachineWorkflow connection mode (every side accepts a drop)', () 
         mode: 'custom',
         states: ['WAITING', 'CALLING', 'SERVING'],
         transitions: [
-          { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
-          { from: 'CALLING', to: 'SERVING', actionLabel: 'Layan', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
-        ],
+          { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', requeuePolicy: { kind: 'KEEP' } },
+          { from: 'CALLING', to: 'SERVING', actionLabel: 'Layan', requeuePolicy: { kind: 'KEEP' } },        ],
         ...overrides,
       };
     }
@@ -361,9 +360,8 @@ describe('StateMachineWorkflow connection mode (every side accepts a drop)', () 
         mode: 'custom',
         states: ['WAITING', 'CALLING', 'SERVING'],
         transitions: [
-          { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
-          { from: 'CALLING', to: 'SERVING', actionLabel: 'Layan', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
-        ],
+          { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', requeuePolicy: { kind: 'KEEP' } },
+          { from: 'CALLING', to: 'SERVING', actionLabel: 'Layan', requeuePolicy: { kind: 'KEEP' } },        ],
         ...overrides,
       };
     }
@@ -401,10 +399,9 @@ describe('StateMachineWorkflow connection mode (every side accepts a drop)', () 
       const onChange = vi.fn();
       const form = loopForm({
         transitions: [
-          { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
-          { from: 'WAITING', to: 'WAITING', actionLabel: 'Ulang', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
-          { from: 'CALLING', to: 'SERVING', actionLabel: 'Layan', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
-        ],
+          { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', requeuePolicy: { kind: 'KEEP' } },
+          { from: 'WAITING', to: 'WAITING', actionLabel: 'Ulang', requeuePolicy: { kind: 'KEEP' } },
+          { from: 'CALLING', to: 'SERVING', actionLabel: 'Layan', requeuePolicy: { kind: 'KEEP' } },        ],
       });
       render(<StateMachineWorkflow value={form} onChange={onChange} errors={[]} />);
       fireConnectEnd(connectionState({}));
@@ -457,9 +454,8 @@ describe('StateMachineWorkflow connection mode (every side accepts a drop)', () 
         mode: 'custom',
         states: ['WAITING', 'CALLING', 'SERVING'],
         transitions: [
-          { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
-          { from: 'CALLING', to: 'SERVING', actionLabel: 'Layan', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
-        ],
+          { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', requeuePolicy: { kind: 'KEEP' } },
+          { from: 'CALLING', to: 'SERVING', actionLabel: 'Layan', requeuePolicy: { kind: 'KEEP' } },        ],
         ...overrides,
       };
     }
@@ -540,10 +536,9 @@ describe('StateMachineWorkflow connection mode (every side accepts a drop)', () 
       const onChange = vi.fn();
       const form = loopForm({
         transitions: [
-          { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
-          { from: 'WAITING', to: 'WAITING', actionLabel: 'Ulang', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
-          { from: 'CALLING', to: 'SERVING', actionLabel: 'Layan', action: 'UPDATE_STATUS', requeuePolicy: { kind: 'KEEP' } },
-        ],
+          { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', requeuePolicy: { kind: 'KEEP' } },
+          { from: 'WAITING', to: 'WAITING', actionLabel: 'Ulang', requeuePolicy: { kind: 'KEEP' } },
+          { from: 'CALLING', to: 'SERVING', actionLabel: 'Layan', requeuePolicy: { kind: 'KEEP' } },        ],
       });
       render(<StateMachineWorkflow value={form} onChange={onChange} errors={[]} />);
       stubElementFromPoint(nodeBodyElement('WAITING'));

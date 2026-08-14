@@ -1,5 +1,4 @@
 import type {
-  TransitionActionType,
   WorkflowActionDto,
   WorkflowActionsDto,
   WorkflowActionUnavailableReason,
@@ -11,16 +10,13 @@ import type { BoundCounter } from '../state/counter-binding';
  * state machine ("Alur Status Tiket") is the **source of truth** for which
  * buttons a ticket offers: the available actions are exactly the outgoing
  * transitions of that ticket's current status, each labelled with the
- * transition's `actionLabel` and running the `action` the manager declared for
- * it. The panel invents no steps of its own, and it decides nothing about what an
- * edge means.
+ * transition's `actionLabel`. The panel invents no steps of its own.
  *
- * That last point used to be split: the backend resolved each `(from, to)` pair to
- * one of eight commands, and a pair does not carry enough information to say what
- * the manager meant — the rule for WAITING read every `X -> WAITING` edge as a
- * category move, so an edge drawn to re-queue a ticket rendered as "Pindah
- * Kategori" and asked for a destination category. The flow now declares the
- * action per edge, and both sides just read it.
+ * Every flow edge is a plain status change ("Ubah Status") — the per-edge
+ * `action` flag that used to distinguish a status change from a category move
+ * is gone. "Pindah Kategori" (FR-CLR-03) is a STANDALONE panel action on the
+ * active ticket, not a flow edge, so it never appears here. Re-queue
+ * `→ WAITING` is just another status change (the number and category stay).
  *
  * What lives here is presentation: grouping the transitions into the call-next
  * primary / the per-ticket cluster, preserving the admin's order, deriving stable
@@ -38,10 +34,6 @@ export interface WorkflowAction {
   readonly from: string;
   readonly to: string;
   readonly actionLabel: string;
-  /** What running it does, declared in the flow. `null` when this build does not
-   *  recognize the value the server sent — treated exactly like an unrunnable
-   *  edge rather than a live button that fails on tap. */
-  readonly action: TransitionActionType | null;
   /** Indonesian, jargon-free wording for the wire's reason code; `null` when the
    *  action is runnable. */
   readonly unavailableReason: string | null;
@@ -59,8 +51,8 @@ const NO_STATUS_CHANGE_REASON =
   'dari panel loket.';
 
 /** Defensive wording for an edge this client cannot place: one the server marked
- *  unrunnable with a reason code this build does not know, or one whose `action`
- *  names a behaviour newer than this build. Still honest, still no jargon. */
+ *  unrunnable with a reason code this build does not know. Still honest, still no
+ *  jargon. */
 const UNKNOWN_REASON = 'Aksi ini belum bisa dijalankan dari panel loket.';
 
 /** The staff-facing sentence for a wire reason code. The backend owns the fact,
@@ -74,44 +66,13 @@ function unavailableCopy(reason: WorkflowActionUnavailableReason | null): string
   }
 }
 
-/**
- * The actions this build knows how to run — the runtime twin of the
- * {@link TransitionActionType} union, which exists only at compile time and so
- * cannot vet a value that arrives over the wire. Written as an exhaustive record
- * so adding a member to the union without teaching this module about it fails
- * `tsc`, and `workflow-commands.ts` stays the single place that maps an action to
- * an endpoint.
- */
-const KNOWN_ACTIONS: Readonly<Record<TransitionActionType, true>> = {
-  UPDATE_STATUS: true,
-  TRANSFER_CATEGORY: true,
-};
-const KNOWN_ACTION_NAMES: ReadonlySet<string> = new Set(Object.keys(KNOWN_ACTIONS));
-
-/**
- * Whether the wire's action is one this build can run. The two DTO copies are
- * versioned independently on purpose (core-api ships first, the panels are
- * redeployed after), so an `action` naming newer behaviour is an expected state,
- * not a bug — and it must not render as a live button that only fails on tap.
- * Treated exactly like an unrunnable edge: visible, disabled, explained.
- */
-function isKnownAction(action: string): action is TransitionActionType {
-  return KNOWN_ACTION_NAMES.has(action);
-}
-
 function toAction(dto: WorkflowActionDto): WorkflowAction {
-  const action = isKnownAction(dto.action) ? dto.action : null;
-  // An action this build does not know carries no reason code (the server
-  // considers it runnable), so it degrades through the unknown wording — the
-  // same graceful path an unknown reason code already takes.
-  const reason = action === null ? null : dto.unavailableReason;
-  const runnable = action !== null && dto.unavailableReason === null;
+  const runnable = dto.unavailableReason === null;
   return {
     from: dto.from,
     to: dto.to,
     actionLabel: dto.actionLabel,
-    action,
-    unavailableReason: runnable ? null : unavailableCopy(reason),
+    unavailableReason: runnable ? null : unavailableCopy(dto.unavailableReason),
   };
 }
 
@@ -123,16 +84,9 @@ function toAction(dto: WorkflowActionDto): WorkflowAction {
  *
  * This is a presentation split — the one place the panel still reads anything off
  * an edge's endpoints — and it decides only WHERE the button goes.
- *
- * It is gated on `UPDATE_STATUS` because the primary button fires the
- * counter-level endpoint unconditionally: an edge the manager declared a category
- * move cannot be honoured there (nobody has picked a ticket yet, let alone a
- * destination category), and firing call-next for it would run something they did
- * not configure. Such an edge falls through to the per-ticket surface instead,
- * where the declaration IS honoured — visible either way, never silently dropped.
  */
-function isCallNextEdge(dto: Pick<WorkflowActionDto, 'from' | 'to' | 'action'>): boolean {
-  return dto.from === 'WAITING' && dto.to === 'CALLING' && dto.action === 'UPDATE_STATUS';
+function isCallNextEdge(dto: Pick<WorkflowActionDto, 'from' | 'to'>): boolean {
+  return dto.from === 'WAITING' && dto.to === 'CALLING';
 }
 
 /**
@@ -167,7 +121,6 @@ export function callNextActionFor(workflow: WorkflowActionsDto | null): Workflow
       from: 'WAITING',
       to: 'CALLING',
       actionLabel: DEFAULT_CALL_NEXT_LABEL,
-      action: 'UPDATE_STATUS',
       unavailableReason: null,
     };
   }
@@ -176,37 +129,30 @@ export function callNextActionFor(workflow: WorkflowActionsDto | null): Workflow
 }
 
 /**
- * Whether the panel can actually run this action. Two independent things stop it,
- * and both must stop it the same way: the flow says running it would change
- * nothing, or it declares behaviour this build does not know. One predicate, so
- * the buttons, their ids and the lists' hints cannot disagree about which
- * transitions are live.
+ * Whether the panel can actually run this action. The flow says running it would
+ * change nothing when `unavailableReason` is set; otherwise it is a live status
+ * change. One predicate, so the buttons, their ids and the lists' hints cannot
+ * disagree about which transitions are live.
  */
-export function isRunnable(
-  action: WorkflowAction,
-): action is WorkflowAction & { readonly action: TransitionActionType } {
-  return action.action !== null && action.unavailableReason === null;
-}
-
-/** The wire action name as a DOM-id slug (`TRANSFER_CATEGORY` →
- *  `transfer-category`) — mechanical, so the ids stay stable as the contract
- *  grows. */
-function actionSlug(action: TransitionActionType): string {
-  return action.toLowerCase().replace(/_/g, '-');
+export function isRunnable(action: WorkflowAction): action is WorkflowAction & {
+  readonly unavailableReason: null;
+} {
+  return action.unavailableReason === null;
 }
 
 /**
- * Stable DOM test id for an action button. Keyed on the declared action plus the
- * target, because one status can offer several edges running the same action (two
- * different custom steps, say) and the target is what tells them apart.
+ * Stable DOM test id for an action button. Keyed on the target status: a
+ * well-formed flow has at most one edge to a given target from a given source, so
+ * the target tells the buttons apart (see {@link actionRunKey} for the in-flight
+ * key, which is ticket-scoped and includes `from` too).
  *
- * An action that cannot run takes the `unroutable` id whichever reason stopped
- * it, so the id matches what the button IS — a disabled button carrying a
- * runnable-looking id would read as live to anything selecting on it.
+ * An action that cannot run takes the `unroutable` id, so the id matches what the
+ * button IS — a disabled button carrying a runnable-looking id would read as
+ * live to anything selecting on it.
  */
 export function actionTestId(action: WorkflowAction): string {
   if (!isRunnable(action)) return `action-unroutable-${action.to}`;
-  return `action-${actionSlug(action.action)}-${action.to}`;
+  return `action-status-${action.to}`;
 }
 
 /**

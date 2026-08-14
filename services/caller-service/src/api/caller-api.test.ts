@@ -81,8 +81,8 @@ describe('CallerApi authed fetch (QUE-43)', () => {
   });
 
   it('reads the workflow actions from GET /api/queue/actions with the bearer', async () => {
-    // The panel's action surface (FR-CLR-02): core-api resolves each transition
-    // to the command that runs it, so no routing table lives on this side.
+    // The panel's action surface (FR-CLR-02): each transition is a plain status
+    // change with the manager's wording, so no routing table lives on this side.
     writeToken('tok');
     mockFetch(() =>
       jsonRes({
@@ -92,7 +92,6 @@ describe('CallerApi authed fetch (QUE-43)', () => {
               from: 'CALLING',
               to: 'SERVING',
               actionLabel: 'Mulai Melayani',
-              command: 'SERVE',
               unavailableReason: null,
             },
           ],
@@ -103,7 +102,7 @@ describe('CallerApi authed fetch (QUE-43)', () => {
     const actions = await api.getWorkflowActions();
     expect(lastUrl).toContain('/api/queue/actions');
     expect(headerAuth(lastInit)).toBe('Bearer tok');
-    expect(actions.byStatus.CALLING[0]).toMatchObject({ to: 'SERVING', command: 'SERVE' });
+    expect(actions.byStatus.CALLING[0]).toMatchObject({ to: 'SERVING', actionLabel: 'Mulai Melayani' });
   });
 
   it('on 401 from the workflow actions clears the token and fires onUnauthorized', async () => {

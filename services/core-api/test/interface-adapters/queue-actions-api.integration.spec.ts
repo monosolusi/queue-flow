@@ -16,7 +16,7 @@ import {
   TerminalNodes,
   TvPanelLayout,
 } from '../../src/domain/store-config';
-import { Identifier, TransitionAction } from '../../src/domain/shared';
+import { Identifier } from '../../src/domain/shared';
 import { Role, USER_REPOSITORY, type IUserRepository } from '../../src/domain/identity';
 import { CreateUserUseCase } from '../../src/application/identity';
 import {
@@ -31,8 +31,8 @@ import {
 
 /**
  * Integration: `GET /api/queue/actions` — the caller panel's dynamic action set.
- * The backend publishes every edge the manager configured with the action they
- * declared for it; the caller renders one button per entry. Nothing about an
+ * The backend publishes every edge the manager configured with the label they
+ * gave it; the caller renders one button per entry. Nothing about an
  * edge's meaning is resolved from its endpoints — that inference is the defect
  * this endpoint used to carry.
  *
@@ -123,7 +123,6 @@ describe('GET /api/queue/actions (integration — caller dynamic actions, FR-CLR
           from: 'WAITING',
           to: 'CALLING',
           actionLabel: 'Panggil Berikutnya',
-          action: 'UPDATE_STATUS',
           unavailableReason: null,
         },
       ],
@@ -132,14 +131,12 @@ describe('GET /api/queue/actions (integration — caller dynamic actions, FR-CLR
           from: 'CALLING',
           to: 'SERVING',
           actionLabel: 'Mulai Melayani',
-          action: 'UPDATE_STATUS',
           unavailableReason: null,
         },
         {
           from: 'CALLING',
           to: 'SKIPPED',
           actionLabel: 'Lewati / Absen',
-          action: 'UPDATE_STATUS',
           unavailableReason: null,
         },
       ],
@@ -148,7 +145,6 @@ describe('GET /api/queue/actions (integration — caller dynamic actions, FR-CLR
           from: 'SERVING',
           to: 'COMPLETED',
           actionLabel: 'Selesai Layan',
-          action: 'UPDATE_STATUS',
           unavailableReason: null,
         },
       ],
@@ -157,7 +153,6 @@ describe('GET /api/queue/actions (integration — caller dynamic actions, FR-CLR
           from: 'SKIPPED',
           to: 'CALLING',
           actionLabel: 'Panggil Ulang',
-          action: 'UPDATE_STATUS',
           unavailableReason: null,
         },
       ],
@@ -171,10 +166,10 @@ describe('GET /api/queue/actions (integration — caller dynamic actions, FR-CLR
     const res = await http(app).get('/api/queue/actions').set(authHeader(adminToken));
 
     expect(res.status).toBe(200);
-    expect(res.body.byStatus.WAITING[0].action).toBe('UPDATE_STATUS');
+    expect(res.body.byStatus.WAITING[0].actionLabel).toBe('Panggil Berikutnya');
   });
 
-  it('publishes a customised graph verbatim: custom states, a declared transfer, a re-announce, and a re-queue', async () => {
+  it('publishes a customised graph verbatim: custom states, a re-announce, and a re-queue', async () => {
     await seedStateMachine(
       new StateMachine(
         StateSchema.of(['WAITING', 'CALLING', 'SERVING', 'SKIPPED', 'COMPLETED', 'PEMBAYARAN']),
@@ -185,12 +180,7 @@ describe('GET /api/queue/actions (integration — caller dynamic actions, FR-CLR
           // Two edges with the SAME endpoints as each other's neighbours and
           // opposite meanings — the pair alone could never tell them apart.
           StateTransitionRule.of('CALLING', 'WAITING', 'Kembalikan ke Antrian'),
-          StateTransitionRule.of(
-            'SERVING',
-            'WAITING',
-            'Pindah Kategori',
-            TransitionAction.TRANSFER_CATEGORY,
-          ),
+          StateTransitionRule.of('SERVING', 'WAITING', 'Pindah Kategori'),
           StateTransitionRule.of('SERVING', 'PEMBAYARAN', 'Ke Pembayaran'),
           StateTransitionRule.of('SERVING', 'SERVING', 'Ulangi Layanan'),
           StateTransitionRule.of('PEMBAYARAN', 'COMPLETED', 'Selesai Layan'),
@@ -206,17 +196,17 @@ describe('GET /api/queue/actions (integration — caller dynamic actions, FR-CLR
     expect(res.status).toBe(200);
     const flat = Object.values(res.body.byStatus)
       .flat()
-      .map((a: any) => [a.from, a.to, a.action, a.unavailableReason]);
+      .map((a: any) => [a.from, a.to, a.unavailableReason]);
     expect(flat).toEqual([
-      ['WAITING', 'CALLING', 'UPDATE_STATUS', null],
-      ['CALLING', 'CALLING', 'UPDATE_STATUS', null],
-      ['CALLING', 'SERVING', 'UPDATE_STATUS', null],
-      ['CALLING', 'WAITING', 'UPDATE_STATUS', null],
-      ['SERVING', 'WAITING', 'TRANSFER_CATEGORY', null],
-      ['SERVING', 'PEMBAYARAN', 'UPDATE_STATUS', null],
-      ['SERVING', 'SERVING', 'UPDATE_STATUS', 'NO_STATUS_CHANGE'],
-      ['PEMBAYARAN', 'COMPLETED', 'UPDATE_STATUS', null],
-      ['PEMBAYARAN', 'CALLING', 'UPDATE_STATUS', null],
+      ['WAITING', 'CALLING', null],
+      ['CALLING', 'CALLING', null],
+      ['CALLING', 'SERVING', null],
+      ['CALLING', 'WAITING', null],
+      ['SERVING', 'WAITING', null],
+      ['SERVING', 'PEMBAYARAN', null],
+      ['SERVING', 'SERVING', 'NO_STATUS_CHANGE'],
+      ['PEMBAYARAN', 'COMPLETED', null],
+      ['PEMBAYARAN', 'CALLING', null],
     ]);
     // Custom + sink states are keyed even when they have no usable action.
     expect(res.body.byStatus.SKIPPED).toEqual([]);
@@ -235,14 +225,14 @@ describe('GET /api/queue/actions (integration — caller dynamic actions, FR-CLR
     expect(board.body).toEqual({ active: [], waiting: [], waitingCount: 0 });
     expect(stateMachine.status).toBe(200);
     expect(stateMachine.body.transitions).toHaveLength(5);
-    // The raw graph endpoint returns the graph as configured — including each
-    // edge's declared action and re-queue policy, which are part of the
-    // definition, not a ruling layered on top of it.
+    // The raw graph endpoint returns the graph as configured — an edge is
+    // `from -> to + actionLabel` plus the re-queue policy a `-> WAITING` edge
+    // declares; what running it does is owned by the target state, not a
+    // per-edge action declaration.
     expect(stateMachine.body.transitions[0]).toEqual({
       from: 'WAITING',
       to: 'CALLING',
       actionLabel: 'Panggil Berikutnya',
-      action: 'UPDATE_STATUS',
       requeuePolicy: { kind: 'KEEP', n: null },
     });
   });

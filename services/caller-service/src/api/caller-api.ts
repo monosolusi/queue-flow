@@ -42,10 +42,11 @@ export interface ICallerApi {
   listCounters(): Promise<CounterDto[]>;
   getQueueSnapshot(counterId: number): Promise<QueueSnapshotDto>;
   /** The counter panel's action surface (FR-CLR-02): the active flow's
-   *  transitions grouped by source status, each carrying the action the manager
-   *  declared for it. The flow is the authority on what an edge does — the panel
-   *  derives only presentation from it, and maps the declared action to an
-   *  endpoint. */
+   *  transitions grouped by source status, each a plain status change labelled
+   *  with the manager's wording. The panel maps every edge to the one
+   *  {@link applyTransition} endpoint — what an edge does is owned by the target
+   *  state, not declared per edge. "Pindah Kategori" is a standalone panel
+   *  action ({@link transfer}), not part of this surface. */
   getWorkflowActions(): Promise<WorkflowActionsDto>;
   /** The manager-configured brand color (QUE-36) applied to `--accent` (QUE-37 AC6). */
   getBrandColor(): Promise<BrandConfigSlice>;

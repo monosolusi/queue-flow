@@ -26,21 +26,14 @@ export interface WorkspacePageProps {
  */
 function useListCommands(api: ICallerApi, bound: BoundCounter): {
   readonly runner: CommandRunner;
-  readonly onAction: (
-    ticket: TicketStateDto,
-    action: WorkflowAction,
-    targetCategoryId?: string,
-  ) => void;
+  readonly onAction: (ticket: TicketStateDto, action: WorkflowAction) => void;
 } {
   const runner = useCommandRunner();
   const { run } = runner;
   const onAction = useCallback(
-    (ticket: TicketStateDto, action: WorkflowAction, targetCategoryId?: string) => {
+    (ticket: TicketStateDto, action: WorkflowAction) => {
       void run(actionRunKey(ticket.ticketId, action), () =>
-        invokeWorkflowAction(api, action, ticket.ticketId, {
-          counterId: bound.counterId,
-          targetCategoryId,
-        }),
+        invokeWorkflowAction(api, action, ticket.ticketId, { counterId: bound.counterId }),
       );
     },
     [api, bound.counterId, run],
@@ -121,7 +114,6 @@ export function WorkspacePage({ bound, onUnbind }: WorkspacePageProps) {
             tickets={state.waiting}
             waitingCount={state.waitingCount}
             actions={waitingActions}
-            bound={bound}
             pending={waitingCommands.runner.pending}
             error={waitingCommands.runner.error}
             notice={waitingCommands.runner.notice}
@@ -130,7 +122,6 @@ export function WorkspacePage({ bound, onUnbind }: WorkspacePageProps) {
           <SkippedQueueList
             tickets={state.skipped}
             actions={skippedActions}
-            bound={bound}
             pending={skippedCommands.runner.pending}
             error={skippedCommands.runner.error}
             notice={skippedCommands.runner.notice}

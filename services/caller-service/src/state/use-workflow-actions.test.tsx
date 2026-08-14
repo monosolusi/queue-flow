@@ -6,8 +6,8 @@ import type { WorkflowActionsDto } from '../api/types';
 import { edge, workflowActions } from '../test/workflow-fixtures';
 
 const defaultWorkflow: WorkflowActionsDto = workflowActions(
-  edge('WAITING', 'CALLING', 'Panggil Berikutnya', 'UPDATE_STATUS'),
-  edge('SERVING', 'COMPLETED', 'Selesai Layan', 'UPDATE_STATUS'),
+  edge('WAITING', 'CALLING', 'Panggil Berikutnya'),
+  edge('SERVING', 'COMPLETED', 'Selesai Layan'),
 );
 
 function makeApi(overrides: Partial<ICallerApi> = {}): ICallerApi {
@@ -62,8 +62,8 @@ describe('useWorkflowActions (FR-CLR-02)', () => {
     expect(api.getWorkflowActions).toHaveBeenCalledTimes(1);
 
     surface = workflowActions(
-      edge('WAITING', 'CALLING', 'Panggil Berikutnya', 'UPDATE_STATUS'),
-      edge('SERVING', 'COMPLETED', 'Selesaikan Layanan', 'UPDATE_STATUS'),
+      edge('WAITING', 'CALLING', 'Panggil Berikutnya'),
+      edge('SERVING', 'COMPLETED', 'Selesaikan Layanan'),
     );
     rerender(<Probe api={api} configVersion={1} />);
 
