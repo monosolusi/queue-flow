@@ -320,13 +320,17 @@ button {
 }
 /* The hint becomes a notice when the flow publishes nothing runnable from
    "Dilewati": that is a configuration fact, not a failure, so it reads as an
-   informational panel (full-contrast text on a raised strip) rather than the
-   muted aside — and never as an error. Overrides the muted colour above by
-   source order, like .skipped-queue__list--actionable does. */
+   informational panel (full-contrast text, its own enclosure) rather than the
+   muted aside — and never as an error. Shape borrowed verbatim from admin's
+   `.admin-panel__warning`: an evenly bordered, faintly tinted box, tinted with
+   `--accent` rather than `--warn` because nothing here is wrong. The tints are
+   `color-mix`ed so a manager-configured brandColor of any hue stays subtle
+   behind the text. Overrides the muted colour above by source order, like
+   .skipped-queue__list--actionable does. */
 .skipped-queue__hint--notice {
   color: var(--text);
-  background: var(--surface-2);
-  border-left: 3px solid var(--accent-on-surface);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
   border-radius: var(--radius);
   padding: 0.65rem 0.85rem;
 }
