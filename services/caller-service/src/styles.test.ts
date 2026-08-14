@@ -21,13 +21,20 @@ import { describe, expect, it } from 'vitest';
 const here = dirname(fileURLToPath(import.meta.url));
 const css = readFileSync(resolve(here, 'styles.css'), 'utf8').replace(/\s+/g, ' ');
 
-/** Extracts the declaration block of a selector (up to the closing brace). */
+/**
+ * EVERY declaration block written for a selector, joined. Every block, not the
+ * first: a later `@media (max-height: …) { .skipped-queue__list { overflow:
+ * hidden } }` would slip past a first-match guard — which is exactly the
+ * reachability regression these tests exist to stop.
+ */
 function rule(sel: string): string {
   const escaped = sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const re = new RegExp(`${escaped}\\s*\\{([^}]*)\\}`);
-  const m = css.match(re);
-  if (!m) throw new Error(`selector not found: ${sel}`);
-  return m[1];
+  // `(^|[\s,{}])` keeps `.skipped-queue__list` from also matching
+  // `.skipped-queue__list--actionable`'s block.
+  const re = new RegExp(`(?:^|[\\s,{}])${escaped}\\s*\\{([^}]*)\\}`, 'g');
+  const blocks = [...css.matchAll(re)].map((m) => m[1]);
+  if (blocks.length === 0) throw new Error(`selector not found: ${sel}`);
+  return blocks.join(' ');
 }
 
 /** The `max-height` cap of a list rule, in rem. */

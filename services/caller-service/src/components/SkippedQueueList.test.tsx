@@ -213,6 +213,31 @@ describe('SkippedQueueList hint follows the flow, never promises a missing actio
     expect(screen.getAllByText(/tidak mengubah status tiket/i)[0]).toBeInTheDocument();
   });
 
+  it('does not point at a category move that has nowhere to go', () => {
+    // A counter serving ONE category renders "Pindah Kategori" disabled — there
+    // is no other category to move to — so "pilih tindakan yang tersedia" would
+    // be the same lie the recall promise was, one button further along.
+    const soloCounter: BoundCounter = {
+      ...bound,
+      assignedCategoryIds: ['cat-a'],
+      assignedCategories: [{ id: 'cat-a', code: 'A', name: 'Customer Service' }],
+    };
+    const onlyTransfer = workflowActions(
+      edge('SKIPPED', 'WAITING', 'Pindah Kategori', 'TRANSFER'),
+    );
+    render(
+      <SkippedQueueList
+        tickets={tickets}
+        actions={ticketActionsFor(onlyTransfer, 'SKIPPED')}
+        bound={soloCounter}
+        onAction={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('skipped-action-s1-WAITING')).toBeDisabled();
+    expect(hint()).toHaveTextContent(/belum bisa dijalankan dari panel loket/i);
+    expect(hint()).toHaveClass('skipped-queue__hint--notice');
+  });
+
   it('never shows staff a raw status name', () => {
     const oneWay = workflowActions(edge('CALLING', 'SKIPPED', 'Lewati / Absen', 'SKIP'));
     renderWith(ticketActionsFor(oneWay, 'SKIPPED'));

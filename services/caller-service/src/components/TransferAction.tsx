@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { TransferCandidate, WorkflowAction } from '../lib/workflow-actions';
 
 export interface TransferActionProps {
@@ -43,6 +43,16 @@ export function TransferAction({
   // Stable id linking the toggle (`aria-controls`) to its chooser, so AT can
   // associate the expanded options with the toggle (QUE-40 AC4).
   const chooserId = useId();
+  // The queue lists are capped scroll containers (styles.css), so a row near the
+  // bottom can expand its chooser below the cut: on a touch panel the tap would
+  // read as a dead button. `block: 'nearest'` scrolls only when it has to, and
+  // only the nearest scrollable ancestor — the panel's own copy of this control
+  // sits in no scroller and stays put.
+  const chooserRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    chooserRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [open]);
 
   if (candidates.length === 0) {
     return (
@@ -88,6 +98,7 @@ export function TransferAction({
       </button>
       {open && (
         <div
+          ref={chooserRef}
           id={chooserId}
           className="transfer-action__chooser"
           data-testid={`${idPrefix}-chooser`}

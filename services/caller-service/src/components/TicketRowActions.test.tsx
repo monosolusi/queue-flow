@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TicketRowActions } from './TicketRowActions';
 import { ticketActionsFor } from '../lib/workflow-actions';
-import type { TicketStateDto } from '../api/types';
+import type { TicketStateDto, WorkflowCommand } from '../api/types';
 import { edge, workflowActions } from '../test/workflow-fixtures';
 
 const ticket = (ticketId: string, ticketNumber: string): TicketStateDto => ({
@@ -55,9 +55,16 @@ describe('TicketRowActions explains an action it cannot run', () => {
   it('gives each unrunnable edge of a row its own reason', () => {
     // Two edges, two different reasons: one shared note would explain the wrong
     // button for whichever came second.
+    //
+    // Both dead ends are ones core-api can really produce for a SKIPPED ticket.
+    // `NO_COMMAND` is NOT among them — `resolveCommand` maps every target out of
+    // SKIPPED to a command except the self-loop, so a `NO_COMMAND` fixture here
+    // would certify a wire shape the server never sends. The second dead end is
+    // therefore the forward-compatibility path: a command newer than this build,
+    // which `toAction` coerces to `command: null` + the unknown reason.
     const twoDeadEnds = workflowActions(
       edge('SKIPPED', 'SKIPPED', 'Tandai Ulang', null, 'NO_STATUS_CHANGE'),
-      edge('SKIPPED', 'SERVING', 'Layani Langsung', null, 'NO_COMMAND'),
+      edge('SKIPPED', 'ARSIP', 'Arsipkan', 'ARCHIVE_TICKET' as WorkflowCommand),
     );
     render(
       <TicketRowActions
@@ -68,15 +75,15 @@ describe('TicketRowActions explains an action it cannot run', () => {
       />,
     );
     const loop = screen.getByTestId('skipped-action-s1-SKIPPED');
-    const noCommand = screen.getByTestId('skipped-action-s1-SERVING');
+    const unknown = screen.getByTestId('skipped-action-s1-ARSIP');
     expect(loop.getAttribute('aria-describedby')).not.toBe(
-      noCommand.getAttribute('aria-describedby'),
+      unknown.getAttribute('aria-describedby'),
     );
     expect(document.getElementById(loop.getAttribute('aria-describedby')!)).toHaveTextContent(
       /tidak mengubah status tiket/i,
     );
-    expect(document.getElementById(noCommand.getAttribute('aria-describedby')!)).toHaveTextContent(
-      /tidak bisa dijalankan dari panel loket/i,
+    expect(document.getElementById(unknown.getAttribute('aria-describedby')!)).toHaveTextContent(
+      /belum bisa dijalankan dari panel loket/i,
     );
   });
 

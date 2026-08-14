@@ -46,17 +46,21 @@ const RECALL_HINT =
 const OTHER_ACTIONS_HINT =
   'Tiket yang tidak hadir saat dipanggil. Pilih tindakan yang tersedia di tombol tiap tiket.';
 /** Transitions are configured but none is executable from the counter (e.g. a
- *  self-loop that would change nothing). The rows still show them, disabled with
- *  their reason — send staff there rather than leaving the buttons unexplained. */
+ *  self-loop that would change nothing, or a category move with nowhere to go). */
 const UNRUNNABLE_ACTIONS_HINT =
   'Lanjutan dari status Dilewati sudah diatur di alur status, tetapi belum bisa dijalankan ' +
-  'dari panel loket. Alasannya tertulis di bawah tombol tiap tiket.';
+  'dari panel loket.';
+/** Appended only when those transitions actually rendered as buttons — each one
+ *  carries its own reason, so send staff there rather than leaving them
+ *  unexplained. Without buttons there is nothing to point at. */
+const UNRUNNABLE_REASONS_SUFFIX = ' Alasannya tertulis di bawah tombol tiap tiket.';
 /** Nothing at all to offer, and the flow was read successfully — so this IS the
  *  configuration: the active alur status has no transition leaving "Dilewati".
- *  Says the fact, then where the manager changes it. */
+ *  States where it is set WITHOUT telling this reader to go and do it: the
+ *  counter panel's user is `caller-staff`, who is RBAC-blocked from /admin. */
 const NO_ACTIONS_HINT =
   'Tiket yang dilewati belum bisa dipanggil ulang: alur status yang dipakai sekarang tidak ' +
-  'punya lanjutan dari status Dilewati. Tambahkan lanjutannya di halaman Alur Status Tiket ' +
+  'punya lanjutan dari status Dilewati. Lanjutannya diatur di halaman Alur Status Tiket ' +
   'pada panel admin.';
 /** The action surface could not be read at all (`GET /api/queue/actions` failed,
  *  or 409'd because the system is not configured yet). Held apart from
@@ -79,17 +83,34 @@ const FLOW_UNREAD_HINT =
  * edge and derives no routing of its own.
  */
 function skippedListHint(
-  actions: readonly WorkflowAction[],
+  /** What the rows actually render — `published` minus what this list dropped. */
+  rendered: readonly WorkflowAction[],
+  /** What the flow published for SKIPPED. Only a claim ABOUT THE FLOW may be
+   *  made from this one; everything describing buttons reads `rendered`. */
+  published: readonly WorkflowAction[],
   workflowError: string | null,
+  /** Whether a category move has anywhere to go: `TransferAction` renders a
+   *  destination-less transfer disabled, so on a single-category counter a
+   *  configured `→ WAITING` edge is a button that cannot be tapped. */
+  transferPossible: boolean,
 ): SkippedListHint {
   // Checked first: an unread surface is indistinguishable from an empty one by
   // its actions alone, and only the workspace knows which happened.
-  if (workflowError !== null && actions.length === 0) {
+  if (workflowError !== null && published.length === 0) {
     return { text: FLOW_UNREAD_HINT, tone: 'notice' };
   }
-  if (actions.some((a) => a.command === 'RECALL')) return { text: RECALL_HINT, tone: 'muted' };
-  if (actions.some((a) => a.command !== null)) return { text: OTHER_ACTIONS_HINT, tone: 'muted' };
-  if (actions.length > 0) return { text: UNRUNNABLE_ACTIONS_HINT, tone: 'notice' };
+  const tappable = (a: WorkflowAction) =>
+    a.command !== null && (a.command !== 'TRANSFER' || transferPossible);
+  if (rendered.some((a) => a.command === 'RECALL')) return { text: RECALL_HINT, tone: 'muted' };
+  if (rendered.some(tappable)) return { text: OTHER_ACTIONS_HINT, tone: 'muted' };
+  // Configured, but nothing here can run it. Point at the per-button reasons
+  // only when there are buttons to point at.
+  if (published.length > 0) {
+    return {
+      text: UNRUNNABLE_ACTIONS_HINT + (rendered.length > 0 ? UNRUNNABLE_REASONS_SUFFIX : ''),
+      tone: 'notice',
+    };
+  }
   return { text: NO_ACTIONS_HINT, tone: 'notice' };
 }
 
@@ -119,10 +140,15 @@ export function SkippedQueueList({
 }: SkippedQueueListProps) {
   const runnable = runnableRowActions(actions, bound, onAction !== undefined);
   const actionable = runnable.length > 0;
-  // Keyed on what the rows actually render, not on what the server sent: a
-  // transfer dropped for want of a binding leaves no button, so it must not
-  // leave a hint pointing at one either.
-  const hint = skippedListHint(runnable, workflowError);
+  // Every ticket in this bucket was called at this counter, so its category is
+  // one the counter serves: a second assigned category is exactly the condition
+  // under which `transferCandidates` can yield a destination for any row.
+  const transferPossible = (bound?.assignedCategoryIds.length ?? 0) > 1;
+  // Two lists, deliberately: the wording about BUTTONS follows what the rows
+  // rendered (a transfer dropped for want of a binding leaves no button, so it
+  // must not leave a hint pointing at one), while the wording about the FLOW
+  // may only be derived from what the flow published.
+  const hint = skippedListHint(runnable, actions, workflowError, transferPossible);
 
   return (
     <section className="skipped-queue" aria-label="Tiket Dilewati">
