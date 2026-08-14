@@ -37,7 +37,7 @@ import {
   StateTransitionRule,
   SystemConfiguration,
 } from '../../src/domain/store-config';
-import { Identifier } from '../../src/domain/shared';
+import { Identifier, TransitionAction } from '../../src/domain/shared';
 import { PriorityPolicy } from '../../src/domain/shared/priority-policy';
 import {
   InMemoryCategoryRepository,
@@ -50,8 +50,8 @@ import { authHeader, bootstrapAuthedAdmin } from '../acceptance/_helpers';
 
 /**
  * Integration: boots the real Nest app (in-memory persistence) and exercises
- * the queue command REST surface added in QUE-2 — call-next, serve, transfer —
- * asserting each lifecycle event actually broadcasts over the WebSocket
+ * the queue command REST surface (QUE-2) — call-next, transition, transfer,
+ * reannounce — asserting each lifecycle event actually broadcasts over the WebSocket
  * (FR-ENG-04), and that an illegal transition surfaces as HTTP 409
  * (FR-ENG-02) via the global {@link DomainExceptionFilter}.
  *
@@ -217,7 +217,7 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
     expect(received).toHaveLength(0);
   });
 
-  it('POST /api/queue/:id/serve transitions CALLING -> SERVING and broadcasts STATUS_UPDATED', async () => {
+  it('POST /api/queue/:id/transition moves CALLING -> SERVING and broadcasts STATUS_UPDATED', async () => {
     // Advance a WAITING ticket to CALLING first (call-next drains its events).
     await seedWaitingTicket(catAId, 'A', 1);
     const callRes = await request(app.getHttpServer())
@@ -226,7 +226,9 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
     const ticketId = callRes.body.ticket.ticketId;
 
     const received = await collectMessages(1, () =>
-      request(app.getHttpServer()).post(`/api/queue/${ticketId}/serve`).set(authHeader(token)),
+      request(app.getHttpServer())
+        .post(`/api/queue/${ticketId}/transition`).set(authHeader(token))
+        .send({ targetStatus: 'SERVING' }),
     );
 
     expect(received).toHaveLength(1);
@@ -236,18 +238,24 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
 
   it('POST /api/queue/:id/transfer reassigns the category and broadcasts TICKET_TRANSFERRED (transfer-enabled config)', async () => {
     // The default state machine has no transfer edge; re-seed a config whose
-    // machine adds CALLING -> WAITING ("Pindah Kategori") — what the wizard
-    // configures to enable transfers (FR-CLR-03).
+    // machine adds CALLING -> WAITING **declared a category move** — what the
+    // designer writes when the manager picks "Pindah Kategori" as that edge's
+    // action (FR-CLR-03). Drawing the edge alone leaves it a plain re-queue.
     const transferMachine = new StateMachine(
       StateSchema.of(['WAITING', 'CALLING', 'SERVING', 'SKIPPED', 'COMPLETED']),
       [
-        ['WAITING', 'CALLING', 'Panggil Berikutnya'],
-        ['CALLING', 'SERVING', 'Mulai Melayani'],
-        ['CALLING', 'SKIPPED', 'Lewati / Absen'],
-        ['SKIPPED', 'CALLING', 'Panggil Ulang'],
-        ['SERVING', 'COMPLETED', 'Selesai Layan'],
-        ['CALLING', 'WAITING', 'Pindah Kategori'],
-      ].map(([from, to, actionLabel]) => StateTransitionRule.of(from, to, actionLabel)),
+        StateTransitionRule.of('WAITING', 'CALLING', 'Panggil Berikutnya'),
+        StateTransitionRule.of('CALLING', 'SERVING', 'Mulai Melayani'),
+        StateTransitionRule.of('CALLING', 'SKIPPED', 'Lewati / Absen'),
+        StateTransitionRule.of('SKIPPED', 'CALLING', 'Panggil Ulang'),
+        StateTransitionRule.of('SERVING', 'COMPLETED', 'Selesai Layan'),
+        StateTransitionRule.of(
+          'CALLING',
+          'WAITING',
+          'Pindah Kategori',
+          TransitionAction.TRANSFER_CATEGORY,
+        ),
+      ],
     );
     await systemConfig.save(
       SystemConfiguration.reconstitute({
@@ -309,7 +317,9 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
     const ticket = await seedWaitingTicket(catAId, 'A', 1); // WAITING has no -> SKIPPED edge
 
     const received = await collectMessages(1, async () => {
-      const res = await request(app.getHttpServer()).post(`/api/queue/${ticket.id.value}/skip`).set(authHeader(token));
+      const res = await request(app.getHttpServer())
+        .post(`/api/queue/${ticket.id.value}/transition`).set(authHeader(token))
+        .send({ targetStatus: 'SKIPPED' });
       expect(res.status).toBe(409);
       expect(res.body.code).toBe('INVALID_STATE_TRANSITION');
     });
@@ -456,11 +466,13 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
     expect(res.status).toBe(400);
   });
 
-  it('POST /api/queue/:id/transition rejects a canonical target with 400 (use the dedicated endpoint)', async () => {
-    // The five PRD-default states each have a dedicated command endpoint whose
-    // aggregate owns the lifecycle side effects. A direct API call must not be
-    // able to bypass them via the generic endpoint — e.g. reaching COMPLETED
-    // here would leave `completedAt` null and corrupt the analytics data model.
+  it('POST /api/queue/:id/transition accepts a canonical target and applies its lifecycle side effect', async () => {
+    // This target used to be rejected with 400, because the endpoint owned no
+    // side effects and a COMPLETED reached through it would leave `completedAt`
+    // null. The side effects now belong to the target state inside the aggregate,
+    // so every route into COMPLETED stamps the timestamp — which is what makes a
+    // single transition endpoint safe, and removes the need for anything upstream
+    // to decide which endpoint an edge requires.
     const serving = QueueTicket.reconstitute({
       id: ticketIdGenerate(),
       ticketNumber: TicketNumber.of('A', 1),
@@ -478,10 +490,82 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
     const res = await request(app.getHttpServer())
       .post(`/api/queue/${serving.id.value}/transition`).set(authHeader(token))
       .send({ targetStatus: 'COMPLETED' });
-    expect(res.status).toBe(400);
-    // The ticket is unchanged — no bypass occurred.
+    expect(res.status).toBe(201);
     const reloaded = await queue.findById(serving.id);
-    expect(reloaded?.currentStatus).toBe('SERVING');
-    expect(reloaded?.completedAt).toBeNull();
+    expect(reloaded?.currentStatus).toBe('COMPLETED');
+    expect(reloaded?.completedAt).not.toBeNull();
+  });
+
+  describe('an edge into WAITING (the reported defect)', () => {
+    /** Re-seeds the active config with a `CALLING -> WAITING` edge carrying `action`. */
+    async function seedCallingToWaiting(action: TransitionAction, label: string): Promise<void> {
+      const machine = new StateMachine(
+        StateSchema.of(['WAITING', 'CALLING', 'SERVING', 'SKIPPED', 'COMPLETED']),
+        [
+          StateTransitionRule.of('WAITING', 'CALLING', 'Panggil Berikutnya'),
+          StateTransitionRule.of('CALLING', 'SERVING', 'Mulai Melayani'),
+          StateTransitionRule.of('CALLING', 'SKIPPED', 'Lewati / Absen'),
+          StateTransitionRule.of('SKIPPED', 'CALLING', 'Panggil Ulang'),
+          StateTransitionRule.of('SERVING', 'COMPLETED', 'Selesai Layan'),
+          StateTransitionRule.of('CALLING', 'WAITING', label, action),
+        ],
+      );
+      await systemConfig.save(
+        SystemConfiguration.reconstitute({
+          id: Identifier.generate(),
+          storeName: 'QMS Requeue Store',
+          isInitialSetupCompleted: true,
+          stateMachine: machine,
+          dailyResetPolicy: DailyResetPolicy.DEFAULT,
+          brandColor: BrandColor.DEFAULT,
+          serviceThemes: ServiceThemes.DEFAULT,
+          tvPanelLayout: TvPanelLayout.DEFAULT,
+          edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
+          nodePositions: NodePositions.DEFAULT,
+          nodeActions: NodeActions.DEFAULT,
+          terminalNodes: TerminalNodes.DEFAULT,
+          endSources: EndSources.DEFAULT,
+          printerConfiguration: PrinterConfiguration.DEFAULT,
+        }),
+      );
+    }
+
+    it('re-queues the ticket, keeping its number and category, when left on UPDATE_STATUS', async () => {
+      // The manager drew this edge to put a ticket back in the queue. It used to
+      // be executed as a category move purely because the target was WAITING.
+      await seedCallingToWaiting(TransitionAction.UPDATE_STATUS, 'Kembalikan ke Antrian');
+      await seedWaitingTicket(catAId, 'A', 1);
+      const callRes = await request(app.getHttpServer())
+        .post('/api/queue/call-next').set(authHeader(token))
+        .send({ counterId: 1 });
+      const ticketId = callRes.body.ticket.ticketId;
+
+      const res = await request(app.getHttpServer())
+        .post(`/api/queue/${ticketId}/transition`).set(authHeader(token))
+        .send({ targetStatus: 'WAITING' });
+
+      expect(res.status).toBe(201);
+      expect(res.body.ticket).toMatchObject({
+        status: 'WAITING',
+        counterId: null,
+        categoryId: catAId,
+        ticketNumber: 'A-001',
+      });
+    });
+
+    it('refuses the same edge through this endpoint when declared a category move', async () => {
+      await seedCallingToWaiting(TransitionAction.TRANSFER_CATEGORY, 'Pindah Kategori');
+      await seedWaitingTicket(catAId, 'A', 1);
+      const callRes = await request(app.getHttpServer())
+        .post('/api/queue/call-next').set(authHeader(token))
+        .send({ counterId: 1 });
+      const ticketId = callRes.body.ticket.ticketId;
+
+      const res = await request(app.getHttpServer())
+        .post(`/api/queue/${ticketId}/transition`).set(authHeader(token))
+        .send({ targetStatus: 'WAITING' });
+
+      expect(res.status).toBe(400);
+    });
   });
 });

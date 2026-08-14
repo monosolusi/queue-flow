@@ -1426,3 +1426,138 @@ describe('SaveSystemConfigurationUseCase — terminalNodes', () => {
     expect(await repos.config.get()).toBeNull();
   });
 });
+
+describe('SaveSystemConfigurationUseCase — a transition declared a category move', () => {
+  function buildUseCase() {
+    return {
+      config: new InMemorySystemConfigurationRepository(),
+      categories: new InMemoryCategoryRepository(),
+      routingRules: new InMemoryCounterRoutingRuleRepository(),
+    };
+  }
+
+  /** The PRD §7 default graph plus one extra edge, so the added edge is the only
+   *  thing under test. */
+  function command(
+    extra: { from: string; to: string; actionLabel: string; action?: string },
+  ): SaveSystemConfigurationCommand {
+    const sm = projectStateMachine(StateMachine.DEFAULT);
+    return {
+      storeName: 'Toko Brand',
+      stateMachine: { ...sm, transitions: [...sm.transitions, extra] },
+      dailyReset: {
+        mode: DailyResetMode.MANUAL,
+        cronExpression: null,
+        resetTicketNumberTo: 1,
+        archivePreviousDayData: true,
+      },
+      categories: [{ code: 'A', name: 'Customer Service' }],
+      routingRules: [
+        {
+          counterId: 1,
+          counterName: 'Loket 1',
+          assignedCategoryCodes: ['A'],
+          priorityPolicy: PriorityPolicy.FIFO_GLOBAL,
+        },
+      ],
+      brandColor: '#2563eb',
+      serviceThemes: { kiosk: 'light', tv: 'light', caller: 'light', admin: 'light' },
+      tvPanelLayout: [
+        { id: 'nowServing', component: 'nowServing', x: 0, y: 0, w: 12, h: 4 },
+        { id: 'waitingQueue', component: 'waitingQueue', x: 0, y: 4, w: 6, h: 3 },
+        { id: 'callHistory', component: 'callHistory', x: 6, y: 4, w: 6, h: 3 },
+        { id: 'countersServing', component: 'countersServing', x: 0, y: 7, w: 12, h: 3 },
+        { id: 'runningText', component: 'runningText', x: 0, y: 10, w: 12, h: 1 },
+      ],
+      edgeRoutingLayout: {},
+      nodePositions: {},
+      nodeActions: {},
+      terminalNodes: { start: 'auto', end: 'auto' },
+      endSources: [],
+      printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
+      actor: 'admin',
+    };
+  }
+
+  function useCaseFor(repos: ReturnType<typeof buildUseCase>) {
+    return new SaveSystemConfigurationUseCase(
+      repos.config,
+      repos.categories,
+      repos.routingRules,
+      new NoOpTransactionManager(),
+      null,
+    );
+  }
+
+  it('rejects one that does not return the ticket to WAITING, pre-tx', async () => {
+    // A category move re-issues the ticket's per-category number, and a fresh
+    // number describes a ticket nobody has served — so it can only land back in
+    // the queue. Were this saved, running it would leave a SERVING ticket with no
+    // `servedAt` and no counter: invisible on every panel, with its QUE-26
+    // service-time row lost. Refused here so no flow reaches the counter that way.
+    const repos = buildUseCase();
+
+    await expect(
+      useCaseFor(repos).execute(
+        command({
+          from: 'CALLING',
+          to: 'SERVING',
+          actionLabel: 'Pindah Kategori',
+          action: 'TRANSFER_CATEGORY',
+        }),
+      ),
+    ).rejects.toThrow(InvalidValueObjectException);
+    // Nothing persisted — fail-fast happened before the tx opened (NFR-REL-02).
+    expect(await repos.config.get()).toBeNull();
+  });
+
+  it('accepts one that targets WAITING and persists the declaration', async () => {
+    // Non-vacuous counterpart: the rule rejects a target, not the action.
+    const repos = buildUseCase();
+
+    await useCaseFor(repos).execute(
+      command({
+        from: 'CALLING',
+        to: 'WAITING',
+        actionLabel: 'Pindah Kategori',
+        action: 'TRANSFER_CATEGORY',
+      }),
+    );
+
+    const saved = await repos.config.get();
+    expect(
+      saved?.stateMachine.transitions.find((t) => t.from === 'CALLING' && t.to === 'WAITING')?.action,
+    ).toBe('TRANSFER_CATEGORY');
+  });
+
+  it('leaves the SAME edge a plain status change when it is not declared a move', async () => {
+    // The reported defect: `CALLING → WAITING` must save and stay a re-queue. Same
+    // endpoints as the accepted transfer above — only the declaration differs.
+    const repos = buildUseCase();
+
+    await useCaseFor(repos).execute(
+      command({ from: 'CALLING', to: 'WAITING', actionLabel: 'Kembalikan ke Antrian' }),
+    );
+
+    const saved = await repos.config.get();
+    expect(
+      saved?.stateMachine.transitions.find((t) => t.from === 'CALLING' && t.to === 'WAITING')?.action,
+    ).toBe('UPDATE_STATUS');
+  });
+
+  it('rejects an unknown action value (not an Object.prototype key either)', async () => {
+    // A TS string enum compiles to a plain object, so a membership test written
+    // with `in` would accept `"toString"` and persist it — neither a transfer nor
+    // anything the caller can run.
+    const repos = buildUseCase();
+
+    for (const action of ['SEND_WEBHOOK', 'toString', 'constructor']) {
+      await expect(
+        useCaseFor(repos).execute(
+          command({ from: 'CALLING', to: 'WAITING', actionLabel: 'Aksi', action }),
+        ),
+      ).rejects.toThrow(InvalidValueObjectException);
+    }
+    expect(await repos.config.get()).toBeNull();
+  });
+});

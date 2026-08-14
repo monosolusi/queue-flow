@@ -18,7 +18,7 @@ import { BootstrapModule } from './infrastructure/bootstrap/bootstrap.module';
  * gateway and event-publishing seam are available app-wide; the read-only REST
  * surface for the caller workspace (QUE-19) and the kiosk ticket-creation
  * surface (QUE-9) are imported here too. QUE-2 adds the queue command REST
- * surface (call-next/serve/complete/skip/recall/transfer), the system-admin
+ * surface (call-next/transition/transfer/reannounce), the system-admin
  * daily-reset surface, and the automatic daily-reset scheduler. QUE-30 adds the
  * health probe, the system-config / wizard REST surface
  * (`GET|PUT /api/system/config`, `GET /api/system/state-machine`), and wires

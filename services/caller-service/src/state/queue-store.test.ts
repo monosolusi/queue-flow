@@ -166,6 +166,55 @@ describe('queueReducer — STATUS_UPDATED', () => {
     expect(next.active[0].status).toBe('SERVING');
   });
 
+  it('returns a re-queued ticket to the waiting list on WAITING (the manager\'s edge)', () => {
+    // `CALLING → WAITING` declared "Ubah Status": a plain re-queue, with no
+    // TICKET_TRANSFERRED behind it. Leaving the ticket in `active` with a WAITING
+    // status would strand it on the counter panel — and because call-next locks
+    // while a ticket is active, the staff could neither serve it nor call the next.
+    let next = reducer(
+      { ...baseState, waiting: [waitingTicket('t1', 'A-001')], waitingCount: 1 },
+      event('TICKET_CALLED', 't1', { ticketNumber: 'A-001', counterId: COUNTER }),
+    );
+    expect(next.active).toHaveLength(1);
+    expect(next.waiting).toHaveLength(0);
+
+    next = reducer(next, event('STATUS_UPDATED', 't1', { from: 'CALLING', to: 'WAITING' }));
+
+    expect(next.active).toHaveLength(0);
+    expect(next.skipped).toHaveLength(0);
+    // Same number, same category — a re-queue is not a category move.
+    expect(next.waiting.map((t) => [t.ticketNumber, t.categoryId, t.status])).toEqual([
+      ['A-001', 'cat-a', 'WAITING'],
+    ]);
+    expect(next.waiting[0].counterId).toBeNull();
+    expect(next.waitingCount).toBe(1);
+  });
+
+  it('drops a re-queued ticket whose category this counter does not serve', () => {
+    // The waiting list is category-scoped, so a ticket re-queued under a category
+    // this counter does not serve leaves every bucket rather than appearing in a
+    // list it does not belong to.
+    let next = reducer(
+      { ...baseState, waiting: [waitingTicket('t1', 'B-001', 'cat-b')], waitingCount: 1 },
+      event('TICKET_CALLED', 't1', { ticketNumber: 'B-001', counterId: COUNTER }),
+    );
+    next = reducer(next, event('STATUS_UPDATED', 't1', { from: 'CALLING', to: 'WAITING' }));
+    expect(next.active).toHaveLength(0);
+    expect(next.waiting).toHaveLength(0);
+  });
+
+  it('re-queues a skipped ticket too, clearing it out of the skipped bucket', () => {
+    // A `SKIPPED → WAITING` edge is a legitimate flow: give up on re-calling and
+    // put the customer back in line. It must leave the skipped list, or the row
+    // would keep offering "Panggil Ulang" for a ticket that is already queued.
+    let next = reducer(
+      { ...baseState, skipped: [skippedTicket('s1', 'A-004')] },
+      event('STATUS_UPDATED', 's1', { from: 'SKIPPED', to: 'WAITING' }),
+    );
+    expect(next.skipped).toHaveLength(0);
+    expect(next.waiting.map((t) => t.ticketNumber)).toEqual(['A-004']);
+  });
+
   it('removes the ticket on COMPLETED', () => {
     let next = reducer(
       baseState,
@@ -285,9 +334,9 @@ describe('queueReducer — STATUS_UPDATED', () => {
   });
 
   it('keeps the ticket on the board for a custom in-progress status (QUE-33)', () => {
-    // A custom status like PREPARING (reached via the generic apply-transition
-    // endpoint) is an in-progress sub-state — the ticket stays the active ticket
-    // at the counter, just with the new status. Only COMPLETED/SKIPPED leave.
+    // A custom status like PREPARING is an in-progress sub-state — the ticket
+    // stays the active ticket at the counter, just with the new status. Only
+    // COMPLETED/SKIPPED leave.
     let next = reducer(
       baseState,
       event('TICKET_CALLED', 't1', { ticketNumber: 'A-001', counterId: COUNTER }),
@@ -400,18 +449,22 @@ describe('queueReducer — TICKET_TRANSFERRED', () => {
 
   it('evicts the active ticket when transferred away (STATUS_UPDATED + TICKET_TRANSFERRED, FR-CLR-03)', () => {
     // The aggregate emits STATUS_UPDATED (CALLING -> WAITING) then
-    // TICKET_TRANSFERRED for a transfer of the active ticket. STATUS_UPDATED
-    // keeps the ticket on the board (WAITING is not terminal); TICKET_TRANSFERRED
-    // must evict it from `active` so the board does not show a stale transferred-
-    // away ticket as the active call.
+    // TICKET_TRANSFERRED for a transfer of the active ticket. The two must
+    // converge on one bucket: STATUS_UPDATED re-queues the ticket under its OLD
+    // identity, and TICKET_TRANSFERRED replaces that entry with the new identity
+    // (or drops it, for a transfer away). Neither may leave it on the board as
+    // the active call.
+    // Seeded in `waiting` first, the way call-next really picks a ticket — the
+    // TICKET_CALLED payload carries no categoryId, so this is what makes the
+    // ticket's category known to the projection at all.
     let next = reducer(
-      baseState,
+      { ...baseState, waiting: [waitingTicket('t1', 'A-001')], waitingCount: 1 },
       event('TICKET_CALLED', 't1', { ticketNumber: 'A-001', counterId: COUNTER }),
     );
     next = reducer(next, event('STATUS_UPDATED', 't1', { from: 'CALLING', to: 'WAITING' }));
-    // Mid-flight: STATUS_UPDATED leaves the active ticket in place (now WAITING).
-    expect(next.active).toHaveLength(1);
-    expect(next.active[0].status).toBe('WAITING');
+    // Mid-flight: it has left the counter for the queue, under its old identity.
+    expect(next.active).toHaveLength(0);
+    expect(next.waiting.map((t) => [t.ticketNumber, t.status])).toEqual([['A-001', 'WAITING']]);
     next = reducer(
       next,
       event('TICKET_TRANSFERRED', 't1', {
@@ -426,6 +479,11 @@ describe('queueReducer — TICKET_TRANSFERRED', () => {
   });
 
   it('evicts from active and re-adds to waiting when the active ticket is transferred into my categories (FR-CLR-03)', () => {
+    // Not seeded in `waiting` first, so TICKET_CALLED leaves the ticket's
+    // categoryId as `''` and the mid-flight STATUS_UPDATED takes the DROP branch,
+    // not the re-queue one (the sibling test above covers that). What this pins is
+    // the convergence: TICKET_TRANSFERRED puts it in `waiting` under the new
+    // identity regardless of which branch preceded it.
     let next = reducer(
       baseState,
       event('TICKET_CALLED', 't1', { ticketNumber: 'A-001', counterId: COUNTER }),

@@ -62,8 +62,8 @@ describe('Range report REST surface (integration — FR-ADM-03 / QUE-44)', () =>
       createdAt,
     );
     t.markCalling(1, policy, createdAt + 10_000);
-    t.startServing(policy, createdAt + 12_000);
-    t.complete(policy, createdAt + 42_000);
+    t.applyTransition('SERVING', policy, createdAt + 12_000);
+    t.applyTransition('COMPLETED', policy, createdAt + 42_000);
     t.pullDomainEvents();
     await repos(booted.app).queue.save(t);
   }

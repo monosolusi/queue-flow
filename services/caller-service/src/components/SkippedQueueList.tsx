@@ -1,5 +1,5 @@
 import type { TicketStateDto } from '../api/types';
-import type { WorkflowAction } from '../lib/workflow-actions';
+import { isRunnable, type WorkflowAction } from '../lib/workflow-actions';
 import type { BoundCounter } from '../state/counter-binding';
 import { TicketRowActions, runnableRowActions } from './TicketRowActions';
 
@@ -84,8 +84,8 @@ const FLOW_UNREAD_HINT =
  * that no button offers — the manager read the old unconditional hint, found no
  * button, and asked why the description says a skipped ticket can be re-called.
  *
- * Presentation only: it reads the `command` core-api already resolved for each
- * edge and derives no routing of its own.
+ * Presentation only: it reads the `action` the manager declared for each edge and
+ * derives no routing of its own.
  */
 function skippedListHint(
   /** What the rows actually render — `published` minus what this list dropped. */
@@ -95,8 +95,8 @@ function skippedListHint(
   published: readonly WorkflowAction[],
   workflowError: string | null,
   /** Whether a category move has anywhere to go: `TransferAction` renders a
-   *  destination-less transfer disabled, so on a single-category counter a
-   *  configured `→ WAITING` edge is a button that cannot be tapped. */
+   *  destination-less transfer disabled, so on a single-category counter an edge
+   *  declared "Pindah Kategori" is a button that cannot be tapped. */
   transferPossible: boolean,
 ): SkippedListHint {
   // Checked first: an unread surface is indistinguishable from an empty one by
@@ -105,8 +105,15 @@ function skippedListHint(
     return { text: FLOW_UNREAD_HINT, tone: 'notice' };
   }
   const tappable = (a: WorkflowAction) =>
-    a.command !== null && (a.command !== 'TRANSFER' || transferPossible);
-  const recall = rendered.find((a) => a.command === 'RECALL');
+    isRunnable(a) && (a.action !== 'TRANSFER_CATEGORY' || transferPossible);
+  // The re-call: a plain status change back into CALLING. Found by its target and
+  // its action, not by a resolved command name — core-api no longer names
+  // commands, and this list only ever holds SKIPPED tickets, so `→ CALLING` from
+  // here IS "panggil ulang". The action check is not redundant: a manager could
+  // declare that same edge a category move, which re-calls nothing.
+  const recall = rendered.find(
+    (a) => a.to === 'CALLING' && a.action === 'UPDATE_STATUS' && tappable(a),
+  );
   if (recall) return { text: recallHint(recall.actionLabel), tone: 'muted' };
   if (rendered.some(tappable)) return { text: OTHER_ACTIONS_HINT, tone: 'muted' };
   // Configured, but nothing here can run it. Point at the per-button reasons

@@ -16,7 +16,7 @@ import {
   TerminalNodes,
   TvPanelLayout,
 } from '../../src/domain/store-config';
-import { Identifier } from '../../src/domain/shared';
+import { Identifier, TransitionAction } from '../../src/domain/shared';
 import { Role, USER_REPOSITORY, type IUserRepository } from '../../src/domain/identity';
 import { CreateUserUseCase } from '../../src/application/identity';
 import {
@@ -31,9 +31,10 @@ import {
 
 /**
  * Integration: `GET /api/queue/actions` — the caller panel's dynamic action set.
- * The backend resolves, for every edge the manager configured, **which queue
- * command executes it**; the caller renders one button per entry and invokes
- * the named command rather than keeping its own client-side routing table.
+ * The backend publishes every edge the manager configured with the action they
+ * declared for it; the caller renders one button per entry. Nothing about an
+ * edge's meaning is resolved from its endpoints — that inference is the defect
+ * this endpoint used to carry.
  *
  * Boots the real Nest app on the in-memory persistence profile so the endpoint
  * is exercised through the real guards, the real `StateTransitionValidator`
@@ -122,7 +123,7 @@ describe('GET /api/queue/actions (integration — caller dynamic actions, FR-CLR
           from: 'WAITING',
           to: 'CALLING',
           actionLabel: 'Panggil Berikutnya',
-          command: 'CALL_NEXT',
+          action: 'UPDATE_STATUS',
           unavailableReason: null,
         },
       ],
@@ -131,14 +132,14 @@ describe('GET /api/queue/actions (integration — caller dynamic actions, FR-CLR
           from: 'CALLING',
           to: 'SERVING',
           actionLabel: 'Mulai Melayani',
-          command: 'SERVE',
+          action: 'UPDATE_STATUS',
           unavailableReason: null,
         },
         {
           from: 'CALLING',
           to: 'SKIPPED',
           actionLabel: 'Lewati / Absen',
-          command: 'SKIP',
+          action: 'UPDATE_STATUS',
           unavailableReason: null,
         },
       ],
@@ -147,7 +148,7 @@ describe('GET /api/queue/actions (integration — caller dynamic actions, FR-CLR
           from: 'SERVING',
           to: 'COMPLETED',
           actionLabel: 'Selesai Layan',
-          command: 'COMPLETE',
+          action: 'UPDATE_STATUS',
           unavailableReason: null,
         },
       ],
@@ -156,7 +157,7 @@ describe('GET /api/queue/actions (integration — caller dynamic actions, FR-CLR
           from: 'SKIPPED',
           to: 'CALLING',
           actionLabel: 'Panggil Ulang',
-          command: 'RECALL',
+          action: 'UPDATE_STATUS',
           unavailableReason: null,
         },
       ],
@@ -170,10 +171,10 @@ describe('GET /api/queue/actions (integration — caller dynamic actions, FR-CLR
     const res = await http(app).get('/api/queue/actions').set(authHeader(adminToken));
 
     expect(res.status).toBe(200);
-    expect(res.body.byStatus.WAITING[0].command).toBe('CALL_NEXT');
+    expect(res.body.byStatus.WAITING[0].action).toBe('UPDATE_STATUS');
   });
 
-  it('resolves a wizard-customised graph: custom states, transfer, re-announce, and a dead edge', async () => {
+  it('publishes a customised graph verbatim: custom states, a declared transfer, a re-announce, and a re-queue', async () => {
     await seedStateMachine(
       new StateMachine(
         StateSchema.of(['WAITING', 'CALLING', 'SERVING', 'SKIPPED', 'COMPLETED', 'PEMBAYARAN']),
@@ -181,11 +182,20 @@ describe('GET /api/queue/actions (integration — caller dynamic actions, FR-CLR
           StateTransitionRule.of('WAITING', 'CALLING', 'Panggil Berikutnya'),
           StateTransitionRule.of('CALLING', 'CALLING', 'Panggil Lagi'),
           StateTransitionRule.of('CALLING', 'SERVING', 'Mulai Melayani'),
-          StateTransitionRule.of('CALLING', 'WAITING', 'Pindah Kategori'),
+          // Two edges with the SAME endpoints as each other's neighbours and
+          // opposite meanings — the pair alone could never tell them apart.
+          StateTransitionRule.of('CALLING', 'WAITING', 'Kembalikan ke Antrian'),
+          StateTransitionRule.of(
+            'SERVING',
+            'WAITING',
+            'Pindah Kategori',
+            TransitionAction.TRANSFER_CATEGORY,
+          ),
           StateTransitionRule.of('SERVING', 'PEMBAYARAN', 'Ke Pembayaran'),
           StateTransitionRule.of('SERVING', 'SERVING', 'Ulangi Layanan'),
           StateTransitionRule.of('PEMBAYARAN', 'COMPLETED', 'Selesai Layan'),
-          // A dead edge: nothing can move an in-progress ticket back to CALLING.
+          // Once unroutable ("nothing moves an in-progress ticket back to
+          // CALLING"); a per-ticket transition reaches it now.
           StateTransitionRule.of('PEMBAYARAN', 'CALLING', 'Panggil Kembali'),
         ],
       ),
@@ -196,16 +206,17 @@ describe('GET /api/queue/actions (integration — caller dynamic actions, FR-CLR
     expect(res.status).toBe(200);
     const flat = Object.values(res.body.byStatus)
       .flat()
-      .map((a: any) => [a.from, a.to, a.command, a.unavailableReason]);
+      .map((a: any) => [a.from, a.to, a.action, a.unavailableReason]);
     expect(flat).toEqual([
-      ['WAITING', 'CALLING', 'CALL_NEXT', null],
-      ['CALLING', 'CALLING', 'REANNOUNCE', null],
-      ['CALLING', 'SERVING', 'SERVE', null],
-      ['CALLING', 'WAITING', 'TRANSFER', null],
-      ['SERVING', 'PEMBAYARAN', 'APPLY_TRANSITION', null],
-      ['SERVING', 'SERVING', null, 'NO_STATUS_CHANGE'],
-      ['PEMBAYARAN', 'COMPLETED', 'COMPLETE', null],
-      ['PEMBAYARAN', 'CALLING', null, 'NO_COMMAND'],
+      ['WAITING', 'CALLING', 'UPDATE_STATUS', null],
+      ['CALLING', 'CALLING', 'UPDATE_STATUS', null],
+      ['CALLING', 'SERVING', 'UPDATE_STATUS', null],
+      ['CALLING', 'WAITING', 'UPDATE_STATUS', null],
+      ['SERVING', 'WAITING', 'TRANSFER_CATEGORY', null],
+      ['SERVING', 'PEMBAYARAN', 'UPDATE_STATUS', null],
+      ['SERVING', 'SERVING', 'UPDATE_STATUS', 'NO_STATUS_CHANGE'],
+      ['PEMBAYARAN', 'COMPLETED', 'UPDATE_STATUS', null],
+      ['PEMBAYARAN', 'CALLING', 'UPDATE_STATUS', null],
     ]);
     // Custom + sink states are keyed even when they have no usable action.
     expect(res.body.byStatus.SKIPPED).toEqual([]);
@@ -224,12 +235,14 @@ describe('GET /api/queue/actions (integration — caller dynamic actions, FR-CLR
     expect(board.body).toEqual({ active: [], waiting: [], waitingCount: 0 });
     expect(stateMachine.status).toBe(200);
     expect(stateMachine.body.transitions).toHaveLength(5);
-    // The raw graph endpoint still returns the graph only — no `command` field
-    // leaked into it.
+    // The raw graph endpoint returns the graph as configured — including each
+    // edge's declared action, which is part of the definition, not a ruling
+    // layered on top of it.
     expect(stateMachine.body.transitions[0]).toEqual({
       from: 'WAITING',
       to: 'CALLING',
       actionLabel: 'Panggil Berikutnya',
+      action: 'UPDATE_STATUS',
     });
   });
 });

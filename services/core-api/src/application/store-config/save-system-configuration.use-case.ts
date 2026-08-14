@@ -1,7 +1,7 @@
 import type { ISystemConfigurationRepository } from '../../domain/store-config';
 import type { ICounterRoutingRuleRepository } from '../../domain/store-config';
 import type { ICategoryRepository } from '../../domain/queue';
-import { Category } from '../../domain/queue';
+import { Category, TicketStatus } from '../../domain/queue';
 import { CounterRoutingRule } from '../../domain/store-config';
 import { SystemConfiguration } from '../../domain/store-config';
 import { StateMachine } from '../../domain/store-config';
@@ -26,6 +26,8 @@ import {
   type ITransactionManager,
   NoOpTransactionManager,
   type PriorityPolicy,
+  TransitionAction,
+  type TransitionActionValue,
 } from '../../domain/shared';
 import { AuditAction, toSnapshot } from '../../domain/audit';
 import { type RecordAuditEntryUseCase } from '../audit/record-audit-entry.use-case';
@@ -58,7 +60,19 @@ export interface WizardRoutingRuleDto {
 
 export interface WizardStateMachineDto {
   readonly states: readonly string[];
-  readonly transitions: readonly { from: string; to: string; actionLabel: string }[];
+  /**
+   * The graph edges. `action` is what running the edge *does* (see
+   * {@link TransitionAction}) and is optional on the wire: a configuration saved
+   * before the field existed carries none, and every such edge means
+   * `UPDATE_STATUS` — the `StateTransitionRule` default. Making it required would
+   * 400 every full-save site that has not been taught the field yet.
+   */
+  readonly transitions: readonly {
+    from: string;
+    to: string;
+    actionLabel: string;
+    action?: string;
+  }[];
   /**
    * Per-state editable descriptions (intrinsic per-state metadata, part of the
    * state-machine definition). Optional on the wire for backward-compat with
@@ -334,6 +348,37 @@ export class SaveSystemConfigurationUseCase {
     const newCategories = this.buildCategories(command.categories);
     const codeToId = new Map(newCategories.map((c) => [c.code, c.id.value]));
     const newRules = this.buildRoutingRules(command.routingRules, codeToId);
+    // Transfer-target cross-check (anti-corruption): a `TRANSFER_CATEGORY` edge
+    // must target WAITING. `StateTransitionRule` cannot enforce it — the check
+    // needs `TicketStatus` from the Queue context, and a Store-Config VO must not
+    // reach across the boundary (DIP) — so it belongs here, where the Queue
+    // context is already an allowed import (categories).
+    //
+    // This is a rule about what the manager may DECLARE, not an inference about
+    // what an edge means: a category move re-issues the ticket's per-category
+    // number, and a fresh `B-001` describes a ticket nobody has served, so the
+    // states that mean "being served" cannot describe it. Declaring
+    // `CALLING -> SERVING` a category move would otherwise produce a SERVING
+    // ticket with no `servedAt` and no counter — invisible on every panel, with
+    // its QUE-26 service-time row silently lost. Refused at save time, so no
+    // flow can reach the counter in that shape.
+    //
+    // **Four sites depend on this holding**, none of which re-check it:
+    // `CallNextTicketUseCase` runs `WAITING -> CALLING` unguarded (disjoint from
+    // any transfer edge only because of this rule), and the caller panel's
+    // counter-level call-next split, its `CALLING -> CALLING` re-announce
+    // hand-off, and its skipped-list re-call detection all assume a
+    // `TRANSFER_CATEGORY` edge cannot be one of theirs. See
+    // `application/queue/declared-transition-action.ts` — relax this and revisit
+    // all four, because nothing will fail on its own.
+    for (const rule of stateMachine.transitions) {
+      if (rule.action === TransitionAction.TRANSFER_CATEGORY && rule.to !== TicketStatus.WAITING) {
+        throw new InvalidValueObjectException(
+          `transition '${rule.from}'->'${rule.to}' is declared a category transfer, ` +
+            `which must return the ticket to '${TicketStatus.WAITING}'`,
+        );
+      }
+    }
     // Edge-membership cross-check (anti-corruption): the VO deliberately does
     // NOT depend on `StateMachine` (DIP), so it cannot validate that a layout
     // key corresponds to a real transition. That check belongs here, in the use
@@ -548,7 +593,17 @@ export class SaveSystemConfigurationUseCase {
 
   private buildStateMachine(dto: WizardStateMachineDto): StateMachine {
     const schema = StateSchema.of([...dto.states]);
-    const rules = dto.transitions.map((t) => StateTransitionRule.of(t.from, t.to, t.actionLabel));
+    const rules = dto.transitions.map((t) =>
+      // `action` arrives as an unvalidated wire string. The cast asserts nothing
+      // the VO does not itself check — `StateTransitionRule.of` rejects any value
+      // outside the enum (→ 400) and recovers `undefined` to `UPDATE_STATUS`.
+      StateTransitionRule.of(
+        t.from,
+        t.to,
+        t.actionLabel,
+        t.action as TransitionActionValue | undefined,
+      ),
+    );
     // Per-state editable descriptions (intrinsic per-state metadata, part of the
     // state-machine definition). `StateDescriptions.of` is permissive on a
     // missing `descriptions` key (backward-compat with direct API calls / tests

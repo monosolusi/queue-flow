@@ -168,10 +168,10 @@ describeOrSkip('DoD-4 — Power-cut recovery (FR-ENG-05, NFR-REL-02/03)', () => 
 
     // Counter 1 -> category A (PRD §7). Call next (A-001) then serve -> SERVING.
     await post('/api/queue/call-next', { counterId: 1 }, auth);
-    const serveRes = await post(`/api/queue/${t1.ticket.ticketId}/serve`, undefined, auth);
+    const serveRes = await post(`/api/queue/${t1.ticket.ticketId}/transition`, { targetStatus: 'SERVING' }, auth);
     expect(serveRes.status).toBe(201);
     const served = (await serveRes.json()) as { status: string };
-    expect(served.status).toBe('serving');
+    expect(served.status).toBe('transitioned');
 
     // --- Power cut: SIGKILL mid-flight (WAL has committed every write) -----
     await killProc(proc);
@@ -216,7 +216,7 @@ describeOrSkip('DoD-4 — Power-cut recovery (FR-ENG-05, NFR-REL-02/03)', () => 
     // of `findSkippedByCounter` (the in-memory twin is covered in the unit
     // suite): the two implementations must stay interchangeable (LSP), and only
     // a real DB proves the SQL predicate matches.
-    const skipRes = await post(`/api/queue/${call.ticket!.ticketId}/skip`, undefined, auth);
+    const skipRes = await post(`/api/queue/${call.ticket!.ticketId}/transition`, { targetStatus: 'SKIPPED' }, auth);
     expect(skipRes.status).toBe(201);
     const parkedRes = await getJson('/api/queue?counterId=1', auth);
     const parked = (await parkedRes.json()) as {

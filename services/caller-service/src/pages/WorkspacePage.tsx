@@ -24,7 +24,7 @@ export interface WorkspacePageProps {
  * notice it produces — is scoped to the surface that displays it: a failure on a
  * skipped row must not print its message under the waiting list.
  */
-function useListCommands(api: ICallerApi): {
+function useListCommands(api: ICallerApi, bound: BoundCounter): {
   readonly runner: CommandRunner;
   readonly onAction: (
     ticket: TicketStateDto,
@@ -37,10 +37,13 @@ function useListCommands(api: ICallerApi): {
   const onAction = useCallback(
     (ticket: TicketStateDto, action: WorkflowAction, targetCategoryId?: string) => {
       void run(actionRunKey(ticket.ticketId, action), () =>
-        invokeWorkflowAction(api, action, ticket.ticketId, targetCategoryId),
+        invokeWorkflowAction(api, action, ticket.ticketId, {
+          counterId: bound.counterId,
+          targetCategoryId,
+        }),
       );
     },
-    [api, run],
+    [api, bound.counterId, run],
   );
   return { runner, onAction };
 }
@@ -83,8 +86,10 @@ export function WorkspacePage({ bound, onUnbind }: WorkspacePageProps) {
   // The rows of a list all share one status, so their actions resolve once.
   const waitingActions = useMemo(() => ticketActionsFor(workflow, 'WAITING'), [workflow]);
   const skippedActions = useMemo(() => ticketActionsFor(workflow, 'SKIPPED'), [workflow]);
-  const waitingCommands = useListCommands(api);
-  const skippedCommands = useListCommands(api);
+  // The bound counter travels with every command: a transition into CALLING has
+  // to announce the ticket somewhere, and this panel's counter is where.
+  const waitingCommands = useListCommands(api, bound);
+  const skippedCommands = useListCommands(api, bound);
 
   return (
     <main className="workspace">

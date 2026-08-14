@@ -68,6 +68,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import {
   type StateMachineForm,
+  DEFAULT_TRANSITION_ACTION,
   defaultStateMachineForm,
   graphSignature,
   reconcileStateNameRefs,
@@ -464,7 +465,7 @@ export function StateMachineWorkflow({
         source: from,
         target: to,
         type: 'transition',
-        data: { actionLabel: '' },
+        data: { actionLabel: '', action: DEFAULT_TRANSITION_ACTION },
         // Carry the exact handles the manager dragged (which side → which
         // side) so the bezier routes through them — vertical when a top/bottom
         // handle was used. React Flow supplies `sourceHandle`/`targetHandle` on
@@ -568,7 +569,7 @@ export function StateMachineWorkflow({
           source: decision.source,
           target: decision.source,
           type: 'transition',
-          data: { actionLabel: '' },
+          data: { actionLabel: '', action: DEFAULT_TRANSITION_ACTION },
           // Two DISTINCT adjacent sides (the dragged-from side + the next one
           // clockwise) so the loop has two real endpoints and `TransitionEdge`
           // arcs it around that corner, clear of the card.
@@ -667,6 +668,16 @@ export function StateMachineWorkflow({
         );
         commit(nodes, nextEdges);
       },
+      // What the edge DOES. Mirrors `onEditTransitionLabel` exactly — both live
+      // on the edge's `data`, so both go through `commit` (the canvas is the
+      // source of truth for edge fields) rather than the form-only `lift` path
+      // the node-level actions use.
+      onEditTransitionAction: (edgeId, action) => {
+        const nextEdges = edges.map((e) =>
+          e.id === edgeId ? { ...e, data: { ...e.data, action } } : e,
+        );
+        commit(nodes, nextEdges);
+      },
       onDeleteTransition: (edgeId) => {
         if (value.transitions.length <= 1) return; // ≥1-transition invariant
         const nextEdges = edges.filter((e) => e.id !== edgeId);
@@ -724,7 +735,7 @@ export function StateMachineWorkflow({
           source,
           target,
           type: 'transition',
-          data: { actionLabel: '' },
+          data: { actionLabel: '', action: DEFAULT_TRANSITION_ACTION },
           sourceHandle: DEFAULT_SOURCE_HANDLE,
           targetHandle: DEFAULT_TARGET_HANDLE,
           markerEnd: EDGE_ARROW_MARKER,

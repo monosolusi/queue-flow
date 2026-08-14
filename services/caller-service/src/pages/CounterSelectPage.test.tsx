@@ -32,10 +32,6 @@ function makeApi(list: CounterDto[] = counters, reject?: Error): ICallerApi {
     // counters); stubs satisfy the wider ICallerApi type for the fake.
     getWorkflowActions: () => Promise.resolve({ byStatus: {} }),
     callNext: () => Promise.resolve(),
-    serve: () => Promise.resolve(),
-    complete: () => Promise.resolve(),
-    skip: () => Promise.resolve(),
-    recall: () => Promise.resolve(),
     reannounce: () => Promise.resolve(),
     transfer: () => Promise.resolve(),
     applyTransition: () => Promise.resolve(),

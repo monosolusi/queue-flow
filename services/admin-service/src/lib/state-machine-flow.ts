@@ -21,10 +21,17 @@ import {
   descriptionFor,
   deriveAutoSources,
   DEFAULT_SOURCE_SIDE,
+  DEFAULT_TRANSITION_ACTION,
   type StateMachineForm,
   type Transition,
 } from './state-machine';
-import { DEFAULT_STATE_MACHINE, DEFAULT_TERMINAL_NODES, type EdgeSide, type TerminalNodesDto } from '../api/types';
+import {
+  DEFAULT_STATE_MACHINE,
+  DEFAULT_TERMINAL_NODES,
+  type EdgeSide,
+  type TerminalNodesDto,
+  type TransitionActionType,
+} from '../api/types';
 
 /** Node payload: the state name (the node id IS the state name — names are
  *  unique per `validateCustomStateMachine`, so they are valid unique node ids)
@@ -75,13 +82,20 @@ export interface FlowNode {
   pinned?: boolean;
 }
 
-/** Edge payload: the transition's action label (the Caller UI button text).
+/** Edge payload: the transition's action label (the Caller UI button text) and
+ *  the action it runs. Both are round-tripped through the canvas by
+ *  `flowToGraph`, so an edge edit made on the canvas cannot silently reset either.
  *  Index signature for `Record<string, unknown>` compatibility (see
  *  {@link FlowNodeData}). No `explicit` flag: EVERY incoming End edge is now
  *  manager-drawn (there are no topology-derived End arrows left), so a flag
  *  distinguishing the two kinds would be vacuous. */
 export interface FlowEdgeData {
   actionLabel: string;
+  /** Terminal (Start/End) marker edges carry {@link DEFAULT_TRANSITION_ACTION}:
+   *  they are canvas-only decoration with no Caller button, so the value is never
+   *  read for them — but keeping the field non-optional means every real edge has
+   *  one, and `flowToGraph` needs no fallback that could mask a dropped value. */
+  action: TransitionActionType;
   [key: string]: unknown;
 }
 
@@ -289,7 +303,7 @@ export function formToFlow(
     source: t.from,
     target: t.to,
     type: 'transition',
-    data: { actionLabel: t.actionLabel },
+    data: { actionLabel: t.actionLabel, action: t.action },
     // Seed from the form sides (the source of truth); a transition with no
     // sides (absent) gets the canonical L→R default.
     sourceHandle: t.sourceSide !== undefined ? sideToHandle(t.sourceSide) : DEFAULT_SOURCE_HANDLE,
@@ -380,7 +394,7 @@ const TERMINAL_SPACING = 240;
  */
 export function deriveTerminalMarkers(
   states: readonly string[],
-  transitions: readonly { from: string; to: string; actionLabel: string }[],
+  transitions: readonly Transition[],
   realPositions: Record<string, { x: number; y: number }>,
   endSources: readonly string[],
 ): { nodes: FlowNode[]; edges: FlowEdge[] } {
@@ -452,7 +466,7 @@ export function deriveTerminalMarkers(
         source: START_NODE_ID,
         target: s,
         type: TERMINAL_EDGE_TYPE,
-        data: { actionLabel: '' },
+        data: { actionLabel: '', action: DEFAULT_TRANSITION_ACTION },
         sourceHandle: HANDLE_IDS.right,
         targetHandle: HANDLE_IDS.left,
         markerEnd: EDGE_ARROW_MARKER,
@@ -478,7 +492,7 @@ export function deriveTerminalMarkers(
       source: s,
       target: END_NODE_ID,
       type: TERMINAL_EDGE_TYPE,
-      data: { actionLabel: '' },
+      data: { actionLabel: '', action: DEFAULT_TRANSITION_ACTION },
       sourceHandle: HANDLE_IDS.right,
       targetHandle: HANDLE_IDS.left,
       markerEnd: EDGE_ARROW_MARKER,
@@ -616,6 +630,7 @@ export function flowToGraph(
       from: idToName.get(e.source) ?? e.source,
       to: idToName.get(e.target) ?? e.target,
       actionLabel: e.data.actionLabel,
+      action: e.data.action,
       sourceSide: handleToSide(e.sourceHandle),
       targetSide: handleToSide(e.targetHandle),
     }));

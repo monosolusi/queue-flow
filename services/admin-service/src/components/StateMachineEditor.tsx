@@ -10,7 +10,14 @@ import {
   updateTransition,
   addTransition,
   removeTransition,
+  TRANSITION_ACTION_LABELS,
+  TRANSITION_ACTIONS,
 } from '../lib/state-machine';
+import type { TransitionActionType } from '../api/types';
+
+/** The "aksi" options for a transition row — the shared `TRANSITION_ACTIONS`
+ *  list, so the wizard and the designer can never offer different sets. */
+const TRANSITION_ACTION_OPTIONS = TRANSITION_ACTIONS;
 
 /**
  * Reusable state-machine editor (DRY extraction from the wizard's step 3, now
@@ -193,6 +200,29 @@ export function StateMachineEditor({
                   aria-label={`Transisi ${i + 1} label aksi`}
                   aria-required="true"
                 />
+                {/* What the button DOES. The designer offers the same choice per
+                    transition; the wizard must too, or a flow set up here could
+                    only ever contain plain status changes and "Pindah Kategori"
+                    would be unreachable until the manager opened the designer. */}
+                <select
+                  className="field__input entry-row__state"
+                  value={t.action}
+                  onChange={(e) =>
+                    onChange(
+                      updateTransition(value, i, {
+                        action: e.target.value as TransitionActionType,
+                      }),
+                    )
+                  }
+                  aria-label={`Transisi ${i + 1} aksi`}
+                  aria-required="true"
+                >
+                  {TRANSITION_ACTION_OPTIONS.map((a) => (
+                    <option key={a} value={a}>
+                      {TRANSITION_ACTION_LABELS[a]}
+                    </option>
+                  ))}
+                </select>
                 <button
                   type="button"
                   className="btn btn--ghost"

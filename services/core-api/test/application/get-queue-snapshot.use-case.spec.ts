@@ -64,7 +64,7 @@ function skippedAt(
     createdAt,
   );
   ticket.markCalling(counterId, StateMachine.DEFAULT, createdAt + 1);
-  ticket.skip(StateMachine.DEFAULT, skippedAtMs);
+  ticket.applyTransition('SKIPPED', StateMachine.DEFAULT, skippedAtMs);
   return ticket;
 }
 

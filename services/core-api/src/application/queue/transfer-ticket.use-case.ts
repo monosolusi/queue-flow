@@ -4,7 +4,6 @@ import type {
   ISequenceRepository,
   ITransitionPolicy,
   ITransitionPolicyResolver,
-  StatusValue,
   TicketId,
 } from '../../domain/queue';
 import { TicketStatus } from '../../domain/queue';
@@ -15,6 +14,7 @@ import {
   ITransactionManager,
   NoOpTransactionManager,
 } from '../../domain/shared';
+import { assertRunnableAsCategoryTransfer } from './declared-transition-action';
 import { QueueEventDispatcher } from './queue-event-dispatcher';
 
 /**
@@ -24,14 +24,13 @@ import { QueueEventDispatcher } from './queue-event-dispatcher';
  *
  * `dateKey` is the per-day sequence key (the same key ticket creation uses);
  * it is supplied explicitly so this use case does not own the date convention.
- * `targetStatus` defaults to `WAITING` (re-queue) and is validated against the
- * active state machine — a transfer is a first-class configurable transition.
+ * There is no `targetStatus`: a transferred ticket always lands in WAITING, which
+ * is what a re-issued per-category number means (see `QueueTicket.transferTo`).
  */
 export interface TransferTicketCommand {
   readonly ticketId: TicketId;
   readonly targetCategoryId: string;
   readonly dateKey: string;
-  readonly targetStatus?: StatusValue;
 }
 
 /**
@@ -60,13 +59,18 @@ export type TransferTicketResult = {
  * Transfers a ticket to a different category — "pindah kategori" (FR-CLR-03).
  *
  * Transfer is a **first-class configurable transition**: the status leg
- * (current -> `targetStatus`, default `WAITING`) is validated against the
- * active {@link ITransitionPolicy} — the same validator every queue action
- * uses (QUE-10 AC#3). An active state machine without the edge (the PRD §7
- * default has no `CALLING -> WAITING`) rejects the transfer with an
- * {@link InvalidStateTransitionException} (AC#2). The wizard/admin enables
- * transfer by adding the edge (e.g. `CALLING -> WAITING` labelled
- * "Pindah Kategori").
+ * (current -> WAITING) is validated against the active {@link ITransitionPolicy} —
+ * the same validator every queue action uses (QUE-10 AC#3). An active state
+ * machine without the edge rejects the transfer with an
+ * {@link InvalidStateTransitionException} (AC#2).
+ *
+ * The manager enables transfer by drawing the edge **and declaring its action
+ * `TRANSFER_CATEGORY`**. Both halves are required, and the second is the reason
+ * this command exists separately: a category move needs a destination the flow
+ * cannot supply (staff pick it per ticket), so it has to be declared rather than
+ * recognised. It used to be recognised — from the target state alone — which made
+ * every `X -> WAITING` edge a category move and turned a plain "back to the
+ * queue" step into a button demanding a category the counter may not even serve.
  *
  * The transition is pre-checked **before** reserving a new sequence number so
  * an illegal transfer does not burn or gap a per-category ticket number
@@ -107,12 +111,20 @@ export class TransferTicketUseCase {
       throw new EntityNotFoundException('QueueTicket', command.ticketId.value);
     }
 
-    const targetStatus = command.targetStatus ?? TicketStatus.WAITING;
     // Pre-check before reserving a sequence number so an illegal transfer
     // does not advance (and thus gap) the per-category sequence (NFR-REL-02).
-    if (!transitionPolicy.isAllowed(ticket.currentStatus, targetStatus)) {
-      throw new InvalidStateTransitionException(ticket.currentStatus, targetStatus);
+    if (!transitionPolicy.isAllowed(ticket.currentStatus, TicketStatus.WAITING)) {
+      throw new InvalidStateTransitionException(ticket.currentStatus, TicketStatus.WAITING);
     }
+    // The edge must be the one the manager declared a category move. Checked
+    // after `isAllowed` so a flow that lacks the edge entirely reports the
+    // missing edge (409) rather than a mis-declared one (400) — and still before
+    // any sequence is reserved.
+    assertRunnableAsCategoryTransfer(
+      transitionPolicy.describeGraph(),
+      ticket.currentStatus,
+      TicketStatus.WAITING,
+    );
 
     const category = await this.categories.getById(command.targetCategoryId);
     if (!category) {
@@ -150,7 +162,6 @@ export class TransferTicketUseCase {
       ticket.transferTo(
         command.targetCategoryId,
         newTicketNumber,
-        targetStatus,
         transitionPolicy,
         this.clock(),
       );

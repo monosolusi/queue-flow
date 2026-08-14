@@ -6,18 +6,14 @@ import type { WorkflowActionsDto } from '../api/types';
 import { edge, workflowActions } from '../test/workflow-fixtures';
 
 const defaultWorkflow: WorkflowActionsDto = workflowActions(
-  edge('WAITING', 'CALLING', 'Panggil Berikutnya', 'CALL_NEXT'),
-  edge('SERVING', 'COMPLETED', 'Selesai Layan', 'COMPLETE'),
+  edge('WAITING', 'CALLING', 'Panggil Berikutnya', 'UPDATE_STATUS'),
+  edge('SERVING', 'COMPLETED', 'Selesai Layan', 'UPDATE_STATUS'),
 );
 
 function makeApi(overrides: Partial<ICallerApi> = {}): ICallerApi {
   return {
     getWorkflowActions: vi.fn(() => Promise.resolve(defaultWorkflow)),
     callNext: vi.fn(() => Promise.resolve()),
-    serve: vi.fn(() => Promise.resolve()),
-    complete: vi.fn(() => Promise.resolve()),
-    skip: vi.fn(() => Promise.resolve()),
-    recall: vi.fn(() => Promise.resolve()),
     reannounce: vi.fn(() => Promise.resolve()),
     transfer: vi.fn(() => Promise.resolve()),
     applyTransition: vi.fn(() => Promise.resolve()),
@@ -66,8 +62,8 @@ describe('useWorkflowActions (FR-CLR-02)', () => {
     expect(api.getWorkflowActions).toHaveBeenCalledTimes(1);
 
     surface = workflowActions(
-      edge('WAITING', 'CALLING', 'Panggil Berikutnya', 'CALL_NEXT'),
-      edge('SERVING', 'COMPLETED', 'Selesaikan Layanan', 'COMPLETE'),
+      edge('WAITING', 'CALLING', 'Panggil Berikutnya', 'UPDATE_STATUS'),
+      edge('SERVING', 'COMPLETED', 'Selesaikan Layanan', 'UPDATE_STATUS'),
     );
     rerender(<Probe api={api} configVersion={1} />);
 

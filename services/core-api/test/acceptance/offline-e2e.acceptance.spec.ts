@@ -105,16 +105,16 @@ describe('DoD-3 — Offline End-to-End realtime flow', () => {
 
     // serve → STATUS_UPDATED (CALLING -> SERVING), complete → STATUS_UPDATED (SERVING -> COMPLETED).
     const serveRes = await http(booted.app)
-      .post(`/api/queue/${ticketId}/serve`)
+      .post(`/api/queue/${ticketId}/transition`).send({ targetStatus: 'SERVING' })
       .set(authHeader(token))
       .expect(201);
-    expect(serveRes.body.status).toBe('serving');
+    expect(serveRes.body.status).toBe('transitioned');
     await waitForLength(tvEvents, 3);
     expect(tvEvents[2].type).toBe('STATUS_UPDATED');
     expect(tvEvents[2].payload.to).toBe('SERVING');
 
     await http(booted.app)
-      .post(`/api/queue/${ticketId}/complete`)
+      .post(`/api/queue/${ticketId}/transition`).send({ targetStatus: 'COMPLETED' })
       .set(authHeader(token))
       .expect(201);
     await waitForLength(tvEvents, 4);
@@ -182,14 +182,14 @@ describe('DoD-3 — Offline End-to-End realtime flow', () => {
     await http(booted.app).post('/api/queue/call-next').set(authHeader(token)).send({ counterId: 1 }).expect(201);
     await waitForLength(tvEvents, 2);
 
-    await http(booted.app).post(`/api/queue/${ticketId}/skip`).set(authHeader(token)).expect(201);
+    await http(booted.app).post(`/api/queue/${ticketId}/transition`).set(authHeader(token)).send({ targetStatus: 'SKIPPED' }).expect(201);
     await waitForLength(tvEvents, 3);
     expect(tvEvents[2].payload.to).toBe('SKIPPED');
 
     // The skipped ticket lands in the caller snapshot's `skipped` bucket, at the
-    // counter that skipped it — the surface "Panggil Ulang" (the RECALL command
-    // `GET /api/queue/actions` publishes for SKIPPED -> CALLING) acts on. Without
-    // it the ticket would be in no bucket and the configured action unreachable.
+    // counter that skipped it — the surface "Panggil Ulang" (the SKIPPED -> CALLING
+    // edge `GET /api/queue/actions` publishes) acts on. Without it the ticket
+    // would be in no bucket and the configured action unreachable.
     const afterSkip = await http(booted.app)
       .get('/api/queue?counterId=1')
       .set(authHeader(token))
@@ -205,8 +205,10 @@ describe('DoD-3 — Offline End-to-End realtime flow', () => {
       },
     ]);
 
-    await http(booted.app).post(`/api/queue/${ticketId}/recall`).set(authHeader(token)).expect(201);
-    // Recall is a re-call to the same counter: it emits STATUS_UPDATED
+    // No counterId in the body: a skipped ticket keeps the counter that called
+    // it, so the re-call announces at that same counter.
+    await http(booted.app).post(`/api/queue/${ticketId}/transition`).set(authHeader(token)).send({ targetStatus: 'CALLING' }).expect(201);
+    // A re-call announces at the same counter: it emits STATUS_UPDATED
     // (SKIPPED -> CALLING) then TICKET_CALLED carrying {ticketNumber, counterId}
     // so the TV board re-shows the ticket and the audio queue re-announces it
     // (FR-TV-01/02). The TICKET_CALLED is the recall-restore signal the TV

@@ -31,7 +31,11 @@ import {
   type EdgeProps,
   type NodeProps,
 } from '@xyflow/react';
-import { DEFAULT_STATE_MACHINE, type NodeActionDto } from '../api/types';
+import {
+  DEFAULT_STATE_MACHINE,
+  type NodeActionDto,
+  type TransitionActionType,
+} from '../api/types';
 import { HANDLE_IDS, getSelfLoopPath, type FlowEdgeData, type FlowNodeData } from '../lib/state-machine-flow';
 
 /**
@@ -69,6 +73,14 @@ export interface WorkflowHandlers {
   onRenameState: (oldName: string, newName: string) => void;
   onDeleteState: (name: string) => void;
   onEditTransitionLabel: (edgeId: string, label: string) => void;
+  /**
+   * Change what running the edge DOES (see {@link TransitionActionType}). Sits
+   * beside `onEditTransitionLabel` because the two are the same kind of edit —
+   * one names the button, the other says what it runs — and because the pair is
+   * the whole reason the backend no longer has to guess an edge's meaning from
+   * its endpoints.
+   */
+  onEditTransitionAction: (edgeId: string, action: TransitionActionType) => void;
   onDeleteTransition: (edgeId: string) => void;
   /**
    * Re-point an edge's `from`/`to` endpoints from the properties panel. Guards

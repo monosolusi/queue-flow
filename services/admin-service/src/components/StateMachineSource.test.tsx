@@ -14,11 +14,11 @@ import type { Transition } from '../lib/state-machine';
  */
 
 const DEFAULT_CONNECTORS: Transition[] = [
-  { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' },
-  { from: 'CALLING', to: 'SERVING', actionLabel: 'Mulai Melayani' },
-  { from: 'CALLING', to: 'SKIPPED', actionLabel: 'Lewati / Absen' },
-  { from: 'SKIPPED', to: 'CALLING', actionLabel: 'Panggil Ulang' },
-  { from: 'SERVING', to: 'COMPLETED', actionLabel: 'Selesai Layan' },
+  { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', action: 'UPDATE_STATUS' },
+  { from: 'CALLING', to: 'SERVING', actionLabel: 'Mulai Melayani', action: 'UPDATE_STATUS' },
+  { from: 'CALLING', to: 'SKIPPED', actionLabel: 'Lewati / Absen', action: 'UPDATE_STATUS' },
+  { from: 'SKIPPED', to: 'CALLING', actionLabel: 'Panggil Ulang', action: 'UPDATE_STATUS' },
+  { from: 'SERVING', to: 'COMPLETED', actionLabel: 'Selesai Layan', action: 'UPDATE_STATUS' },
 ];
 
 describe('StateMachineSource (XML Source view)', () => {
@@ -191,7 +191,7 @@ describe('StateMachineSource (XML Source view)', () => {
     // non-default connection point, so the routing is visible alongside the
     // from→to direction.
     const connectors: Transition[] = [
-      { from: 'SKIPPED', to: 'CALLING', actionLabel: 'Panggil Ulang', sourceSide: 'bottom', targetSide: 'top' },
+      { from: 'SKIPPED', to: 'CALLING', actionLabel: 'Panggil Ulang', action: 'UPDATE_STATUS', sourceSide: 'bottom', targetSide: 'top' },
     ];
     render(
       <StateMachineSource

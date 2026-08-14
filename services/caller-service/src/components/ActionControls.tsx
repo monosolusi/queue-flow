@@ -4,6 +4,7 @@ import type { TicketStateDto, WorkflowActionsDto } from '../api/types';
 import {
   actionRunKey,
   actionTestId,
+  isRunnable,
   callNextActionFor,
   ticketActionsFor,
   transferCandidates,
@@ -34,19 +35,18 @@ export interface ActionControlsProps {
  * Three clusters, in order:
  *
  * 1. **Call next** — the counter-level entry action. It renders only when the
- *    flow actually has an edge out of WAITING that core-api resolved to
- *    `CALL_NEXT` (delete it in the designer and the button goes away), labelled
- *    with that edge's wording. It
+ *    flow actually has a `WAITING -> CALLING` edge it can honour (delete it in the
+ *    designer and the button goes away), labelled with that edge's wording. It
  *    is disabled while an unresolved ticket occupies the counter: the store
  *    projects `active` to the tickets still at it (a completed one leaves, a
  *    skipped one moves to the skipped list), so `active !== null` means staff
  *    must resolve the current ticket first — calling next on top of it would
  *    strand it in CALLING forever and corrupt analytics.
  * 2. **Flow actions** — one button per outgoing edge of `active.status`, each
- *    carrying the command **core-api** resolved for it. An edge the counter
- *    panel cannot execute (`command === null`) is rendered disabled with the
- *    reason, never silently dropped: a configured transition that simply
- *    vanishes is exactly the complaint this derivation exists to fix.
+ *    running the action **the manager declared** for it. An edge the panel cannot
+ *    run (see `isRunnable`) is rendered disabled with the reason, never silently
+ *    dropped: a configured transition that simply vanishes is exactly the
+ *    complaint this derivation exists to fix.
  * 3. **Utilities** — "Panggil Lagi", the built-in re-announce fallback. Kept
  *    only while the flow says nothing about it: a re-announce IS a
  *    `CALLING → CALLING` self-loop (it repeats the call without changing the
@@ -80,13 +80,29 @@ export function ActionControls({
   );
   // The manager drew the `CALLING → CALLING` self-loop, so re-announce is part
   // of the flow now — the built-in utility button stands down rather than
-  // duplicating it under different wording.
-  const flowOwnsReannounce = actions.some((a) => a.command === 'REANNOUNCE');
+  // duplicating it under different wording. Recognised by the edge itself (a
+  // runnable self-loop on CALLING) rather than by a command name: core-api no
+  // longer resolves edges to commands, and the announcement is what arriving in
+  // CALLING means.
+  //
+  // The `UPDATE_STATUS` check is not redundant, and mirrors the same check in
+  // `SkippedQueueList`: were that edge declared a category move, what replaced the
+  // utility button would be a destination chooser, which announces nothing — so
+  // staff would lose the only way to repeat an announcement. core-api will not
+  // SAVE such an edge (a category move must target WAITING), so this is
+  // rolling-deploy defence in depth: a panel can outlive the config that produced
+  // its graph. Keep it.
+  const flowOwnsReannounce = actions.some(
+    (a) => a.from === 'CALLING' && a.to === 'CALLING' && isRunnable(a) && a.action === 'UPDATE_STATUS',
+  );
 
   function fire(action: WorkflowAction, targetCategoryId?: string): void {
     if (!active) return;
     void run(actionRunKey(active.ticketId, action), () =>
-      invokeWorkflowAction(api, action, active.ticketId, targetCategoryId),
+      invokeWorkflowAction(api, action, active.ticketId, {
+        counterId: bound.counterId,
+        targetCategoryId,
+      }),
     );
   }
 
@@ -116,7 +132,7 @@ export function ActionControls({
             const blocked = blockedApartFrom(key);
             const testId = actionTestId(action);
 
-            if (action.command === null) {
+            if (!isRunnable(action)) {
               // Configured in the flow but unexecutable here. Shown disabled with
               // a visible reason so the manager can see the edge exists and why
               // the counter cannot run it.
@@ -139,7 +155,7 @@ export function ActionControls({
               );
             }
 
-            if (action.command === 'TRANSFER') {
+            if (action.action === 'TRANSFER_CATEGORY') {
               return (
                 <TransferAction
                   // `key` is ticket-scoped, so a different ticket taking the

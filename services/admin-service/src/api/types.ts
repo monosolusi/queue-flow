@@ -103,10 +103,29 @@ export const DEFAULT_TV_GRID_LAYOUT: TvGridLayout = [
   { id: 'runningText', component: 'runningText', x: 0, y: 10, w: 12, h: 1 },
 ];
 
+/**
+ * What running a transition *does*, chosen by the manager per edge. The backend
+ * never infers it from the edge's endpoints — it used to, reading every edge into
+ * WAITING as a category move, so an edge drawn to put a ticket back in the queue
+ * produced a "Pindah Kategori" button demanding a destination category.
+ *
+ * - `UPDATE_STATUS` — move the ticket to the edge's target state (the default).
+ * - `TRANSFER_CATEGORY` — "pindah kategori" (FR-CLR-03): move it to another
+ *   category as well, re-issuing its number. The one action that needs an
+ *   argument staff supply at the counter, which is why it must be declared.
+ *
+ * Mirrors core-api's `TransitionAction` enum.
+ */
+export type TransitionActionType = 'UPDATE_STATUS' | 'TRANSFER_CATEGORY';
+
 export interface StateTransitionDto {
   readonly from: string;
   readonly to: string;
   readonly actionLabel: string;
+  /** Optional on the wire: absent means `UPDATE_STATUS`, which is what every
+   *  edge configured before this field existed means (core-api's
+   *  `StateTransitionRule` default). */
+  readonly action?: TransitionActionType;
 }
 
 export interface StateMachineDto {
@@ -131,7 +150,7 @@ export interface StateMachineDto {
  * Connection-point (handle) routing is now sourced from the form transitions
  * (`Transition.sourceSide`/`targetSide`) and persisted in the separate
  * {@link EdgeRoutingLayoutDto} map — NOT on the wire {@link StateTransitionDto}
- * (which stays `{ from, to, actionLabel }` only).
+ * (which carries `{ from, to, actionLabel, action }` only).
  */
 export type EdgeSide = 'top' | 'right' | 'bottom' | 'left';
 
@@ -494,15 +513,30 @@ export const DEFAULT_CATEGORIES: readonly WizardCategoryDto[] = [
   { code: 'B', name: 'Kasir & Pembayaran' },
 ];
 
-/** The PRD §7 default state machine (prefilled into the wizard designer). */
-export const DEFAULT_STATE_MACHINE: StateMachineDto = {
+/**
+ * The PRD §7 default state machine (prefilled into the wizard designer).
+ *
+ * Typed with `Required<StateTransitionDto>` transitions: `action` is optional on
+ * the *wire* (an absent value means UPDATE_STATUS, which is what stores
+ * configured before the field existed carry), but this preset states every field
+ * explicitly. That makes each entry a complete `Transition`, so the many places
+ * that build a form by copying these edges need no per-field defaulting.
+ */
+interface DefaultStateMachineDto extends Omit<StateMachineDto, 'transitions'> {
+  readonly transitions: readonly Required<StateTransitionDto>[];
+}
+
+export const DEFAULT_STATE_MACHINE: DefaultStateMachineDto = {
   states: ['WAITING', 'CALLING', 'SERVING', 'SKIPPED', 'COMPLETED'],
+  // Every default edge is a plain status change: the PRD §7 flow has no category
+  // move. Stated explicitly rather than left to the wire default so the preset
+  // reads as configuration, not as an omission.
   transitions: [
-    { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' },
-    { from: 'CALLING', to: 'SERVING', actionLabel: 'Mulai Melayani' },
-    { from: 'CALLING', to: 'SKIPPED', actionLabel: 'Lewati / Absen' },
-    { from: 'SKIPPED', to: 'CALLING', actionLabel: 'Panggil Ulang' },
-    { from: 'SERVING', to: 'COMPLETED', actionLabel: 'Selesai Layan' },
+    { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', action: 'UPDATE_STATUS' },
+    { from: 'CALLING', to: 'SERVING', actionLabel: 'Mulai Melayani', action: 'UPDATE_STATUS' },
+    { from: 'CALLING', to: 'SKIPPED', actionLabel: 'Lewati / Absen', action: 'UPDATE_STATUS' },
+    { from: 'SKIPPED', to: 'CALLING', actionLabel: 'Panggil Ulang', action: 'UPDATE_STATUS' },
+    { from: 'SERVING', to: 'COMPLETED', actionLabel: 'Selesai Layan', action: 'UPDATE_STATUS' },
   ],
   // No per-state description overrides — the canonical copy (describeState) is
   // the fallback for each of the 5 PRD §7 default statuses. `{}` = derive.

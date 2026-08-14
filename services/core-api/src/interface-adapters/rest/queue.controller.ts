@@ -68,11 +68,14 @@ export class QueueController {
 
   /**
    * `GET /api/queue/actions` → the active state machine's configured edges, keyed
-   * by source status, each already resolved to **the queue command that
-   * realizes it** (FR-CLR-02). The caller panel renders one button per entry and
-   * invokes the named command; it no longer keeps its own client-side map of
-   * which endpoint executes which edge — that is backend knowledge (aggregate
-   * preconditions), and this endpoint is its authority.
+   * by source status, each carrying the **action the manager declared** for it
+   * (FR-CLR-02). The caller panel renders one button per entry and runs the
+   * declared action; nothing here resolves an edge to a command.
+   *
+   * It used to: each edge was mapped to one of eight queue commands, keyed on the
+   * `(from, to)` pair — which cannot say what the manager meant, so the rule for
+   * WAITING read every `X -> WAITING` edge as a category move and turned a
+   * re-queue into a "Pindah Kategori" button demanding a destination category.
    *
    * Authenticated (admin or caller-staff) via the controller-level guards — the
    * same classification as `GET /api/system/state-machine`, which serves the raw

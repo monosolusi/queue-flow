@@ -41,14 +41,14 @@ describe('SkippedQueueList (FR-CLR-02 — a skipped ticket stays recallable)', (
     expect(onAction).toHaveBeenCalledTimes(1);
     expect(onAction.mock.calls[0][0]).toMatchObject({ ticketId: 's2' });
     // No special case for recall: the command is the one the server named.
-    expect(onAction.mock.calls[0][1]).toMatchObject({ to: 'CALLING', command: 'RECALL' });
+    expect(onAction.mock.calls[0][1]).toMatchObject({ to: 'CALLING', action: 'UPDATE_STATUS' });
   });
 
   it('renders whatever the flow says, not a hardcoded recall', async () => {
     const onAction = vi.fn();
     const configured = workflowActions(
-      edge('SKIPPED', 'CALLING', 'Panggil Lagi Yang Absen', 'RECALL'),
-      edge('SKIPPED', 'BATAL', 'Batalkan Tiket', 'APPLY_TRANSITION'),
+      edge('SKIPPED', 'CALLING', 'Panggil Lagi Yang Absen', 'UPDATE_STATUS'),
+      edge('SKIPPED', 'BATAL', 'Batalkan Tiket', 'UPDATE_STATUS'),
     );
     render(
       <SkippedQueueList
@@ -62,7 +62,7 @@ describe('SkippedQueueList (FR-CLR-02 — a skipped ticket stays recallable)', (
     expect(row).toHaveTextContent('Panggil Lagi Yang Absen');
     expect(row).toHaveTextContent('Batalkan Tiket');
     await userEvent.click(screen.getByTestId('skipped-action-s1-BATAL'));
-    expect(onAction.mock.calls[0][1]).toMatchObject({ command: 'APPLY_TRANSITION' });
+    expect(onAction.mock.calls[0][1]).toMatchObject({ action: 'UPDATE_STATUS' });
   });
 
   it('shows the empty state rather than disappearing', () => {
@@ -150,7 +150,7 @@ describe('SkippedQueueList hint follows the flow, never promises a missing actio
 
   it('says so plainly when the flow leads nowhere out of "Dilewati"', () => {
     // A flow the designer can really produce: a way INTO skipped, none back out.
-    const oneWay = workflowActions(edge('CALLING', 'SKIPPED', 'Lewati / Absen', 'SKIP'));
+    const oneWay = workflowActions(edge('CALLING', 'SKIPPED', 'Lewati / Absen', 'UPDATE_STATUS'));
     renderWith(ticketActionsFor(oneWay, 'SKIPPED'));
 
     // Answers the manager's question — yes, it is meant to be like that here —
@@ -187,7 +187,7 @@ describe('SkippedQueueList hint follows the flow, never promises a missing actio
   });
 
   it('points at the row buttons when the flow offers actions but no recall', () => {
-    const noRecall = workflowActions(edge('SKIPPED', 'BATAL', 'Batalkan Tiket', 'APPLY_TRANSITION'));
+    const noRecall = workflowActions(edge('SKIPPED', 'BATAL', 'Batalkan Tiket', 'UPDATE_STATUS'));
     renderWith(ticketActionsFor(noRecall, 'SKIPPED'));
 
     expect(hint()).not.toHaveTextContent(RECALL_PROMISE);
@@ -199,11 +199,11 @@ describe('SkippedQueueList hint follows the flow, never promises a missing actio
   });
 
   it('does not point at the buttons when every configured action is unrunnable', () => {
-    // A self-loop (supported by the designer): configured, visible, but core-api
-    // resolves no command for it — "pilih tindakan yang tersedia" would be the
-    // same lie one step further in.
+    // A self-loop (supported by the designer): configured, visible, but it would
+    // change nothing — "pilih tindakan yang tersedia" would be the same lie one
+    // step further in.
     const selfLoop = workflowActions(
-      edge('SKIPPED', 'SKIPPED', 'Tandai Ulang', null, 'NO_STATUS_CHANGE'),
+      edge('SKIPPED', 'SKIPPED', 'Tandai Ulang', 'UPDATE_STATUS', 'NO_STATUS_CHANGE'),
     );
     renderWith(ticketActionsFor(selfLoop, 'SKIPPED'));
 
@@ -225,7 +225,7 @@ describe('SkippedQueueList hint follows the flow, never promises a missing actio
       assignedCategories: [{ id: 'cat-a', code: 'A', name: 'Customer Service' }],
     };
     const onlyTransfer = workflowActions(
-      edge('SKIPPED', 'WAITING', 'Pindah Kategori', 'TRANSFER'),
+      edge('SKIPPED', 'WAITING', 'Pindah Kategori', 'TRANSFER_CATEGORY'),
     );
     render(
       <SkippedQueueList
@@ -241,7 +241,7 @@ describe('SkippedQueueList hint follows the flow, never promises a missing actio
   });
 
   it('never shows staff a raw status name', () => {
-    const oneWay = workflowActions(edge('CALLING', 'SKIPPED', 'Lewati / Absen', 'SKIP'));
+    const oneWay = workflowActions(edge('CALLING', 'SKIPPED', 'Lewati / Absen', 'UPDATE_STATUS'));
     renderWith(ticketActionsFor(oneWay, 'SKIPPED'));
     expect(hint().textContent).not.toMatch(/SKIPPED|CALLING|WAITING/);
   });
@@ -251,7 +251,7 @@ describe('SkippedQueueList hint follows the flow, never promises a missing actio
     // them must too — hardcoding "Panggil Ulang" over a button that reads
     // "Panggil Lagi Yang Absen" is this very bug in miniature.
     const renamed = workflowActions(
-      edge('SKIPPED', 'CALLING', 'Panggil Lagi Yang Absen', 'RECALL'),
+      edge('SKIPPED', 'CALLING', 'Panggil Lagi Yang Absen', 'UPDATE_STATUS'),
     );
     renderWith(ticketActionsFor(renamed, 'SKIPPED'));
 

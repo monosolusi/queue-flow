@@ -129,9 +129,10 @@ export class PostgresQueueRepository implements IQueueRepository, ITicketArchive
   }
 
   async findSkippedByCounter(counterId: number): Promise<QueueTicket[]> {
-    // Counter-scoped, mirroring findActiveByCounter: `skip` leaves counter_id
-    // assigned and `recall` re-announces to it, so the skipped list belongs to
-    // the counter that skipped the ticket. Oldest skip first (updated_at asc).
+    // Counter-scoped, mirroring findActiveByCounter: a transition into SKIPPED
+    // keeps counter_id assigned and one back into CALLING re-announces at it, so
+    // the skipped list belongs to the counter that skipped the ticket. Oldest
+    // skip first (updated_at asc).
     return withDbClient(this.pool, async (client) => {
       const { rows } = await client.query<TicketRow>(
         `SELECT * FROM tickets

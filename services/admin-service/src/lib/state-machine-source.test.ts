@@ -43,16 +43,16 @@ function richForm(): StateMachineForm {
     mode: 'custom',
     states: ['WAITING', 'VERIFIKASI', 'SERVING', 'COMPLETED'],
     transitions: [
-      { from: 'WAITING', to: 'VERIFIKASI', actionLabel: 'Panggil Berikutnya' },
-      { from: 'VERIFIKASI', to: 'SERVING', actionLabel: 'Mulai Melayani' },
+      { from: 'WAITING', to: 'VERIFIKASI', actionLabel: 'Panggil Berikutnya', action: 'UPDATE_STATUS' },
+      { from: 'VERIFIKASI', to: 'SERVING', actionLabel: 'Mulai Melayani', action: 'UPDATE_STATUS' },
       {
         from: 'VERIFIKASI',
         to: 'WAITING',
-        actionLabel: 'Kembalikan ke Antrian',
+        actionLabel: 'Kembalikan ke Antrian', action: 'UPDATE_STATUS',
         sourceSide: 'bottom',
         targetSide: 'top',
       },
-      { from: 'SERVING', to: 'COMPLETED', actionLabel: 'Selesai Layan' },
+      { from: 'SERVING', to: 'COMPLETED', actionLabel: 'Selesai Layan', action: 'UPDATE_STATUS' },
     ],
     positions: {
       WAITING: { x: 0, y: 0 },
@@ -78,9 +78,9 @@ function selfLoopForm(): StateMachineForm {
     mode: 'custom',
     states: ['WAITING', 'CALLING', 'COMPLETED'],
     transitions: [
-      { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' },
-      { from: 'CALLING', to: 'CALLING', actionLabel: 'Panggil Ulang' },
-      { from: 'CALLING', to: 'COMPLETED', actionLabel: 'Selesai Layan' },
+      { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', action: 'UPDATE_STATUS' },
+      { from: 'CALLING', to: 'CALLING', actionLabel: 'Panggil Ulang', action: 'UPDATE_STATUS' },
+      { from: 'CALLING', to: 'COMPLETED', actionLabel: 'Selesai Layan', action: 'UPDATE_STATUS' },
     ],
     positions: {},
     nodeActions: {},
@@ -99,7 +99,7 @@ function singleStateForm(): StateMachineForm {
   return {
     mode: 'custom',
     states: ['WAITING'],
-    transitions: [{ from: 'WAITING', to: 'WAITING', actionLabel: 'Panggil Ulang' }],
+    transitions: [{ from: 'WAITING', to: 'WAITING', actionLabel: 'Panggil Ulang', action: 'UPDATE_STATUS' }],
     positions: {},
     nodeActions: {},
     descriptions: {},
@@ -151,7 +151,15 @@ function canonical(form: StateMachineForm): StateMachineForm {
     ...form,
     mode: 'custom',
     positions,
-    transitions: form.states.flatMap((s) => form.transitions.filter((t) => t.from === s)),
+    // `action` is sparse in the XML (the UPDATE_STATUS default is omitted), so a
+    // fixture that leaves it off round-trips as the explicit default. Same shape
+    // as materializing positions above: the codec resolves the default on the way
+    // back in, and the expected form has to say so.
+    transitions: form.states.flatMap((s) =>
+      form.transitions
+        .filter((t) => t.from === s)
+        .map((t) => ({ ...t, action: t.action ?? 'UPDATE_STATUS' })),
+    ),
     terminalNodes: {
       start: canonTerminal(form.terminalNodes.start),
       end: canonTerminal(form.terminalNodes.end),
@@ -341,8 +349,8 @@ describe('formToXml — Kaleo workflow-definition shape', () => {
       mode: 'custom',
       states: ['A', 'S'],
       transitions: [
-        { from: 'A', to: 'S', actionLabel: 'Lanjut' },
-        { from: 'S', to: 'S', actionLabel: 'Ulangi' },
+        { from: 'A', to: 'S', actionLabel: 'Lanjut', action: 'UPDATE_STATUS' },
+        { from: 'S', to: 'S', actionLabel: 'Ulangi', action: 'UPDATE_STATUS' },
       ],
     };
     const xml = formToXml(form);
@@ -392,8 +400,8 @@ describe('formToXml — Kaleo workflow-definition shape', () => {
       mode: 'custom',
       states: ['A', 'B', 'C'],
       transitions: [
-        { from: 'A', to: 'B', actionLabel: 'Lanjut' },
-        { from: 'A', to: 'C', actionLabel: 'Lanjut' },
+        { from: 'A', to: 'B', actionLabel: 'Lanjut', action: 'UPDATE_STATUS' },
+        { from: 'A', to: 'C', actionLabel: 'Lanjut', action: 'UPDATE_STATUS' },
       ],
     };
     const xml = formToXml(form);
@@ -406,7 +414,7 @@ describe('formToXml — Kaleo workflow-definition shape', () => {
       ...defaultForm(),
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: '→ ✓' }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: '→ ✓', action: 'UPDATE_STATUS' }],
     };
     expect(formToXml(form)).toContain('<name>transisi</name>');
   });
@@ -429,8 +437,8 @@ describe('formToXml — <initial> derivation', () => {
       mode: 'custom',
       states: ['ANTRI_A', 'ANTRI_B', 'SELESAI'],
       transitions: [
-        { from: 'ANTRI_A', to: 'SELESAI', actionLabel: 'Selesai Layan' },
-        { from: 'ANTRI_B', to: 'SELESAI', actionLabel: 'Selesai Layan' },
+        { from: 'ANTRI_A', to: 'SELESAI', actionLabel: 'Selesai Layan', action: 'UPDATE_STATUS' },
+        { from: 'ANTRI_B', to: 'SELESAI', actionLabel: 'Selesai Layan', action: 'UPDATE_STATUS' },
       ],
     };
     const xml = formToXml(form);
@@ -444,9 +452,9 @@ describe('formToXml — <initial> derivation', () => {
     const form: StateMachineForm = {
       ...selfLoopForm(),
       transitions: [
-        { from: 'WAITING', to: 'WAITING', actionLabel: 'Tunggu Lagi' },
-        { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' },
-        { from: 'CALLING', to: 'COMPLETED', actionLabel: 'Selesai Layan' },
+        { from: 'WAITING', to: 'WAITING', actionLabel: 'Tunggu Lagi', action: 'UPDATE_STATUS' },
+        { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', action: 'UPDATE_STATUS' },
+        { from: 'CALLING', to: 'COMPLETED', actionLabel: 'Selesai Layan', action: 'UPDATE_STATUS' },
       ],
     };
     const xml = formToXml(form);
@@ -466,7 +474,7 @@ describe('formToXml — positions in node <metadata>', () => {
       ...defaultForm(),
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' }],
       positions: { A: { x: 10, y: 20 }, B: { x: 240, y: 0 } },
     };
     const xml = formToXml(form);
@@ -479,7 +487,7 @@ describe('formToXml — positions in node <metadata>', () => {
       ...defaultForm(),
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' }],
       positions: {},
     };
     const xml = formToXml(form);
@@ -490,7 +498,7 @@ describe('formToXml — positions in node <metadata>', () => {
     // The serialized coordinates MUST equal the autoLayout derivation the
     // Diagram's `formToFlow` uses (XML == diagram derivation, single source
     // of truth).
-    const auto = autoLayout(['A', 'B'], [{ from: 'A', to: 'B', actionLabel: 'go' }]);
+    const auto = autoLayout(['A', 'B'], [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' }]);
     expect(auto.A).toEqual({ x: 0, y: 0 });
     expect(auto.B).toEqual({ x: 240, y: 0 });
   });
@@ -536,7 +544,7 @@ describe('formToXml — sparse metadata', () => {
       ...defaultForm(),
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', sourceSide: 'bottom', targetSide: 'top' }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS', sourceSide: 'bottom', targetSide: 'top' }],
     };
     expect(formToXml(form)).toContain('{"sourceSide":"bottom","targetSide":"top"}');
   });
@@ -546,7 +554,7 @@ describe('formToXml — sparse metadata', () => {
       ...defaultForm(),
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', sourceSide: 'bottom' }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS', sourceSide: 'bottom' }],
     };
     // targetSide materialized to the default ('left').
     expect(formToXml(form)).toContain('{"sourceSide":"bottom","targetSide":"left"}');
@@ -557,7 +565,7 @@ describe('formToXml — sparse metadata', () => {
       ...defaultForm(),
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' }],
       positions: { A: { x: 10, y: 20 }, B: { x: 240, y: 80 } },
       descriptions: { A: 'Antrian dimulai di sini', B: '' },
     };
@@ -576,7 +584,7 @@ describe('formToXml — sparse metadata', () => {
       ...defaultForm(),
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' }],
       positions: { A: { x: 10, y: 20 }, B: { x: 240, y: 80 } },
     };
     // The node metadata carries `xy` and nothing else. (Matched on the metadata
@@ -598,7 +606,7 @@ describe('formToXml — sparse metadata', () => {
       ...defaultForm(),
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' }],
       positions: { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
       terminalNodes: { start: 'hidden', end: { x: 720, y: 30 } },
     };
@@ -612,7 +620,7 @@ describe('formToXml — sparse metadata', () => {
       ...defaultForm(),
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' }],
       positions: { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
       endSources: ['A', 'B'],
     };
@@ -648,7 +656,7 @@ describe('formToXml — node actions', () => {
       ...defaultForm(),
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' }],
       nodeActions: {
         A: [
           { executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'B' },
@@ -668,7 +676,7 @@ describe('formToXml — escaping', () => {
       ...defaultForm(),
       mode: 'custom',
       states: ['A&B'],
-      transitions: [{ from: 'A&B', to: 'A&B', actionLabel: 'go "there" <now>' }],
+      transitions: [{ from: 'A&B', to: 'A&B', actionLabel: 'go "there" <now>', action: 'UPDATE_STATUS' }],
     };
     const xml = formToXml(form);
     expect(xml).toContain('<name>A&amp;B</name>');
@@ -687,7 +695,7 @@ describe('formToXml — escaping', () => {
       ...defaultForm(),
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' }],
       descriptions: { A: 'akhiri dengan ]]> lalu lanjut' },
     };
     const xml = formToXml(form);
@@ -772,7 +780,7 @@ describe('round-trip (formToXml → xmlToForm)', () => {
       ...defaultForm(),
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' }],
       positions: { A: { x: 10, y: 20 }, B: { x: 240, y: 80 } },
     };
     const result = xmlToForm(formToXml(form));
@@ -787,7 +795,7 @@ describe('round-trip (formToXml → xmlToForm)', () => {
       ...defaultForm(),
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'up', sourceSide: 'bottom', targetSide: 'top' }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'up', action: 'UPDATE_STATUS', sourceSide: 'bottom', targetSide: 'top' }],
     };
     const result = xmlToForm(formToXml(form));
     expect(result.ok).toBe(true);
@@ -801,7 +809,7 @@ describe('round-trip (formToXml → xmlToForm)', () => {
       ...defaultForm(),
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go' }],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' }],
       descriptions: { A: 'Antrian dimulai di sini' },
     };
     const result = xmlToForm(formToXml(form));
@@ -834,8 +842,8 @@ describe('round-trip (formToXml → xmlToForm)', () => {
       mode: 'custom',
       states: ['WAITING', 'CALLING', 'SERVING'],
       transitions: [
-        { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' },
-        { from: 'CALLING', to: 'SERVING', actionLabel: 'Mulai Melayani' },
+        { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', action: 'UPDATE_STATUS' },
+        { from: 'CALLING', to: 'SERVING', actionLabel: 'Mulai Melayani', action: 'UPDATE_STATUS' },
       ],
     };
     const result = xmlToForm(formToXml(form));
@@ -910,7 +918,11 @@ describe('xmlToForm — lenient reading', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.form.states).toEqual(['A', 'B']);
-    expect(result.form.transitions).toEqual([{ from: 'A', to: 'B', actionLabel: 'go' }]);
+    // `action` is absent from this hand-written source, so it reads back as the
+    // UPDATE_STATUS default the serializer omits it for.
+    expect(result.form.transitions).toEqual([
+      { from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' },
+    ]);
     // A is still re-derived as the entry status on the way back out.
     expect(formToXml(result.form)).toContain('<initial>true</initial>');
   });
@@ -1236,5 +1248,103 @@ describe('xmlToForm — errors (never throws, always Indonesian)', () => {
   it('a freshly added empty-label transition is caught (mirrors the visual editor invariant)', () => {
     const form = addTransition(defaultForm());
     expect(xmlToForm(formToXml(form)).ok).toBe(false);
+  });
+});
+
+describe("a transition's action in the source", () => {
+  /**
+   * The PRD §7 default graph plus a `CALLING → WAITING` edge carrying `action`.
+   * A category move must target WAITING (`validateCustomStateMachine`, mirroring
+   * the backend's save-time rule), so this is the only shape the codec can
+   * round-trip a declared transfer through.
+   */
+  function withWaitingAction(action: 'UPDATE_STATUS' | 'TRANSFER_CATEGORY'): StateMachineForm {
+    const base = defaultForm();
+    return {
+      ...base,
+      mode: 'custom',
+      transitions: [
+        ...base.transitions,
+        { from: 'CALLING', to: 'WAITING', actionLabel: 'Kembalikan ke Antrian', action },
+      ],
+    };
+  }
+
+  it('is omitted for the UPDATE_STATUS default (sparse — the source stays quiet about it)', () => {
+    const xml = formToXml(withWaitingAction('UPDATE_STATUS'));
+    // The JSON key, not the bare word — `<actions>`/`<execution-type>` and the
+    // Indonesian prose elsewhere in the document both contain "action".
+    expect(xml).not.toContain('"action"');
+    // And no metadata element appears on an otherwise default edge at all. (An
+    // earlier cut wrote `<metadata><![CDATA[{}]]></metadata>` on every edge,
+    // which the exact-document test caught — this pins it directly.)
+    expect(xml).not.toContain('<metadata><![CDATA[{}]]></metadata>');
+    // Non-vacuous: the same assertion FAILS once an action is declared.
+    expect(formToXml(withWaitingAction('TRANSFER_CATEGORY'))).toContain('"action"');
+  });
+
+  it('is emitted and read back when the manager declared a category move', () => {
+    const form = withWaitingAction('TRANSFER_CATEGORY');
+    const xml = formToXml(form);
+    expect(xml).toContain('"action":"TRANSFER_CATEGORY"');
+
+    const result = xmlToForm(xml);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const parsed = result.form.transitions.find((t) => t.from === 'CALLING' && t.to === 'WAITING');
+    expect(parsed?.action).toBe('TRANSFER_CATEGORY');
+    // Every other edge keeps the default, so the sparse emission is not
+    // leaking the one declared value onto its neighbours.
+    expect(
+      result.form.transitions
+        .filter((t) => !(t.from === 'CALLING' && t.to === 'WAITING'))
+        .every((t) => t.action === 'UPDATE_STATUS'),
+    ).toBe(true);
+  });
+
+  it('rides the same metadata element as the connection sides without either being lost', () => {
+    // Both facets are sparse and share one `<metadata>`; a naive implementation
+    // that wrote one then overwrote it would drop the other.
+    const base = defaultForm();
+    const form: StateMachineForm = {
+      ...base,
+      mode: 'custom',
+      transitions: [
+        ...base.transitions,
+        {
+          from: 'CALLING',
+          to: 'WAITING',
+          actionLabel: 'Pindah Kategori',
+          action: 'TRANSFER_CATEGORY' as const,
+          sourceSide: 'bottom' as const,
+          targetSide: 'top' as const,
+        },
+      ],
+    };
+    const result = xmlToForm(formToXml(form));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const parsed = result.form.transitions.find((t) => t.from === 'CALLING' && t.to === 'WAITING');
+    expect(parsed).toMatchObject({
+      action: 'TRANSFER_CATEGORY',
+      sourceSide: 'bottom',
+      targetSide: 'top',
+    });
+  });
+
+  it('rejects an unknown action with a manager-readable Indonesian error', () => {
+    const xml = `<?xml version="1.0"?><workflow-definition xmlns="urn:liferay.com:liferay-workflow_7.4.0">
+      <task><name>A</name><metadata><![CDATA[{"xy":[0,0]}]]></metadata>
+        <transitions><transition><labels><label language-id="id_ID">go</label></labels>
+          <target>B</target><metadata><![CDATA[{"action":"SEND_WEBHOOK"}]]></metadata>
+        </transition></transitions>
+      </task>
+      <state><name>B</name><metadata><![CDATA[{"xy":[240,0]}]]></metadata></state>
+    </workflow-definition>`;
+    const result = xmlToForm(xml);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain('UPDATE_STATUS');
+    expect(result.error).toContain('TRANSFER_CATEGORY');
   });
 });

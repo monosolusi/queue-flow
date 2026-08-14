@@ -58,9 +58,10 @@ export class InMemoryQueueRepository implements IQueueRepository, ITicketArchive
   }
 
   async findSkippedByCounter(counterId: number): Promise<QueueTicket[]> {
-    // Counter-scoped, mirroring findActiveByCounter: `skip` leaves the counter
-    // assigned and `recall` re-announces to it, so the skipped list belongs to
-    // the counter that skipped the ticket. Oldest skip first (updatedAt asc).
+    // Counter-scoped, mirroring findActiveByCounter: a transition into SKIPPED
+    // keeps the counter assigned and one back into CALLING re-announces at it, so
+    // the skipped list belongs to the counter that skipped the ticket. Oldest
+    // skip first (updatedAt asc).
     return [...this.tickets.values()]
       .filter((t) => t.counterId === counterId && t.currentStatus === TicketStatus.SKIPPED)
       .sort((a, b) => a.updatedAt - b.updatedAt);

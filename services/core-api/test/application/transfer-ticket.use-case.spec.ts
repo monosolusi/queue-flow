@@ -16,6 +16,7 @@ import {
   StateSchema,
   StateTransitionRule,
 } from '../../src/domain/store-config';
+import { TransitionAction } from '../../src/domain/shared';
 import { TransferTicketUseCase } from '../../src/application/queue';
 import {
   InMemoryCategoryRepository,
@@ -27,22 +28,34 @@ import { fakePolicyResolver, spyDispatcher } from './test-doubles';
 const FIXED_NOW = 1_700_000_000_000;
 const DATE_KEY = '2026-07-30';
 
+/** The PRD §7 default edges, as `[from, to, actionLabel]` triples. */
+const DEFAULT_EDGES: readonly (readonly [string, string, string])[] = [
+  ['WAITING', 'CALLING', 'Panggil Berikutnya'],
+  ['CALLING', 'SERVING', 'Mulai Melayani'],
+  ['CALLING', 'SKIPPED', 'Lewati / Absen'],
+  ['SKIPPED', 'CALLING', 'Panggil Ulang'],
+  ['SERVING', 'COMPLETED', 'Selesai Layan'],
+];
+
+/** A flow whose `CALLING -> WAITING` edge carries `action`. */
+function callingToWaiting(action: TransitionAction): StateMachine {
+  return new StateMachine(
+    StateSchema.of(['WAITING', 'CALLING', 'SERVING', 'SKIPPED', 'COMPLETED']),
+    [
+      ...DEFAULT_EDGES.map((e) => StateTransitionRule.of(e[0], e[1], e[2])),
+      StateTransitionRule.of('CALLING', 'WAITING', 'Pindah Kategori', action),
+    ],
+  );
+}
+
 /**
- * A state machine with a configurable `CALLING -> WAITING` transfer edge
- * ("Pindah Kategori") added to the PRD §7 default — what the wizard/admin
- * configures to enable transfers (FR-CLR-03).
+ * A state machine with a configurable `CALLING -> WAITING` edge **declared a
+ * category move** added to the PRD §7 default — what the designer writes when
+ * the manager picks "Pindah Kategori" as that edge's action (FR-CLR-03). Drawing
+ * the edge is not enough: the same pair left on the default `UPDATE_STATUS` is a
+ * plain re-queue, which is the whole point of the declaration.
  */
-const transferPolicy = new StateMachine(
-  StateSchema.of(['WAITING', 'CALLING', 'SERVING', 'SKIPPED', 'COMPLETED']),
-  [
-    ['WAITING', 'CALLING', 'Panggil Berikutnya'],
-    ['CALLING', 'SERVING', 'Mulai Melayani'],
-    ['CALLING', 'SKIPPED', 'Lewati / Absen'],
-    ['SKIPPED', 'CALLING', 'Panggil Ulang'],
-    ['SERVING', 'COMPLETED', 'Selesai Layan'],
-    ['CALLING', 'WAITING', 'Pindah Kategori'],
-  ].map(([from, to, actionLabel]) => StateTransitionRule.of(from, to, actionLabel)),
-);
+const transferPolicy = callingToWaiting(TransitionAction.TRANSFER_CATEGORY);
 
 /** A fresh category (random UUID id) with the given code/name, saved to the repo. */
 async function seedCategory(
@@ -169,6 +182,68 @@ describe('TransferTicketUseCase (pindah kategori — FR-CLR-03)', () => {
     expect(ticket.currentStatus).toBe(TicketStatus.CALLING);
     expect(ticket.categoryId).toBe('CAT-A');
     expect(dispatcher.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('refuses an edge the manager did not declare a category move, and burns no sequence number', async () => {
+    // The reported defect in reverse: `CALLING -> WAITING` exists and is legal,
+    // but the manager drew it to put a ticket back in the queue. Executing it as a
+    // category move would re-issue the ticket's number under a category nobody
+    // asked for — so the edge's own declaration, not its endpoints, decides.
+    const sequencesSpy = new InMemorySequenceRepository();
+    const useCaseRequeue = new TransferTicketUseCase(
+      queue,
+      categories,
+      sequencesSpy,
+      fakePolicyResolver(callingToWaiting(TransitionAction.UPDATE_STATUS)),
+      dispatcher,
+      clock,
+    );
+    const ticket = callingTicket();
+    await queue.save(ticket);
+    const catB = await seedCategory(categories, 'B', 'Kasir & Pembayaran');
+
+    await expect(
+      useCaseRequeue.execute({
+        ticketId: ticket.id,
+        targetCategoryId: catB.id.value,
+        dateKey: DATE_KEY,
+      }),
+    ).rejects.toBeInstanceOf(InvalidArgumentException);
+
+    expect(await sequencesSpy.currentSequence(catB.id.value, DATE_KEY)).toBe(0);
+    expect(ticket.currentStatus).toBe(TicketStatus.CALLING);
+    expect(ticket.categoryId).toBe('CAT-A');
+    expect(ticket.ticketNumber.formatted()).toBe('A-001');
+    expect(dispatcher.dispatch).not.toHaveBeenCalled();
+  });
+
+  it('refuses a transfer along an edge whose target is not WAITING', () => {
+    // Unreachable through the designer or the config API — a `TRANSFER_CATEGORY`
+    // edge that targets anything else is rejected at save time, because a
+    // re-issued per-category number describes a ticket nobody has served. Pinned
+    // here so the aggregate's own contract is the one that holds if a flow ever
+    // arrives from another path.
+    const machine = new StateMachine(
+      StateSchema.of(['WAITING', 'CALLING', 'SERVING', 'SKIPPED', 'COMPLETED', 'PREPARING']),
+      [
+        ...DEFAULT_EDGES.map((e) => StateTransitionRule.of(e[0], e[1], e[2])),
+        StateTransitionRule.of(
+          'CALLING',
+          'PREPARING',
+          'Pindah Kategori',
+          TransitionAction.TRANSFER_CATEGORY,
+        ),
+      ],
+    );
+    const ticket = callingTicket();
+
+    // The aggregate transitions to WAITING regardless of what the edge targets,
+    // and this flow has no `CALLING -> WAITING` edge, so it refuses outright.
+    expect(() =>
+      ticket.transferTo('CAT-B', TicketNumber.of('B', 1), machine, FIXED_NOW + 1),
+    ).toThrow(InvalidStateTransitionException);
+    expect(ticket.currentStatus).toBe(TicketStatus.CALLING);
+    expect(ticket.categoryId).toBe('CAT-A');
   });
 
   it('throws EntityNotFoundException when the target category does not exist', async () => {

@@ -104,7 +104,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     const customForm = { ...defaultStateMachineForm(), mode: 'custom' as const };
     const errors = validateCustomStateMachine({
       ...customForm,
-      transitions: [...customForm.transitions, { from: 'WAITING', to: 'CALLING', actionLabel: '' }],
+      transitions: [...customForm.transitions, { from: 'WAITING', to: 'CALLING', actionLabel: '', action: 'UPDATE_STATUS' }],
     });
     expect(errors.length).toBeGreaterThan(0);
     renderWorkflow(customForm, errors);
@@ -483,7 +483,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     renderWorkflow({
       mode: 'custom',
       states: ['WAITING', 'CALLING'],
-      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' }],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', action: 'UPDATE_STATUS' }],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    });
     selectEdge('WAITING->CALLING#0');
     const panel = screen.getByTestId('sm-properties');
@@ -535,7 +535,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       {
         mode: 'custom',
         states: ['ONHOLD', 'CALLING'],
-        transitions: [{ from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut' }],
+        transitions: [{ from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut', action: 'UPDATE_STATUS' }],
         positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,      },
       [],
       onChange,
@@ -630,7 +630,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING', 'EXTRA'],
       transitions: [
-        { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', sourceSide: 'bottom', targetSide: 'top' },
+        { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', action: 'UPDATE_STATUS', sourceSide: 'bottom', targetSide: 'top' },
         ...DEFAULT_STATE_MACHINE.transitions.slice(1).map((t) => ({ ...t })),
       ],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
@@ -702,8 +702,8 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING', 'ONHOLD'],
       transitions: [
-        { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' },
-        { from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut' },
+        { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', action: 'UPDATE_STATUS' },
+        { from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut', action: 'UPDATE_STATUS' },
       ],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderWorkflow(customForm);
@@ -723,7 +723,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     const customForm: StateMachineForm = {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING'],
-      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', action: 'UPDATE_STATUS' }],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderWorkflow(customForm, [], onChange);
     selectStateNode('WAITING');
@@ -753,8 +753,8 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING'],
       transitions: [
-        { from: 'CALLING', to: 'CALLING', actionLabel: 'ulang' },
-        { from: 'CALLING', to: 'WAITING', actionLabel: 'kembali' },
+        { from: 'CALLING', to: 'CALLING', actionLabel: 'ulang', action: 'UPDATE_STATUS' },
+        { from: 'CALLING', to: 'WAITING', actionLabel: 'kembali', action: 'UPDATE_STATUS' },
       ],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderWorkflow(customForm);
@@ -789,7 +789,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     const oneTransitionForm: StateMachineForm = {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING'],
-      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', action: 'UPDATE_STATUS' }],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderWorkflow(oneTransitionForm);
     selectStateNode('WAITING');
@@ -823,7 +823,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     const customForm: StateMachineForm = {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING', 'LONELY'],
-      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', action: 'UPDATE_STATUS' }],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: ['LONELY'], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderWorkflow(customForm);
     // The terminal edge is live on the canvas — the filter has real work to do.
@@ -869,7 +869,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     const customForm: StateMachineForm = {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING'],
-      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', action: 'UPDATE_STATUS' }],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
     };
     renderWorkflow(customForm, [], onChange);
@@ -900,7 +900,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     const customForm: StateMachineForm = {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING', 'SKIPPED'],
-      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', action: 'UPDATE_STATUS' }],
       positions: {},
       nodeActions: {
         WAITING: [{ executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'CALLING' }],
@@ -946,7 +946,7 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
     const customForm: StateMachineForm = {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING'],
-      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' }],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', action: 'UPDATE_STATUS' }],
       positions: {},
       nodeActions: {
         WAITING: [{ executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'CALLING' }],
@@ -998,8 +998,8 @@ describe('StateMachineWorkflow (visual React Flow builder)', () => {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING', 'COMPLETED'],
       transitions: [
-        { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' },
-        { from: 'WAITING', to: 'COMPLETED', actionLabel: 'Skip' },
+        { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', action: 'UPDATE_STATUS' },
+        { from: 'WAITING', to: 'COMPLETED', actionLabel: 'Skip', action: 'UPDATE_STATUS' },
       ],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderWorkflow(form, [], onChange);
@@ -1471,6 +1471,106 @@ describe('StateMachineWorkflow (Start/End terminal markers)', () => {
       const panel = screen.getByTestId('sm-properties');
       expect(within(panel).queryByTestId('panel-end-source-GONE')).not.toBeInTheDocument();
       expect(within(panel).getByTestId('panel-end-source-WAITING')).toBeInTheDocument();
+    });
+  });
+
+  // The "Aksi" dropdown per outgoing transition: what running that button DOES.
+  // The manager's report is what it exists for — they drew `CALLING → WAITING`
+  // to put a ticket back in the queue and got a "Pindah Kategori" button asking
+  // for a destination category, because the backend inferred the meaning from
+  // the target state. Now the edge says which it is, and the same endpoints can
+  // mean either.
+  describe('the "Aksi" dropdown on an outgoing transition', () => {
+    /** Selects WAITING and opens its "Transisi keluar" sub-view. */
+    function openWaitingTransitions(): HTMLElement {
+      selectStateNode('WAITING');
+      const panel = screen.getByTestId('sm-properties');
+      fireEvent.click(within(panel).getByTestId('panel-goto-transitions'));
+      return panel;
+    }
+
+    it('defaults to Ubah Status and offers Pindah Kategori', () => {
+      renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
+      const panel = openWaitingTransitions();
+      const select = within(panel).getByTestId(
+        'panel-transition-action-WAITING->CALLING#0',
+      ) as HTMLSelectElement;
+      expect(select.value).toBe('UPDATE_STATUS');
+      expect([...select.options].map((o) => o.value)).toEqual([
+        'UPDATE_STATUS',
+        'TRANSFER_CATEGORY',
+      ]);
+      expect([...select.options].map((o) => o.textContent)).toEqual([
+        'Ubah Status',
+        'Pindah Kategori',
+      ]);
+    });
+
+    it('lifts the chosen action onto that transition and leaves every other field alone', () => {
+      const onChange = vi.fn();
+      renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const }, [], onChange);
+      const panel = openWaitingTransitions();
+
+      fireEvent.change(
+        within(panel).getByTestId('panel-transition-action-WAITING->CALLING#0'),
+        { target: { value: 'TRANSFER_CATEGORY' } },
+      );
+
+      expect(onChange).toHaveBeenCalledTimes(1);
+      const next = onChange.mock.calls[0][0];
+      const edited = next.transitions.find(
+        (t: { from: string; to: string }) => t.from === 'WAITING' && t.to === 'CALLING',
+      );
+      expect(edited.action).toBe('TRANSFER_CATEGORY');
+      // Its label and endpoints are untouched — the action is a separate facet,
+      // not a relabelling.
+      expect(edited.actionLabel).toBe('Panggil Berikutnya');
+      // No edge was created or removed: the graph shape is identical.
+      expect(next.transitions).toHaveLength(defaultStateMachineForm().transitions.length);
+      expect(next.states).toEqual([...DEFAULT_STATE_MACHINE.states]);
+      // Every OTHER transition keeps its own action.
+      expect(
+        next.transitions
+          .filter((t: { from: string; to: string }) => !(t.from === 'WAITING' && t.to === 'CALLING'))
+          .every((t: { action: string }) => t.action === 'UPDATE_STATUS'),
+      ).toBe(true);
+    });
+
+    it('renders the action a saved transition already carries', () => {
+      // Round-trip proof: a stored TRANSFER_CATEGORY edge shows as such, so the
+      // manager can see (and undo) what they chose.
+      const base = defaultStateMachineForm();
+      const form = {
+        ...base,
+        mode: 'custom' as const,
+        transitions: base.transitions.map((t) =>
+          t.from === 'WAITING' ? { ...t, action: 'TRANSFER_CATEGORY' as const } : t,
+        ),
+      };
+      renderWorkflow(form);
+      const panel = openWaitingTransitions();
+      expect(
+        (within(panel).getByTestId('panel-transition-action-WAITING->CALLING#0') as HTMLSelectElement)
+          .value,
+      ).toBe('TRANSFER_CATEGORY');
+    });
+
+    it('is editable from the standalone edge editor too, so both paths agree', () => {
+      const onChange = vi.fn();
+      renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const }, [], onChange);
+      selectEdge('WAITING->CALLING#0');
+      const panel = screen.getByTestId('sm-properties');
+
+      fireEvent.change(within(panel).getByTestId('panel-transition-action'), {
+        target: { value: 'TRANSFER_CATEGORY' },
+      });
+
+      const next = onChange.mock.calls[0][0];
+      expect(
+        next.transitions.find(
+          (t: { from: string; to: string }) => t.from === 'WAITING' && t.to === 'CALLING',
+        ).action,
+      ).toBe('TRANSFER_CATEGORY');
     });
   });
 });

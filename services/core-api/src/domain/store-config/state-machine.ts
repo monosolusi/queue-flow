@@ -82,7 +82,7 @@ export class StateMachine implements ITransitionPolicy, ITransitionGraphSource {
    * {@link TransitionGraph} shape — the node set plus every edge, in
    * configuration order. `descriptions` / `stateSchema` / `StateTransitionRule`
    * stay behind the boundary: the read side gets plain `from`/`to`/
-   * `actionLabel` triples, never Store-Config value objects.
+   * `actionLabel`/`action` records, never Store-Config value objects.
    */
   public describeGraph(): TransitionGraph {
     return {
@@ -91,6 +91,7 @@ export class StateMachine implements ITransitionPolicy, ITransitionGraphSource {
         from: rule.from,
         to: rule.to,
         actionLabel: rule.actionLabel,
+        action: rule.action,
       })),
     };
   }

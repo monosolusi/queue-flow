@@ -24,9 +24,9 @@ const tickets: readonly TicketStateDto[] = [
 
 /** A manager-configured flow that gives waiting tickets their own steps. */
 const configured: WorkflowActionsDto = workflowActions(
-  edge('WAITING', 'CALLING', 'Panggil Berikutnya', 'CALL_NEXT'),
-  edge('WAITING', 'SKIPPED', 'Lewati / Absen', 'SKIP'),
-  edge('WAITING', 'BATAL', 'Batalkan Tiket', 'APPLY_TRANSITION'),
+  edge('WAITING', 'CALLING', 'Panggil Berikutnya', 'UPDATE_STATUS'),
+  edge('WAITING', 'SKIPPED', 'Lewati / Absen', 'UPDATE_STATUS'),
+  edge('WAITING', 'BATAL', 'Batalkan Tiket', 'UPDATE_STATUS'),
 );
 
 describe('WaitingQueueList (FR-CLR-02 — waiting actions follow the flow)', () => {
@@ -68,7 +68,7 @@ describe('WaitingQueueList (FR-CLR-02 — waiting actions follow the flow)', () 
     await userEvent.click(screen.getByTestId('waiting-action-w2-BATAL'));
     expect(onAction).toHaveBeenCalledTimes(1);
     expect(onAction.mock.calls[0][0]).toMatchObject({ ticketId: 'w2' });
-    expect(onAction.mock.calls[0][1]).toMatchObject({ to: 'BATAL', command: 'APPLY_TRANSITION' });
+    expect(onAction.mock.calls[0][1]).toMatchObject({ to: 'BATAL', action: 'UPDATE_STATUS' });
   });
 
   it('disables every row while a command is in flight, marking the one running', () => {
@@ -112,8 +112,8 @@ describe('WaitingQueueList (FR-CLR-02 — waiting actions follow the flow)', () 
   it('offers the category move with the destinations this counter serves', async () => {
     const onAction = vi.fn();
     const withTransfer = workflowActions(
-      edge('WAITING', 'CALLING', 'Panggil Berikutnya', 'CALL_NEXT'),
-      edge('WAITING', 'WAITING', 'Pindah Kategori', 'TRANSFER'),
+      edge('WAITING', 'CALLING', 'Panggil Berikutnya', 'UPDATE_STATUS'),
+      edge('WAITING', 'WAITING', 'Pindah Kategori', 'TRANSFER_CATEGORY'),
     );
     render(
       <WaitingQueueList
@@ -128,7 +128,7 @@ describe('WaitingQueueList (FR-CLR-02 — waiting actions follow the flow)', () 
     await userEvent.click(screen.getByTestId('waiting-action-w1-WAITING'));
     expect(onAction).toHaveBeenCalledWith(
       expect.objectContaining({ ticketId: 'w1' }),
-      expect.objectContaining({ command: 'TRANSFER' }),
+      expect.objectContaining({ action: 'TRANSFER_CATEGORY' }),
       'cat-b',
     );
   });
@@ -143,7 +143,7 @@ describe('WaitingQueueList (FR-CLR-02 — waiting actions follow the flow)', () 
         { id: 'cat-c', code: 'C', name: 'Informasi' },
       ],
     };
-    const withTransfer = workflowActions(edge('WAITING', 'WAITING', 'Pindah Kategori', 'TRANSFER'));
+    const withTransfer = workflowActions(edge('WAITING', 'WAITING', 'Pindah Kategori', 'TRANSFER_CATEGORY'));
     render(
       <WaitingQueueList
         tickets={tickets}
@@ -163,7 +163,7 @@ describe('WaitingQueueList (FR-CLR-02 — waiting actions follow the flow)', () 
     await userEvent.click(screen.getByTestId('waiting-action-w1-WAITING-target-cat-c'));
     expect(onAction).toHaveBeenCalledWith(
       expect.objectContaining({ ticketId: 'w1' }),
-      expect.objectContaining({ command: 'TRANSFER' }),
+      expect.objectContaining({ action: 'TRANSFER_CATEGORY' }),
       'cat-c',
     );
   });

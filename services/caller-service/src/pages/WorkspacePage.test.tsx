@@ -71,10 +71,6 @@ function makeApi(snap: QueueSnapshotDto = snapshot): ICallerApi {
     getQueueSnapshot: vi.fn(() => Promise.resolve(snap)),
     getWorkflowActions: vi.fn(() => Promise.resolve(PRD_DEFAULT_WORKFLOW)),
     callNext: vi.fn(() => Promise.resolve()),
-    serve: vi.fn(() => Promise.resolve()),
-    complete: vi.fn(() => Promise.resolve()),
-    skip: vi.fn(() => Promise.resolve()),
-    recall: vi.fn(() => Promise.resolve()),
     reannounce: vi.fn(() => Promise.resolve()),
     transfer: vi.fn(() => Promise.resolve()),
     applyTransition: vi.fn(() => Promise.resolve()),
@@ -188,9 +184,9 @@ describe('WorkspacePage', () => {
     api.getWorkflowActions = vi.fn(() =>
       Promise.resolve(
         workflowActions(
-          edge('WAITING', 'CALLING', 'Panggil Berikutnya', 'CALL_NEXT'),
-          edge('WAITING', 'BATAL', 'Batalkan Tiket', 'APPLY_TRANSITION'),
-          edge('CALLING', 'SERVING', 'Mulai Melayani', 'SERVE'),
+          edge('WAITING', 'CALLING', 'Panggil Berikutnya', 'UPDATE_STATUS'),
+          edge('WAITING', 'BATAL', 'Batalkan Tiket', 'UPDATE_STATUS'),
+          edge('CALLING', 'SERVING', 'Mulai Melayani', 'UPDATE_STATUS'),
         ),
       ),
     );
@@ -207,12 +203,12 @@ describe('WorkspacePage', () => {
     const cancel = await screen.findByTestId('waiting-action-w1-BATAL');
     expect(cancel).toHaveTextContent('Batalkan Tiket');
     // The active ticket (CALLING) offers its own outgoing edge in the panel.
-    expect(screen.getByTestId('action-serve')).toHaveTextContent('Mulai Melayani');
+    expect(screen.getByTestId('action-update-status-SERVING')).toHaveTextContent('Mulai Melayani');
     // A single fetch serves both.
     expect(api.getWorkflowActions).toHaveBeenCalledTimes(1);
 
     await userEvent.click(cancel);
-    expect(api.applyTransition).toHaveBeenCalledWith('w1', 'BATAL');
+    expect(api.applyTransition).toHaveBeenCalledWith('w1', 'BATAL', 1);
   });
 
   it('keeps a skipped ticket on the panel so staff can actually recall it (the real path)', async () => {
@@ -223,8 +219,8 @@ describe('WorkspacePage', () => {
     // `GET /api/queue/actions` — was unreachable from every screen.
     const { api } = renderWorkspace();
     await screen.findByText('A-001');
-    await userEvent.click(screen.getByTestId('action-skip'));
-    expect(api.skip).toHaveBeenCalledWith('a1');
+    await userEvent.click(screen.getByTestId('action-update-status-SKIPPED'));
+    expect(api.applyTransition).toHaveBeenCalledWith('a1', 'SKIPPED', 1);
 
     FakeWebSocket.last!.send(wireEvent('STATUS_UPDATED', 'a1', { from: 'CALLING', to: 'SKIPPED' }));
 
@@ -238,9 +234,10 @@ describe('WorkspacePage', () => {
     expect(recall).toHaveTextContent('Panggil Ulang');
     expect(recall).not.toBeDisabled();
 
-    // And tapping it issues the recall command for that ticket.
+    // And tapping it runs that edge for that ticket, announcing it at this
+    // counter — one endpoint, the target in the payload.
     await userEvent.click(recall);
-    expect(api.recall).toHaveBeenCalledWith('a1');
+    expect(api.applyTransition).toHaveBeenCalledWith('a1', 'CALLING', 1);
 
     // The recall's own events bring the ticket back to the counter.
     FakeWebSocket.last!.send(wireEvent('STATUS_UPDATED', 'a1', { from: 'SKIPPED', to: 'CALLING' }));
@@ -251,7 +248,7 @@ describe('WorkspacePage', () => {
     expect(screen.getByRole('region', { name: 'Tiket Dilewati' })).toHaveTextContent(
       'Tidak ada tiket yang dilewati.',
     );
-    expect(screen.getByTestId('action-serve')).toBeInTheDocument();
+    expect(screen.getByTestId('action-update-status-SERVING')).toBeInTheDocument();
   });
 
   it('shows the skipped list empty rather than hiding it', async () => {
@@ -312,8 +309,8 @@ describe('WorkspacePage', () => {
     api.getWorkflowActions = vi.fn(() =>
       Promise.resolve(
         workflowActions(
-          edge('SKIPPED', 'CALLING', 'Panggil Lagi Yang Absen', 'RECALL'),
-          edge('SKIPPED', 'BATAL', 'Batalkan Tiket', 'APPLY_TRANSITION'),
+          edge('SKIPPED', 'CALLING', 'Panggil Lagi Yang Absen', 'UPDATE_STATUS'),
+          edge('SKIPPED', 'BATAL', 'Batalkan Tiket', 'UPDATE_STATUS'),
         ),
       ),
     );
@@ -330,7 +327,7 @@ describe('WorkspacePage', () => {
     expect(row).toHaveTextContent('Panggil Lagi Yang Absen');
     expect(row).toHaveTextContent('Batalkan Tiket');
     await userEvent.click(screen.getByTestId('skipped-action-s1-BATAL'));
-    expect(api.applyTransition).toHaveBeenCalledWith('s1', 'BATAL');
+    expect(api.applyTransition).toHaveBeenCalledWith('s1', 'BATAL', 1);
   });
 
   it('keeps the primary controls above the queue lists, however many tickets are skipped', async () => {
