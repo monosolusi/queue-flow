@@ -19,7 +19,6 @@
 import {
   autoLayout,
   descriptionFor,
-  deriveAutoSinks,
   deriveAutoSources,
   DEFAULT_SOURCE_SIDE,
   type StateMachineForm,
@@ -78,18 +77,11 @@ export interface FlowNode {
 
 /** Edge payload: the transition's action label (the Caller UI button text).
  *  Index signature for `Record<string, unknown>` compatibility (see
- *  {@link FlowNodeData}). `explicit` flags a terminal edge as a manager-drawn
- *  End connection (vs an auto-derived sink→End arrow) — canvas-only, used by
- *  the End-marker panel to distinguish the two kinds in the "Transisi masuk"
- *  list. */
+ *  {@link FlowNodeData}). No `explicit` flag: EVERY incoming End edge is now
+ *  manager-drawn (there are no topology-derived End arrows left), so a flag
+ *  distinguishing the two kinds would be vacuous. */
 export interface FlowEdgeData {
   actionLabel: string;
-  /** True when this terminal edge is an EXPLICIT End connection (a manager
-   *  drag from a state into the End marker), false/absent for an auto-derived
-   *  sink→End arrow. Canvas-only — `flowToGraph` filters ALL terminal edges
-   *  out (by `type === 'terminal'`), so this never reaches the wire; the
-   *  explicit set is carried in the form's `endSources` array instead. */
-  explicit?: boolean;
   [key: string]: unknown;
 }
 
@@ -198,13 +190,17 @@ export function sideToHandle(side: EdgeSide): string {
 }
 
 /**
- * Canvas-only terminal markers (Start/End) — auto-derived visual affordances
- * for the graph's real entry (in-degree 0 AND out-degree > 0) and exit
- * (out-degree 0 AND in-degree > 0) states; an isolated, not-yet-wired status is
- * neither, and a self-loop counts for neither degree (the predicates live in
- * the pure `state-machine.ts` — `stateDegrees` / {@link deriveAutoSources} /
- * {@link deriveAutoSinks} — so the XML codec derives Kaleo's `<initial>` from
- * the SAME rule). They are NOT in the form, NOT on the wire, NOT in the XML source view —
+ * Canvas-only terminal markers (Start/End). Start is AUTO-DERIVED for the
+ * graph's real entry states (in-degree 0 AND out-degree > 0; an isolated,
+ * not-yet-wired status is not an entry, and a SELF-LOOP counts for neither
+ * degree — the predicate lives in the pure `state-machine.ts` as `stateDegrees`
+ * / {@link deriveAutoSources}, so the XML codec derives Kaleo's `<initial>`
+ * from the SAME rule and the two views cannot disagree about where the flow
+ * starts). End is MANUAL-ONLY: it derives no incoming edges from the topology
+ * at all — every arrow into it comes from the manager-drawn `form.endSources`
+ * (manager feedback: "node masih otomatis linked ke end, seharusnya manual
+ * linked"). They are NOT in the form (bar `endSources`), NOT on the wire
+ * `transitions`, NOT in the XML `<transition>`s —
  * `flowToGraph` filters them out (see {@link flowToGraph}'s `type === 'state'`
  * / `type === 'transition'` filters), and the XML codec `state-machine-xml.ts`
  * is untouched. They re-derive on every canvas re-seed so the markers always
@@ -308,7 +304,7 @@ export function formToFlow(
  * state node. Matches `autoLayout`'s `X_SPACING = 240` in `state-machine.ts`
  * (the canonical left-to-right rank gap) so the Start marker sits one rank to
  * the LEFT of the leftmost source and the End marker one rank to the RIGHT of
- * the rightmost sink — the markers read as the graph's entry/exit rank without
+ * the rightmost end source — the markers read as the graph's entry/exit rank without
  * crowding the real nodes. NOT imported from `state-machine.ts` to keep that
  * module's internal spacing constant private (it is not exported); the value
  * is duplicated here with a comment pointing back to the source of truth.
@@ -316,57 +312,98 @@ export function formToFlow(
 const TERMINAL_SPACING = 240;
 
 /**
- * Derive the canvas-only Start/End terminal markers + their terminal edges
- * from the graph topology. Pure + framework-free (unit-testable in isolation,
- * like every other mapper here).
+ * Derive the canvas-only Start/End terminal markers + their terminal edges.
+ * Pure + framework-free (unit-testable in isolation, like every other mapper
+ * here). The two halves derive DIFFERENTLY, on purpose:
  *
+ * **Start — auto-derived from topology.**
  * - `sources` = {@link deriveAutoSources} — in-degree 0 AND out-degree > 0: a
- *   real entry point (nothing flows in, something flows out).
- * - `sinks` = {@link deriveAutoSinks} — out-degree 0 AND in-degree > 0: a real
- *   exit point (something flows in, nothing flows out).
- * - Both predicates live in the PURE `state-machine.ts` (next to `autoLayout`,
- *   same reason: the DOM-layer XML codec imports them from there and must never
- *   depend on this React Flow layer). Degrees come from its `stateDegrees`:
- *   transitions referencing an unknown state are ignored, and a SELF-LOOP counts
- *   for neither degree (so a self-loop never removes a status's Start/End
- *   arrow), which also means a self-loop-ONLY status is ISOLATED and links to
- *   NEITHER marker.
- * - A Start marker is emitted ONLY when `sources.length > 0`; an End marker
- *   ONLY when `sinks.length > 0`. A pure-cycle graph (every state has an
- *   incoming edge) → no markers. A graph of only isolated states → no markers.
- *   An empty graph → no markers.
+ *   real entry point, nothing flows in and something flows out.
+ * - The predicate lives in the PURE `state-machine.ts` (next to {@link autoLayout},
+ *   for the same reason: the DOM-layer XML codec imports it from there and must
+ *   never depend on this React Flow layer, so Kaleo's `<initial>` and this
+ *   marker share ONE rule and cannot disagree about where the flow starts).
+ *   Degrees come from its `stateDegrees`: transitions referencing an unknown
+ *   state are ignored, mirroring {@link autoLayout}'s defensive guard, and a
+ *   SELF-LOOP counts for NEITHER degree — a self-loop is flow that leaves a
+ *   status and returns to it, so it must never cost that status its Start arrow
+ *   (the manager's "waiting memiliki transisi masuk dari start … aku bikin
+ *   self-loop kemudian yg dr start hilang" report). A self-loop-ONLY status is
+ *   therefore still ISOLATED.
+ * - An ISOLATED state (degree 0 on BOTH sides) is NOT a source. Without that
+ *   exclusion a just-dropped, not-yet-wired status reads as the flow's entry
+ *   (the manager's "a stray status with no transisi is automatically linked to
+ *   Start and End" feedback) — it has no entry semantics yet.
+ * - The Start marker is emitted ONLY when `sources.length > 0`. A pure-cycle
+ *   graph (every state has an incoming edge) → no Start marker; a graph of only
+ *   isolated states → no Start marker; an empty graph → no markers at all.
+ *
+ * **End — MANUAL-ONLY, derived from `endSources`.** There is NO topology
+ * predicate: a state with no outgoing transition (a "sink") is no longer
+ * auto-linked. This is the manager's "node masih otomatis linked ke end,
+ * seharusnya manual linked" feedback — wiring a new status into the flow used
+ * to silently claim it as the flow's exit. One edge is emitted per VALID
+ * `endSources` entry (one that has a real position; repeats are de-duped).
+ * - The End marker NODE is emitted for ANY non-empty `states` list, even with
+ *   zero `endSources`. That is load-bearing UX, not cosmetics: the marker is the
+ *   drop target the manager drags a connection INTO, so withholding it when
+ *   nothing is linked yet would make the first manual link impossible. (Marker
+ *   PRESENCE is then filtered by `value.terminalNodes.end` in
+ *   {@link formToFlowWithMarkers} — `'hidden'` still omits it.)
  *
  * Marker positions are derived from `realPositions` (a `Record<stateName,
  * {x,y}>` of the REAL state node positions, built by the caller from the
- * `formToFlow`-returned state nodes). The X bounds cover only the states the
- * marker CONNECTS to: Start sits at `minX - TERMINAL_SPACING`, one rank left of
- * the leftmost SOURCE; End at `maxX + TERMINAL_SPACING`, one rank right of the
- * rightmost SINK. (Not the leftmost/rightmost real node: an isolated status
- * dropped to the right of the real sink would drag the End marker past a node it
- * has no edge to.) The vertical center `yCenter = (minY + maxY) / 2` stays
- * GRAPH-WIDE — the markers denote the whole diagram's entry/exit. A missing
- * position is skipped and an empty bound list defaults to 0, so a marker never
- * NaNs.
+ * `formToFlow`-returned state nodes). The X bounds cover the states the marker
+ * actually CONNECTS to: Start sits at `minX - TERMINAL_SPACING`, one rank left
+ * of the leftmost SOURCE; End at `maxX + TERMINAL_SPACING`, one rank right of
+ * the rightmost END SOURCE. (Not the leftmost/rightmost real node: an isolated
+ * status dropped to the right of the graph would otherwise drag the End marker
+ * past a node it has no edge to.) With NO valid `endSources` the End marker
+ * connects to nothing, so it falls back to the max X over ALL real positions and
+ * simply parks at the right edge of the diagram. The vertical center
+ * `yCenter = (minY + maxY) / 2` stays GRAPH-WIDE — the markers denote the whole
+ * diagram's entry/exit. A missing position is skipped and an empty bound list
+ * defaults to 0, so a marker never NaNs.
  *
- * Terminal edges: a Start marker emits one `START_NODE_ID → source` edge per
- * source; an End marker emits one `sink → END_NODE_ID` edge per sink. They
- * carry `type: 'terminal'` (filtered by {@link flowToGraph} so they never
- * reach the form/wire), an empty `actionLabel` (no Caller button — they are
- * visual markers, not real transitions), and the canonical L→R handle
+ * Terminal edges: the Start marker emits one `START_NODE_ID → source` edge per
+ * source; the End marker emits one `endSource → END_NODE_ID` edge per valid
+ * entry. They carry `type: 'terminal'` (filtered by {@link flowToGraph} so they
+ * never reach the form/wire), an empty `actionLabel` (no Caller button — they
+ * are visual markers, not real transitions), and the canonical L→R handle
  * routing (`right` → `left`) + the {@link EDGE_ARROW_MARKER} so the arrow
  * reads the same as a real transition edge.
+ *
+ * `endSources` is a REQUIRED parameter with no default: there is exactly one
+ * production call site ({@link formToFlowWithMarkers}), and forcing it to pass
+ * the form's list keeps a future caller from silently deriving an End marker
+ * with no incoming edges it never meant to drop.
  */
 export function deriveTerminalMarkers(
   states: readonly string[],
   transitions: readonly { from: string; to: string; actionLabel: string }[],
   realPositions: Record<string, { x: number; y: number }>,
+  endSources: readonly string[],
 ): { nodes: FlowNode[]; edges: FlowEdge[] } {
   if (states.length === 0) return { nodes: [], edges: [] };
-  // The degree predicates live in `deriveAutoSources`/`deriveAutoSinks` (one
-  // source of truth, shared with the End-marker panel's "Transisi masuk" list —
-  // the rule used to be re-implemented there and could drift).
+  // The entry predicate lives in the pure `state-machine.ts` as
+  // `deriveAutoSources` — ONE source of truth shared with the XML codec's Kaleo
+  // `<initial>` flag, so the diagram and the Sumber view cannot disagree about
+  // where the flow starts. It excludes an ISOLATED state (degree 0 on both
+  // sides — a stray, just-added status is not an entry point) and counts a
+  // SELF-LOOP toward neither degree, so drawing `X -> X` never costs X its
+  // Start arrow. Unknown-state references are ignored there too, mirroring
+  // `autoLayout`'s defensive guard.
   const sources = deriveAutoSources(states, transitions);
-  const sinks = deriveAutoSinks(states, transitions);
+  // The End incoming set is MANUAL-ONLY — no out-degree predicate. Keep only
+  // entries that map to a real positioned node (a stale name from a deleted
+  // state draws nothing) and de-dupe repeats (two edges would share one id).
+  const endIncoming: string[] = [];
+  const seenEndSource = new Set<string>();
+  for (const s of endSources) {
+    if (seenEndSource.has(s) || realPositions[s] === undefined) continue;
+    seenEndSource.add(s);
+    endIncoming.push(s);
+  }
 
   // X coords of the given states that have a known position. A missing entry is
   // skipped so a name with no position can never produce a NaN bound.
@@ -376,17 +413,22 @@ export function deriveTerminalMarkers(
       return p ? [p.x] : [];
     });
   // The X bounds are taken over the states the marker actually CONNECTS to —
-  // sources for Start, sinks for End — not over every real node. With isolated
-  // states excluded above, a stray status dropped to the RIGHT of the real sink
-  // (managers drop into empty space) would otherwise push the End marker past a
-  // node it has no edge to, stretching the terminal edge across the canvas.
+  // sources for Start, end sources for End — not over every real node. With
+  // isolated states excluded above, a stray status dropped to the RIGHT of the
+  // connected states (managers drop into empty space) would otherwise push the
+  // End marker past a node it has no edge to, stretching the terminal edge
+  // across the canvas. When End connects to NOTHING (no valid `endSources`) it
+  // has no such span, so it falls back to every real node and parks at the right
+  // edge of the diagram — still a reachable drop target.
   const sourceXs = xsOf(sources);
-  const sinkXs = xsOf(sinks);
+  const endSourceXs = xsOf(endIncoming);
+  const allXs = Object.values(realPositions).map((p) => p.x);
+  const endBoundXs = endSourceXs.length ? endSourceXs : allXs;
   const minX = sourceXs.length ? Math.min(...sourceXs) : 0;
-  const maxX = sinkXs.length ? Math.max(...sinkXs) : 0;
+  const maxX = endBoundXs.length ? Math.max(...endBoundXs) : 0;
   // The vertical center stays GRAPH-WIDE (every real node) — the markers read as
   // the entry/exit of the whole diagram, so they sit at its vertical middle, not
-  // at the middle of the source/sink subset.
+  // at the middle of the connected subset.
   const real = Object.values(realPositions);
   const minY = real.length ? Math.min(...real.map((p) => p.y)) : 0;
   const maxY = real.length ? Math.max(...real.map((p) => p.y)) : 0;
@@ -417,47 +459,53 @@ export function deriveTerminalMarkers(
       });
     }
   }
-  if (sinks.length > 0) {
-    nodes.push({
-      id: END_NODE_ID,
-      type: END_NODE_TYPE,
-      position: { x: maxX + TERMINAL_SPACING, y: yCenter },
-      data: { name: END_NODE_ID, description: '' },
-      draggable: false,
-      selectable: true,
+  // The End marker node is UNCONDITIONAL for a non-empty graph (the
+  // `states.length === 0` early return above is the only withholding case): it
+  // must be on the canvas for the manager to have something to drag a
+  // connection INTO, even before any `endSources` entry exists. Its incoming
+  // edges are exclusively the manager-drawn ones.
+  nodes.push({
+    id: END_NODE_ID,
+    type: END_NODE_TYPE,
+    position: { x: maxX + TERMINAL_SPACING, y: yCenter },
+    data: { name: END_NODE_ID, description: '' },
+    draggable: false,
+    selectable: true,
+  });
+  for (const s of endIncoming) {
+    edges.push({
+      id: `${s}->${END_NODE_ID}`,
+      source: s,
+      target: END_NODE_ID,
+      type: TERMINAL_EDGE_TYPE,
+      data: { actionLabel: '' },
+      sourceHandle: HANDLE_IDS.right,
+      targetHandle: HANDLE_IDS.left,
+      markerEnd: EDGE_ARROW_MARKER,
     });
-    for (const s of sinks) {
-      edges.push({
-        id: `${s}->${END_NODE_ID}`,
-        source: s,
-        target: END_NODE_ID,
-        type: TERMINAL_EDGE_TYPE,
-        data: { actionLabel: '' },
-        sourceHandle: HANDLE_IDS.right,
-        targetHandle: HANDLE_IDS.left,
-        markerEnd: EDGE_ARROW_MARKER,
-      });
-    }
   }
   return { nodes, edges };
 }
 
 /**
  * {@link formToFlow} + the canvas-only Start/End terminal markers in one call.
- * The marker EDGES stay auto-derived from topology (sources = in-degree 0 with
- * out-degree > 0, sinks = out-degree 0 with in-degree > 0 — an isolated state is
- * neither, and a self-loop counts for neither degree) via
- * {@link deriveTerminalMarkers}; the marker NODE presence +
- * position come from `value.terminalNodes` — the manager controls marker
- * PRESENCE + POSITION only, not edges:
+ * The marker EDGES come from {@link deriveTerminalMarkers}: Start's are
+ * auto-derived from topology (sources = in-degree 0 with out-degree > 0 — an
+ * isolated state is not one, and a self-loop counts for neither degree, so
+ * `X -> X` never costs X its Start arrow), End's are exclusively
+ * `value.endSources` (manual only — no topology predicate). The marker NODE
+ * presence + position come from `value.terminalNodes`:
  *  - `'hidden'` → omit the marker node (and its edges — an edge with no source
  *    node cannot render).
  *  - `'auto'` → derive the position from the real node bounds (the
- *    {@link deriveTerminalMarkers} math), `pinned: false`; emit ONLY when the
- *    topology has sources/sinks (a pure-cycle graph has none → no auto marker;
- *    so does a graph of only isolated, not-yet-wired states).
+ *    {@link deriveTerminalMarkers} math), `pinned: false`. Start emits only when
+ *    the topology has sources (a pure-cycle graph has none → no auto Start; so
+ *    does a graph of only isolated, not-yet-wired states); End emits for ANY
+ *    non-empty graph, with or without `endSources` — it is the drop target the
+ *    manual link is drawn into, so it can never be withheld for having no
+ *    incoming edge yet.
  *  - `{x,y}` → explicit manager-pinned position, `pinned: true`; emit ALWAYS
- *    (the manager willed the marker even if the topology has no sources/sinks).
+ *    (the manager willed the marker even on an empty/source-less graph).
  *
  * The markers are positioned from the REAL state node positions returned by
  * {@link formToFlow} (so an auto marker sits at the correct rank offset from
@@ -478,22 +526,10 @@ export function formToFlowWithMarkers(
   // Topology-derived markers: the edge + auto-position derivation engine. We
   // reuse it for the terminal edges + the auto marker positions, then consult
   // `value.terminalNodes` for marker presence + position override + pinned.
-  const topo = deriveTerminalMarkers(value.states, value.transitions, realPositions);
+  const topo = deriveTerminalMarkers(value.states, value.transitions, realPositions, value.endSources);
   const autoStart = topo.nodes.find((n) => n.id === START_NODE_ID);
   const autoEnd = topo.nodes.find((n) => n.id === END_NODE_ID);
   const startEdges = topo.edges.filter((e) => e.source === START_NODE_ID);
-  const autoEndEdges = topo.edges.filter((e) => e.target === END_NODE_ID);
-  // The auto sink set — the {@link deriveAutoSinks} states (already drawn by
-  // `autoEndEdges` as `${s}->${END_NODE_ID}`). An explicit endSource that IS a
-  // sink is de-duplicated: the auto arrow already draws, so we do NOT emit a
-  // second `${s}->${END_NODE_ID}#x` edge (a duplicate id would collide and a
-  // duplicate edge would render two arrows on top of each other).
-  const autoSinks = new Set(autoEndEdges.map((e) => e.source));
-  // Real-node bounds fallback for an auto End marker with no autoEnd (the
-  // topology has no sinks but the manager willed End connections — emit the
-  // marker at the rightmost real-node rank, mirroring the auto-derivation
-  // math in `deriveTerminalMarkers`).
-  const real = Object.values(realPositions);
 
   const markerNodes: FlowNode[] = [];
   const markerEdges: FlowEdge[] = [];
@@ -516,66 +552,24 @@ export function formToFlowWithMarkers(
       markerEdges.push(...startEdges);
     }
   }
-  // End marker (mirrors start with sinks, PLUS the explicit endSources path).
-  // The End marker emits when:
-  //  - `end !== 'hidden'` AND
-  //    - pinned `{x,y}` (emit always), OR
-  //    - auto AND topology has sinks (autoEnd), OR
-  //    - auto AND no sinks BUT `value.endSources` has at least one VALID entry
-  //      (the manager willed End connections even though no state is a sink —
-  //      the explicit edges need a marker to attach to). Position falls back to
-  //      the rightmost real-node rank + vertical center (mirroring
-  //      `deriveTerminalMarkers`'s auto math) when `autoEnd` is undefined.
+  // End marker: mirrors the Start branch exactly — hidden → omit; auto → emit
+  // the derived marker; {x,y} → emit always, pinned. The only asymmetry is in
+  // `deriveTerminalMarkers` itself: `autoEnd` is defined for ANY non-empty
+  // graph (the marker is the manual link's drop target, so it is never
+  // withheld), and its incoming edges are exclusively `value.endSources`.
   if (end !== 'hidden') {
     const emitExplicit = typeof end === 'object';
-    const validEndSources = value.endSources.filter((s) => realPositions[s] !== undefined);
-    const hasExplicit = validEndSources.length > 0;
     const emitAuto = end === 'auto' && autoEnd !== undefined;
-    const emitAutoForExplicit = end === 'auto' && autoEnd === undefined && hasExplicit;
-    if (emitExplicit || emitAuto || emitAutoForExplicit) {
-      let position: { x: number; y: number };
-      if (emitExplicit) {
-        position = { x: end.x, y: end.y };
-      } else if (autoEnd !== undefined) {
-        position = autoEnd.position;
-      } else {
-        // Fallback: rightmost real-node rank + vertical center (mirrors
-        // `deriveTerminalMarkers`'s maxX + TERMINAL_SPACING + yCenter math).
-        const maxX = real.length ? Math.max(...real.map((p) => p.x)) : 0;
-        const minY = real.length ? Math.min(...real.map((p) => p.y)) : 0;
-        const maxY = real.length ? Math.max(...real.map((p) => p.y)) : 0;
-        position = { x: maxX + TERMINAL_SPACING, y: (minY + maxY) / 2 };
-      }
+    if (emitExplicit || emitAuto) {
       markerNodes.push({
         id: END_NODE_ID,
         type: END_NODE_TYPE,
-        position,
+        position: emitExplicit ? { x: end.x, y: end.y } : autoEnd!.position,
         data: { name: END_NODE_ID, description: '' },
         selectable: true,
         pinned: emitExplicit,
       });
-      // Auto sink→End arrows first (the topology-derived set).
-      markerEdges.push(...autoEndEdges);
-      // EXPLICIT End connections: one edge per endSource entry that is NOT
-      // already a sink (de-duplicated — a sink already has an auto arrow).
-      // Distinct edge id `${s}->${END_NODE_ID}#x` (the `#x` suffix
-      // differentiates from the auto `${s}->${END_NODE_ID}` so the two never
-      // collide). `data.explicit = true` flags the edge for the End panel.
-      // `type: TERMINAL_EDGE_TYPE` so `flowToGraph` filters it out (never
-      // reaches the wire transitions — `__end` is not a real state).
-      for (const s of validEndSources) {
-        if (autoSinks.has(s)) continue;
-        markerEdges.push({
-          id: `${s}->${END_NODE_ID}#x`,
-          source: s,
-          target: END_NODE_ID,
-          type: TERMINAL_EDGE_TYPE,
-          data: { actionLabel: '', explicit: true },
-          sourceHandle: HANDLE_IDS.right,
-          targetHandle: HANDLE_IDS.left,
-          markerEnd: EDGE_ARROW_MARKER,
-        });
-      }
+      markerEdges.push(...topo.edges.filter((e) => e.target === END_NODE_ID));
     }
   }
   return { nodes: [...stateNodes, ...markerNodes], edges: [...transEdges, ...markerEdges] };
@@ -629,7 +623,7 @@ export function flowToGraph(
   // with `pinned` → `{x,y}` (manager-pinned); a present marker without `pinned`
   // → `'auto'` (auto-derived position). An ABSENT marker preserves the prior
   // `prevTerminalNodes[key]` — absence is ambiguous (it could mean `'hidden'`
-  // OR an auto marker dropped because the topology has no sources/sinks), so
+  // OR an auto Start marker dropped because the topology has no sources), so
   // the caller passes the prior terminalNodes to disambiguate.
   const startNode = nodes.find((n) => n.type === START_NODE_TYPE);
   const endNode = nodes.find((n) => n.type === END_NODE_TYPE);
@@ -700,8 +694,8 @@ export function isDuplicateTransition(
   source: string,
   target: string,
 ): boolean {
-  // Exclude the canvas-only terminal edges (Start→source / sink→End) — they
-  // share no `from`/`to` pair with a real transition (the markers' ids are
+  // Exclude the canvas-only terminal edges (Start→source / endSource→End) —
+  // they share no `from`/`to` pair with a real transition (the markers' ids are
   // reserved `__start`/`__end`), but a defensive `type !== 'terminal'` filter
   // keeps the predicate honest if a future caller passes the full canvas edge
   // list (which now includes the markers). Terminal edges must never cause a
@@ -710,15 +704,17 @@ export function isDuplicateTransition(
 }
 
 /**
- * True when an EXPLICIT or AUTO terminal edge already connects `source` to the
- * End marker (`source → __end`). The single source of truth for the
- * duplicate-End-connection check shared by `isValidConnection` (live, during
- * the drag) + `onConnect` (defensive — a real connection that somehow bypassed
- * the live guard). Covers both the auto sink→End arrow (`${s}->${END_NODE_ID}`,
- * no `#x` suffix) and the explicit edge (`${s}->${END_NODE_ID}#x`) so a manager
- * cannot drag a second arrow from a state that already reaches End (auto OR
- * explicit). Terminal-edge-typed only — a real transition to a state coincidentally
- * named like a sink is unaffected.
+ * True when a terminal edge already connects `source` to the End marker
+ * (`source → __end`). The single source of truth for the duplicate-End-connection
+ * check shared by `isValidConnection` (live, during the drag) + `onConnect`
+ * (defensive — a real connection that somehow bypassed the live guard), so a
+ * manager cannot draw a SECOND arrow from a state already linked to End.
+ *
+ * Every End edge is manager-drawn now (`endSources`), so this rejects only a
+ * genuine repeat. In particular a state with NO outgoing transition is NOT
+ * pre-rejected: it used to carry an auto sink→End arrow, which made the
+ * predicate refuse the very link the manager was trying to draw. Terminal-edge-
+ * typed only — a real transition edge never trips it.
  */
 export function hasEndSource(edges: readonly FlowEdge[], source: string): boolean {
   return edges.some(
@@ -760,9 +756,9 @@ export function rejectionMessageForConnection(
   const from = outcome.fromId;
   const to = outcome.toId;
   // Dropping onto the End marker is rejected only when the source state is
-  // already connected to End (auto sink OR explicit endSource). Surface a
-  // manager-facing message naming the source so the manager knows why the
-  // drop was refused (mirrors the duplicate-transition message style).
+  // already an End source (a repeat of a link the manager drew before).
+  // Surface a manager-facing message naming the source so the manager knows why
+  // the drop was refused (mirrors the duplicate-transition message style).
   if (to === END_NODE_ID && from && hasEndSource(edges, from)) {
     return `Status ${from} sudah terhubung ke titik akhir.`;
   }

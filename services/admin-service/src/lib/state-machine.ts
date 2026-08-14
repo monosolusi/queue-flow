@@ -127,9 +127,10 @@ export interface StateMachineForm {
    * by state name — the terminal ids `__start`/`__end` are reserved canvas
    * markers, not state names). `'auto'` derives the marker position from the
    * real node bounds; `{x,y}` is a manager-pinned explicit position; `'hidden'`
-   * omits the marker. The terminal EDGES stay auto-derived from topology, so
-   * the manager controls marker PRESENCE + POSITION only. Travels the wire in
-   * the separate `terminalNodes` field (built by `toTerminalNodesDto`).
+   * omits the marker. This field controls marker PRESENCE + POSITION only: the
+   * Start marker's edges stay auto-derived from topology, and the End marker's
+   * come from {@link StateMachineForm.endSources}. Travels the wire in the
+   * separate `terminalNodes` field (built by `toTerminalNodesDto`).
    *
    * Canvas-rendered (unlike `nodeActions`): `formToFlowWithMarkers` consults it
    * for marker presence + position, and `flowToGraph` captures it back from the
@@ -141,9 +142,10 @@ export interface StateMachineForm {
   /**
    * Explicit End-marker connections — a flat array of state NAMES the manager
    * dragged a connection from into the End terminal marker (multiple allowed).
-   * Canvas-rendered (like `terminalNodes`): `formToFlowWithMarkers` emits an
-   * EXPLICIT terminal edge for each entry that is not already a sink, so a
-   * change MUST re-seed the canvas → `graphSignature` INCLUDES `endSources`.
+   * Canvas-rendered (like `terminalNodes`): `formToFlowWithMarkers` emits one
+   * terminal edge per entry — and NOTHING else feeds the End marker, so this is
+   * the complete set of arrows into it. A change MUST re-seed the canvas →
+   * `graphSignature` INCLUDES `endSources`.
    * Travels the wire in the separate top-level `endSources` field (built by
    * {@link toEndSourcesDto}), NOT inside `stateMachine` (the End marker is a
    * canvas-only affordance, NOT a real state — `__end` never reaches the wire
@@ -165,8 +167,8 @@ export function defaultStateMachineForm(): StateMachineForm {
     // is the fallback for each of the 5 PRD §7 default statuses.
     descriptions: {},
     terminalNodes: { ...DEFAULT_TERMINAL_NODES },
-    // No explicit End connections — the End marker only shows the auto-derived
-    // sink→End arrows for the default graph's sinks (COMPLETED).
+    // No End connections — the PRD §7 default graph declares none, so the End
+    // marker renders with no incoming arrow until the manager draws one.
     endSources: [],
   };
 }
@@ -368,8 +370,8 @@ export function toTerminalNodesDto(form: StateMachineForm): TerminalNodesDto {
  * Builds the explicit End-connections wire array from the form. A shallow copy
  * of `form.endSources` (the form is the source of truth — built by the
  * `onConnect`-to-End path + the panel "Transisi masuk" delete, or by
- * `xmlToForm` on a Source edit). `[]` means "no explicit End connections —
- * only the auto-derived sink→End arrows". Mirrors `toTerminalNodesDto`'s doc
+ * `xmlToForm` on a Source edit). `[]` means "no End connections drawn" — and
+ * since nothing else feeds the End marker, no arrows into it at all. Mirrors `toTerminalNodesDto`'s doc
  * style: read `form.endSources` directly, do not special-case mode (default
  * mode force-resets the graph in `toStateMachineDto` and the default canvas
  * carries no explicit End connections, so the array is `[]` regardless —
@@ -539,12 +541,16 @@ export function autoLayout(
  *     made a status with a self-loop stop being in-degree 0, which silently
  *     dropped its `__start → S` terminal arrow — the manager's "WAITING punya
  *     transisi masuk dari Mulai, lalu aku bikin self-loop dan yang dari Mulai
- *     hilang" report. Symmetrically it removed a sink's `S → __end` arrow.
+ *     hilang" report.
  *
  * Consequence (deliberate): a status whose ONLY transition is a self-loop stays
- * degree 0 on BOTH sides — i.e. ISOLATED — and an isolated status auto-links to
- * NEITHER Start nor End (see {@link deriveAutoSources}/{@link deriveAutoSinks}).
- * A self-loop wires the status to itself, not into the flow.
+ * degree 0 on BOTH sides — i.e. ISOLATED — and an isolated status is not an
+ * entry point (see {@link deriveAutoSources}). A self-loop wires the status to
+ * itself, not into the flow.
+ *
+ * The out-degree half has a second consumer: the XML codec picks Kaleo's
+ * `<task>` vs `<state>` tag from `outDeg`, so a self-looping status still
+ * serializes as terminal — matching the canvas, which draws it no exit.
  */
 export function stateDegrees(
   states: readonly string[],
@@ -585,23 +591,6 @@ export function deriveAutoSources(
 ): string[] {
   const { inDeg, outDeg } = stateDegrees(states, transitions);
   return states.filter((s) => (inDeg.get(s) ?? 0) === 0 && (outDeg.get(s) ?? 0) > 0);
-}
-
-/**
- * The graph's real EXIT states — out-degree 0 AND in-degree > 0 (per
- * {@link stateDegrees}): something flows in, nothing flows out. Isolated states
- * are excluded for the same reason as in {@link deriveAutoSources}.
- *
- * Shared by `deriveTerminalMarkers` (which draws the `S → __end` arrows) and the
- * End-marker properties panel's "Transisi masuk" list, so the list can never
- * drift from the arrows actually drawn on the canvas.
- */
-export function deriveAutoSinks(
-  states: readonly string[],
-  transitions: readonly { from: string; to: string }[],
-): string[] {
-  const { inDeg, outDeg } = stateDegrees(states, transitions);
-  return states.filter((s) => (outDeg.get(s) ?? 0) === 0 && (inDeg.get(s) ?? 0) > 0);
 }
 
 /**
@@ -798,6 +787,101 @@ export function updateStateDescription(
     descriptions[name] = value;
   }
   return { ...form, descriptions };
+}
+
+/**
+ * The three form fields that reference states BY NAME rather than by position
+ * in `states`: `nodeActions` (keyed by name, and each action's `value` is a
+ * name too), `descriptions` (keyed by name), and `endSources` (an array OF
+ * names). Grouped as one shape because they share one failure mode and one
+ * cascade rule — see {@link reconcileStateNameRefs}.
+ */
+export interface StateNameRefs {
+  readonly nodeActions: NodeActionsDto;
+  readonly descriptions: Record<string, string>;
+  readonly endSources: readonly string[];
+}
+
+/**
+ * Reconcile the state-name-referencing fields against the live state list,
+ * optionally remapping a rename. Pure + framework-free.
+ *
+ * **Why this exists (a save-blocking landmine).** The save use case
+ * cross-checks all three against the active state schema and throws on any
+ * entry that is not a live state — `node actions key 'X' is not a state in the
+ * active state machine`, the same for `state descriptions key`, and `end
+ * sources entry`. Each becomes an HTTP 400 on EVERY subsequent save. The
+ * stranded entry is invisible in the UI (every panel lists only live states),
+ * so there is NO in-app route to clear it: the manager is locked out of saving
+ * until someone hand-edits the XML Source. The canvas delete/rename path
+ * therefore MUST cascade, exactly as the form-editor helpers
+ * {@link updateState}/{@link removeState} already do for their own path.
+ *
+ * **Rename REMAPS, it does not prune.** A rename must preserve the manager's
+ * intent: the description, the node actions and the End link follow the status
+ * to its new name. Pruning alone would satisfy the cross-check while silently
+ * throwing the manager's work away. Only names that are gone for good (a
+ * delete) are dropped.
+ *
+ * Applied in one pass per field: map the name through the rename first, then
+ * keep it only if it is a live state.
+ *  - `nodeActions` — the KEY is remapped/pruned, and so is each action's
+ *    `value` (also cross-checked: `node actions['k'].value 'X' is not a
+ *    state`). An action whose target state was DELETED is dropped: an
+ *    "Update Status ke <deleted>" action has no meaning left, and this mirrors
+ *    the way `onDeleteState` already cascades away transitions that referenced
+ *    the state. The `value` remap/prune is gated on `type === 'UPDATE_STATUS'`
+ *    to MIRROR the backend cross-check exactly (which only validates the value
+ *    for that type). `NodeActionType` is a single-member union today, so the
+ *    gate is a no-op — but it is deliberate insurance, not redundancy: a future
+ *    action type whose `value` is not a state name (a webhook URL, say) would
+ *    otherwise be silently DELETED on the next canvas commit, and unlike
+ *    {@link NODE_ACTION_TYPE_LABELS} (an exhaustive `Record` that breaks the
+ *    build on widening) nothing here would fail to compile.
+ *  - `descriptions` — key remapped/pruned.
+ *  - `endSources` — the array VALUES are remapped/pruned, and de-duplicated
+ *    defensively (the backend `EndSources.of` rejects a duplicate entry as
+ *    malformed; a rename onto an existing name cannot reach here today because
+ *    `onRenameState` refuses a name already on the canvas, but the guard costs
+ *    one `Set`).
+ */
+export function reconcileStateNameRefs(
+  refs: StateNameRefs,
+  liveStates: readonly string[],
+  rename?: { readonly from: string; readonly to: string },
+): { nodeActions: NodeActionsDto; descriptions: Record<string, string>; endSources: string[] } {
+  const live = new Set(liveStates);
+  const mapName = (name: string): string =>
+    rename !== undefined && name === rename.from ? rename.to : name;
+
+  const nodeActions: NodeActionsDto = {};
+  for (const [key, actions] of Object.entries(refs.nodeActions ?? {})) {
+    const nextKey = mapName(key);
+    if (!live.has(nextKey)) continue;
+    nodeActions[nextKey] = actions
+      .map((a) => (a.type === 'UPDATE_STATUS' ? { ...a, value: mapName(a.value) } : a))
+      .filter((a) => a.type !== 'UPDATE_STATUS' || live.has(a.value));
+  }
+
+  const descriptions: Record<string, string> = {};
+  for (const [key, text] of Object.entries(refs.descriptions ?? {})) {
+    const nextKey = mapName(key);
+    if (live.has(nextKey)) descriptions[nextKey] = text;
+  }
+
+  const endSources: string[] = [];
+  const seen = new Set<string>();
+  // `?? []` mirrors the `?? {}` on the two maps above: `StateNameRefs` types all
+  // three as required, but many test fixtures build partial forms behind a type
+  // assertion, so the defensive coalesce stays consistent across all three.
+  for (const source of refs.endSources ?? []) {
+    const next = mapName(source);
+    if (!live.has(next) || seen.has(next)) continue;
+    seen.add(next);
+    endSources.push(next);
+  }
+
+  return { nodeActions, descriptions, endSources };
 }
 
 // --- form mutation helpers (pure over the StateMachineForm slice) ------------

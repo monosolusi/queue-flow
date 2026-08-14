@@ -3,7 +3,7 @@ import { DEFAULT_STATE_MACHINE } from '../api/types';
 import {
   addTransition,
   autoLayout,
-  deriveAutoSinks,
+  stateDegrees,
   toStateMachineDto,
   validateCustomStateMachine,
   type StateMachineForm,
@@ -348,9 +348,11 @@ describe('formToXml — Kaleo workflow-definition shape', () => {
     const xml = formToXml(form);
     expect(xml).toContain('<task>\n    <name>A</name>');
     expect(xml).toContain('<state>\n    <name>S</name>');
-    // Asserted against the canvas's OWN predicate, so the two cannot drift
-    // apart again without this failing.
-    expect(deriveAutoSinks(form.states, form.transitions)).toEqual(['S']);
+    // Asserted against the SHARED predicate the tag is derived from, so the
+    // two cannot drift apart again without this failing. S is terminal
+    // (out-degree 0) precisely because its only outgoing edge is a self-loop,
+    // which `stateDegrees` counts toward neither degree.
+    expect(stateDegrees(form.states, form.transitions).outDeg.get('S')).toBe(0);
     // Both of S's facets survive the round-trip regardless of the tag.
     const result = xmlToForm(xml);
     expect(result.ok).toBe(true);

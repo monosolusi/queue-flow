@@ -212,9 +212,8 @@ function toConfig(row: ConfigRow): SystemConfiguration {
     // membership cross-check (terminal ids are not state names).
     terminalNodes: TerminalNodes.of(row.terminal_nodes ?? undefined),
     // Same boot-window fallback for end_sources (0016 migration). `of()`
-    // recovers a null/undefined column to the empty default array (no explicit
-    // end sources — the End marker falls back to the auto-derived sink
-    // behavior), and a pre-migration row's SELECT * simply lacks the column (pg
+    // recovers a null/undefined column to the empty default array (no end
+    // sources recorded), and a pre-migration row's SELECT * simply lacks the column (pg
     // returns undefined here) — both paths reconstitute EndSources.DEFAULT.
     // Mirrors the terminalNodes fallback. State-membership cross-check runs in
     // the save use case (the VO stays free of a StateMachine dependency).

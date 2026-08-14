@@ -134,11 +134,10 @@ export interface WorkflowHandlers {
    */
   onDropTerminal: (key: 'start' | 'end', position: { x: number; y: number }) => void;
   /**
-   * Remove an EXPLICIT End connection (a manager-drawn arrow from `source`
-   * into the End marker). Non-stamping (re-seeds the canvas; the explicit
-   * terminal edge disappears). Used by the End-marker panel's "Transisi masuk"
-   * delete button. Auto sink→End arrows are NOT removable here (topology-
-   * derived).
+   * Remove an End connection (a manager-drawn arrow from `source` into the End
+   * marker). Non-stamping (re-seeds the canvas; the terminal edge disappears).
+   * Used by the End-marker panel's "Transisi masuk" delete button. Every
+   * incoming End edge is manager-drawn, so every row in that list is removable.
    */
   onRemoveEndSource: (source: string) => void;
 }
@@ -325,21 +324,28 @@ export function StartNode({ }: NodeProps): JSX.Element {
 
 /**
  * A canvas-only End terminal marker — a bold-ring "stop" affordance (■ glyph)
- * with a "Selesai" label. Auto-derived for the graph's real exit states
- * (out-degree 0 AND in-degree > 0 — an isolated, not-yet-wired status is NOT an
- * exit point, and a transition from a status to ITSELF counts for neither
- * degree) AND a drop target for EXPLICIT manager-drawn End connections
- * (`form.endSources`, multiple allowed). NOT in the wire `transitions` (the
- * terminal edges are filtered at `flowToGraph`). ONE `<Handle type="source"
- * position={Position.Left} id={HANDLE_IDS.left} isConnectable={connectable} />` —
- * the `source`-typed handle on the LEFT is the terminal edge's TARGET (a
- * sink→End or an explicit state→End edge drops onto this handle). Under the
+ * with a "Selesai" label. Its incoming arrows are MANUAL ONLY: nothing about
+ * the graph shape links a state to End, so every arrow comes from a manager
+ * drag recorded in `form.endSources` (multiple allowed). The marker therefore
+ * renders even with ZERO incoming arrows — it is the drop target the first
+ * manual link is drawn into, so withholding it would make the link impossible.
+ * NOT in the wire `transitions` (the terminal edges are filtered at
+ * `flowToGraph`). FOUR TYPELESS `<Handle type="source">`s — one per side, ids
+ * matching {@link HANDLE_IDS} — exactly like {@link StateNode}. Under the
  * parent's `ConnectionMode.Loose` a `source`-typed handle both STARTS and
  * RECEIVES a connection, so the manager can drag from any state's handle and
- * drop onto this handle. `isConnectable` is gated on `mode === 'custom'` so
- * the read-only default-mode canvas stays non-interactive; the programmatic
- * auto terminal edges still attach regardless of `isConnectable` (same
- * mechanism as `StartNode`).
+ * drop onto ANY side of this marker. One left-side handle was enough while the
+ * auto-sink rule drew the common arrows for free; now that a manual drag is the
+ * ONLY route to an End link, a single drop point on one side is a real
+ * discoverability risk — "selalu tidak bisa menghubungkan" is a standing
+ * manager complaint about this designer. Four sides is purely additive: the
+ * marker still never ORIGINATES an edge, because `isValidConnection` rejects
+ * `from === END_NODE_ID` and `onConnect` carries the same terminal guard.
+ * `isConnectable` is gated on `mode === 'custom'` so the read-only
+ * default-mode canvas stays non-interactive; the terminal edges still attach
+ * regardless of `isConnectable` (same mechanism as `StartNode`), and the
+ * incoming edges keep targeting the LEFT handle so the canonical L→R routing
+ * is unchanged.
  *
  * Inline `<svg>` (no external assets — NFR-REL-01) using `currentColor`.
  */
@@ -353,6 +359,9 @@ export function EndNode({ }: NodeProps): JSX.Element {
       data-testid="sm-node-end"
       aria-label="Titik akhir alur"
     >
+      <Handle type="source" position={Position.Top} id={HANDLE_IDS.top} isConnectable={connectable} />
+      <Handle type="source" position={Position.Right} id={HANDLE_IDS.right} isConnectable={connectable} />
+      <Handle type="source" position={Position.Bottom} id={HANDLE_IDS.bottom} isConnectable={connectable} />
       <Handle type="source" position={Position.Left} id={HANDLE_IDS.left} isConnectable={connectable} />
       <span className="terminal-node__glyph" aria-hidden="true">
         <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
@@ -365,7 +374,7 @@ export function EndNode({ }: NodeProps): JSX.Element {
 }
 
 /**
- * A canvas-only terminal edge (Start→source / sink→End): a clean bezier via
+ * A canvas-only terminal edge (Start→source / endSource→End): a clean bezier via
  * {@link getBezierPath} + {@link BaseEdge} (forwarding the `markerEnd` so the
  * arrow reads), wrapped in a `<g className="terminal-edge">` so the CSS can
  * style it as a dashed muted line — visually distinct from a solid transition

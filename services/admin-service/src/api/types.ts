@@ -210,11 +210,13 @@ export type NodeActionsDto = Record<string, NodeActionDto[]>;
  * One terminal (Start/End) marker's persisted state. `'auto'` — derive the
  * marker position from the real node bounds (the default; current UX).
  * `{x,y}` — manager-pinned explicit position. `'hidden'` — manager deleted;
- * marker omitted. Mirrors core-api's `TerminalNodeState` VO. The terminal EDGES
- * stay auto-derived from topology (sources = in-degree 0 AND out-degree > 0,
- * sinks = out-degree 0 AND in-degree > 0 — an isolated, not-yet-wired state is
- * neither, and a self-loop counts for neither degree) — the manager controls
- * marker PRESENCE + POSITION only, not edges.
+ * marker omitted. Mirrors core-api's `TerminalNodeState` VO. This field controls
+ * marker PRESENCE + POSITION only. The Start marker's edges are auto-derived
+ * from topology (sources = in-degree 0 AND out-degree > 0 — an isolated,
+ * not-yet-wired state is not one, and a transition from a status to ITSELF
+ * counts for neither degree, so a self-loop never costs a status its Start
+ * arrow); the End marker's edges are manual only and come from
+ * {@link EndSourcesDto}.
  */
 export type TerminalNodeStateDto = 'auto' | 'hidden' | { readonly x: number; readonly y: number };
 
@@ -240,17 +242,17 @@ export interface TerminalNodesDto {
  * real state, so `__end` never reaches the wire `transitions` (the diagram
  * filters terminal edges at `flowToGraph`). Mirrors core-api's `endSources`
  * field-for-field. Not change-gated for audit (an appearance concern, like
- * {@link TerminalNodesDto}). `[]` means "no explicit End connections — only
- * the auto-derived sink→End arrows" (the default). An entry that is also a
- * sink (out-degree 0) is de-duplicated on the canvas (the auto arrow already
- * draws), so `endSources` only records the EXPLICIT additions.
+ * {@link TerminalNodesDto}). This is the SOLE source of the End marker's
+ * incoming arrows — nothing about the graph shape adds one — so `[]` means the
+ * End marker renders with no incoming arrow at all (it still renders: it is the
+ * drop target the manager drags into). Every entry draws exactly one arrow.
  */
 export type EndSourcesDto = readonly string[];
 
 /**
- * Empty end-sources list — "no explicit End connections". Matches the backend
- * `EndSources.DEFAULT` so a store that never drags into End keeps the existing
- * auto-derived sink→End arrows only (zero visual regression, mirroring
+ * Empty end-sources list — "no End connections drawn yet". Matches the backend
+ * `EndSources.DEFAULT`, and is what {@link DEFAULT_STATE_MACHINE} carries: the
+ * PRD §7 default graph declares no End connections (mirroring
  * {@link DEFAULT_TERMINAL_NODES}).
  */
 export const DEFAULT_END_SOURCES: EndSourcesDto = [];
@@ -360,17 +362,17 @@ export interface SystemConfigurationDto {
   readonly nodeActions: NodeActionsDto;
   /** Start/End terminal-marker states (appearance concern, not change-gated).
    *  Always present — the backend defaults to {@link DEFAULT_TERMINAL_NODES}
-   *  (auto/auto) so a store that never touches the markers keeps the existing
-   *  auto-derived entry/exit affordances (zero visual regression); `toForm`
-   *  keeps a defensive `?? DEFAULT_TERMINAL_NODES` coercion (belt-and-suspenders,
-   *  same as `nodeActions`). */
+   *  (auto/auto) so a store that never touches the markers gets both entry/exit
+   *  affordances on the canvas: an auto-positioned Start (when the topology has
+   *  an entry state) and the always-present End drop target; `toForm` keeps a
+   *  defensive `?? DEFAULT_TERMINAL_NODES` coercion (belt-and-suspenders, same
+   *  as `nodeActions`). */
   readonly terminalNodes: TerminalNodesDto;
   /** Explicit End-marker connections (a flat array of state names the manager
    *  dragged into the End terminal marker). Always present — the backend
    *  defaults to {@link DEFAULT_END_SOURCES} so a store that never drags into
-   *  End keeps the auto-derived sink→End arrows only (zero visual regression);
-   *  `toForm` keeps a defensive `?? []` coercion (belt-and-suspenders, same as
-   *  `terminalNodes`). */
+   *  End simply has no incoming End arrows; `toForm` keeps a defensive `?? []`
+   *  coercion (belt-and-suspenders, same as `terminalNodes`). */
   readonly endSources: EndSourcesDto;
   /** Printer configuration for the kiosk receipt printer. Always present — the
    *  backend defaults to {@link DEFAULT_PRINTER_CONFIGURATION} so a store that
@@ -540,10 +542,13 @@ export const DEFAULT_NODE_POSITIONS: NodePositionsDto = {};
 export const DEFAULT_NODE_ACTIONS: NodeActionsDto = {};
 
 /**
- * Auto/auto terminal markers — "derive both Start and End from the real node
- * bounds". Matches the backend `TerminalNodes.DEFAULT` so a store that never
- * touches the markers keeps the existing auto-derived entry/exit affordances
- * (zero visual regression, mirroring {@link DEFAULT_NODE_ACTIONS}).
+ * Auto/auto terminal markers — "derive both markers' POSITION from the real
+ * node bounds". Position is all that `'auto'` governs for End: its incoming
+ * EDGES are manual-only ({@link EndSourcesDto}), and its presence is
+ * unconditional. For Start, `'auto'` additionally means its edges are derived
+ * from the topology. Matches the backend `TerminalNodes.DEFAULT` so a store
+ * that never touches the markers gets both affordances on the canvas
+ * (mirroring {@link DEFAULT_NODE_ACTIONS}).
  */
 export const DEFAULT_TERMINAL_NODES: TerminalNodesDto = { start: 'auto', end: 'auto' };
 

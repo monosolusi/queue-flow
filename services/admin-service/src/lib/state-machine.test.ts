@@ -9,13 +9,13 @@ import {
   defaultStateMachineForm,
   describeState,
   descriptionFor,
-  deriveAutoSinks,
   deriveAutoSources,
   graphSignature,
   stateDegrees,
   isDefaultGraph,
   mergeEdgeSides,
   missingCanonicalStates,
+  reconcileStateNameRefs,
   removeState,
   toEdgeRoutingLayoutDto,
   toNodeActionsDto,
@@ -912,7 +912,7 @@ describe('isDefaultGraph with endSources', () => {
   });
 });
 
-describe('stateDegrees / deriveAutoSources / deriveAutoSinks (the shared degree predicates)', () => {
+describe('stateDegrees / deriveAutoSources (the shared degree predicates)', () => {
   it('counts a normal transition on both ends', () => {
     const { inDeg, outDeg } = stateDegrees(['A', 'B'], [{ from: 'A', to: 'B' }]);
     expect(outDeg.get('A')).toBe(1);
@@ -935,16 +935,15 @@ describe('stateDegrees / deriveAutoSources / deriveAutoSinks (the shared degree 
     expect(inDeg.get('A')).toBe(0);
   });
 
-  it('derives the default graph sources/sinks (WAITING in, COMPLETED out)', () => {
-    expect(deriveAutoSources([...DEFAULT_STATE_MACHINE.states], DEFAULT_STATE_MACHINE.transitions)).toEqual([
-      'WAITING',
-    ]);
-    expect(deriveAutoSinks([...DEFAULT_STATE_MACHINE.states], DEFAULT_STATE_MACHINE.transitions)).toEqual([
-      'COMPLETED',
-    ]);
+  it('derives the default graph entry state (WAITING)', () => {
+    expect(
+      deriveAutoSources([...DEFAULT_STATE_MACHINE.states], DEFAULT_STATE_MACHINE.transitions),
+    ).toEqual(['WAITING']);
   });
 
-  it('keeps a source a source and a sink a sink when either grows a self-loop', () => {
+  it('keeps an entry state an entry state when it grows a self-loop', () => {
+    // The manager's report: WAITING had a Start arrow, drawing WAITING -> WAITING
+    // made it in-degree 1 and the Start arrow silently vanished.
     const states = ['A', 'B'];
     const transitions = [
       { from: 'A', to: 'B' },
@@ -952,23 +951,149 @@ describe('stateDegrees / deriveAutoSources / deriveAutoSinks (the shared degree 
       { from: 'B', to: 'B' },
     ];
     expect(deriveAutoSources(states, transitions)).toEqual(['A']);
-    expect(deriveAutoSinks(states, transitions)).toEqual(['B']);
   });
 
-  it('treats a self-loop-ONLY state as isolated (neither a source nor a sink)', () => {
+  it('treats a self-loop-ONLY state as isolated (not an entry point)', () => {
     const states = ['A', 'B', 'LOOPY'];
     const transitions = [
       { from: 'A', to: 'B' },
       { from: 'LOOPY', to: 'LOOPY' },
     ];
     expect(deriveAutoSources(states, transitions)).toEqual(['A']);
-    expect(deriveAutoSinks(states, transitions)).toEqual(['B']);
   });
 
   it('treats a not-yet-wired state as isolated (the PR #103 invariant)', () => {
     const states = ['A', 'B', 'STRAY'];
     const transitions = [{ from: 'A', to: 'B' }];
     expect(deriveAutoSources(states, transitions)).toEqual(['A']);
-    expect(deriveAutoSinks(states, transitions)).toEqual(['B']);
+  });
+});
+
+describe('reconcileStateNameRefs (canvas delete/rename cascade)', () => {
+  // The three fields that reference states BY NAME. The save use case
+  // cross-checks all of them and 400s on an entry naming a dead state, and no
+  // panel lists such an entry — so a stranded name locks the manager out of
+  // saving with no in-app way to clear it. This helper is the single cascade
+  // the canvas `commit` path runs.
+  const refs = () => ({
+    nodeActions: {
+      COMPLETED: [{ executionType: 'ON_ENTRY' as const, type: 'UPDATE_STATUS' as const, value: 'WAITING' }],
+      SERVING: [{ executionType: 'ON_EXIT' as const, type: 'UPDATE_STATUS' as const, value: 'COMPLETED' }],
+    },
+    descriptions: { COMPLETED: 'Tiket selesai', SERVING: 'Sedang dilayani' },
+    endSources: ['COMPLETED'],
+  });
+
+  it('remaps every reference to the renamed state (a rename preserves intent)', () => {
+    const out = reconcileStateNameRefs(refs(), ['WAITING', 'SERVING', 'SELESAI'], {
+      from: 'COMPLETED',
+      to: 'SELESAI',
+    });
+    // The End link follows the rename rather than being dropped.
+    expect(out.endSources).toEqual(['SELESAI']);
+    expect(out.descriptions).toEqual({ SELESAI: 'Tiket selesai', SERVING: 'Sedang dilayani' });
+    // Both the KEY and a referencing action VALUE are remapped.
+    expect(out.nodeActions.SELESAI).toEqual([
+      { executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'WAITING' },
+    ]);
+    expect(out.nodeActions.SERVING).toEqual([
+      { executionType: 'ON_EXIT', type: 'UPDATE_STATUS', value: 'SELESAI' },
+    ]);
+    expect(out.nodeActions.COMPLETED).toBeUndefined();
+  });
+
+  it('prunes every reference to a deleted state', () => {
+    const out = reconcileStateNameRefs(refs(), ['WAITING', 'SERVING']);
+    expect(out.endSources).toEqual([]);
+    expect(out.descriptions).toEqual({ SERVING: 'Sedang dilayani' });
+    expect(out.nodeActions.COMPLETED).toBeUndefined();
+    // A surviving state's action pointing AT the deleted state is dropped —
+    // "Update Status ke <deleted>" has no meaning and would fail the same
+    // cross-check.
+    expect(out.nodeActions.SERVING).toEqual([]);
+  });
+
+  it('leaves a fully-live set untouched', () => {
+    const input = refs();
+    const out = reconcileStateNameRefs(input, ['WAITING', 'SERVING', 'COMPLETED']);
+    expect(out.endSources).toEqual(input.endSources);
+    expect(out.descriptions).toEqual(input.descriptions);
+    expect(out.nodeActions).toEqual(input.nodeActions);
+  });
+
+  it('de-duplicates an endSource that a rename collapses onto an existing entry', () => {
+    // Defensive: the backend `EndSources.of` rejects a duplicate entry as
+    // malformed. `onRenameState` refuses a name already on the canvas, so this
+    // is unreachable today — the guard costs one Set.
+    const out = reconcileStateNameRefs(
+      { nodeActions: {}, descriptions: {}, endSources: ['A', 'B'] },
+      ['B'],
+      { from: 'A', to: 'B' },
+    );
+    expect(out.endSources).toEqual(['B']);
+  });
+
+  it('never emits a name outside the live state list', () => {
+    // The invariant the backend cross-check enforces, asserted directly. The
+    // fixture is built so every output collection SURVIVES non-empty — a live
+    // key, a live action value and a live end source all remain. An `.every()`
+    // over an empty array passes trivially, so a fixture that prunes everything
+    // would assert nothing about over-pruning; the non-emptiness expectations
+    // below keep this test honest.
+    const out = reconcileStateNameRefs(
+      {
+        nodeActions: {
+          // Key dies (COMPLETED is not live).
+          COMPLETED: [
+            { executionType: 'ON_ENTRY' as const, type: 'UPDATE_STATUS' as const, value: 'WAITING' },
+          ],
+          // Key lives; first action's value dies, second survives.
+          SERVING: [
+            { executionType: 'ON_EXIT' as const, type: 'UPDATE_STATUS' as const, value: 'COMPLETED' },
+            { executionType: 'ON_ENTRY' as const, type: 'UPDATE_STATUS' as const, value: 'WAITING' },
+          ],
+        },
+        descriptions: { COMPLETED: 'Tiket selesai', SERVING: 'Sedang dilayani' },
+        endSources: ['COMPLETED', 'SERVING'],
+      },
+      ['WAITING', 'SERVING'],
+    );
+    const live = new Set(['WAITING', 'SERVING']);
+    // Non-vacuity: each collection the invariant ranges over is non-empty.
+    expect(out.endSources).toEqual(['SERVING']);
+    expect(Object.keys(out.descriptions)).toEqual(['SERVING']);
+    expect(out.nodeActions.SERVING).toHaveLength(1);
+    expect(out.endSources.every((s) => live.has(s))).toBe(true);
+    expect(Object.keys(out.descriptions).every((k) => live.has(k))).toBe(true);
+    expect(Object.keys(out.nodeActions).every((k) => live.has(k))).toBe(true);
+    for (const actions of Object.values(out.nodeActions)) {
+      expect(actions.every((a) => live.has(a.value))).toBe(true);
+    }
+  });
+
+  it('leaves a non-UPDATE_STATUS action value alone (mirrors the backend cross-check)', () => {
+    // `NodeActionType` has one member today, so this asserts the GATE rather
+    // than live behaviour: a future action type whose `value` is not a state
+    // name (a webhook URL, say) must survive a canvas commit instead of being
+    // silently deleted. Cast because the union cannot express the future type
+    // yet — when it widens, this test starts exercising a real code path.
+    const out = reconcileStateNameRefs(
+      {
+        nodeActions: {
+          SERVING: [
+            {
+              executionType: 'ON_ENTRY' as const,
+              type: 'WEBHOOK' as unknown as 'UPDATE_STATUS',
+              value: 'http://printer.local/notify',
+            },
+          ],
+        },
+        descriptions: {},
+        endSources: [],
+      },
+      ['SERVING'],
+    );
+    expect(out.nodeActions.SERVING).toHaveLength(1);
+    expect(out.nodeActions.SERVING[0].value).toBe('http://printer.local/notify');
   });
 });

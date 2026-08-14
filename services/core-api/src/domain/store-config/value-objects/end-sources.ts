@@ -12,19 +12,20 @@ export type EndSourcesDto = string[];
  * (parallel to `NodePositions` / `NodeActions` / `TerminalNodes`) on its own
  * JSONB column (`end_sources`).
  *
- * Pre-feature, the End marker auto-derived an incoming arrow from every state
- * with NO outgoing transitions (a "sink"). The manager wanted to EXPLICITLY
- * drag a connection from any state into End, with MULTIPLE allowed — these
- * explicit "end sources" are purely visual canvas metadata (like node
- * positions): they have NO domain / queue-engine meaning and are NOT consumed
- * by caller / tv / kiosk (ISP — they never read `endSources`). They persist
- * across save / reload so the manager-designed canvas is stable.
+ * The manager drags a connection from a state into End, with MULTIPLE allowed —
+ * these "end sources" are purely visual canvas metadata (like node positions):
+ * they have NO domain / queue-engine meaning and are NOT consumed by caller /
+ * tv / kiosk (ISP — they never read `endSources`). They persist across save /
+ * reload so the manager-designed canvas is stable. How the admin canvas renders
+ * them (and whether it derives any additional End arrow of its own) is a
+ * PRESENTATION concern owned entirely by admin-service — this VO deliberately
+ * states no canvas derivation rule.
  *
  * `of()` is permissive on *missing* (a `undefined`/`null` raw from the
  * pre-migration boot window or a JSON `null`) so a reconstituted row from before
  * this column existed, or a defensively-empty column, recovers to the default
- * (empty array = no explicit end sources, the End marker falls back to the
- * auto-derived sink behavior) without a per-row migration seeding. It is strict
+ * (an empty array — no end sources recorded) without a per-row migration
+ * seeding. It is strict
  * only on *present*-but-malformed values: a non-array raw, a non-string
  * element, an empty/whitespace-only element, or a duplicate entry throws
  * `InvalidValueObjectException` (→ HTTP 400) so a malformed PUT fails fast
@@ -89,10 +90,10 @@ export class EndSources extends ValueObject<EndSourcesDto> {
     return new EndSources(sources);
   }
 
-  /** Empty array = no explicit end sources (the End marker falls back to the
-   *  auto-derived sink behavior). Matches `NodePositions.DEFAULT` /
-   *  `NodeActions.DEFAULT` / `TerminalNodes.DEFAULT` for zero visual regression
-   *  — a store that never configures this keeps the pre-feature End behavior. */
+  /** Empty array = no end sources recorded. Matches `NodePositions.DEFAULT` /
+   *  `NodeActions.DEFAULT` / `TerminalNodes.DEFAULT` — a store that never
+   *  configures this persists nothing and the admin canvas decides what to
+   *  render for it. */
   public static DEFAULT: EndSources = EndSources.of([]);
 
   /** The flat array of explicit end-source state names. Used by the save use
