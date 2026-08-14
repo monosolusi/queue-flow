@@ -27,7 +27,7 @@ function skipped(
   skippedAt: number,
 ): QueueTicket {
   const ticket = calling(categoryId, createdAt, seq, counterId);
-  ticket.skip(StateMachine.DEFAULT, skippedAt);
+  ticket.applyTransition('SKIPPED', StateMachine.DEFAULT, skippedAt);
   return ticket;
 }
 
@@ -131,7 +131,7 @@ describe('InMemoryQueueRepository (IQueueRepository contract)', () => {
       await repo.save(ticket);
       expect(await repo.findSkippedByCounter(1)).toHaveLength(1);
 
-      ticket.recall(StateMachine.DEFAULT, 400);
+      ticket.applyTransition('CALLING', StateMachine.DEFAULT, 400);
       await repo.save(ticket);
 
       expect(await repo.findSkippedByCounter(1)).toEqual([]);

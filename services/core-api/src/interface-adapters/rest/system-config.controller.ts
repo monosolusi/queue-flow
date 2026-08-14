@@ -118,10 +118,17 @@ function configNestedShapeErrors(body: Partial<SaveSystemConfigurationCommand>):
           !Array.isArray(t) &&
           typeof t.from === 'string' &&
           typeof t.to === 'string' &&
-          typeof t.actionLabel === 'string',
+          typeof t.actionLabel === 'string' &&
+          // `action` is optional (absent means UPDATE_STATUS — see
+          // `StateTransitionRule`). Only its transport shape is checked here;
+          // enum membership belongs to the VO (SRP), which 400s on an unknown
+          // value just the same.
+          (t.action === undefined || typeof t.action === 'string'),
       )
     ) {
-      errs.push('stateMachine.transitions must be an array of { from, to, actionLabel: string }');
+      errs.push(
+        'stateMachine.transitions must be an array of { from, to, actionLabel: string, action?: string }',
+      );
     }
     // `descriptions` is optional (backward-compat with direct API calls / tests
     // that omit it). `StateDescriptions.of` DOES handle non-object and

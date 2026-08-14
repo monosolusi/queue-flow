@@ -68,7 +68,8 @@ export class GetQueueSnapshotUseCase {
     }
 
     // The skipped read is counter-scoped (not category-scoped) like the active
-    // read: `skip` leaves the counter assigned and `recall` re-announces to it.
+    // read: a transition into SKIPPED keeps the counter, and one back into CALLING
+    // re-announces at it.
     const [active, waiting, skipped] = await Promise.all([
       this.queue.findActiveByCounter(command.counterId),
       this.queue.findWaitingByCategories(rule.assignedCategoryIds),

@@ -20,8 +20,9 @@ export type ReannounceTicketResult = {
 /**
  * Re-announces the currently-calling ticket — "Panggil Lagi". Loads the
  * ticket, drives the aggregate's `reannounce` (no state transition, so no
- * {@link ITransitionPolicyResolver} is consulted — distinct from `recall`,
- * which is a `SKIPPED -> CALLING` transition), persists it, drains the
+ * {@link ITransitionPolicyResolver} is consulted — which is what keeps it usable
+ * on a flow that draws no `CALLING -> CALLING` edge, unlike a transition),
+ * persists it, drains the
  * re-emitted `TICKET_CALLED` event so it broadcasts (FR-ENG-04), and returns a
  * transport-agnostic DTO. The re-emit makes the TV board re-show the ticket
  * and the audio queue re-announce it (FR-TV-01/02) with no TV-side change —

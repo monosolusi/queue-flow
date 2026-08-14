@@ -121,7 +121,7 @@ describe('CallerApi authed fetch (QUE-43)', () => {
     const onUnauthorized = vi.fn();
     mockFetch(() => jsonRes({}, 401, 'Unauthorized'));
     const api = new CallerApi({ onUnauthorized });
-    await expect(api.serve('t-1')).rejects.toThrow(/401/);
+    await expect(api.applyTransition('t-1', 'SERVING')).rejects.toThrow(/401/);
     expect(readToken()).toBeNull();
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
   });

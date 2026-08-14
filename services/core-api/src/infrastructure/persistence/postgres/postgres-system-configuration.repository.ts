@@ -45,7 +45,7 @@ import { StateMachine } from '../../../domain/store-config/state-machine';
 import { StateSchema } from '../../../domain/store-config/value-objects/state-schema';
 import { StateDescriptions } from '../../../domain/store-config/value-objects/state-descriptions';
 import { StateTransitionRule } from '../../../domain/store-config/value-objects/state-transition-rule';
-import { Identifier } from '../../../domain/shared';
+import { Identifier, type TransitionActionValue } from '../../../domain/shared';
 import { withDbClient } from './transaction-context';
 
 interface ConfigRow {
@@ -54,7 +54,15 @@ interface ConfigRow {
   is_initial_setup_completed: boolean;
   state_machine: {
     states: string[];
-    transitions: { from: string; to: string; actionLabel: string }[];
+    transitions: {
+      from: string;
+      to: string;
+      actionLabel: string;
+      /** What running the edge does — lazy key (absent on pre-feature rows,
+       *  defaults to `UPDATE_STATUS`). Same lazy-key pattern as `descriptions`
+       *  below: no SQL migration, the key appears on the next save. */
+      action?: TransitionActionValue;
+    }[];
     /** Per-state description overrides — lazy key (absent on pre-feature rows,
      *  defaults to `{}`). Mirrors the `timezone`-in-`daily_reset_policy` lazy-
      *  key pattern. */
@@ -142,7 +150,12 @@ export class PostgresSystemConfigurationRepository implements ISystemConfigurati
 function serializeStateMachine(sm: StateMachine) {
   return {
     states: [...sm.stateSchema.states],
-    transitions: sm.transitions.map((t) => ({ from: t.from, to: t.to, actionLabel: t.actionLabel })),
+    transitions: sm.transitions.map((t) => ({
+      from: t.from,
+      to: t.to,
+      actionLabel: t.actionLabel,
+      action: t.action,
+    })),
     // Per-state description overrides, materialized from the VO. Always written
     // (the VO defaults to `{}` = no overrides) so the `descriptions` key appears
     // lazily on the next save of a pre-feature row (mirrors the `timezone`-in-
@@ -159,7 +172,10 @@ function toConfig(row: ConfigRow): SystemConfiguration {
     isInitialSetupCompleted: row.is_initial_setup_completed,
     stateMachine: new StateMachine(
       StateSchema.of(sm.states),
-      sm.transitions.map((t) => StateTransitionRule.of(t.from, t.to, t.actionLabel)),
+      // `action` is a lazy key: a pre-feature row carries none, and
+      // `StateTransitionRule.of` recovers `undefined` to `UPDATE_STATUS` — the
+      // meaning every edge configured before the field existed had.
+      sm.transitions.map((t) => StateTransitionRule.of(t.from, t.to, t.actionLabel, t.action)),
       // Lazy-key backward-compat: a pre-feature row's `state_machine` JSONB
       // carries no `descriptions` key, so `sm.descriptions` is `undefined`.
       // `StateDescriptions.of(undefined)` recovers to the empty default (derive

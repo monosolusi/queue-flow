@@ -19,9 +19,9 @@ const LOAD_ERROR =
 /**
  * Loads the counter panel's action surface (`GET /api/queue/actions`) — the
  * source of truth for every action button in the workspace (FR-CLR-02). It
- * carries the active flow's transitions grouped by source status, each already
- * resolved by core-api to the command that runs it, so the panel needs no second
- * fetch of the raw graph and no routing table of its own.
+ * carries the active flow's transitions grouped by source status, each with the
+ * action the manager declared for it, so the panel needs no second fetch of the
+ * raw graph and no routing table of its own.
  *
  * Owned by the page rather than a single component because two children derive
  * from the same surface (the action panel and the waiting list), and a second

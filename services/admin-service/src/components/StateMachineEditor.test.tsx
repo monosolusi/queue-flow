@@ -100,7 +100,7 @@ describe('StateMachineEditor (shared editor — wizard + AdminPanel)', () => {
     const customForm = { ...defaultStateMachineForm(), mode: 'custom' as const };
     const errors = validateCustomStateMachine({
       ...customForm,
-      transitions: [...customForm.transitions, { from: 'WAITING', to: 'CALLING', actionLabel: '' }],
+      transitions: [...customForm.transitions, { from: 'WAITING', to: 'CALLING', actionLabel: '', action: 'UPDATE_STATUS' as const }],
     });
     expect(errors.length).toBeGreaterThan(0);
     renderEditor(customForm, errors);
@@ -141,7 +141,7 @@ describe('StateMachineEditor (shared editor — wizard + AdminPanel)', () => {
     renderEditor({
       mode: 'custom',
       states: ['WAITING', 'CALLING'],
-      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya' }],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', action: 'UPDATE_STATUS' as const }],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    });
 
     const warning = screen.getByTestId('sm-standard-warning');
@@ -157,7 +157,7 @@ describe('StateMachineEditor (shared editor — wizard + AdminPanel)', () => {
     const value = {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING'],
-      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: '' }],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: '', action: 'UPDATE_STATUS' as const }],
       positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderEditor(value, validateCustomStateMachine(value));
     expect(screen.getByTestId('sm-editor')).toHaveAttribute(
@@ -185,5 +185,29 @@ describe('StateMachineEditor (shared editor — wizard + AdminPanel)', () => {
     expect(next.mode).toBe('default');
     expect(next.states).toEqual([...DEFAULT_STATE_MACHINE.states]);
     expect(next.transitions).toHaveLength(DEFAULT_STATE_MACHINE.transitions.length);
+  });
+
+  it('offers the "Aksi" choice per transition, so a wizard-built flow can declare a category move', () => {
+    // The designer offers it; the wizard must too, or a flow set up during
+    // first-run could only ever contain plain status changes.
+    const onChange = vi.fn();
+    renderEditor({ ...defaultStateMachineForm(), mode: 'custom' as const }, [], onChange);
+
+    const select = screen.getByLabelText('Transisi 1 aksi') as HTMLSelectElement;
+    expect(select.value).toBe('UPDATE_STATUS');
+    expect([...select.options].map((o) => o.textContent)).toEqual([
+      'Ubah Status',
+      'Pindah Kategori',
+    ]);
+
+    fireEvent.change(select, { target: { value: 'TRANSFER_CATEGORY' } });
+
+    const next = onChange.mock.calls[0][0];
+    expect(next.transitions[0].action).toBe('TRANSFER_CATEGORY');
+    // Only that transition changed.
+    expect(next.transitions[0].actionLabel).toBe('Panggil Berikutnya');
+    expect(next.transitions.slice(1).every((t: { action: string }) => t.action === 'UPDATE_STATUS')).toBe(
+      true,
+    );
   });
 });

@@ -146,8 +146,8 @@ describe('StateMachineWorkflow connection mode (every side accepts a drop)', () 
         mode: 'custom',
         states: ['WAITING', 'CALLING', 'SERVING'],
         transitions: [
-          { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' },
-          { from: 'CALLING', to: 'SERVING', actionLabel: 'Layan' },
+          { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', action: 'UPDATE_STATUS' },
+          { from: 'CALLING', to: 'SERVING', actionLabel: 'Layan', action: 'UPDATE_STATUS' },
         ],
         ...overrides,
       };
@@ -361,8 +361,8 @@ describe('StateMachineWorkflow connection mode (every side accepts a drop)', () 
         mode: 'custom',
         states: ['WAITING', 'CALLING', 'SERVING'],
         transitions: [
-          { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' },
-          { from: 'CALLING', to: 'SERVING', actionLabel: 'Layan' },
+          { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', action: 'UPDATE_STATUS' },
+          { from: 'CALLING', to: 'SERVING', actionLabel: 'Layan', action: 'UPDATE_STATUS' },
         ],
         ...overrides,
       };
@@ -401,9 +401,9 @@ describe('StateMachineWorkflow connection mode (every side accepts a drop)', () 
       const onChange = vi.fn();
       const form = loopForm({
         transitions: [
-          { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' },
-          { from: 'WAITING', to: 'WAITING', actionLabel: 'Ulang' },
-          { from: 'CALLING', to: 'SERVING', actionLabel: 'Layan' },
+          { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', action: 'UPDATE_STATUS' },
+          { from: 'WAITING', to: 'WAITING', actionLabel: 'Ulang', action: 'UPDATE_STATUS' },
+          { from: 'CALLING', to: 'SERVING', actionLabel: 'Layan', action: 'UPDATE_STATUS' },
         ],
       });
       render(<StateMachineWorkflow value={form} onChange={onChange} errors={[]} />);
@@ -457,8 +457,8 @@ describe('StateMachineWorkflow connection mode (every side accepts a drop)', () 
         mode: 'custom',
         states: ['WAITING', 'CALLING', 'SERVING'],
         transitions: [
-          { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' },
-          { from: 'CALLING', to: 'SERVING', actionLabel: 'Layan' },
+          { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', action: 'UPDATE_STATUS' },
+          { from: 'CALLING', to: 'SERVING', actionLabel: 'Layan', action: 'UPDATE_STATUS' },
         ],
         ...overrides,
       };
@@ -540,9 +540,9 @@ describe('StateMachineWorkflow connection mode (every side accepts a drop)', () 
       const onChange = vi.fn();
       const form = loopForm({
         transitions: [
-          { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil' },
-          { from: 'WAITING', to: 'WAITING', actionLabel: 'Ulang' },
-          { from: 'CALLING', to: 'SERVING', actionLabel: 'Layan' },
+          { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', action: 'UPDATE_STATUS' },
+          { from: 'WAITING', to: 'WAITING', actionLabel: 'Ulang', action: 'UPDATE_STATUS' },
+          { from: 'CALLING', to: 'SERVING', actionLabel: 'Layan', action: 'UPDATE_STATUS' },
         ],
       });
       render(<StateMachineWorkflow value={form} onChange={onChange} errors={[]} />);

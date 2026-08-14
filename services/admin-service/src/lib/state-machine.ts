@@ -11,6 +11,7 @@ import {
   type StateMachineDto,
   type StateTransitionDto,
   type TerminalNodesDto,
+  type TransitionActionType,
 } from '../api/types';
 
 /**
@@ -45,11 +46,47 @@ export const NODE_ACTION_TYPE_LABELS: Record<NodeActionType, string> = {
   UPDATE_STATUS: 'Update Status',
 };
 
+/**
+ * Every {@link TransitionActionType}, as the runtime list the compile-time union
+ * cannot provide. The single source of truth for what a transition's action may
+ * be: the "Aksi" dropdown's options and the XML codec's accepted set are both
+ * derived from it, so neither can drift from the union or from each other.
+ *
+ * The `satisfies` clause is the exhaustiveness guard — widening the union without
+ * adding the member here fails `tsc`. Mirrors core-api's `TransitionAction` enum.
+ */
+export const TRANSITION_ACTIONS = ['UPDATE_STATUS', 'TRANSFER_CATEGORY'] as const satisfies
+  readonly TransitionActionType[];
+
+/** Manager-facing wording for each action. Keyed off {@link TRANSITION_ACTIONS}
+ *  rather than the other way round, so the codec's validation never has to import
+ *  presentation copy to know which values are legal. Written as an exhaustive
+ *  `Record`, so a new action needs wording before it compiles. */
+export const TRANSITION_ACTION_LABELS: Record<TransitionActionType, string> = {
+  UPDATE_STATUS: 'Ubah Status',
+  TRANSFER_CATEGORY: 'Pindah Kategori',
+};
+
+/** The action an edge means when none was ever chosen for it. Every edge
+ *  configured before the field existed is one of these. */
+export const DEFAULT_TRANSITION_ACTION: TransitionActionType = 'UPDATE_STATUS';
+
+/** The one status a category move may land in — see the rule in
+ *  {@link validateCustomStateMachine}. Named rather than inlined so the rule and
+ *  its message cannot drift apart. */
+const WAITING_STATE = 'WAITING';
+
 /** One transition edge in the editable state machine. */
 export interface Transition {
   from: string;
   to: string;
   actionLabel: string;
+  /**
+   * What running this edge does — the manager's own declaration. Required in the
+   * form (always a concrete value, defaulted on the way in from the wire, where
+   * it is optional) so no code path has to re-decide what an absent value means.
+   */
+  action: TransitionActionType;
   /**
    * Which side of the source node this edge exits. Optional — absent means
    * the default ({@link DEFAULT_SOURCE_SIDE}). The form is the source of truth
@@ -212,6 +249,11 @@ export function isDefaultGraph(
       t.from === d.from &&
       t.to === d.to &&
       t.actionLabel === d.actionLabel &&
+      // A default-structure graph whose manager changed an edge's action is
+      // CUSTOM — it must load editable, not read-only, or they could not change
+      // it back. Both sides are normalized because this predicate is called with
+      // wire DTOs too, where `action` is optional.
+      (t.action ?? DEFAULT_TRANSITION_ACTION) === (d.action ?? DEFAULT_TRANSITION_ACTION) &&
       isDefaultSides(t.sourceSide, t.targetSide)
     );
   });
@@ -248,7 +290,12 @@ export function toStateMachineDto(form: StateMachineForm): StateMachineDto {
         // Strip the canvas-only `sourceSide`/`targetSide` — they are NOT on the
         // wire {@link StateTransitionDto}; they travel in the separate
         // {@link EdgeRoutingLayoutDto} map (see {@link toEdgeRoutingLayoutDto}).
-        transitions: form.transitions.map((t) => ({ from: t.from, to: t.to, actionLabel: t.actionLabel })),
+        transitions: form.transitions.map((t) => ({
+          from: t.from,
+          to: t.to,
+          actionLabel: t.actionLabel,
+          action: t.action,
+        })),
         // Strip empty/whitespace values defensively so the wire stays lean
         // (`updateStateDescription` already deletes empties, but a corrupt
         // prefill or a direct form edit could leave a blank entry). The VO on
@@ -292,9 +339,17 @@ export function mergeEdgeSides(
   const layout = edgeLayout ?? {};
   return transitions.map((t) => {
     const sides = layout[`${t.from}->${t.to}`];
+    // `action` is optional on the wire and required in the form: this is the one
+    // boundary that resolves an absent value, so nothing downstream has to.
+    const base = {
+      from: t.from,
+      to: t.to,
+      actionLabel: t.actionLabel,
+      action: t.action ?? DEFAULT_TRANSITION_ACTION,
+    };
     return sides
-      ? { from: t.from, to: t.to, actionLabel: t.actionLabel, sourceSide: sides.sourceSide, targetSide: sides.targetSide }
-      : { from: t.from, to: t.to, actionLabel: t.actionLabel };
+      ? { ...base, sourceSide: sides.sourceSide, targetSide: sides.targetSide }
+      : base;
   });
 }
 
@@ -419,7 +474,7 @@ const Y_SPACING = 120;
  */
 export function autoLayout(
   states: readonly string[],
-  transitions: readonly { from: string; to: string; actionLabel: string }[],
+  transitions: readonly Transition[],
 ): Record<string, { x: number; y: number }> {
   const stateSet = new Set(states);
   const adj = new Map<string, string[]>();
@@ -623,6 +678,17 @@ export function validateCustomStateMachine(form: StateMachineForm): string[] {
     const edge = `${t.from}->${t.to}`;
     if (seenEdges.has(edge)) errors.push(`Transisi '${t.from}'→'${t.to}' duplikat.`);
     seenEdges.add(edge);
+    // A category move re-issues the ticket's number under the new category, and a
+    // fresh number means a ticket nobody has served yet — so it can only land back
+    // in the queue. Mirrors the backend's save-time rule, stated here so the
+    // manager reads it in their own words instead of getting a 400 on save.
+    if (t.action === 'TRANSFER_CATEGORY' && t.to !== WAITING_STATE) {
+      errors.push(
+        `Transisi '${t.from}'→'${t.to}': aksi "${TRANSITION_ACTION_LABELS.TRANSFER_CATEGORY}" ` +
+          `harus menuju status '${WAITING_STATE}', karena tiket dapat nomor baru dan ` +
+          `kembali menunggu.`,
+      );
+    }
   }
   // De-duplicate identical messages (e.g. several empty labels).
   return [...new Set(errors)];
@@ -889,7 +955,7 @@ export function reconcileStateNameRefs(
 export function updateTransition(
   form: StateMachineForm,
   i: number,
-  patch: Partial<{ from: string; to: string; actionLabel: string }>,
+  patch: Partial<{ from: string; to: string; actionLabel: string; action: TransitionActionType }>,
 ): StateMachineForm {
   const transitions = form.transitions.map((t, idx) => (idx === i ? { ...t, ...patch } : t));
   return { ...form, transitions };
@@ -901,7 +967,17 @@ export function addTransition(form: StateMachineForm): StateMachineForm {
   const firstState = form.states[0] ?? '';
   return {
     ...form,
-    transitions: [...form.transitions, { from: firstState, to: firstState, actionLabel: '' }],
+    transitions: [
+      ...form.transitions,
+      // A new edge is a plain status change until the manager says otherwise —
+      // the common case, and the one that needs no extra argument.
+      {
+        from: firstState,
+        to: firstState,
+        actionLabel: '',
+        action: DEFAULT_TRANSITION_ACTION,
+      },
+    ],
   };
 }
 
@@ -1038,6 +1114,14 @@ export function removeState(form: StateMachineForm, i: number): StateMachineForm
  * canonicalized to `'auto'` | `'hidden'` | `x,y` so the signature is stable
  * across equivalent serializations.
  *
+ * INCLUDES each transition's `action` — not because it is drawn (it is not; the
+ * edge chip shows only the label) but because it LIVES ON the canvas edge's
+ * `data`, so `flowToGraph` writes it back on every `commit`. Leave it out and a
+ * Source-view action edit would not re-seed the canvas, whose edges still carry
+ * the old value — then the next unrelated `commit` (a node drag is enough) would
+ * write that stale value back over the manager's edit, silently. The rule is
+ * about which fields the canvas ROUND-TRIPS, not which it renders.
+ *
  * INCLUDES `endSources` (canvas-rendered, like `terminalNodes`): an explicit
  * End connection add/delete is a structural canvas change the guards must
  * detect — a source-view endSources edit re-seeds the canvas, and the
@@ -1056,6 +1140,7 @@ export function graphSignature(form: StateMachineForm): string {
       from: t.from,
       to: t.to,
       actionLabel: t.actionLabel,
+      action: t.action,
       sourceSide: t.sourceSide ?? DEFAULT_SOURCE_SIDE,
       targetSide: t.targetSide ?? DEFAULT_TARGET_SIDE,
     })),

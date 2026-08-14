@@ -1,16 +1,24 @@
+import type { TransitionActionValue } from '../shared/transition-action';
 import type { StatusValue } from './value-objects/ticket-status';
 
 /**
  * One directed edge of the active state machine as the Queue context sees it:
- * a `from -> to` pair plus the Indonesian caller-panel button label configured
- * for it (PRD §7). A transport-agnostic, framework-free shape — deliberately
- * NOT the Store-Config `StateTransitionRule` value object, so enumerating the
- * graph does not leak Store-Config internals into the Queue context.
+ * a `from -> to` pair, the Indonesian caller-panel button label configured for
+ * it (PRD §7), and the {@link TransitionAction} the manager declared for it. A
+ * transport-agnostic, framework-free shape — deliberately NOT the Store-Config
+ * `StateTransitionRule` value object, so enumerating the graph does not leak
+ * Store-Config internals into the Queue context.
+ *
+ * `action` is carried here rather than derived downstream because it is the
+ * *only* thing that says what running the edge does. Reading it from the graph is
+ * what stops the Queue context from inferring an edge's meaning from the name of
+ * its target state (see {@link TransitionAction}).
  */
 export interface TransitionDescriptor {
   readonly from: StatusValue;
   readonly to: StatusValue;
   readonly actionLabel: string;
+  readonly action: TransitionActionValue;
 }
 
 /**
@@ -50,12 +58,17 @@ export interface ITransitionPolicy {
 }
 
 /**
- * Port for enumerating the active graph. The aggregate never calls this — it
- * exists for the read side, which must answer "which command realizes each
- * configured edge?" for the caller panel's dynamic action buttons (FR-CLR-02)
- * without the Queue context importing the Store-Config `StateMachine`.
- * Segregated from {@link ITransitionPolicy} (ISP) so only the read side depends
- * on enumeration; the same concrete `StateMachine` implements both.
+ * Port for enumerating the active graph — the node set plus every edge, with the
+ * action each one declares. The aggregate never calls it: it decides one edge at a
+ * time and is handed the policy, so it needs no view of the whole graph.
+ *
+ * Its clients are the read side, which publishes the graph as the caller panel's
+ * action surface (FR-CLR-02), and the two command use cases, which read an edge's
+ * declared action to refuse running it as the wrong command — both without the
+ * Queue context importing the Store-Config `StateMachine`. Segregated from
+ * {@link ITransitionPolicy} (ISP) so a narrowing decorator of the policy is not
+ * forced to answer for whole-graph enumeration; the same concrete `StateMachine`
+ * implements both.
  */
 export interface ITransitionGraphSource {
   describeGraph(): TransitionGraph;

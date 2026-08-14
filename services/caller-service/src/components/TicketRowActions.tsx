@@ -1,6 +1,11 @@
 import { useId } from 'react';
 import type { TicketStateDto } from '../api/types';
-import { actionRunKey, transferCandidates, type WorkflowAction } from '../lib/workflow-actions';
+import {
+  actionRunKey,
+  isRunnable,
+  transferCandidates,
+  type WorkflowAction,
+} from '../lib/workflow-actions';
 import type { BoundCounter } from '../state/counter-binding';
 import { TransferAction } from './TransferAction';
 
@@ -63,9 +68,9 @@ export function TicketRowActions({
         const blocked = pending !== null && !busy;
         const testId = `${testIdStem}-${ticket.ticketId}-${action.to}`;
 
-        if (action.command === null) {
-          // Configured in the flow but unexecutable from the counter panel (or
-          // named by a command newer than this build). Rendered disabled with
+        if (!isRunnable(action)) {
+          // Configured in the flow but would change nothing (or declares an
+          // action newer than this build). Rendered disabled with
           // the reason rather than as a button that would reject on tap — and
           // the reason is VISIBLE text, mirroring `ActionControls`: a `title`
           // tooltip needs a hover the counter's touch screen cannot produce, so
@@ -89,7 +94,7 @@ export function TicketRowActions({
           );
         }
 
-        if (action.command === 'TRANSFER' && bound) {
+        if (action.action === 'TRANSFER_CATEGORY' && bound) {
           return (
             <TransferAction
               key={key}
@@ -132,5 +137,5 @@ export function runnableRowActions(
   hasHandler: boolean,
 ): readonly WorkflowAction[] {
   if (!hasHandler) return [];
-  return actions.filter((a) => a.command !== 'TRANSFER' || bound !== undefined);
+  return actions.filter((a) => a.action !== 'TRANSFER_CATEGORY' || bound !== undefined);
 }

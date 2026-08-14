@@ -1,13 +1,8 @@
 import { BadRequestException, Body, Controller, Param, Post, UseGuards } from '@nestjs/common';
 import {
-  acceptsGenericTransitionTarget,
   ApplyTransitionUseCase,
   CallNextTicketUseCase,
-  CompleteTicketUseCase,
-  RecallTicketUseCase,
   ReannounceTicketUseCase,
-  ServeTicketUseCase,
-  SkipTicketUseCase,
   TransferTicketUseCase,
 } from '../../application/queue';
 import { toDateKey } from '../../application/shared/date';
@@ -35,56 +30,36 @@ import { Roles } from '../auth/roles.decorator';
 export class QueueCommandsController {
   constructor(
     private readonly callNextUseCase: CallNextTicketUseCase,
-    private readonly serveUseCase: ServeTicketUseCase,
-    private readonly completeUseCase: CompleteTicketUseCase,
-    private readonly skipUseCase: SkipTicketUseCase,
-    private readonly recallUseCase: RecallTicketUseCase,
     private readonly reannounceUseCase: ReannounceTicketUseCase,
     private readonly transferUseCase: TransferTicketUseCase,
     private readonly applyTransitionUseCase: ApplyTransitionUseCase,
   ) {}
 
-  /** `POST /api/queue/call-next { counterId }` → the next ticket for the counter. */
+  /** `POST /api/queue/call-next { counterId }` → the next ticket for the counter.
+   *  Counter-level: it **picks** a ticket by routing + priority rather than acting
+   *  on one the staff named, which is why it is not a per-ticket transition. */
   @Post('call-next')
   callNext(@Body() body: { counterId?: number | string }) {
     const counterId = parseCounterId(body?.counterId);
     return this.callNextUseCase.execute({ counterId });
   }
 
-  /** `POST /api/queue/:ticketId/serve` → begin serving the called ticket. */
-  @Post(':ticketId/serve')
-  serve(@Param('ticketId') ticketId: string) {
-    return this.serveUseCase.execute({ ticketId: parseTicketId(ticketId) });
-  }
-
-  /** `POST /api/queue/:ticketId/complete` → end service on the served ticket. */
-  @Post(':ticketId/complete')
-  complete(@Param('ticketId') ticketId: string) {
-    return this.completeUseCase.execute({ ticketId: parseTicketId(ticketId) });
-  }
-
-  /** `POST /api/queue/:ticketId/skip` → mark the called ticket as skipped. */
-  @Post(':ticketId/skip')
-  skip(@Param('ticketId') ticketId: string) {
-    return this.skipUseCase.execute({ ticketId: parseTicketId(ticketId) });
-  }
-
-  /** `POST /api/queue/:ticketId/recall` → re-call a previously skipped ticket. */
-  @Post(':ticketId/recall')
-  recall(@Param('ticketId') ticketId: string) {
-    return this.recallUseCase.execute({ ticketId: parseTicketId(ticketId) });
-  }
-
-  /** `POST /api/queue/:ticketId/reannounce` → re-announce the currently-calling
-   *  ticket ("Panggil Lagi"). Re-emits TICKET_CALLED without a state change;
-   *  only valid from CALLING (a 409 otherwise). */
+  /** `POST /api/queue/:ticketId/reannounce` → repeat the announcement for the
+   *  currently-calling ticket ("Panggil Lagi"). Re-emits TICKET_CALLED without a
+   *  state change, so it stays available on a flow that draws no
+   *  `CALLING -> CALLING` edge; only valid from CALLING (a 409 otherwise). */
   @Post(':ticketId/reannounce')
   reannounce(@Param('ticketId') ticketId: string) {
     return this.reannounceUseCase.execute({ ticketId: parseTicketId(ticketId) });
   }
 
   /**
-   * `POST /api/queue/:ticketId/transfer { targetCategoryId }` → "pindah kategori".
+   * `POST /api/queue/:ticketId/transfer { targetCategoryId }` → "pindah kategori"
+   * (FR-CLR-03). The one command beside {@link transition}, because it needs an
+   * argument no flow can hold: the destination category, chosen by staff per
+   * ticket. There is no target status — a transferred ticket always lands in
+   * WAITING, which is what a re-issued per-category number means.
+   *
    * `dateKey` is today's per-day sequence key, derived here (interface-adapter)
    * so the use case stays anti-corruption-clean (no Store-Config import) and the
    * date convention remains in the application layer via {@link toDateKey}.
@@ -108,30 +83,29 @@ export class QueueCommandsController {
   }
 
   /**
-   * `POST /api/queue/:ticketId/transition { targetStatus }` → apply a generic,
-   * wizard-configurable transition to an arbitrary **custom** target state
-   * (QUE-33). The backing for every `action_label` that does not map to one of
-   * the six fixed commands — a plain status change (STATUS_UPDATED) with no
-   * lifecycle timestamp / counter / number side effects. Illegal transitions
-   * surface as 409 `INVALID_STATE_TRANSITION`, unknown tickets as 404.
+   * `POST /api/queue/:ticketId/transition { targetStatus, counterId? }` → run one
+   * configured transition of the active flow. **The** per-ticket state-change
+   * endpoint: it accepts any target in the active schema — canonical or custom —
+   * and the aggregate applies whatever side effects that target state carries
+   * (announcement, service clock, re-queue). Illegal transitions surface as 409
+   * `INVALID_STATE_TRANSITION`, unknown tickets as 404.
    *
-   * The five PRD-default states each have a dedicated command endpoint
-   * (call-next/serve/complete/skip/recall/transfer) whose aggregates own the
-   * domain-specific side effects (lifecycle timestamps, counter/number
-   * reassignment). The generic endpoint is for **custom** targets only: a
-   * canonical target is rejected with 400 so a direct API call cannot bypass
-   * those named transitions and silently corrupt the QUE-26 analytics data
-   * model (e.g. a `COMPLETED` reached via this path would leave `completedAt`
-   * null). That admission rule is {@link acceptsGenericTransitionTarget} — the
-   * same function `GetWorkflowActionsUseCase` consults when it tells the caller
-   * which edges the `APPLY_TRANSITION` command realizes, so the endpoint and the
-   * published routing cannot drift. The caller no longer routes edges itself: it
-   * renders the command `GET /api/queue/actions` names for each edge.
+   * `counterId` is the panel's bound counter; a transition into CALLING needs one
+   * to announce the ticket at, falling back to the counter the ticket already
+   * holds (400 when neither is available).
+   *
+   * There is no serve/complete/skip/recall endpoint beside it. Splitting per
+   * target state meant something upstream had to decide which endpoint a given
+   * `(from, to)` pair needed — a decision that cannot be derived from the pair,
+   * and whose one rule for WAITING read every `X -> WAITING` edge as a category
+   * move. What runs is now read from the flow, not inferred: the only edges this
+   * endpoint refuses are the ones the manager declared `TRANSFER_CATEGORY`, which
+   * go to {@link transfer} because they need a destination category (400).
    */
   @Post(':ticketId/transition')
   transition(
     @Param('ticketId') ticketId: string,
-    @Body() body: { targetStatus?: string },
+    @Body() body: { targetStatus?: string; counterId?: number | string },
   ) {
     const targetStatus = body?.targetStatus;
     if (!targetStatus || !targetStatus.trim()) {
@@ -139,18 +113,18 @@ export class QueueCommandsController {
         "body field 'targetStatus' must be a non-empty string",
       );
     }
-    const target = targetStatus.trim();
-    if (!acceptsGenericTransitionTarget(target)) {
-      throw new BadRequestException(
-        `targetStatus '${target}' has a dedicated command endpoint; use that instead`,
-      );
-    }
     return this.applyTransitionUseCase.execute({
       ticketId: parseTicketId(ticketId),
-      targetStatus: target,
+      targetStatus: targetStatus.trim(),
+      // `== null` covers an explicit JSON `null` as well as an absent field: both
+      // mean "no counter supplied", and the aggregate then falls back to the one
+      // the ticket already holds. Routing `null` through `parseCounterId` would
+      // 400 instead, defeating that fallback.
+      counterId: body?.counterId == null ? null : parseCounterId(body.counterId),
     });
   }
 }
+
 
 function parseCounterId(raw: number | string | undefined): number {
   const parsed = typeof raw === 'number' ? raw : Number.parseInt(raw ?? '', 10);

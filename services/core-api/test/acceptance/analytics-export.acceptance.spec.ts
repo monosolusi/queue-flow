@@ -96,9 +96,9 @@ describe('DoD-5 — Daily analytics & local export (FR-ADM-03 / QUE-26)', () => 
     await sleep(2);
     const ticketId = await callNext(counterId);
     await sleep(2);
-    await http(booted.app).post(`/api/queue/${ticketId}/serve`).set(authHeader(token)).expect(201);
+    await http(booted.app).post(`/api/queue/${ticketId}/transition`).set(authHeader(token)).send({ targetStatus: 'SERVING' }).expect(201);
     await sleep(2);
-    await http(booted.app).post(`/api/queue/${ticketId}/complete`).set(authHeader(token)).expect(201);
+    await http(booted.app).post(`/api/queue/${ticketId}/transition`).set(authHeader(token)).send({ targetStatus: 'COMPLETED' }).expect(201);
     return ticketId;
   }
 
@@ -118,12 +118,12 @@ describe('DoD-5 — Daily analytics & local export (FR-ADM-03 / QUE-26)', () => 
     await sleep(2);
     const t2 = await callNext(1);
     await sleep(2);
-    await http(booted.app).post(`/api/queue/${t2}/skip`).set(authHeader(token)).expect(201);
-    await http(booted.app).post(`/api/queue/${t2}/recall`).set(authHeader(token)).expect(201);
+    await http(booted.app).post(`/api/queue/${t2}/transition`).set(authHeader(token)).send({ targetStatus: 'SKIPPED' }).expect(201);
+    await http(booted.app).post(`/api/queue/${t2}/transition`).set(authHeader(token)).send({ targetStatus: 'CALLING' }).expect(201);
     await sleep(2);
-    await http(booted.app).post(`/api/queue/${t2}/serve`).set(authHeader(token)).expect(201);
+    await http(booted.app).post(`/api/queue/${t2}/transition`).set(authHeader(token)).send({ targetStatus: 'SERVING' }).expect(201);
     await sleep(2);
-    await http(booted.app).post(`/api/queue/${t2}/complete`).set(authHeader(token)).expect(201);
+    await http(booted.app).post(`/api/queue/${t2}/transition`).set(authHeader(token)).send({ targetStatus: 'COMPLETED' }).expect(201);
     // Counter 2 (serves A+B, CATEGORY_PRIORITY) completes one B ticket.
     await createAndComplete(catBId, 2);
 

@@ -38,6 +38,8 @@ import { useEffect, useState } from "react";
 import {
   describeState,
   NODE_ACTION_TYPE_LABELS,
+  TRANSITION_ACTION_LABELS,
+  TRANSITION_ACTIONS,
   type StateMachineForm,
 } from "../lib/state-machine";
 import {
@@ -46,7 +48,7 @@ import {
   type FlowNode,
 } from "../lib/state-machine-flow";
 import type { WorkflowHandlers } from "./StateMachineWorkflowNodes";
-import type { NodeActionType } from "../api/types";
+import type { NodeActionType, TransitionActionType } from "../api/types";
 
 /** The action-type options shown in the "Aksi" dropdown, built from the shared
  *  `NODE_ACTION_TYPE_LABELS` map (the single source of truth in the pure
@@ -58,6 +60,13 @@ import type { NodeActionType } from "../api/types";
 const NODE_ACTION_TYPE_OPTIONS: ReadonlyArray<{ value: NodeActionType; label: string }> = (
   Object.keys(NODE_ACTION_TYPE_LABELS) as NodeActionType[]
 ).map((value) => ({ value, label: NODE_ACTION_TYPE_LABELS[value] }));
+
+/** The options for a transition's "Aksi" dropdown — what running that button
+ *  does. The shared `TRANSITION_ACTIONS` list (the single source of truth in the
+ *  pure `state-machine.ts`, exhaustiveness-guarded against the union), so the
+ *  dropdown can never offer a value the wire does not accept — nor omit one it
+ *  does. The XML codec validates against the same list. */
+const TRANSITION_ACTION_OPTIONS = TRANSITION_ACTIONS;
 
 export interface WorkflowPropertiesPanelProps {
   mode: "default" | "custom";
@@ -371,6 +380,7 @@ export function StateMachineWorkflowProperties({
                 {outgoing.map((edge) => {
                   const labelId = `panel-transition-label-${edge.id}`;
                   const toId = `panel-transition-to-${edge.id}`;
+                  const actionId = `panel-transition-action-${edge.id}`;
                   return (
                     <li key={edge.id} className="sm-properties__action">
                       <label className="sm-properties__action-label" htmlFor={labelId}>
@@ -402,6 +412,28 @@ export function StateMachineWorkflowProperties({
                           </option>
                         ))}
                       </select>
+                      <label className="sm-properties__action-label" htmlFor={actionId}>
+                        Aksi
+                      </label>
+                      <select
+                        id={actionId}
+                        className="sm-properties__input"
+                        data-testid={`panel-transition-action-${edge.id}`}
+                        value={edge.data.action}
+                        aria-describedby="panel-transition-action-hint"
+                        onChange={(e) =>
+                          handlers.onEditTransitionAction(
+                            edge.id,
+                            e.target.value as TransitionActionType,
+                          )
+                        }
+                      >
+                        {TRANSITION_ACTION_OPTIONS.map((a) => (
+                          <option key={a} value={a}>
+                            {TRANSITION_ACTION_LABELS[a]}
+                          </option>
+                        ))}
+                      </select>
                       <button
                         type="button"
                         className="sm-properties__action-delete"
@@ -419,6 +451,12 @@ export function StateMachineWorkflowProperties({
             )}
             <p id="panel-transition-label-hint" className="sm-properties__hint">
               Teks tombol yang muncul di layar petugas.
+            </p>
+            <p id="panel-transition-action-hint" className="sm-properties__hint">
+              Yang dikerjakan tombol ini. <strong>Ubah Status</strong> memindahkan tiket ke status
+              tujuan — nomor dan kategorinya tetap. <strong>Pindah Kategori</strong> memindahkannya
+              ke kategori lain sekaligus, dan petugas memilih kategori tujuannya saat menekan
+              tombol.
             </p>
             <button
               type="button"
@@ -694,6 +732,35 @@ export function StateMachineWorkflowProperties({
           />
           <p id="panel-action-label-hint" className="sm-properties__hint">
             Teks tombol yang muncul di layar petugas.
+          </p>
+        </div>
+        <div className="sm-properties__field">
+          <label className="sm-properties__label" htmlFor="panel-transition-action">
+            Aksi
+          </label>
+          <select
+            id="panel-transition-action"
+            className="sm-properties__input"
+            data-testid="panel-transition-action"
+            value={selectedEdge.data.action}
+            aria-describedby="panel-transition-action-hint-edge"
+            onChange={(e) =>
+              handlers.onEditTransitionAction(
+                selectedEdge.id,
+                e.target.value as TransitionActionType,
+              )
+            }
+          >
+            {TRANSITION_ACTION_OPTIONS.map((a) => (
+              <option key={a} value={a}>
+                {TRANSITION_ACTION_LABELS[a]}
+              </option>
+            ))}
+          </select>
+          <p id="panel-transition-action-hint-edge" className="sm-properties__hint">
+            Yang dikerjakan tombol ini. <strong>Ubah Status</strong> memindahkan tiket ke status
+            tujuan — nomor dan kategorinya tetap. <strong>Pindah Kategori</strong> memindahkannya ke
+            kategori lain sekaligus, dan petugas memilih kategori tujuannya saat menekan tombol.
           </p>
         </div>
         <button

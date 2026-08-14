@@ -66,7 +66,7 @@ src/
     shared/                aggregate-root, domain-event, entity, errors
                             (NoOpTransactionManager lives here — see CLAUDE.md DI section)
   application/             USE CASES — framework-free, inject domain ports only
-    queue/                 create/call-next/serve/complete/skip/recall/transfer/apply-transition
+    queue/                 create/call-next/apply-transition/transfer/reannounce (+ declared-transition-action)
                             reset-daily-queue, cleanup-transaction-log, get-queue-snapshot,
                             list-categories, ticket-state.dto, queue-event-dispatcher
                             (dispatcher: import direct path, NOT from barrel — see CLAUDE.md)

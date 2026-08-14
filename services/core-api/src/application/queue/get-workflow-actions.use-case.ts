@@ -4,61 +4,39 @@ import type {
   TransitionDescriptor,
 } from '../../domain/queue';
 import { TicketStatus } from '../../domain/queue';
-import { acceptsGenericTransitionTarget } from './generic-transition-target';
+import { TransitionAction, type TransitionActionValue } from '../../domain/shared';
 
 /**
- * The queue command that realizes a configured state-machine edge. One value per
- * command surface the caller panel can invoke:
+ * Machine-readable reason a configured edge cannot be run from the counter panel.
  *
- * | command            | endpoint                                |
- * |--------------------|-----------------------------------------|
- * | `CALL_NEXT`        | `POST /api/queue/call-next`             |
- * | `RECALL`           | `POST /api/queue/:id/recall`            |
- * | `REANNOUNCE`       | `POST /api/queue/:id/reannounce`        |
- * | `SERVE`            | `POST /api/queue/:id/serve`             |
- * | `COMPLETE`         | `POST /api/queue/:id/complete`          |
- * | `SKIP`             | `POST /api/queue/:id/skip`              |
- * | `TRANSFER`         | `POST /api/queue/:id/transfer`          |
- * | `APPLY_TRANSITION` | `POST /api/queue/:id/transition`        |
+ * - `NO_STATUS_CHANGE` — a self-loop that would leave the ticket exactly where it
+ *   is. `applyTransition` short-circuits when the target equals the current
+ *   status, so the request would succeed, change nothing and broadcast nothing.
+ *
+ * A **code**, never user-facing copy: the backend owns the fact, the caller panel
+ * owns the Indonesian wording.
  */
-export type WorkflowCommand =
-  | 'CALL_NEXT'
-  | 'RECALL'
-  | 'REANNOUNCE'
-  | 'SERVE'
-  | 'COMPLETE'
-  | 'SKIP'
-  | 'TRANSFER'
-  | 'APPLY_TRANSITION';
+export type WorkflowActionUnavailableReason = 'NO_STATUS_CHANGE';
 
 /**
- * Machine-readable reason no command realizes a configured edge.
+ * One configured edge of the active state machine, as the counter panel needs it:
+ * where it goes, what its button says, and what running it does.
  *
- * - `NO_COMMAND` — the manager configured an edge no queue command can execute
- *   (e.g. `SERVING -> CALLING`: nothing moves an in-progress ticket back into
- *   CALLING).
- * - `NO_STATUS_CHANGE` — a self-loop that is not one of the two meaningful ones
- *   (`CALLING -> CALLING` re-announce / `WAITING -> WAITING` transfer). The
- *   aggregate's `transitionTo` short-circuits when `from === target`, so
- *   invoking a command for such an edge would 200 and do nothing.
- *
- * A **code**, never user-facing copy: the backend owns the fact, the caller
- * panel owns the Indonesian wording.
- */
-export type WorkflowActionUnavailableReason = 'NO_COMMAND' | 'NO_STATUS_CHANGE';
-
-/**
- * One configured edge of the active state machine plus the backend's ruling on
- * which command realizes it. `command` and `unavailableReason` are mutually
- * exclusive: exactly one of the two is non-null.
+ * `action` is the manager's declaration, passed through verbatim — this
+ * projection resolves nothing. There is no `command` field: which endpoint an
+ * edge uses follows from `action` alone (a status change or a category move), so
+ * there is nothing for the backend to rule on. It used to rule, keying on the
+ * `(from, to)` pair, and the rule for WAITING read every `X -> WAITING` edge as a
+ * category move — which is how a flow drawn to put a ticket back in the queue
+ * produced a "Pindah Kategori" button asking for a destination category.
  */
 export interface WorkflowActionDto {
   readonly from: StatusValue;
   readonly to: StatusValue;
   readonly actionLabel: string;
-  /** The command that realizes this edge; `null` when none can. */
-  readonly command: WorkflowCommand | null;
-  /** Why `command` is null; `null` when `command` is non-null. */
+  /** What running this edge does — declared by the manager in the flow. */
+  readonly action: TransitionActionValue;
+  /** Why this edge cannot be run; `null` (the normal case) when it can. */
   readonly unavailableReason: WorkflowActionUnavailableReason | null;
 }
 
@@ -74,22 +52,23 @@ export interface WorkflowActionsDto {
 }
 
 /**
- * Read-side use case: enumerates the active state machine and resolves, for
- * every configured edge, **which queue command executes it** (FR-CLR-02).
+ * Read-side use case: publishes the active state machine as the counter panel's
+ * action surface (FR-CLR-02) — every configured edge, grouped by source status,
+ * with the label and the action the manager gave it.
  *
- * This is the authority the caller panel used to duplicate client-side. Which
- * aggregate method / endpoint can realize a given `(from -> to)` pair, and what
- * its preconditions are, is Queue-context knowledge: it follows from the
- * `QueueTicket` aggregate's own guards (`recall` hard-requires SKIPPED,
- * `reannounce` hard-requires CALLING, `transitionTo` short-circuits on
- * `from === target`, `transferTo` deliberately does not), not from how the
- * manager drew the graph. The client renders labels and calls the command it is
- * told to; it no longer re-derives the routing.
+ * It deliberately decides almost nothing. An earlier version resolved each
+ * `(from, to)` pair to one of eight queue commands, and that table was the defect:
+ * a pair does not carry enough information to say what the manager meant by the
+ * edge, so the table guessed — reading `CALLING -> WAITING` as a category move
+ * because the target happened to be WAITING. The flow now states its own
+ * intent per edge, so this projection copies it out. What is left here is the one
+ * fact the flow cannot state, because it follows from the aggregate rather than
+ * the configuration: whether running an edge would actually do anything.
  *
- * Lives in the Queue context (not Store Config) for exactly that reason — and
- * because `application/store-config/**` -> `application/queue/**` is forbidden
- * by dep-cruiser, so the ruling could not live on the Store-Config side without
- * inverting the dependency.
+ * Lives in the Queue context because that fact is Queue knowledge — and because
+ * `application/store-config/**` -> `application/queue/**` is forbidden by
+ * dep-cruiser, so it could not live on the Store-Config side without inverting
+ * the dependency.
  *
  * Depends only on the domain {@link ITransitionPolicyResolver} port (DIP), and
  * resolves the active policy **per execution** — never a boot-time snapshot,
@@ -122,66 +101,36 @@ export class GetWorkflowActionsUseCase {
   }
 }
 
-/** Pairs a configured edge with the command that realizes it. */
 function describeAction(transition: TransitionDescriptor): WorkflowActionDto {
   return {
     from: transition.from,
     to: transition.to,
     actionLabel: transition.actionLabel,
-    ...resolveCommand(transition.from, transition.to),
+    action: transition.action,
+    unavailableReason: unavailableReasonFor(transition),
   };
 }
 
-type CommandResolution = Pick<WorkflowActionDto, 'command' | 'unavailableReason'>;
-
-function realizedBy(command: WorkflowCommand): CommandResolution {
-  return { command, unavailableReason: null };
-}
-
-function unavailable(reason: WorkflowActionUnavailableReason): CommandResolution {
-  return { command: null, unavailableReason: reason };
-}
-
 /**
- * The resolution table. **Ordered** — the two meaningful self-loops must be
- * decided before the generic `from === to` rule, or a `CALLING -> CALLING`
- * re-announce and a `WAITING -> WAITING` transfer would both be mis-reported as
- * `NO_STATUS_CHANGE`.
+ * Whether running this edge would visibly do anything — the only ruling left,
+ * and a fact about the aggregate rather than about the manager's intent.
+ *
+ * A self-loop normally does nothing: `applyTransition` short-circuits when the
+ * target equals the current status, so the button would return 200, change
+ * nothing and broadcast nothing — which reads as a broken panel. Two self-loops
+ * are exceptions and must be checked first:
+ *
+ * - a `TRANSFER_CATEGORY` edge moves the ticket to another category, which is a
+ *   real change whether or not the status also moves (`transferTo` deliberately
+ *   does not short-circuit);
+ * - `CALLING -> CALLING` repeats the announcement, which is the entire point of
+ *   drawing it — the customer did not hear the first one.
  */
-function resolveCommand(from: StatusValue, to: StatusValue): CommandResolution {
-  // 1. Into CALLING — three distinct commands, keyed on where the ticket is now.
-  //    `call-next` is counter-level (it picks the next ticket by routing +
-  //    priority, not a specific one); `recall` hard-requires SKIPPED; a
-  //    self-loop on CALLING is a re-announce (no status change, re-emits
-  //    TICKET_CALLED). Nothing else can move a ticket back into CALLING.
-  if (to === TicketStatus.CALLING) {
-    if (from === TicketStatus.WAITING) return realizedBy('CALL_NEXT');
-    if (from === TicketStatus.SKIPPED) return realizedBy('RECALL');
-    if (from === TicketStatus.CALLING) return realizedBy('REANNOUNCE');
-    return unavailable('NO_COMMAND');
-  }
-  // 2. Into WAITING — the category move ("pindah kategori"). Includes the
-  //    `WAITING -> WAITING` self-loop: `transferTo` deliberately does NOT
-  //    short-circuit on `from === to`, because a transfer is a category move
-  //    whether or not the status also changes.
-  if (to === TicketStatus.WAITING) return realizedBy('TRANSFER');
-  // 3. Any other self-loop is a no-op: `transitionTo` returns early when
-  //    `from === target`, so the command would 200 and change nothing.
-  if (from === to) return unavailable('NO_STATUS_CHANGE');
-  // 4. A custom (non-canonical) target — PREPARING, PAYMENT, … — is exactly
-  //    what the generic transition endpoint exists for. This *predicts* that
-  //    endpoint's admission rule, so it asks the rule itself
-  //    ({@link acceptsGenericTransitionTarget}) rather than restating it: the
-  //    controller enforces the same function, so the two can never drift.
-  if (acceptsGenericTransitionTarget(to)) return realizedBy('APPLY_TRANSITION');
-  // 5. The remaining canonical targets each have a dedicated command whose
-  //    aggregate method owns the lifecycle-timestamp side effects.
-  if (to === TicketStatus.SERVING) return realizedBy('SERVE');
-  if (to === TicketStatus.COMPLETED) return realizedBy('COMPLETE');
-  if (to === TicketStatus.SKIPPED) return realizedBy('SKIP');
-  // Unreachable for today's five canonical states (every one is handled above).
-  // Kept as a forward-compatibility guard: a canonical status added to
-  // `TicketStatus` without a command mapping here reports "no command" instead
-  // of routing the caller to an endpoint that would reject it.
-  return unavailable('NO_COMMAND');
+function unavailableReasonFor(
+  transition: TransitionDescriptor,
+): WorkflowActionUnavailableReason | null {
+  if (transition.action === TransitionAction.TRANSFER_CATEGORY) return null;
+  if (transition.from !== transition.to) return null;
+  if (transition.to === TicketStatus.CALLING) return null;
+  return 'NO_STATUS_CHANGE';
 }

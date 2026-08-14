@@ -198,6 +198,33 @@ function projectEvent(state: QueueState, e: QueueLifecycleWireEvent, ctx: QueueC
           skipped,
         };
       }
+      if (to === 'WAITING') {
+        // Back in the queue. MOVE it — leaving it in `active` with a WAITING
+        // status keeps a re-queued ticket sitting on the counter panel, which
+        // also keeps "Panggil Berikutnya" disabled (it locks while a ticket is
+        // active), so the staff could neither serve this one nor call the next.
+        //
+        // This branch used to be unreachable for a live `→ WAITING` edge: the
+        // backend executed every one as a category move, so a `TICKET_TRANSFERRED`
+        // always arrived immediately after and evicted the stale entry. Making the
+        // edge a plain re-queue removed that second event and left the stale entry
+        // permanent. The transfer flow still works: its `TICKET_TRANSFERRED`
+        // replaces this `waiting` entry (it filters by ticketId before re-adding),
+        // so the two events converge on one bucket either way.
+        const requeued: TicketStateDto = { ...ticket, status: to, counterId: null };
+        const waiting = ctx.categoryIds.has(requeued.categoryId)
+          ? [...state.waiting.filter((t) => t.ticketId !== e.aggregateId), requeued].sort(
+              byTicketNumber,
+            )
+          : state.waiting.filter((t) => t.ticketId !== e.aggregateId);
+        return {
+          ...state,
+          active: state.active.filter((t) => t.ticketId !== e.aggregateId),
+          skipped: state.skipped.filter((t) => t.ticketId !== e.aggregateId),
+          waiting,
+          waitingCount: waiting.length,
+        };
+      }
       if (absent && !at) {
         // Leaving SKIPPED for a non-terminal status: the counter is handling the
         // ticket again, so it returns to the board. The recall path emits
@@ -210,23 +237,11 @@ function projectEvent(state: QueueState, e: QueueLifecycleWireEvent, ctx: QueueC
           skipped: state.skipped.filter((t) => t.ticketId !== e.aggregateId),
         };
       }
-      // Any other target (CALLING, SERVING, or a custom in-progress state like
-      // PREPARING reached via the generic apply-transition endpoint, QUE-33)
-      // keeps the ticket on the board as the active ticket at the counter — the
-      // staff is still serving it, just in a sub-state. Only COMPLETED leaves
-      // the counter outright; SKIPPED moves to its own list (above). The caller
-      // fires the generic endpoint for the active ticket and for the rows of the
-      // waiting/skipped lists, so a WAITING-sourced generic transition leaves a
-      // ticket this branch never sees; the `!ticket` guard above leaves such a
-      // ticket in `waiting` untouched (no divergence on the supported flow).
-      //
-      // The one WAITING target that *does* reach the active ticket is the transfer
-      // flow (FR-CLR-03 "Pindah Kategori"): the aggregate records STATUS_UPDATED
-      // (CALLING -> WAITING) and then TICKET_TRANSFERRED in sequence. STATUS_UPDATED
-      // alone would leave a stale WAITING entry on the board; the immediately
-      // following TICKET_TRANSFERRED evicts it from `active` (see below). Do not
-      // treat WAITING as terminal here — that would race the two events and could
-      // drop the ticket before TICKET_TRANSFERRED re-adds it to `waiting`.
+      // Any remaining target (CALLING, SERVING, or a custom in-progress state
+      // like PREPARING) keeps the ticket on the board as the active ticket at the
+      // counter — the staff is still serving it, just in a sub-state. The three
+      // targets that move it elsewhere are handled above: COMPLETED leaves every
+      // surface, SKIPPED goes to its own list, WAITING returns to the queue.
       const active = state.active.map((t) =>
         t.ticketId === e.aggregateId ? { ...t, status: to } : t,
       );

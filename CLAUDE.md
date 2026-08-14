@@ -85,15 +85,34 @@ server-side audio model would be over-abstraction.)
 Default state machine: `WAITING → CALLING → SERVING → COMPLETED`, plus
 `SKIPPED` (from `CALLING`, returns via "Panggil Ulang"). Custom states
 (`PREPARING`, `PAYMENT`, …) are wizard-configurable; each transition carries an
-`action_label` → Caller UI button.
+`action_label` → Caller UI button, plus a `TransitionAction` ∈
+{`UPDATE_STATUS`, `TRANSFER_CATEGORY`} saying **what running it does**
+(default `UPDATE_STATUS`, absent on pre-feature configs).
 
-**Transfer Queue** ("pindah kategori", FR-CLR-03) is a first-class configurable
-transition, not a special case: `TransferTicketUseCase` validates
-`currentStatus → targetStatus` (default `WAITING`) against the active
-`ITransitionPolicy`, then reassigns category + reissues a per-category number
-(clearing the counter). PRD §7 default machine has no transfer edge →
-`InvalidStateTransitionException` until the wizard adds one. Pre-checks before
-reserving the new number so an illegal transfer burns no sequence (NFR-REL-02).
+**Never infer an edge's meaning from its endpoints.** `X → WAITING` used to be
+executed as a category move, so a manager who drew `CALLING → WAITING` to
+re-queue a ticket got a "Pindah Kategori" button demanding a destination
+category. The flow declares the next state AND the action; both sides read them.
+
+**One per-ticket transition command.** `POST /api/queue/:id/transition
+{ targetStatus, counterId? }` runs any edge the active flow allows, canonical or
+custom, and `QueueTicket.applyTransition` applies the **target state's** side
+effects (→CALLING announces at a counter, →SERVING/→COMPLETED stamp the
+lifecycle clock, →WAITING clears the counter + resets the clock). There is no
+serve/complete/skip/recall endpoint: a per-target surface forces something
+upstream to guess which one an edge needs. `call-next` (counter-level ticket
+*selection*) and `reannounce` (no state change, so it needs no
+`CALLING → CALLING` edge) survive because neither is a per-ticket transition.
+
+**Transfer Queue** ("pindah kategori", FR-CLR-03) keeps its own command because
+it takes an argument no flow can hold — the destination category, chosen by
+staff per ticket. `TransferTicketUseCase` validates `currentStatus →
+targetStatus` against the active `ITransitionPolicy`, requires the edge to be
+declared `TRANSFER_CATEGORY`, then reassigns category + reissues a per-category
+number (clearing the counter). Both directions are enforced
+(`application/queue/declared-transition-action.ts`) so an edge can never run as
+the wrong command. Pre-checks before reserving the new number so an illegal
+transfer burns no sequence (NFR-REL-02).
 
 The full reference config JSON (store name, daily_reset, state_machine,
 categories, routings) lives in PRD §7 — read it before touching config code.
@@ -194,13 +213,17 @@ in that area). Each area's load-bearing essence:
   setup-admin self-gates on setup status; login dummy-verify side-channel. →
   memory `identity-auth-gotchas`
 - **Realtime & queue command lifecycle** — `QueueEventDispatcher` (import via
-  direct path, not the barrel); six commands drain events after `queue.save`;
-  transfer emits 2 events, recall emits 2 (TICKET_CALLED re-shows on TV);
-  generic transition rejects canonical targets. → memory
+  direct path, not the barrel); every command drains events after `queue.save`;
+  transfer emits 2 events, a `→ CALLING` transition emits 2 (TICKET_CALLED
+  re-shows on TV) but the `CALLING → CALLING` self-loop emits only the
+  announcement; the transition command accepts canonical targets and rejects only
+  a `TRANSFER_CATEGORY` edge, which must itself target `WAITING`. → memory
   `core-api-architecture-gotchas`
 - **Domain value-object rules** — construction failures throw
   `InvalidValueObjectException` (never bare `Error`); `InvalidArgumentException`
-  for use-case guardrails; declare module `const`s before a VO with a `static
+  for guardrails on a supplied argument — usually a use case, but an aggregate may
+  raise it for a precondition on an argument rather than on its own state (a
+  `→ CALLING` transition with no counter); declare module `const`s before a VO with a `static
   DEFAULT` (TDZ); relocate invariants when deleting a guardrail VO. → memory
   `core-api-architecture-gotchas`
 - **REST surface separation** — read-only `RestApiModule`; mutation endpoints get

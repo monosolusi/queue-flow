@@ -1,6 +1,6 @@
 import { AggregateRoot } from '../shared/aggregate-root';
 import { Identifier } from '../shared/identifier';
-import { InvalidStateTransitionException } from '../shared/errors';
+import { InvalidArgumentException, InvalidStateTransitionException } from '../shared/errors';
 import type { ITransitionPolicy } from './state-machine.port';
 import { TicketNumber } from './value-objects/ticket-number';
 import { TicketStatus, type StatusValue } from './value-objects/ticket-status';
@@ -160,70 +160,42 @@ export class QueueTicket extends AggregateRoot<TicketId> {
   }
 
   /**
-   * Call this ticket to a counter. WAITING -> CALLING ("Panggil Berikutnya").
-   * Idempotent: calling a ticket that is already in CALLING is a no-op (no
-   * counter reassignment, no event) — use {@link recall} to re-announce a
-   * SKIPPED ticket.
+   * Call this ticket to a counter as the counter's *next* ticket — the
+   * counter-level "Panggil Berikutnya" path (`CallNextTicketUseCase`).
+   * Idempotent: a ticket already in CALLING is left untouched (no counter
+   * reassignment, no event), because call-next **picks** a ticket rather than
+   * acting on a chosen one, and re-picking the same one must not re-announce it.
+   * A deliberate re-announcement is {@link reannounce} — or, when the manager
+   * draws a `CALLING -> CALLING` edge, {@link applyTransition}.
    */
   public markCalling(counterId: number, policy: ITransitionPolicy, now = Date.now()): void {
     if (this._currentStatus === TicketStatus.CALLING) {
       return; // already calling — no-op, preserves least-surprise
     }
-    this.transitionTo(TicketStatus.CALLING, policy, now);
-    this._counterId = counterId;
-    this._calledAt = now;
-    this.record(
-      new TicketCalledEvent(this.id.value, this._ticketNumber.formatted(), counterId, now),
-    );
+    this.callToCounter(counterId, policy, now);
   }
 
   /**
-   * Re-call a skipped ticket. SKIPPED -> CALLING ("Panggil Ulang"). Only valid
-   * from SKIPPED — the aggregate owns this precondition so the policy alone
-   * cannot leave a CALLING ticket without a counter.
-   */
-  public recall(policy: ITransitionPolicy, now = Date.now()): void {
-    if (this._currentStatus !== TicketStatus.SKIPPED) {
-      throw new InvalidStateTransitionException(this._currentStatus, TicketStatus.CALLING);
-    }
-    this.transitionTo(TicketStatus.CALLING, policy, now);
-    // A re-call is a fresh call attempt — reset the called-at timestamp so the
-    // wait-time metric reflects the time from creation (or re-queue) to the
-    // *latest* call, not the original (now-stale) one.
-    this._calledAt = now;
-    // A recall is a re-call to the same counter: re-emit TICKET_CALLED so the TV
-    // board re-shows the ticket and the audio queue re-announces it (FR-TV-01/02).
-    // Recall is only reachable from SKIPPED, which (per the PRD §7 default machine)
-    // follows a prior {@link markCalling} that set `_counterId`, so it is non-null
-    // here. The guard is defensive against a degenerate custom machine that reached
-    // SKIPPED without a prior call (no counter to re-call to) — the status transition
-    // still proceeds, but no re-announce fires for that edge.
-    if (this._counterId !== null) {
-      this.record(
-        new TicketCalledEvent(this.id.value, this._ticketNumber.formatted(), this._counterId, now),
-      );
-    }
-  }
-
-  /**
-   * Re-announce the currently-calling ticket — "Panggil Lagi". Distinct from
-   * {@link recall}: recall is a `SKIPPED -> CALLING` *transition* that also
-   * re-announces; `reannounce` performs **no state change** — the ticket is
-   * already in CALLING, and the staff just wants the TV/audio to repeat the
-   * announcement (the customer didn't hear it). Re-emits a
-   * {@link TicketCalledEvent} (so the TV board re-shows the ticket and the
-   * audio queue re-announces it, FR-TV-01/02) and re-sets `calledAt` to the
-   * re-announce time (a fresh call attempt — mirrors `recall`'s calledAt
-   * semantics). Only valid from CALLING; any other status surfaces as an
-   * {@link InvalidStateTransitionException} (→ 409) for a consistent
-   * error contract with the other state-guarded commands. No
-   * {@link ITransitionPolicy} is consulted because no transition occurs.
+   * Repeat the announcement for the currently-calling ticket — "Panggil Lagi".
+   * **Not a transition:** the ticket is already in CALLING and stays there; the
+   * customer simply did not hear it. Re-emits a {@link TicketCalledEvent} (so the
+   * TV board re-shows the ticket and the audio queue re-announces it,
+   * FR-TV-01/02) and re-sets `calledAt` to the re-announce time (a fresh call
+   * attempt). No {@link ITransitionPolicy} is consulted, because there is no edge
+   * to validate — which is why this stays its own operation rather than folding
+   * into {@link applyTransition}: it must remain available on a flow that draws no
+   * `CALLING -> CALLING` edge. When the manager *does* draw that edge, running it
+   * lands here too (via {@link applyTransition}), so there is one implementation
+   * either way.
    *
-   * Defensive `_counterId !== null` guard mirrors `recall`: a CALLING ticket
-   * always has a counterId per the PRD §7 default machine (`markCalling` sets
-   * it), but a degenerate custom machine could reach CALLING without one — the
-   * calledAt reset still proceeds (it's a re-announce attempt) but no
-   * re-announce event fires for that edge (no counter to re-call to).
+   * Only valid from CALLING; any other status surfaces as an
+   * {@link InvalidStateTransitionException} (→ 409) for a consistent error
+   * contract with the transition command.
+   *
+   * The defensive `_counterId !== null` guard covers a degenerate flow that
+   * reached CALLING without a counter (every normal route sets one): the
+   * calledAt reset still proceeds — it *is* a call attempt — but nothing is
+   * announced, because there is no counter to announce at.
    */
   public reannounce(now = Date.now()): void {
     if (this._currentStatus !== TicketStatus.CALLING) {
@@ -231,7 +203,7 @@ export class QueueTicket extends AggregateRoot<TicketId> {
     }
     // A re-announce is a fresh call attempt — reset the called-at timestamp so
     // the wait-time metric reflects the time from creation to the *latest*
-    // announcement, not the original (now-stale) one. Mirrors `recall`.
+    // announcement, not the original (now-stale) one. Mirrors `callToCounter`.
     this._calledAt = now;
     this._updatedAt = now;
     if (this._counterId !== null) {
@@ -241,51 +213,178 @@ export class QueueTicket extends AggregateRoot<TicketId> {
     }
   }
 
-  /** Begin serving. CALLING -> SERVING ("Mulai Melayani"). */
-  public startServing(policy: ITransitionPolicy, now = Date.now()): void {
-    this.transitionTo(TicketStatus.SERVING, policy, now);
-    this._servedAt = now;
-  }
-
-  /** Mark service complete. SERVING -> COMPLETED ("Selesai Layan"). */
-  public complete(policy: ITransitionPolicy, now = Date.now()): void {
-    this.transitionTo(TicketStatus.COMPLETED, policy, now);
-    this._completedAt = now;
-  }
-
-  /** Skip / mark absent. CALLING -> SKIPPED ("Lewati / Absen"). */
-  public skip(policy: ITransitionPolicy, now = Date.now()): void {
-    this.transitionTo(TicketStatus.SKIPPED, policy, now);
+  /**
+   * Run one configured transition of the active flow — **the** single entry
+   * point for every per-ticket status change the counter panel can make
+   * (FR-CLR-02). The flow says which state comes next; this applies it, together
+   * with whatever side effects that state carries.
+   *
+   * There is deliberately no per-target command surface above this. A ticket
+   * entering CALLING is announced to a counter, one entering SERVING starts its
+   * service clock, one returning to WAITING gives up its counter — those are
+   * properties of the **target state**, so the aggregate owns them, and every
+   * route into that state gets them. The alternative (a distinct endpoint per
+   * canonical state, and a table upstream guessing which one a `(from, to)` pair
+   * needs) made the API infer meaning the manager never expressed: `CALLING ->
+   * WAITING` was read as a category move, so a flow drawn to put a ticket back
+   * in the queue produced a "Pindah Kategori" button demanding a destination
+   * category. A category move is a genuinely different operation — it takes an
+   * argument no flow can supply — and lives in {@link transferTo}, reached only
+   * by an edge the manager declared `TRANSFER_CATEGORY`.
+   *
+   * `counterId` is required in practice only for `-> CALLING`, where the ticket
+   * must end up announced at a known counter; it falls back to the counter the
+   * ticket is already assigned to (how a skipped ticket is re-called to the same
+   * counter). Every other target ignores it.
+   *
+   * Idempotent for targets with no side effect of their own: `transitionTo`
+   * short-circuits when `target` already equals the current status, and the
+   * side-effect appliers below are gated on the status having actually changed.
+   * The two self-loops that *do* something — `CALLING -> CALLING`
+   * (re-announce) and a `TRANSFER_CATEGORY` edge — bypass that gate by design.
+   */
+  public applyTransition(
+    target: StatusValue,
+    policy: ITransitionPolicy,
+    now = Date.now(),
+    counterId: number | null = null,
+  ): void {
+    switch (target) {
+      case TicketStatus.CALLING:
+        this.callToCounter(counterId, policy, now);
+        return;
+      case TicketStatus.WAITING:
+        this.returnToQueue(policy, now);
+        return;
+      case TicketStatus.SERVING:
+        this.startServing(policy, now);
+        return;
+      case TicketStatus.COMPLETED:
+        this.complete(policy, now);
+        return;
+      case TicketStatus.SKIPPED:
+        this.skip(policy, now);
+        return;
+      default:
+        // A custom state the manager added (PREPARING, PAYMENT, …). It has no
+        // canonical lifecycle meaning, so a plain status change is the whole of
+        // it — no timestamp, no counter, no re-issued number.
+        this.transitionTo(target, policy, now);
+    }
   }
 
   /**
-   * Apply a generic, configurable transition to an arbitrary target state —
-   * the backing for the wizard-configurable `action_label`s that do not map
-   * to one of the six fixed commands (QUE-33). Unlike the named transitions
-   * above, this is a **plain status change**: it validates `current ->
-   * target` against the active {@link ITransitionPolicy} and records a
-   * {@link TicketStatusChangedEvent} (STATUS_UPDATED), but it owns no
-   * domain-specific side effects — it does not set a lifecycle timestamp
-   * (`calledAt`/`servedAt`/`completedAt`), reassign the counter, or reissue
-   * the ticket number. Those richer semantics belong to the fixed commands
-   * (markCalling/startServing/complete/skip/transferTo); the generic endpoint
-   * is for custom in-progress states (PREPARING, PAYMENT, …) the manager adds
-   * via the wizard. Idempotent: a no-op when `target` already equals the
-   * current status.
+   * Announce this ticket at `counterId` — every route into CALLING, whichever
+   * status it comes from: the counter's next pick ({@link markCalling}), a
+   * skipped customer who came back (`SKIPPED -> CALLING`, "Panggil Ulang"), or a
+   * ticket pulled back from a later step. The counter assignment, the fresh
+   * `calledAt` and the {@link TicketCalledEvent} that drives the TV board + audio
+   * (FR-TV-01/02) belong to *arriving in CALLING*, so they happen here rather
+   * than in each route's caller.
+   *
+   * `calledAt` is reset on every call attempt so the wait-time metric measures
+   * creation (or re-queue) to the **latest** announcement, not a stale earlier
+   * one. A `CALLING -> CALLING` edge is a re-announcement: the status does not
+   * change, but the announcement is the point, so it still fires — the policy
+   * must allow the self-loop, which is exactly what drawing that edge means.
    */
-  public applyTransition(target: StatusValue, policy: ITransitionPolicy, now = Date.now()): void {
-    this.transitionTo(target, policy, now);
+  private callToCounter(counterId: number | null, policy: ITransitionPolicy, now: number): void {
+    const from = this._currentStatus;
+    // The edge is checked BEFORE the counter is resolved, so a flow that draws no
+    // way into CALLING reports the missing edge (409) rather than a missing
+    // argument (400). Same ordering rule the transfer command follows: describe
+    // what is actually wrong with the request, most fundamental first.
+    if (!policy.isAllowed(from, TicketStatus.CALLING)) {
+      throw new InvalidStateTransitionException(from, TicketStatus.CALLING);
+    }
+    const resolved = this.counterToCallTo(counterId);
+    if (from === TicketStatus.CALLING) {
+      this._counterId = resolved;
+      this.reannounce(now);
+      return;
+    }
+    this.transitionTo(TicketStatus.CALLING, policy, now);
+    this._counterId = resolved;
+    this._calledAt = now;
+    this.record(
+      new TicketCalledEvent(this.id.value, this._ticketNumber.formatted(), resolved, now),
+    );
+  }
+
+  /**
+   * Which counter a `-> CALLING` transition announces at: the one supplied by
+   * the request (the panel's bound counter), falling back to the counter the
+   * ticket is already assigned to — how a skipped ticket returns to the same
+   * counter that called it. A ticket that has never been called and arrives with
+   * no counter cannot be announced anywhere; that is a missing argument, not an
+   * illegal transition, so it surfaces as a 400 rather than a 409.
+   */
+  private counterToCallTo(counterId: number | null): number {
+    const resolved = counterId ?? this._counterId;
+    if (resolved === null) {
+      throw new InvalidArgumentException(
+        'a transition into CALLING needs a counter to announce the ticket at',
+      );
+    }
+    return resolved;
+  }
+
+  /**
+   * Put this ticket back in the queue — any `-> WAITING` transition. The counter
+   * assignment goes (the ticket is nobody's now) and the lifecycle timestamps
+   * clear, because a re-queued ticket's wait starts over: leaving `calledAt` set
+   * would report a wait that already ended, and leaving `servedAt` set would
+   * pair a fresh completion with an abandoned service (QUE-26).
+   *
+   * This is the transition the manager draws as "Kembalikan ke Antrian" and the
+   * one that used to be executed as a category move.
+   */
+  private returnToQueue(policy: ITransitionPolicy, now: number): void {
+    if (!this.transitionTo(TicketStatus.WAITING, policy, now)) {
+      return;
+    }
+    this._counterId = null;
+    this._calledAt = null;
+    this._servedAt = null;
+    this._completedAt = null;
+  }
+
+  /** Begin serving. `-> SERVING` ("Mulai Melayani") — starts the service clock. */
+  private startServing(policy: ITransitionPolicy, now: number): void {
+    if (this.transitionTo(TicketStatus.SERVING, policy, now)) {
+      this._servedAt = now;
+    }
+  }
+
+  /** Mark service complete. `-> COMPLETED` ("Selesai Layan") — stops the clock. */
+  private complete(policy: ITransitionPolicy, now: number): void {
+    if (this.transitionTo(TicketStatus.COMPLETED, policy, now)) {
+      this._completedAt = now;
+    }
+  }
+
+  /** Skip / mark absent. `-> SKIPPED` ("Lewati / Absen"). Keeps the counter
+   *  assignment so the ticket stays in that counter's skipped bucket and can be
+   *  re-called to the same counter. */
+  private skip(policy: ITransitionPolicy, now: number): void {
+    this.transitionTo(TicketStatus.SKIPPED, policy, now);
   }
 
   /**
    * Transfer this ticket to a different category — "pindah kategori"
    * (FR-CLR-03). A first-class **configurable** transition: the status leg
-   * (current -> `targetStatus`, default `WAITING`) is validated against the
-   * active {@link ITransitionPolicy} exactly like any other transition, so an
-   * active state machine without the edge (e.g. the PRD §7 default has no
-   * `CALLING -> WAITING`) rejects the transfer with
-   * {@link InvalidStateTransitionException}. The wizard/admin enables transfer
-   * by adding the edge (e.g. `CALLING -> WAITING` labelled "Pindah Kategori").
+   * (current -> WAITING) is validated against the active
+   * {@link ITransitionPolicy} exactly like any other transition, so an active
+   * state machine without the edge rejects the transfer with
+   * {@link InvalidStateTransitionException}.
+   *
+   * The manager enables transfer by drawing the edge **and declaring its action
+   * `TRANSFER_CATEGORY`** — the flow's own statement that this button moves a
+   * ticket between categories. Nothing about the edge's endpoints implies it:
+   * `CALLING -> WAITING` is a plain re-queue unless the manager says otherwise.
+   * The application layer enforces that pairing (this aggregate is handed the
+   * destination category it was asked for; it does not re-read the
+   * configuration).
    *
    * On success the category is reassigned, a new per-category
    * {@link TicketNumber} is applied, and the counter is cleared — the ticket
@@ -294,31 +393,39 @@ export class QueueTicket extends AggregateRoot<TicketId> {
    * {@link TicketTransferredEvent} (the category/number reassignment) so
    * downstream can sync on the re-issued number.
    *
+   * **The ticket always lands in WAITING**, and that is not a default — it is what
+   * a re-issued per-category number means. A fresh `B-001` is a ticket nobody has
+   * served, so the states that describe being served cannot describe it: landing
+   * in SERVING would leave `servedAt` null (breaking the QUE-26 service-time row)
+   * and, with the counter cleared, drop the ticket out of every counter panel with
+   * no way back. Where a *plain* transition lands is the manager's choice; where a
+   * category move lands follows from what it does. The application layer rejects a
+   * `TRANSFER_CATEGORY` edge that targets anything else, so such a flow is refused
+   * at save time rather than half-executed here.
+   *
    * Note: unlike {@link transitionTo}, this method intentionally does **not**
-   * short-circuit when `from === targetStatus`. A transfer is a category move
-   * regardless of whether the status also changes, so the
+   * short-circuit when the ticket is already WAITING. A transfer is a category
+   * move regardless of whether the status also changes, so the
    * {@link TicketStatusChangedEvent} may carry `from === to` when a manager
-   * configures a self-edge (e.g. `WAITING -> WAITING` labelled "Pindah
-   * Kategori"). The TV projection keeps `WAITING` non-terminal in
-   * `STATUS_UPDATED`, so the ticket stays visible until the subsequent
-   * `TICKET_TRANSFERRED` evicts + re-adds it — the two-event reconciliation
-   * contract still holds. The use-case layer additionally rejects a transfer to
-   * the ticket's *own* category, so a no-op category move never reaches here.
+   * configures the `WAITING -> WAITING` self-edge. Both events converge on the
+   * caller's waiting list: the `STATUS_UPDATED` re-queues the ticket under its old
+   * identity and the `TICKET_TRANSFERRED` replaces that entry with the new one.
+   * The use-case layer additionally rejects a transfer to the ticket's *own*
+   * category, so a no-op category move never reaches here.
    */
   public transferTo(
     newCategoryId: string,
     newTicketNumber: TicketNumber,
-    targetStatus: StatusValue,
     policy: ITransitionPolicy,
     now = Date.now(),
   ): void {
     const from = this._currentStatus;
-    if (!policy.isAllowed(from, targetStatus)) {
-      throw new InvalidStateTransitionException(from, targetStatus);
+    if (!policy.isAllowed(from, TicketStatus.WAITING)) {
+      throw new InvalidStateTransitionException(from, TicketStatus.WAITING);
     }
     const oldCategoryId = this._categoryId;
     const oldTicketNumber = this._ticketNumber;
-    this._currentStatus = targetStatus;
+    this._currentStatus = TicketStatus.WAITING;
     this._categoryId = newCategoryId;
     this._ticketNumber = newTicketNumber;
     this._counterId = null;
@@ -333,8 +440,8 @@ export class QueueTicket extends AggregateRoot<TicketId> {
       new TicketStatusChangedEvent(
         this.id.value,
         from,
-        targetStatus,
-        policy.actionLabelFor(from, targetStatus),
+        TicketStatus.WAITING,
+        policy.actionLabelFor(from, TicketStatus.WAITING),
         now,
       ),
     );
@@ -350,10 +457,19 @@ export class QueueTicket extends AggregateRoot<TicketId> {
     );
   }
 
-  private transitionTo(target: StatusValue, policy: ITransitionPolicy, now: number): void {
+  /**
+   * The status change itself, validated against the active policy.
+   *
+   * Returns whether the status actually moved. Callers use that to gate the
+   * target state's side effects: a short-circuited self-transition records no
+   * event and changes nothing, so stamping `servedAt` (or clearing `calledAt`)
+   * on top of it would rewrite the ticket's history from a request that, as far
+   * as everything else is concerned, did nothing.
+   */
+  private transitionTo(target: StatusValue, policy: ITransitionPolicy, now: number): boolean {
     const from = this._currentStatus;
     if (from === target) {
-      return; // idempotent — no event, no state change
+      return false; // idempotent — no event, no state change
     }
     if (!policy.isAllowed(from, target)) {
       throw new InvalidStateTransitionException(from, target);
@@ -369,5 +485,6 @@ export class QueueTicket extends AggregateRoot<TicketId> {
         now,
       ),
     );
+    return true;
   }
 }

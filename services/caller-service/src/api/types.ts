@@ -50,40 +50,43 @@ export interface BrandConfigSlice {
 }
 
 /**
- * A backend command able to realize one workflow transition, named as core-api
- * names it on the wire. **Which** command (if any) realizes a given edge is the
- * backend's decision, not this client's — the panel receives it in
- * {@link WorkflowActionDto.command} and only renders it.
+ * What running a transition does — declared by the manager in "Alur Status
+ * Tiket" and passed through by core-api verbatim, named as it is on the wire.
+ *
+ * This replaced a `command` field the backend used to *resolve* from each edge's
+ * `(from, to)` pair. A pair cannot say what the manager meant by an edge, so that
+ * resolution guessed: every edge into WAITING was ruled a category move, and a
+ * flow drawn to put a ticket back in the queue produced a "Pindah Kategori"
+ * button demanding a destination category. The flow now states its own intent,
+ * and this client maps that intent to an endpoint (see `lib/workflow-commands.ts`)
+ * — a different mapping, and necessarily a client-side one.
+ *
+ * - `UPDATE_STATUS` — move the ticket to the transition's target state.
+ * - `TRANSFER_CATEGORY` — "pindah kategori" (FR-CLR-03): also move it to another
+ *   category, which staff choose per ticket.
  */
-export type WorkflowCommand =
-  | 'CALL_NEXT'
-  | 'RECALL'
-  | 'REANNOUNCE'
-  | 'SERVE'
-  | 'COMPLETE'
-  | 'SKIP'
-  | 'TRANSFER'
-  | 'APPLY_TRANSITION';
+export type TransitionActionType = 'UPDATE_STATUS' | 'TRANSFER_CATEGORY';
 
 /**
- * Why no command realizes a transition — a **code**, not prose: the backend owns
- * the fact, this client owns the Indonesian wording (see
- * `lib/workflow-actions.ts`).
+ * Why a transition cannot be run — a **code**, not prose: the backend owns the
+ * fact, this client owns the Indonesian wording (see `lib/workflow-actions.ts`).
  *
- * - `NO_COMMAND` — the counter panel has no endpoint for this edge at all.
- * - `NO_STATUS_CHANGE` — running it would leave the ticket's status untouched.
+ * - `NO_STATUS_CHANGE` — running it would leave the ticket exactly where it is.
+ *
+ * There is no `NO_COMMAND` any more: a per-ticket transition reaches any target
+ * the flow allows, so no configured edge is unroutable.
  */
-export type WorkflowActionUnavailableReason = 'NO_COMMAND' | 'NO_STATUS_CHANGE';
+export type WorkflowActionUnavailableReason = 'NO_STATUS_CHANGE';
 
-/** One transition of the active flow (FR-CLR-02), resolved by core-api to the
- *  command that executes it. `command === null` means nothing can run it — the
- *  button is still rendered (disabled + the reason) so a configured edge never
- *  silently disappears. */
+/** One transition of the active flow (FR-CLR-02), with the action the manager
+ *  declared for it. `unavailableReason !== null` means running it would do
+ *  nothing — the button is still rendered (disabled + the reason) so a configured
+ *  edge never silently disappears. */
 export interface WorkflowActionDto {
   readonly from: string;
   readonly to: string;
   readonly actionLabel: string;
-  readonly command: WorkflowCommand | null;
+  readonly action: TransitionActionType;
   readonly unavailableReason: WorkflowActionUnavailableReason | null;
 }
 

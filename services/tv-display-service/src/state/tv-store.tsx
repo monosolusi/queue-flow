@@ -279,18 +279,19 @@ function projectEvent(state: TvState, e: QueueLifecycleWireEvent): TvState {
           : state.history;
         return { ...state, nowServing: null, history };
       }
-      // SKIPPED (recallable via "Panggil Ulang") and WAITING (transfer, re-enters
-      // the queue as a fresh ticket) leave the board without entering history:
-      // neither is a concluded call.
+      // SKIPPED (recallable via "Panggil Ulang") and WAITING both leave the board
+      // without entering history: neither is a concluded call. WAITING covers both
+      // ways a ticket goes back in line — a plain re-queue and a category move —
+      // which is why this branch needed no change when the two stopped being the
+      // same operation. A category move additionally re-numbers the ticket, and
+      // its TICKET_TRANSFERRED handles that below.
       //
-      // Recall-restore: a recalled ticket (SKIPPED -> CALLING) re-shows on the
-      // board and re-announces audio via the TICKET_CALLED event the domain now
-      // emits on recall (QueueTicket.recall records a TicketCalledEvent, mirroring
-      // markCalling) — no TV-side retained state is needed. The STATUS_UPDATED
-      // for the recall reaches the TV while nowServing is null (SKIPPED cleared
-      // it above), so this `nowServing?.ticketId !== aggregateId` guard returns
-      // state unchanged and the follow-on TICKET_CALLED does the restore. The TV
-      // needs no recall-specific projection here.
+      // Re-call restore: a ticket coming back into CALLING re-shows on the board
+      // and re-announces audio via the TICKET_CALLED the aggregate emits on
+      // arriving in CALLING — no TV-side retained state is needed. Its
+      // STATUS_UPDATED reaches the TV while nowServing is null (SKIPPED or WAITING
+      // cleared it above), so the `nowServing?.ticketId !== aggregateId` guard
+      // returns state unchanged and the follow-on TICKET_CALLED does the restore.
       if (p.to === 'SKIPPED' || p.to === 'WAITING') {
         return { ...state, nowServing: null };
       }

@@ -69,8 +69,16 @@ export class SystemNotConfiguredException extends DomainError {
  * window below the enforced floor (QUE-25 / FR-ADM-02). Distinct from
  * {@link InvalidValueObjectException} (a malformed value object) and
  * {@link InvalidStateTransitionException} (a forbidden state move): the value
- * is well-formed, just not permitted by a use-case-level business rule. Maps to
- * 400 Bad Request — the caller can fix the argument and retry.
+ * is well-formed, just not permitted by a business rule. Maps to 400 Bad Request
+ * — the caller can fix the argument and retry.
+ *
+ * Usually raised by a use case, but an **aggregate** may raise it for a
+ * precondition on a supplied argument rather than on its own state: a transition
+ * into CALLING with no counter to announce the ticket at is a missing argument,
+ * not an illegal edge, and only the aggregate knows that CALLING needs one.
+ * Answering with 409 there would tell the caller their flow is wrong when their
+ * request is; pushing the rule up to the use case would leak which states carry
+ * which side effects out of the domain.
  */
 export class InvalidArgumentException extends DomainError {
   constructor(detail: string) {

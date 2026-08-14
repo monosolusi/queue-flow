@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TicketRowActions } from './TicketRowActions';
 import { ticketActionsFor } from '../lib/workflow-actions';
-import type { TicketStateDto, WorkflowCommand } from '../api/types';
+import type { TicketStateDto, TransitionActionType } from '../api/types';
 import { edge, workflowActions } from '../test/workflow-fixtures';
 
 const ticket = (ticketId: string, ticketNumber: string): TicketStateDto => ({
@@ -14,11 +14,11 @@ const ticket = (ticketId: string, ticketNumber: string): TicketStateDto => ({
   counterId: 1,
 });
 
-/** A self-loop out of "Dilewati": configured in the designer, but core-api
- *  resolves no command for it — the edge the rows must explain rather than
+/** A self-loop out of "Dilewati": configured in the designer, but it would leave
+ *  the ticket exactly where it is — the edge the rows must explain rather than
  *  present as a dead button. */
 const selfLoop = workflowActions(
-  edge('SKIPPED', 'SKIPPED', 'Tandai Ulang', null, 'NO_STATUS_CHANGE'),
+  edge('SKIPPED', 'SKIPPED', 'Tandai Ulang', 'UPDATE_STATUS', 'NO_STATUS_CHANGE'),
 );
 
 /**
@@ -60,14 +60,14 @@ describe('TicketRowActions explains an action it cannot run', () => {
     // button for whichever came second.
     //
     // Both dead ends are ones core-api can really produce for a SKIPPED ticket.
-    // `NO_COMMAND` is NOT among them — `resolveCommand` maps every target out of
-    // SKIPPED to a command except the self-loop, so a `NO_COMMAND` fixture here
-    // would certify a wire shape the server never sends. The second dead end is
-    // therefore the forward-compatibility path: a command newer than this build,
-    // which `toAction` coerces to `command: null` + the unknown reason.
+    // The only reason code it sends is NO_STATUS_CHANGE (a self-loop), so the
+    // second dead end is the forward-compatibility path instead: an `action`
+    // newer than this build, which `toAction` coerces to `action: null` + the
+    // unknown reason. A fixture for a wire shape the server never sends would
+    // certify nothing.
     const twoDeadEnds = workflowActions(
-      edge('SKIPPED', 'SKIPPED', 'Tandai Ulang', null, 'NO_STATUS_CHANGE'),
-      edge('SKIPPED', 'ARSIP', 'Arsipkan', 'ARCHIVE_TICKET' as WorkflowCommand),
+      edge('SKIPPED', 'SKIPPED', 'Tandai Ulang', 'UPDATE_STATUS', 'NO_STATUS_CHANGE'),
+      edge('SKIPPED', 'ARSIP', 'Arsipkan', 'ARCHIVE_TICKET' as TransitionActionType),
     );
     render(
       <TicketRowActions
@@ -120,7 +120,7 @@ describe('TicketRowActions explains an action it cannot run', () => {
 
   it('leaves a runnable action plain — the note belongs to the dead ends only', async () => {
     const onAction = vi.fn();
-    const recall = workflowActions(edge('SKIPPED', 'CALLING', 'Panggil Ulang', 'RECALL'));
+    const recall = workflowActions(edge('SKIPPED', 'CALLING', 'Panggil Ulang', 'UPDATE_STATUS'));
     render(
       <TicketRowActions
         ticket={ticket('s1', 'A-004')}

@@ -42,25 +42,41 @@ export interface ICallerApi {
   listCounters(): Promise<CounterDto[]>;
   getQueueSnapshot(counterId: number): Promise<QueueSnapshotDto>;
   /** The counter panel's action surface (FR-CLR-02): the active flow's
-   *  transitions grouped by source status, each already resolved by core-api to
-   *  the command that runs it. The backend is the authority on that resolution —
-   *  the panel derives only presentation from it. */
+   *  transitions grouped by source status, each carrying the action the manager
+   *  declared for it. The flow is the authority on what an edge does — the panel
+   *  derives only presentation from it, and maps the declared action to an
+   *  endpoint. */
   getWorkflowActions(): Promise<WorkflowActionsDto>;
   /** The manager-configured brand color (QUE-36) applied to `--accent` (QUE-37 AC6). */
   getBrandColor(): Promise<BrandConfigSlice>;
   // Command surface (FR-CLR-02 / FR-ENG-03) -------------------------------
+  /** Counter-level: pick and call this counter's next ticket by routing +
+   *  priority. Not a per-ticket transition, which is why it survives alongside
+   *  {@link applyTransition}. */
   callNext(counterId: number): Promise<void>;
-  serve(ticketId: string): Promise<void>;
-  complete(ticketId: string): Promise<void>;
-  skip(ticketId: string): Promise<void>;
-  recall(ticketId: string): Promise<void>;
-  /** Re-announce the currently-calling ticket ("Panggil Lagi") — re-emits
-   *  TICKET_CALLED without a state change; only valid from CALLING. */
+  /** Repeat the announcement for the currently-calling ticket ("Panggil Lagi").
+   *  Not a transition — no state change, and it needs no `CALLING -> CALLING`
+   *  edge, so it works on a stock flow. */
   reannounce(ticketId: string): Promise<void>;
+  /** "Pindah kategori" (FR-CLR-03): move the ticket to `targetCategoryId`. It
+   *  always lands back in the queue — a re-issued per-category number describes a
+   *  ticket nobody has served — so there is no target status to send. The one
+   *  command beside {@link applyTransition}, because the destination category is an
+   *  argument no flow can hold. */
   transfer(ticketId: string, targetCategoryId: string): Promise<void>;
-  /** Generic apply-transition (QUE-33): drives a wizard-configurable edge to
-   *  an arbitrary target state not covered by the six fixed commands. */
-  applyTransition(ticketId: string, targetStatus: string): Promise<void>;
+  /**
+   * Run one configured transition — **the** per-ticket state-change command. Any
+   * target the active flow allows, canonical or custom; core-api's aggregate owns
+   * the side effects of arriving in that state. `counterId` is this panel's bound
+   * counter, needed only for a transition into CALLING (which has to announce the
+   * ticket somewhere).
+   *
+   * There is no serve/complete/skip/recall method beside it: a per-target command
+   * surface forced something to decide which endpoint a given edge needed, and
+   * that decision cannot be derived from the edge's endpoints — the rule for
+   * WAITING turned a re-queue into a category move.
+   */
+  applyTransition(ticketId: string, targetStatus: string, counterId?: number): Promise<void>;
 }
 
 const API_BASE = '/api';
@@ -181,7 +197,7 @@ async function postJson<T>(path: string, body: unknown, opts: AuthOptions = {}):
  * Fetch-based {@link ICallerApi} using relative `/api` URLs — same-origin behind
  * NGINX in production, proxied to core-api:3000 by Vite in dev. No remote calls
  * (NFR-REL-01). Command endpoints map to the core-api `QueueCommandsController`
- * (`POST /api/queue/call-next`, `…/:id/serve|complete|skip|recall|reannounce|transfer`).
+ * (`POST /api/queue/call-next`, `…/:id/transition|transfer|reannounce`).
  *
  * The optional `onUnauthorized` constructor option overrides the default 401
  * redirect (tests inject a spy); production constructs `new CallerApi()` with
@@ -288,26 +304,6 @@ export class CallerApi implements ICallerApi {
       () => undefined,
     );
   }
-  serve(ticketId: string): Promise<void> {
-    return postEmpty(`/queue/${encodeURIComponent(ticketId)}/serve`, {
-      onUnauthorized: this.onUnauthorized,
-    });
-  }
-  complete(ticketId: string): Promise<void> {
-    return postEmpty(`/queue/${encodeURIComponent(ticketId)}/complete`, {
-      onUnauthorized: this.onUnauthorized,
-    });
-  }
-  skip(ticketId: string): Promise<void> {
-    return postEmpty(`/queue/${encodeURIComponent(ticketId)}/skip`, {
-      onUnauthorized: this.onUnauthorized,
-    });
-  }
-  recall(ticketId: string): Promise<void> {
-    return postEmpty(`/queue/${encodeURIComponent(ticketId)}/recall`, {
-      onUnauthorized: this.onUnauthorized,
-    });
-  }
   reannounce(ticketId: string): Promise<void> {
     return postEmpty(`/queue/${encodeURIComponent(ticketId)}/reannounce`, {
       onUnauthorized: this.onUnauthorized,
@@ -320,10 +316,10 @@ export class CallerApi implements ICallerApi {
       { onUnauthorized: this.onUnauthorized },
     ).then(() => undefined);
   }
-  applyTransition(ticketId: string, targetStatus: string): Promise<void> {
+  applyTransition(ticketId: string, targetStatus: string, counterId?: number): Promise<void> {
     return postJson(
       `/queue/${encodeURIComponent(ticketId)}/transition`,
-      { targetStatus },
+      counterId === undefined ? { targetStatus } : { targetStatus, counterId },
       { onUnauthorized: this.onUnauthorized },
     ).then(() => undefined);
   }

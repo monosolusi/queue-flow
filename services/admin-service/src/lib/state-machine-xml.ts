@@ -63,6 +63,7 @@
  * | `transitions[].to` | `<transition><target>` |
  * | `transitions[].from` | the CONTAINING node's `<name>` (nesting) |
  * | `transitions[].sourceSide`/`targetSide` | transition `<metadata>` JSON (sparse) |
+ * | `transitions[].action` | transition `<metadata>` JSON `action` (sparse) |
  * | `positions[name]` | node `<metadata>` JSON `xy` |
  * | `descriptions[name]` | node `<metadata>` JSON `description` (sparse) |
  * | `nodeActions[name]` | `<actions><action>` + action `<metadata>` JSON |
@@ -96,10 +97,12 @@ import {
   autoLayout,
   DEFAULT_SOURCE_SIDE,
   DEFAULT_TARGET_SIDE,
+  DEFAULT_TRANSITION_ACTION,
   deriveAutoSources,
   EDGE_SIDES,
   isDefaultSides,
   stateDegrees,
+  TRANSITION_ACTIONS,
   validateCustomStateMachine,
   type StateMachineForm,
   type Transition,
@@ -110,6 +113,7 @@ import type {
   NodeActionExecutionType,
   NodeActionType,
   TerminalNodeStateDto,
+  TransitionActionType,
 } from '../api/types';
 
 // `EdgeSide` is the wire enum `'top'|'right'|'bottom'|'left'` (from
@@ -440,18 +444,33 @@ export function formToXml(form: StateMachineForm): string {
         // on parse. Emitted on every transition (not sparse) because Kaleo's
         // sample carries it and its meaning is positional, not optional.
         lines.push(`        <default>${i === 0 ? 'true' : 'false'}</default>`);
-        // Connection sides ride the transition `<metadata>` ONLY when non-default
-        // (`!isDefaultSides`), and then BOTH are written so the source never
-        // shows a half-routed edge. This mirrors the sparse
-        // {@link toEdgeRoutingLayoutDto} wire map — the source is the
-        // human-readable twin of the wire map, so they omit the same entries.
+        // The transition `<metadata>` carries the two facets Kaleo has no slot
+        // for, each SPARSE — omitted at its default — so a default-shaped graph
+        // emits no metadata element at all:
+        //
+        // - connection sides, and then BOTH are written so the source never
+        //   shows a half-routed edge. This mirrors the sparse
+        //   {@link toEdgeRoutingLayoutDto} wire map — the source is the
+        //   human-readable twin of the wire map, so they omit the same entries.
+        // - `action`: what running the edge DOES. Omitted for the
+        //   `UPDATE_STATUS` default, so only a manager-declared category move
+        //   appears in the source. It rides metadata rather than a Kaleo element
+        //   because Kaleo has no per-transition action concept — its `<action>`
+        //   lives on nodes.
+        const transitionMeta: Record<string, unknown> = {};
         if (!isDefaultSides(t.sourceSide, t.targetSide)) {
-          lines.push(
-            `        ${metadataElement({
-              sourceSide: t.sourceSide ?? DEFAULT_SOURCE_SIDE,
-              targetSide: t.targetSide ?? DEFAULT_TARGET_SIDE,
-            })}`,
-          );
+          transitionMeta.sourceSide = t.sourceSide ?? DEFAULT_SOURCE_SIDE;
+          transitionMeta.targetSide = t.targetSide ?? DEFAULT_TARGET_SIDE;
+        }
+        // `?? DEFAULT` is defensive against a partially-built fixture form (the
+        // field is required in `Transition`): without it an absent value would
+        // write `action: undefined`, which `JSON.stringify` drops — emitting an
+        // empty `<metadata><![CDATA[{}]]></metadata>` element on an otherwise
+        // default edge and breaking the sparse-emission contract.
+        const action = t.action ?? DEFAULT_TRANSITION_ACTION;
+        if (action !== DEFAULT_TRANSITION_ACTION) transitionMeta.action = action;
+        if (Object.keys(transitionMeta).length > 0) {
+          lines.push(`        ${metadataElement(transitionMeta)}`);
         }
         lines.push('      </transition>');
       });
@@ -649,6 +668,31 @@ function parseNodeActions(nodeEl: Element, stateName: string): Parsed<NodeAction
   return { ok: true, value: actions };
 }
 
+/**
+ * Validates the `action` out of a transition's metadata — what running the edge
+ * does. Absent → the {@link DEFAULT_TRANSITION_ACTION} the serializer omits it
+ * for, which is also what every edge authored before the field existed means.
+ *
+ * The accepted set is DERIVED from {@link TRANSITION_ACTIONS}, the same list the
+ * dropdown derives its options from — so widening the union teaches the codec and
+ * the UI in one edit. An earlier action-type parser here hardcoded its one
+ * accepted literal and would have silently rejected a value the dropdown had
+ * already started offering. It reads the action LIST rather than the label map, so
+ * this codec depends on no presentation copy.
+ */
+function parseTransitionAction(value: unknown, from: string): Parsed<TransitionActionType> {
+  if (value === undefined) return { ok: true, value: DEFAULT_TRANSITION_ACTION };
+  if (typeof value === 'string' && (TRANSITION_ACTIONS as readonly string[]).includes(value)) {
+    return { ok: true, value: value as TransitionActionType };
+  }
+  return {
+    ok: false,
+    error: `"action" pada transisi dari status '${from}' harus salah satu dari ${TRANSITION_ACTIONS
+      .map((k) => `"${k}"`)
+      .join(', ')}.`,
+  };
+}
+
 /** Validates one connection-side value out of a transition's metadata. Absent →
  *  `undefined` (default routing). The side enum is validated HERE (the parse
  *  boundary), NOT in `validateCustomStateMachine` — sides are layout, not graph
@@ -692,9 +736,11 @@ function parseNodeTransitions(nodeEl: Element, from: string): Parsed<Transition[
     if (!sourceSide.ok) return sourceSide;
     const targetSide = parseSide(meta.value.targetSide, from);
     if (!targetSide.ok) return targetSide;
+    const action = parseTransitionAction(meta.value.action, from);
+    if (!action.ok) return action;
     // `<name>` and `<default>` are DERIVED on serialize (a slug of the label /
     // the first-outgoing flag), so they are read back as nothing at all.
-    const transition: Transition = { from, to, actionLabel };
+    const transition: Transition = { from, to, actionLabel, action: action.value };
     if (sourceSide.value !== undefined) transition.sourceSide = sourceSide.value;
     if (targetSide.value !== undefined) transition.targetSide = targetSide.value;
     transitions.push(transition);

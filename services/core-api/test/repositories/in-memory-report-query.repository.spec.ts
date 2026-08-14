@@ -47,8 +47,8 @@ describe('InMemoryReportQueryRepository (QUE-26 CQRS read side)', () => {
     // Ticket 1 (A): wait 10s, service 30s.
     const t1 = newTicket(catA.id.value, DAY_START + 1000);
     t1.markCalling(1, policy, DAY_START + 11000); // calledAt - createdAt = 10000
-    t1.startServing(policy, DAY_START + 12000);
-    t1.complete(policy, DAY_START + 42000); // completedAt - servedAt = 30000
+    t1.applyTransition('SERVING', policy, DAY_START + 12000);
+    t1.applyTransition('COMPLETED', policy, DAY_START + 42000); // completedAt - servedAt = 30000
     t1.pullDomainEvents();
 
     // Ticket 2 (A): still waiting — contributes to total + per-category count, but not averages.
@@ -99,8 +99,8 @@ describe('InMemoryReportQueryRepository (QUE-26 CQRS read side)', () => {
 
     const prior = newTicket(catA.id.value, DAY_START - MS_PER_DAY + 1000); // previous day
     prior.markCalling(1, policy, DAY_START - MS_PER_DAY + 11000);
-    prior.startServing(policy, DAY_START - MS_PER_DAY + 12000);
-    prior.complete(policy, DAY_START - MS_PER_DAY + 42000);
+    prior.applyTransition('SERVING', policy, DAY_START - MS_PER_DAY + 12000);
+    prior.applyTransition('COMPLETED', policy, DAY_START - MS_PER_DAY + 42000);
     prior.pullDomainEvents();
     await queue.save(prior);
     // A daily reset relocated prior-day tickets to the archive.
@@ -132,21 +132,21 @@ describe('InMemoryReportQueryRepository (QUE-26 CQRS read side)', () => {
 
     const t1 = newTicket(catA.id.value, DAY_START + 1000);
     t1.markCalling(1, policy, DAY_START + 11000);
-    t1.startServing(policy, DAY_START + 12000);
-    t1.complete(policy, DAY_START + 42000); // service 30000
+    t1.applyTransition('SERVING', policy, DAY_START + 12000);
+    t1.applyTransition('COMPLETED', policy, DAY_START + 42000); // service 30000
     t1.pullDomainEvents();
 
     const t2 = newTicket(catA.id.value, DAY_START + 2000);
     t2.markCalling(1, policy, DAY_START + 12000);
-    t2.startServing(policy, DAY_START + 13000);
-    t2.complete(policy, DAY_START + 49000); // service 36000
+    t2.applyTransition('SERVING', policy, DAY_START + 13000);
+    t2.applyTransition('COMPLETED', policy, DAY_START + 49000); // service 36000
     t2.pullDomainEvents();
 
     // A ticket called to a different counter does not count.
     const t3 = newTicket(catA.id.value, DAY_START + 3000);
     t3.markCalling(2, policy, DAY_START + 13000);
-    t3.startServing(policy, DAY_START + 14000);
-    t3.complete(policy, DAY_START + 50000);
+    t3.applyTransition('SERVING', policy, DAY_START + 14000);
+    t3.applyTransition('COMPLETED', policy, DAY_START + 50000);
     t3.pullDomainEvents();
 
     await queue.save(t1);
@@ -172,8 +172,8 @@ describe('InMemoryReportQueryRepository (QUE-26 CQRS read side)', () => {
       // Day 1: one completed ticket (wait 10s, service 30s).
       const t1 = newTicket(catA.id.value, DAY_START + 1000);
       t1.markCalling(1, policy, DAY_START + 11000);
-      t1.startServing(policy, DAY_START + 12000);
-      t1.complete(policy, DAY_START + 42000);
+      t1.applyTransition('SERVING', policy, DAY_START + 12000);
+      t1.applyTransition('COMPLETED', policy, DAY_START + 42000);
       t1.pullDomainEvents();
 
       // Day 2: one waiting ticket (no call).
@@ -233,15 +233,15 @@ describe('InMemoryReportQueryRepository (QUE-26 CQRS read side)', () => {
       // Day 1 counter 1 cat A: completed (service 30s).
       const t1 = newTicket(catA.id.value, DAY_START + 1000);
       t1.markCalling(1, policy, DAY_START + 11000);
-      t1.startServing(policy, DAY_START + 12000);
-      t1.complete(policy, DAY_START + 42000);
+      t1.applyTransition('SERVING', policy, DAY_START + 12000);
+      t1.applyTransition('COMPLETED', policy, DAY_START + 42000);
       t1.pullDomainEvents();
 
       // Day 2 counter 1 cat B: completed (service 40s).
       const t2 = newTicket(catB.id.value, DAY_START + MS_PER_DAY + 1000);
       t2.markCalling(1, policy, DAY_START + MS_PER_DAY + 11000);
-      t2.startServing(policy, DAY_START + MS_PER_DAY + 12000);
-      t2.complete(policy, DAY_START + MS_PER_DAY + 52000);
+      t2.applyTransition('SERVING', policy, DAY_START + MS_PER_DAY + 12000);
+      t2.applyTransition('COMPLETED', policy, DAY_START + MS_PER_DAY + 52000);
       t2.pullDomainEvents();
 
       // Day 2 counter 2 cat A: waiting (not served).
@@ -298,8 +298,8 @@ describe('InMemoryReportQueryRepository (QUE-26 CQRS read side)', () => {
 
       const prior = newTicket(catA.id.value, DAY_START - MS_PER_DAY + 1000); // 2026-07-31
       prior.markCalling(1, policy, DAY_START - MS_PER_DAY + 11000);
-      prior.startServing(policy, DAY_START - MS_PER_DAY + 12000);
-      prior.complete(policy, DAY_START - MS_PER_DAY + 42000);
+      prior.applyTransition('SERVING', policy, DAY_START - MS_PER_DAY + 12000);
+      prior.applyTransition('COMPLETED', policy, DAY_START - MS_PER_DAY + 42000);
       prior.pullDomainEvents();
       await queue.save(prior);
       await queue.archiveTicketsBefore(DAY_START); // archive 2026-07-31

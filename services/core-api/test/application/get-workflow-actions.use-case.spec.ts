@@ -1,10 +1,9 @@
 import {
   GetWorkflowActionsUseCase,
   type WorkflowActionDto,
-  type WorkflowCommand,
 } from '../../src/application/queue';
 import type { ITransitionPolicyResolver } from '../../src/domain/queue';
-import { SystemNotConfiguredException } from '../../src/domain/shared';
+import { SystemNotConfiguredException, TransitionAction } from '../../src/domain/shared';
 import {
   StateMachine,
   StateSchema,
@@ -12,119 +11,149 @@ import {
 } from '../../src/domain/store-config';
 import { fakePolicyResolver } from './test-doubles';
 
+/** `[from, to, actionLabel, action?]` — `action` omitted means UPDATE_STATUS. */
+type EdgeSpec = readonly [string, string, string, TransitionAction?];
+
 /**
  * Builds a real {@link StateMachine} (not a hand-rolled fake) over exactly the
  * given edges, deriving the schema from the states they mention. Using the real
  * policy implementation means these specs also cover `describeGraph()`, the
- * enumeration capability the use case reads the graph through.
+ * enumeration capability the use case reads the graph through — including whether
+ * it carries each edge's declared action.
  */
 function machineOf(
-  edges: readonly (readonly [string, string, string])[],
+  edges: readonly EdgeSpec[],
   extraStates: readonly string[] = [],
 ): StateMachine {
   const states = [...new Set([...edges.flatMap(([from, to]) => [from, to]), ...extraStates])];
   return new StateMachine(
     StateSchema.of(states),
-    edges.map(([from, to, label]) => StateTransitionRule.of(from, to, label)),
+    edges.map((e) => StateTransitionRule.of(e[0], e[1], e[2], e[3])),
   );
 }
 
 /** Runs the use case against a policy built from `edges`. */
 async function actionsFor(
-  edges: readonly (readonly [string, string, string])[],
+  edges: readonly EdgeSpec[],
   extraStates: readonly string[] = [],
 ) {
   const useCase = new GetWorkflowActionsUseCase(fakePolicyResolver(machineOf(edges, extraStates)));
   return (await useCase.execute()).byStatus;
 }
 
-describe('GetWorkflowActionsUseCase (which command realizes each configured edge)', () => {
-  describe('resolution table — the backend is the authority for edge -> command', () => {
-    // Every rule, keyed on the (from, to) pair. `PAYMENT` / `PREPARING` stand in
-    // for wizard-configured custom states.
-    const cases: readonly [
-      from: string,
-      to: string,
-      command: WorkflowCommand | null,
-      reason: WorkflowActionDto['unavailableReason'],
-    ][] = [
-      // Into CALLING — three distinct commands plus a dead end.
-      ['WAITING', 'CALLING', 'CALL_NEXT', null],
-      ['SKIPPED', 'CALLING', 'RECALL', null],
-      ['CALLING', 'CALLING', 'REANNOUNCE', null],
-      ['SERVING', 'CALLING', null, 'NO_COMMAND'],
-      ['COMPLETED', 'CALLING', null, 'NO_COMMAND'],
-      ['PAYMENT', 'CALLING', null, 'NO_COMMAND'],
-      // Into WAITING — the category move, self-loop included.
-      ['CALLING', 'WAITING', 'TRANSFER', null],
-      ['WAITING', 'WAITING', 'TRANSFER', null],
-      ['SERVING', 'WAITING', 'TRANSFER', null],
-      ['SKIPPED', 'WAITING', 'TRANSFER', null],
-      ['COMPLETED', 'WAITING', 'TRANSFER', null],
-      ['PAYMENT', 'WAITING', 'TRANSFER', null],
-      // The remaining canonical targets — dedicated commands.
-      ['CALLING', 'SERVING', 'SERVE', null],
-      ['PAYMENT', 'SERVING', 'SERVE', null],
-      ['SERVING', 'COMPLETED', 'COMPLETE', null],
-      ['PAYMENT', 'COMPLETED', 'COMPLETE', null],
-      ['CALLING', 'SKIPPED', 'SKIP', null],
-      ['WAITING', 'SKIPPED', 'SKIP', null],
-      // Custom (non-canonical) targets — the generic transition endpoint.
-      ['SERVING', 'PAYMENT', 'APPLY_TRANSITION', null],
-      ['CALLING', 'PREPARING', 'APPLY_TRANSITION', null],
-      ['PAYMENT', 'PREPARING', 'APPLY_TRANSITION', null],
-      // Self-loops that are neither a re-announce nor a transfer: the aggregate
-      // short-circuits on `from === target`, so no command changes anything.
-      ['SERVING', 'SERVING', null, 'NO_STATUS_CHANGE'],
-      ['COMPLETED', 'COMPLETED', null, 'NO_STATUS_CHANGE'],
-      ['SKIPPED', 'SKIPPED', null, 'NO_STATUS_CHANGE'],
-      ['PAYMENT', 'PAYMENT', null, 'NO_STATUS_CHANGE'],
+describe('GetWorkflowActionsUseCase (publishing the flow as the counter panel surface)', () => {
+  describe('the declared action is passed through, never inferred from the edge', () => {
+    // The pairs the deleted resolution table used to key on. What matters now is
+    // that the endpoints have NO influence on the published action — only the
+    // manager's declaration does. `PAYMENT` / `PREPARING` stand in for
+    // wizard-configured custom states.
+    const pairs: readonly (readonly [string, string])[] = [
+      ['WAITING', 'CALLING'],
+      ['SKIPPED', 'CALLING'],
+      ['SERVING', 'CALLING'],
+      ['COMPLETED', 'CALLING'],
+      ['PAYMENT', 'CALLING'],
+      ['CALLING', 'WAITING'],
+      ['SERVING', 'WAITING'],
+      ['SKIPPED', 'WAITING'],
+      ['COMPLETED', 'WAITING'],
+      ['PAYMENT', 'WAITING'],
+      ['CALLING', 'SERVING'],
+      ['PAYMENT', 'SERVING'],
+      ['SERVING', 'COMPLETED'],
+      ['PAYMENT', 'COMPLETED'],
+      ['CALLING', 'SKIPPED'],
+      ['WAITING', 'SKIPPED'],
+      ['SERVING', 'PAYMENT'],
+      ['CALLING', 'PREPARING'],
+      ['PAYMENT', 'PREPARING'],
     ];
 
-    it.each(cases)('%s -> %s resolves to %s / %s', async (from, to, command, reason) => {
+    it.each(pairs)('%s -> %s defaults to UPDATE_STATUS and is runnable', async (from, to) => {
       const byStatus = await actionsFor([[from, to, 'Aksi']]);
 
       expect(byStatus[from]).toEqual([
-        { from, to, actionLabel: 'Aksi', command, unavailableReason: reason },
+        { from, to, actionLabel: 'Aksi', action: 'UPDATE_STATUS', unavailableReason: null },
       ]);
     });
 
-    it('exactly one of command / unavailableReason is non-null for every rule', async () => {
-      for (const [from, to] of cases) {
-        const [action] = (await actionsFor([[from, to, 'Aksi']]))[from];
-        expect(action.command === null).toBe(action.unavailableReason !== null);
-      }
+    it.each(pairs)(
+      '%s -> %s is a category transfer when — and only when — declared one',
+      async (from, to) => {
+        const byStatus = await actionsFor([
+          [from, to, 'Pindah Kategori', TransitionAction.TRANSFER_CATEGORY],
+        ]);
+
+        expect(byStatus[from]).toEqual([
+          {
+            from,
+            to,
+            actionLabel: 'Pindah Kategori',
+            action: 'TRANSFER_CATEGORY',
+            unavailableReason: null,
+          },
+        ]);
+      },
+    );
+
+    it('reports the manager\'s CALLING -> WAITING re-queue as a plain status change', async () => {
+      // The reported defect: this edge was published as a category move purely
+      // because its target was WAITING, so the panel rendered a "Pindah Kategori"
+      // button that demanded a destination category the counter may not serve.
+      const byStatus = await actionsFor([['CALLING', 'WAITING', 'Kembalikan ke Antrian']]);
+
+      expect(byStatus.CALLING).toEqual([
+        {
+          from: 'CALLING',
+          to: 'WAITING',
+          actionLabel: 'Kembalikan ke Antrian',
+          action: 'UPDATE_STATUS',
+          unavailableReason: null,
+        },
+      ]);
     });
   });
 
-  describe('self-loop ordering — the two meaningful self-loops are decided first', () => {
-    it('CALLING -> CALLING is a re-announce, not NO_STATUS_CHANGE', async () => {
-      const byStatus = await actionsFor([['CALLING', 'CALLING', 'Panggil Lagi']]);
+  describe('the one remaining ruling: would running the edge do anything?', () => {
+    const selfLoops: readonly [
+      state: string,
+      action: TransitionAction,
+      reason: WorkflowActionDto['unavailableReason'],
+    ][] = [
+      // A re-announcement IS the point of drawing CALLING -> CALLING.
+      ['CALLING', TransitionAction.UPDATE_STATUS, null],
+      // A category move is a real change whether or not the status also moves.
+      ['WAITING', TransitionAction.TRANSFER_CATEGORY, null],
+      ['PAYMENT', TransitionAction.TRANSFER_CATEGORY, null],
+      // Everything else short-circuits in the aggregate: 200, no change, no
+      // broadcast — which reads as a broken panel unless we say so.
+      ['WAITING', TransitionAction.UPDATE_STATUS, 'NO_STATUS_CHANGE'],
+      ['SERVING', TransitionAction.UPDATE_STATUS, 'NO_STATUS_CHANGE'],
+      ['COMPLETED', TransitionAction.UPDATE_STATUS, 'NO_STATUS_CHANGE'],
+      ['SKIPPED', TransitionAction.UPDATE_STATUS, 'NO_STATUS_CHANGE'],
+      ['PAYMENT', TransitionAction.UPDATE_STATUS, 'NO_STATUS_CHANGE'],
+    ];
 
-      expect(byStatus.CALLING[0]).toMatchObject({
-        command: 'REANNOUNCE',
-        unavailableReason: null,
-      });
-    });
+    it.each(selfLoops)(
+      'a %s self-loop declared %s reports %s',
+      async (state, action, reason) => {
+        const byStatus = await actionsFor([[state, state, 'Aksi', action]]);
 
-    it('WAITING -> WAITING is a transfer, not NO_STATUS_CHANGE', async () => {
-      // `transferTo` deliberately does not short-circuit on `from === to` — a
-      // transfer is a category move whether or not the status also changes.
-      const byStatus = await actionsFor([['WAITING', 'WAITING', 'Pindah Kategori']]);
+        expect(byStatus[state][0].unavailableReason).toBe(reason);
+      },
+    );
 
-      expect(byStatus.WAITING[0]).toMatchObject({
-        command: 'TRANSFER',
-        unavailableReason: null,
-      });
-    });
+    it('never marks a real transition unavailable', async () => {
+      const byStatus = await actionsFor([
+        ['WAITING', 'CALLING', 'Panggil Berikutnya'],
+        ['CALLING', 'WAITING', 'Kembalikan ke Antrian'],
+        ['CALLING', 'PAYMENT', 'Ke Pembayaran'],
+        ['PAYMENT', 'COMPLETED', 'Selesai'],
+      ]);
 
-    it('a custom-state self-loop still falls through to NO_STATUS_CHANGE', async () => {
-      const byStatus = await actionsFor([['PAYMENT', 'PAYMENT', 'Ulangi Pembayaran']]);
-
-      expect(byStatus.PAYMENT[0]).toMatchObject({
-        command: null,
-        unavailableReason: 'NO_STATUS_CHANGE',
-      });
+      const all = Object.values(byStatus).flat();
+      expect(all).toHaveLength(4);
+      expect(all.every((a) => a.unavailableReason === null)).toBe(true);
     });
   });
 
@@ -140,7 +169,7 @@ describe('GetWorkflowActionsUseCase (which command realizes each configured edge
             from: 'WAITING',
             to: 'CALLING',
             actionLabel: 'Panggil Berikutnya',
-            command: 'CALL_NEXT',
+            action: 'UPDATE_STATUS',
             unavailableReason: null,
           },
         ],
@@ -149,14 +178,14 @@ describe('GetWorkflowActionsUseCase (which command realizes each configured edge
             from: 'CALLING',
             to: 'SERVING',
             actionLabel: 'Mulai Melayani',
-            command: 'SERVE',
+            action: 'UPDATE_STATUS',
             unavailableReason: null,
           },
           {
             from: 'CALLING',
             to: 'SKIPPED',
             actionLabel: 'Lewati / Absen',
-            command: 'SKIP',
+            action: 'UPDATE_STATUS',
             unavailableReason: null,
           },
         ],
@@ -165,7 +194,7 @@ describe('GetWorkflowActionsUseCase (which command realizes each configured edge
             from: 'SERVING',
             to: 'COMPLETED',
             actionLabel: 'Selesai Layan',
-            command: 'COMPLETE',
+            action: 'UPDATE_STATUS',
             unavailableReason: null,
           },
         ],
@@ -174,7 +203,7 @@ describe('GetWorkflowActionsUseCase (which command realizes each configured edge
             from: 'SKIPPED',
             to: 'CALLING',
             actionLabel: 'Panggil Ulang',
-            command: 'RECALL',
+            action: 'UPDATE_STATUS',
             unavailableReason: null,
           },
         ],
@@ -198,21 +227,21 @@ describe('GetWorkflowActionsUseCase (which command realizes each configured edge
         ['CALLING', 'SERVING', 'Mulai Melayani'],
         ['CALLING', 'SKIPPED', 'Lewati / Absen'],
         ['CALLING', 'PAYMENT', 'Ke Pembayaran'],
-        ['CALLING', 'CALLING', 'Panggil Lagi'],
+        ['CALLING', 'WAITING', 'Pindah Kategori', TransitionAction.TRANSFER_CATEGORY],
       ]);
 
-      expect(byStatus.CALLING.map((a) => [a.to, a.command])).toEqual([
-        ['SERVING', 'SERVE'],
-        ['SKIPPED', 'SKIP'],
-        ['PAYMENT', 'APPLY_TRANSITION'],
-        ['CALLING', 'REANNOUNCE'],
+      expect(byStatus.CALLING.map((a) => [a.to, a.action])).toEqual([
+        ['SERVING', 'UPDATE_STATUS'],
+        ['SKIPPED', 'UPDATE_STATUS'],
+        ['PAYMENT', 'UPDATE_STATUS'],
+        ['WAITING', 'TRANSFER_CATEGORY'],
       ]);
     });
 
     it('carries the configured Indonesian action label verbatim', async () => {
-      const byStatus = await actionsFor([['CALLING', 'WAITING', 'Pindah Kategori']]);
+      const byStatus = await actionsFor([['CALLING', 'WAITING', 'Kembalikan ke Antrian']]);
 
-      expect(byStatus.CALLING[0].actionLabel).toBe('Pindah Kategori');
+      expect(byStatus.CALLING[0].actionLabel).toBe('Kembalikan ke Antrian');
     });
   });
 
@@ -243,7 +272,7 @@ describe('GetWorkflowActionsUseCase (which command realizes each configured edge
           from: 'CALLING',
           to: 'CALLING',
           actionLabel: 'Panggil Lagi',
-          command: 'REANNOUNCE',
+          action: 'UPDATE_STATUS',
           unavailableReason: null,
         },
       ]);
