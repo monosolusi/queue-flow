@@ -196,8 +196,8 @@ export class GetSystemConfigurationUseCase {
         // positions (Start/End stay the pre-marker-persistence auto-derived
         // canvas-only nodes on a clean store).
         terminalNodes: TerminalNodes.DEFAULT.toDto(),
-        // Default end sources — empty array = no explicit end sources (the End
-        // marker falls back to the auto-derived sink behavior on a clean store).
+        // Default end sources — empty array = none recorded on a clean store
+        // (how the admin canvas renders that is its own presentation concern).
         endSources: EndSources.DEFAULT.toDto(),
         // Default printer configuration — chrome mode = zero behavior change
         // (the kiosk keeps using Chrome's print dialog), so a clean store

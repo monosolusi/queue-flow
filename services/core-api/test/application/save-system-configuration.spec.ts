@@ -817,7 +817,7 @@ describe('SaveSystemConfigurationUseCase — endSources', () => {
     expect(await repos.config.get()).toBeNull();
   });
 
-  it('accepts an empty endSources (DEFAULT — auto-derived sink behavior)', async () => {
+  it('accepts an empty endSources (DEFAULT — none recorded)', async () => {
     const repos = buildUseCase();
     const useCase = new SaveSystemConfigurationUseCase(
       repos.config,

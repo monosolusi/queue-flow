@@ -700,7 +700,7 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
     expect(cfg.body.endSources).toEqual(sources);
   });
 
-  it('a clean store prefills endSources with [] (auto-derived sink behavior)', async () => {
+  it('a clean store prefills endSources with [] (none recorded)', async () => {
     const res = await request(app.getHttpServer()).get('/api/system/config');
     expect(res.status).toBe(200);
     expect(res.body.endSources).toEqual([]);

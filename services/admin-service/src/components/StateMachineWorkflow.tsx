@@ -70,6 +70,7 @@ import {
   type StateMachineForm,
   defaultStateMachineForm,
   graphSignature,
+  reconcileStateNameRefs,
   updateStateDescription,
 } from '../lib/state-machine';
 import {
@@ -239,33 +240,48 @@ export function StateMachineWorkflow({
   // description is CANVAS-ONLY (`flowToGraph` ignores it), so this never changes
   // the wire form.
   const commit = useCallback(
-    (nextNodes: FlowNode[], nextEdges: FlowEdge[]) => {
+    (
+      nextNodes: FlowNode[],
+      nextEdges: FlowEdge[],
+      rename?: { from: string; to: string },
+    ) => {
       const { states, transitions, positions, terminalNodes } = flowToGraph(
         nextNodes,
         nextEdges,
         value.terminalNodes,
       );
-      // `nodeActions` + `descriptions` are panel-only (not canvas-rendered), so
-      // `flowToGraph` ignores them (like `mode`). Carry them from `value` so a
-      // canvas commit preserves them across the `flowToGraph` round-trip —
-      // mirrors how `mode` is preserved from `value.mode` below. `terminalNodes`
-      // IS canvas-rendered → `flowToGraph` captures it (pinned markers → {x,y},
-      // auto markers → 'auto', absent markers preserved via `value.terminalNodes`).
+      // `nodeActions`, `descriptions` and `endSources` all reference states BY
+      // NAME, and `flowToGraph` rebuilds `states` from the canvas nodes — so a
+      // delete/rename here can strand an entry pointing at a state that no
+      // longer exists. The save use case cross-checks all three and 400s on a
+      // stale entry, and no panel lists it (they all render live states only),
+      // so the manager would be locked out of saving with no in-app way to fix
+      // it. `reconcileStateNameRefs` prunes the dead names and REMAPS the
+      // renamed one (a rename must carry the manager's work to the new name,
+      // not silently drop it). `positions` needs no such pass — `flowToGraph`
+      // rebuilds it from the live nodes. Callers that rename pass `rename`;
+      // every other caller prunes only.
+      const { nodeActions, descriptions, endSources } = reconcileStateNameRefs(
+        {
+          nodeActions: value.nodeActions,
+          descriptions: value.descriptions,
+          endSources: value.endSources,
+        },
+        states,
+        rename,
+      );
+      // `terminalNodes` IS canvas-rendered → `flowToGraph` captures it (pinned
+      // markers → {x,y}, auto markers → 'auto', absent markers preserved via
+      // `value.terminalNodes`). `mode` is panel-only, carried from `value`.
       const form: StateMachineForm = {
         mode: value.mode,
         states,
         transitions,
         positions,
-        nodeActions: value.nodeActions,
-        descriptions: value.descriptions,
+        nodeActions,
+        descriptions,
         terminalNodes,
-        // `endSources` is canvas-rendered (the explicit End edges re-derive
-        // from it in `formToFlowWithMarkers`) but NOT captured by `flowToGraph`
-        // (terminal edges are filtered, so the form's `endSources` is the sole
-        // source of truth). Carry it from `value` so a canvas commit preserves
-        // the explicit End connections across the `flowToGraph` round-trip
-        // (mirrors `nodeActions`/`descriptions`).
-        endSources: value.endSources,
+        endSources,
       };
       // REBUILD the marker nodes from the form so auto markers re-attach to the
       // (possibly moved) state bounds after a state drag — an auto marker's
@@ -379,13 +395,26 @@ export function StateMachineWorkflow({
       if (to === END_NODE_ID) {
         if (isTerminalNodeId(from)) return; // End has no incoming from markers.
         // Defensive duplicate guard: the live `isValidConnection` below already
-        // rejects a duplicate (auto sink OR existing endSource), but keep the
-        // check so a real connection that bypassed the live guard never seeds
-        // a second explicit edge from the same source.
+        // rejects a repeat of an existing endSource, but keep the check so a
+        // real connection that bypassed the live guard never seeds a second
+        // edge from the same source. ANY real state may be the source —
+        // including one with no outgoing transition, which is exactly the leaf
+        // the manager now has to link by hand.
         if (hasEndSource(edges, from)) return;
         onChange({ ...value, endSources: [...value.endSources, from] });
         return;
       }
+      // Terminal-marker guard, mirroring the live `isValidConnection`. Under
+      // `ConnectionMode.Loose` React Flow can fire `onConnect` for a pair the
+      // live guard rejected (the same premise the duplicate guard below rests
+      // on), so a drag STARTED at the End marker's handle and dropped on a
+      // state would otherwise mint a real `transition` edge with source
+      // `__end` — and `flowToGraph` falls back to `e.source` for an id it
+      // cannot resolve, so `__end` would reach the wire `transitions`. That is
+      // the one path by which a canvas-only marker id can escape onto the
+      // wire, and it is newly reachable because End's handle is the only
+      // interactive terminal handle.
+      if (isTerminalNodeId(from) || isTerminalNodeId(to)) return;
       // Defensive duplicate guard: the live `isValidConnection` below already
       // rejects a duplicate during the drag, but keep the check so a real
       // connection that somehow bypassed the live guard (e.g. a future RF
@@ -428,11 +457,12 @@ export function StateMachineWorkflow({
       const from = connection.source;
       const to = connection.target;
       if (!from || !to) return true;
-      // End marker: the manager MAY drag a connection from a real state into
-      // the End marker (multiple explicit End connections allowed). Reject a
-      // duplicate (the source is already connected to End — auto sink OR an
-      // existing explicit endSource). End itself has no outgoing, and no
-      // other terminal marker may be the source of an End connection.
+      // End marker: the manager MAY drag a connection from ANY real state into
+      // the End marker (multiple End connections allowed) — including a leaf
+      // with no outgoing transition, which is the ONLY way it reaches End now
+      // that nothing is auto-linked. Reject only a repeat (the source is
+      // already an endSource). End itself has no outgoing, and no other
+      // terminal marker may be the source of an End connection.
       if (to === END_NODE_ID) {
         if (isTerminalNodeId(from)) return false;
         return !hasEndSource(edges, from);
@@ -540,8 +570,11 @@ export function StateMachineWorkflow({
         // selection mid-rename would close the panel and break the flow).
         if (selectedNodeId === oldName) setSelectedNodeId(newName);
         // `commit` refreshes the renamed node's `description` from the next form
-        // via `withDescriptions` (the placeholder above is never rendered).
-        commit(nextNodes, nextEdges);
+        // via `withDescriptions` (the placeholder above is never rendered). The
+        // `rename` arg carries the name-keyed satellite data (description, node
+        // actions, End link) across to the new name — without it `commit`'s
+        // prune would see the old name as dead and drop the manager's work.
+        commit(nextNodes, nextEdges, { from: oldName, to: newName });
       },
       onDeleteState: (name) => {
         // Cascade: drop the node + every transition referencing it so the
@@ -677,13 +710,12 @@ export function StateMachineWorkflow({
       onDropTerminal: (key, position) => {
         onChange({ ...value, terminalNodes: { ...value.terminalNodes, [key]: { x: position.x, y: position.y } } });
       },
-      // Remove an EXPLICIT End connection (a manager-drawn arrow into the End
-      // marker). Non-stamping (raw `onChange`, no `lastEmitted` stamp) so the
-      // sync effect sees `graphSignature` changed (endSources included) →
-      // re-seeds → the explicit terminal edge disappears from the canvas.
-      // Mirrors the non-stamping terminal handlers above. Auto sink→End arrows
-      // are NOT removable here (they derive from topology — delete the state's
-      // outgoing transitions or the state itself to remove one).
+      // Remove an End connection (a manager-drawn arrow into the End marker).
+      // Non-stamping (raw `onChange`, no `lastEmitted` stamp) so the sync
+      // effect sees `graphSignature` changed (endSources included) → re-seeds →
+      // the terminal edge disappears from the canvas. Mirrors the non-stamping
+      // terminal handlers above. Every incoming End edge is manager-drawn, so
+      // this removes any of them — nothing on the End marker is topology-owned.
       onRemoveEndSource: (source) => {
         onChange({ ...value, endSources: value.endSources.filter((s) => s !== source) });
       },

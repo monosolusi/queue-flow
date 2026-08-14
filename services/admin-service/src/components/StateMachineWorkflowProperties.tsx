@@ -176,13 +176,14 @@ export function StateMachineWorkflowProperties({
   // the Rules of Hooks. `view`/`setView` are read/written below.
 
   if (selectedNode) {
-    // Canvas-only terminal markers (Start/End) — auto-derived visual
-    // affordances, NOT real states. They carry no name/description on the form,
+    // Canvas-only terminal markers (Start/End) — visual affordances, NOT real
+    // states. They carry no name/description on the form,
     // so the state editor below would render a spurious editor for `__start`/
     // `__end`. Branch to a read-only marker panel first: a heading naming the
-    // marker + a hint explaining what it denotes (entry/exit). No editing
-    // controls — the manager cannot rename/delete a marker (it is derived from
-    // the topology, not a form entity); the back button returns to the palette.
+    // marker + a hint explaining what it denotes (entry/exit). No name/
+    // description editor — a marker is not a form entity; the back button
+    // returns to the palette. (The End branch below DOES carry editing
+    // controls: its incoming links are manager-owned.)
     if (selectedNode.type === "start" || selectedNode.type === "end") {
       const isStart = selectedNode.type === "start";
       const key = isStart ? "start" : "end";
@@ -194,69 +195,53 @@ export function StateMachineWorkflowProperties({
         : isHidden
           ? "Tersembunyi."
           : `Posisi ditetapkan: x=${(terminal as { x: number; y: number }).x}, y=${(terminal as { x: number; y: number }).y}`;
-      // End-marker-only: the "Transisi masuk" list. Auto sinks = states with
-      // out-degree 0 (the auto-derived sink→End arrows); explicit = the
-      // manager-drawn `endSources` entries that are NOT auto sinks (de-duped on
-      // the canvas — an endSource that is also a sink already has an auto arrow
-      // and is NOT re-listed as explicit). Each explicit row carries a "Hapus"
-      // button (lifts via `onRemoveEndSource`, non-stamping); auto rows are
-      // read-only (topology-derived — delete the state's outgoing transitions
-      // or the state itself to remove one).
+      // End-marker-only: the "Transisi masuk" list. MANUAL ONLY — every row is
+      // a manager-drawn `form.endSources` entry (filtered to live states, so a
+      // stale name from a deleted status never lists), and every row carries a
+      // "Hapus" button (lifts via `onRemoveEndSource`, non-stamping). There are
+      // no read-only "otomatis" rows any more: the End point derives nothing
+      // from the graph shape, so nothing here is beyond the manager's control
+      // (manager feedback: "node masih otomatis linked ke end, seharusnya
+      // manual linked").
       let endIncoming: JSX.Element | null = null;
       if (!isStart) {
         const stateSet = new Set(form.states);
-        const outDeg = new Map<string, number>();
-        for (const s of form.states) outDeg.set(s, 0);
-        for (const t of form.transitions) {
-          if (!stateSet.has(t.from) || !stateSet.has(t.to)) continue;
-          outDeg.set(t.from, (outDeg.get(t.from) ?? 0) + 1);
-        }
-        const autoSinks = form.states.filter((s) => (outDeg.get(s) ?? 0) === 0);
-        const autoSinkSet = new Set(autoSinks);
-        const explicit = form.endSources.filter(
-          (s) => stateSet.has(s) && !autoSinkSet.has(s),
-        );
-        const rows: JSX.Element[] = [
-          ...autoSinks.map((s) => (
-            <li
-              key={`auto-${s}`}
-              className="sm-properties__action"
-              data-testid={`panel-end-source-${s}`}
+        const incoming = form.endSources.filter((s) => stateSet.has(s));
+        const rows = incoming.map((s) => (
+          <li
+            key={s}
+            className="sm-properties__action"
+            data-testid={`panel-end-source-${s}`}
+          >
+            <span className="sm-properties__action-label">{s}</span>
+            <button
+              type="button"
+              className="sm-properties__action-delete"
+              data-testid={`panel-end-source-delete-${s}`}
+              aria-label={`Hapus transisi masuk dari ${s}`}
+              onClick={() => handlers.onRemoveEndSource(s)}
             >
-              <span className="sm-properties__action-label">{s}</span>
-              <span className="sm-properties__hint">Otomatis — status tanpa transisi keluar</span>
-            </li>
-          )),
-          ...explicit.map((s) => (
-            <li
-              key={`explicit-${s}`}
-              className="sm-properties__action"
-              data-testid={`panel-end-source-${s}`}
-            >
-              <span className="sm-properties__action-label">{s}</span>
-              <button
-                type="button"
-                className="sm-properties__action-delete"
-                data-testid={`panel-end-source-delete-${s}`}
-                aria-label={`Hapus transisi masuk dari ${s}`}
-                onClick={() => handlers.onRemoveEndSource(s)}
-              >
-                Hapus
-              </button>
-            </li>
-          )),
-        ];
+              Hapus
+            </button>
+          </li>
+        ));
         endIncoming = (
           <div className="sm-properties__field" data-testid="panel-end-incoming">
             <p className="sm-properties__label" id="panel-end-incoming-label">
               Transisi masuk
             </p>
+            {/* The drag instruction lives ONCE, in the marker description
+                above — it is always visible and explains the rule and the
+                action together. This hint owns what the description cannot:
+                what the list is, and how to undo an entry. The empty state
+                below stays actionable in its own words rather than repeating
+                the same sentence a third time. */}
             <p className="sm-properties__hint">
-              Status yang berakhir di titik akhir. Seret garis dari sebuah status ke titik akhir untuk menambahkan.
+              Daftar status yang sudah Anda sambungkan. Tekan Hapus untuk melepas sambungan.
             </p>
             {rows.length === 0 ? (
               <p className="sm-properties__hint" data-testid="panel-end-incoming-empty">
-                Belum ada transisi masuk. Seret garis dari sebuah status ke titik akhir untuk menambahkan.
+                Belum ada transisi masuk. Sambungkan sebuah status ke titik akhir untuk mengisi daftar ini.
               </p>
             ) : (
               <ul
@@ -275,10 +260,17 @@ export function StateMachineWorkflowProperties({
           {backButton}
           <p className="sm-properties__heading">{isStart ? "Titik awal alur" : "Titik akhir alur"}</p>
           <div className="sm-properties__field">
+            {/* The two markers behave differently, so the copy says so plainly.
+                Start is derived: it points at every status that has a transisi
+                keluar but no transisi masuk. End is MANUAL: it never links
+                itself to anything — the manager draws each incoming line
+                (manager feedback: "node masih otomatis linked ke end,
+                seharusnya manual linked"). SME-friendly Indonesian, no jargon
+                ("transisi", "status", "seret garis" — no graph vocabulary). */}
             <p className="sm-properties__hint" data-testid="panel-marker-description">
               {isStart
-                ? "Status awal — status yang punya transisi keluar tapi tidak punya transisi masuk. Panah keluar dari titik ini ke status pertama. Status yang belum punya transisi sama sekali tidak terhubung ke sini."
-                : "Status akhir — status yang punya transisi masuk tapi tidak punya transisi keluar. Panah masuk ke titik ini dari status terakhir. Status yang belum punya transisi sama sekali tidak terhubung ke sini. Seret garis dari sebuah status ke titik akhir untuk menambahkan transisi masuk."}
+                ? "Titik awal alur — tempat tiket baru masuk. Titik ini otomatis menunjuk ke status yang punya transisi keluar tapi tidak punya transisi masuk. Status yang belum punya transisi sama sekali tidak terhubung ke sini."
+                : "Titik akhir alur — tempat tiket selesai. Titik ini tidak pernah tersambung otomatis: tidak ada status yang masuk ke sini sampai Anda sendiri yang menyambungkannya. Seret garis dari sebuah status ke titik akhir untuk menambahkan transisi masuk."}
             </p>
             <p className="sm-properties__hint" data-testid={`panel-terminal-info-${key}`}>
               {posInfo}
@@ -322,8 +314,8 @@ export function StateMachineWorkflowProperties({
     // ≥1-transition invariant). The edges are read directly from the canvas
     // because the inline editor needs the edge `id` to call the handlers — the
     // outgoing edges are exactly `edges.filter(e => e.source === name)`.
-    // Terminal edges (sink→End) are excluded so a sink state with no real
-    // outgoing transitions shows the empty hint, not a spurious row. The
+    // Terminal edges (state→End) are excluded so a state whose only outgoing
+    // line is a manual End link shows the empty hint, not a spurious row. The
     // `actionLabel` STAYS per-Transition on the wire (unchanged) — this is a
     // presentation reframing, not a wire/domain change (the new node-level
     // "Aksi" travel the separate `nodeActions` wire map).

@@ -121,12 +121,11 @@ export function prdWizardPayload() {
     // render at derived positions (zero visual regression for the standard
     // wizard payload).
     terminalNodes: { start: 'auto', end: 'auto' },
-    // endSources: explicit "end sources" for the admin state-machine editor —
-    // the flat array of state NAMES the manager dragged an explicit arrow from
-    // into the End terminal marker. `[]` = no explicit end sources (the End
-    // marker falls back to the auto-derived sink behavior — zero visual
-    // regression for the standard wizard payload). Purely visual canvas
-    // metadata; not consumed by caller/tv/kiosk (ISP).
+    // endSources: the "end sources" for the admin state-machine editor — the
+    // flat array of state NAMES the manager dragged an arrow from into the End
+    // terminal marker. `[]` = none recorded, which is what the standard wizard
+    // payload carries. Purely visual canvas metadata; not consumed by
+    // caller/tv/kiosk (ISP).
     endSources: [],
     // printerConfiguration: which printer the kiosk uses — chrome mode = zero
     // behavior change (the kiosk keeps using Chrome's print dialog). The
