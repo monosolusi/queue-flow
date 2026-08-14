@@ -70,19 +70,6 @@ const initialState = (counterId: number): QueueState => ({
   configVersion: 0,
 });
 
-/**
- * Display-only sort for the `waiting` list. A lexicographic compare on the
- * zero-padded `A-001` format yields a deterministic category-code-major order
- * (`A-*` before `B-*`); within a category the zero-padded sequence matches
- * creation order up to 999 — past 999 (`A-1000` < `A-999` lexicographically)
- * it can invert, and across categories it is not creation order at all. That
- * is fine: this is a stable display projection only — the authoritative
- * next-ticket selection is the backend's `CallNextTicketUseCase`
- * (FIFO_GLOBAL / CATEGORY_PRIORITY), never this sort.
- */
-const byTicketNumber = (a: TicketStateDto, b: TicketStateDto) =>
-  a.ticketNumber.localeCompare(b.ticketNumber);
-
 /** Builds a reducer bound to a fixed counter + its assigned categories. */
 export function makeQueueReducer(ctx: QueueCtx) {
   return function queueReducer(state: QueueState, action: QueueAction): QueueState {
@@ -137,7 +124,13 @@ function projectEvent(state: QueueState, e: QueueLifecycleWireEvent, ctx: QueueC
         status: 'WAITING',
         counterId: null,
       };
-      const waiting = [...state.waiting, ticket].sort(byTicketNumber);
+      // A newly created ticket has `waiting_order = clock()` — the largest
+      // value in the queue — so it belongs at the BACK of the waiting list.
+      // Appending preserves the server's `waiting_order ASC` order without a
+      // re-sort, and without a refetch: the kiosk create path is frequent
+      // (every ticket), so a snapshot fetch per create would storm the
+      // endpoint. The position is provably correct from the value alone.
+      const waiting = [...state.waiting, ticket];
       return { ...state, waiting, waitingCount: waiting.length };
     }
     case 'TICKET_CALLED': {
@@ -212,10 +205,24 @@ function projectEvent(state: QueueState, e: QueueLifecycleWireEvent, ctx: QueueC
         // replaces this `waiting` entry (it filters by ticketId before re-adding),
         // so the two events converge on one bucket either way.
         const requeued: TicketStateDto = { ...ticket, status: to, counterId: null };
-        const waiting = ctx.categoryIds.has(requeued.categoryId)
-          ? [...state.waiting.filter((t) => t.ticketId !== e.aggregateId), requeued].sort(
-              byTicketNumber,
-            )
+        const mine = ctx.categoryIds.has(requeued.categoryId);
+        // A re-queue (KEEP / TO_BACK / BACK_N) re-stamps `waiting_order`, and
+        // BACK_N may renumber sibling tickets' `waiting_order` too — but the
+        // backend emits NO per-sibling WS events, only this single
+        // STATUS_UPDATED for the re-queued ticket. The RequeuePolicy is not
+        // on the wire, so the client cannot compute the correct insertion
+        // position: KEEP returns the ticket to its ORIGINAL `waiting_order`
+        // (which the client no longer knows — it was removed from `waiting`
+        // when called), BACK_N is an exact-rank insertion, TO_BACK is the
+        // end. Append optimistically so the ticket leaves the active panel
+        // instantly (and "Panggil Berikutnya" unlocks), then mark the state
+        // stale so the provider refetches the authoritative server order —
+        // which corrects the position AND picks up any BACK_N-renumbered
+        // siblings. Same live-vs-reload hazard `dedupeAppend` exists to
+        // remove for the skipped list; re-queue/transfer are infrequent
+        // staff actions, so one extra snapshot fetch is negligible.
+        const waiting = mine
+          ? [...state.waiting.filter((t) => t.ticketId !== e.aggregateId), requeued]
           : state.waiting.filter((t) => t.ticketId !== e.aggregateId);
         return {
           ...state,
@@ -223,6 +230,16 @@ function projectEvent(state: QueueState, e: QueueLifecycleWireEvent, ctx: QueueC
           skipped: state.skipped.filter((t) => t.ticketId !== e.aggregateId),
           waiting,
           waitingCount: waiting.length,
+          // Only a re-queue back into MY categories needs a refetch — the
+          // not-mine branch drops the ticket from this counter's view
+          // entirely, and a re-queue in another category does not renumber
+          // my siblings. `state.stale` is carried (not cleared) on the
+          // not-mine branch so a prior stale signal survives a not-mine
+          // event in the same sequence — e.g. a transfer-away's
+          // STATUS_UPDATED (CALLING → WAITING, mine) sets stale, then its
+          // TICKET_TRANSFERRED to another category is not-mine and must not
+          // drop the pending refetch. Do not "simplify" to `stale: mine`.
+          stale: mine ? true : state.stale,
         };
       }
       if (absent && !at) {
@@ -272,9 +289,27 @@ function projectEvent(state: QueueState, e: QueueLifecycleWireEvent, ctx: QueueC
           status: 'WAITING',
           counterId: null,
         };
-        waiting = [...waiting, ticket].sort(byTicketNumber);
+        // A transfer re-enters waiting under a new category; the aggregate
+        // intentionally PRESERVES `waiting_order` (see `transferTo`), which
+        // could place it mid-list — so appending to the end is the wrong
+        // position, but the correct one is not on the wire. Append
+        // optimistically and mark stale so the provider refetches the
+        // authoritative order. Transfers are infrequent staff actions, so
+        // the extra snapshot fetch is negligible (same trade as a re-queue
+        // and as SYSTEM_RESET).
+        waiting = [...waiting, ticket];
       }
-      return { ...state, active, skipped, waiting, waitingCount: waiting.length };
+      return {
+        ...state,
+        active,
+        skipped,
+        waiting,
+        waitingCount: waiting.length,
+        // `mine` sets stale for the refetch; the not-mine branch carries
+        // `state.stale` for the same reason the re-queue branch above does
+        // (a prior stale signal in the same sequence must survive).
+        stale: mine ? true : state.stale,
+      };
     }
     case 'SYSTEM_RESET':
       // The provider refetches the snapshot; mark stale as a signal.
@@ -318,9 +353,14 @@ function dedupePrepend(ticket: TicketStateDto, list: readonly TicketStateDto[]):
  *    reorder the list on a duplicate broadcast alone — the same mis-tap hazard
  *    this function exists to remove, in miniature.
  *
- * The waiting list keeps its own ticket-number sort (see `byTicketNumber` call
- * sites): its server order is `createdAt` ascending and that pairing predates
- * this bucket — not changed here.
+ * The waiting list preserves server array order (no client-side sort): the
+ * snapshot returns it `waiting_order ASC, created_at ASC`, and live WS events
+ * either append to the end (TICKET_CREATED, whose `waiting_order = clock()`
+ * is the largest) or mark the state stale for a refetch (re-queue / transfer,
+ * whose correct position the client cannot compute from the wire — KEEP
+ * returns to an original `waiting_order` the client no longer knows, BACK_N
+ * renumbers siblings that get no per-sibling event). Same live-vs-reload
+ * hazard, same append-or-refetch fix — not changed here.
  */
 function dedupeAppend(ticket: TicketStateDto, list: readonly TicketStateDto[]): readonly TicketStateDto[] {
   const at = list.findIndex((t) => t.ticketId === ticket.ticketId);
@@ -404,6 +444,13 @@ export function QueueStoreProvider({ bound, api, children, socketOptions }: Queu
     void refetch();
   }, [refetch]);
 
+  // Stale-driven refetch. Fires once per `stale` false→true transition, so
+  // rapid same-direction events (e.g. several re-queues before the first
+  // refetch resolves) coalesce into a single fetch — `stale` stays true and
+  // the effect does not re-fire. A snapshot that races a later commit (read
+  // before, dispatched after) resets `stale=false` and may briefly miss a
+  // position; the next WS event re-marks stale and self-heals. This is the
+  // same accepted race SYSTEM_RESET has.
   useEffect(() => {
     if (!state.stale) {
       return;

@@ -95,6 +95,28 @@ describe('queueReducer — snapshot', () => {
     expect(reducer(baseState, action).skipped.map((t) => t.ticketNumber)).toEqual(['B-003', 'A-011']);
   });
 
+  it('keeps the snapshot’s waiting order (waiting_order ASC) instead of re-sorting it', () => {
+    // The server sends this bucket `waiting_order ASC, created_at ASC` — the
+    // queue position, NOT the ticket number. A-005 can sit ahead of A-003:
+    // A-003 was re-queued to the back (TO_BACK / BACK_N) and now has the
+    // larger `waiting_order`. A client that re-sorted by ticket number would
+    // flip them to `['A-003', 'A-005']` — the live-vs-reload divergence this
+    // test pins. The fixture is in the OPPOSITE order to the ticket numbers
+    // so a ticket-number sort is the failing case, not a coincidence.
+    const action: QueueAction = {
+      type: 'SNAPSHOT_LOADED',
+      snapshot: {
+        counterId: COUNTER,
+        active: [],
+        waiting: [waitingTicket('w5', 'A-005'), waitingTicket('w3', 'A-003')],
+        waitingCount: 2,
+      },
+    };
+    const next = reducer(baseState, action);
+    expect(next.waiting.map((t) => t.ticketNumber)).toEqual(['A-005', 'A-003']);
+    expect(next.stale).toBe(false);
+  });
+
   it('SNAPSHOT_ERROR sets error state', () => {
     const next = reducer(baseState, { type: 'SNAPSHOT_ERROR', message: 'boom' });
     expect(next.loadStatus).toBe('error');
@@ -127,6 +149,29 @@ describe('queueReducer — TICKET_CREATED', () => {
     );
     next = reducer(next, event('TICKET_CREATED', 't-new', { ticketNumber: 'A-003', categoryId: 'cat-a' }));
     expect(next.waiting).toHaveLength(1);
+  });
+
+  it('preserves the server waiting order on a new ticket (does NOT re-sort by ticket number)', () => {
+    // Regression guard for the reported bug: the waiting list used to be
+    // re-sorted by `localeCompare(ticketNumber)` on every WS event, which
+    // discarded the server's `waiting_order` ordering. Seed the list in a
+    // NON-ticket-number order the server could really send (A-005 ahead of
+    // A-003 — A-003 was re-queued to the back), then create A-006. A new
+    // ticket has `waiting_order = clock()` (the largest), so it belongs at
+    // the BACK. The list must stay `['A-005', 'A-003', 'A-006']` — the
+    // failing case (old behaviour) re-sorted to `['A-003', 'A-005', 'A-006']`.
+    const seeded: QueueState = {
+      ...baseState,
+      waiting: [waitingTicket('w5', 'A-005'), waitingTicket('w3', 'A-003')],
+      waitingCount: 2,
+    };
+    const next = reducer(
+      seeded,
+      event('TICKET_CREATED', 't-new', { ticketNumber: 'A-006', categoryId: 'cat-a' }),
+    );
+    expect(next.waiting.map((t) => t.ticketNumber)).toEqual(['A-005', 'A-003', 'A-006']);
+    // The frequent kiosk create path must NOT trigger a snapshot refetch.
+    expect(next.stale).toBe(false);
   });
 });
 
@@ -188,6 +233,45 @@ describe('queueReducer — STATUS_UPDATED', () => {
     ]);
     expect(next.waiting[0].counterId).toBeNull();
     expect(next.waitingCount).toBe(1);
+    // A re-queue back into MY categories re-stamps `waiting_order` (and may
+    // renumber siblings); the correct position is not on the wire, so the
+    // store marks itself stale for the provider to refetch the authoritative
+    // order.
+    expect(next.stale).toBe(true);
+  });
+
+  it('optimistically appends a re-queued ticket to the end and marks stale (KEEP/BACK_N)', () => {
+    // The store cannot compute the re-queue position from the wire: KEEP
+    // returns the ticket to its ORIGINAL `waiting_order` (which the client
+    // no longer knows — it left `waiting` when called), BACK_N is an exact-
+    // rank insertion, TO_BACK is the end. So it appends optimistically (the
+    // ticket leaves the active panel instantly, unlocking call-next) and
+    // marks stale so the refetch corrects the position AND picks up any
+    // BACK_N-renumbered siblings (which get no per-sibling WS event).
+    //
+    // The optimistic append lands A-005 at the END — intentionally WRONG for
+    // a KEEP re-queue (its preserved `waiting_order` should put it back at
+    // the front, `['A-005', 'A-003']`). `stale` is the contract that the
+    // refetch will correct it; this test pins that contract, not the wrong
+    // interim order.
+    let next: QueueState = {
+      ...baseState,
+      waiting: [waitingTicket('w5', 'A-005'), waitingTicket('w3', 'A-003')],
+      waitingCount: 2,
+    };
+    next = reducer(next, event('TICKET_CALLED', 'w5', { ticketNumber: 'A-005', counterId: COUNTER }));
+    expect(next.active).toHaveLength(1);
+    expect(next.waiting.map((t) => t.ticketNumber)).toEqual(['A-003']);
+
+    next = reducer(next, event('STATUS_UPDATED', 'w5', { from: 'CALLING', to: 'WAITING' }));
+
+    // The ticket left the active panel — call-next unlocks.
+    expect(next.active).toHaveLength(0);
+    expect(next.skipped).toHaveLength(0);
+    // Optimistic append to the END (wrong for KEEP; corrected by refetch).
+    expect(next.waiting.map((t) => t.ticketNumber)).toEqual(['A-003', 'A-005']);
+    // The refetch contract: the provider will reload the authoritative order.
+    expect(next.stale).toBe(true);
   });
 
   it('drops a re-queued ticket whose category this counter does not serve', () => {
@@ -201,6 +285,9 @@ describe('queueReducer — STATUS_UPDATED', () => {
     next = reducer(next, event('STATUS_UPDATED', 't1', { from: 'CALLING', to: 'WAITING' }));
     expect(next.active).toHaveLength(0);
     expect(next.waiting).toHaveLength(0);
+    // A re-queue in another category does not renumber THIS counter's
+    // siblings, and the ticket left this view entirely — no refetch needed.
+    expect(next.stale).toBe(false);
   });
 
   it('re-queues a skipped ticket too, clearing it out of the skipped bucket', () => {
@@ -213,6 +300,11 @@ describe('queueReducer — STATUS_UPDATED', () => {
     );
     expect(next.skipped).toHaveLength(0);
     expect(next.waiting.map((t) => t.ticketNumber)).toEqual(['A-004']);
+    // Same re-queue branch as the from-active path: the ticket re-enters MY
+    // category (cat-a), so the store marks stale for the provider to refetch
+    // the authoritative `waiting_order` position. Pins the from-skipped
+    // branch so a future gate like `from === 'CALLING'` cannot regress it.
+    expect(next.stale).toBe(true);
   });
 
   it('removes the ticket on COMPLETED', () => {
@@ -428,6 +520,10 @@ describe('queueReducer — TICKET_TRANSFERRED', () => {
       }),
     );
     expect(next.waiting.map((t) => t.ticketNumber)).toEqual(['A-009']);
+    // A transfer re-enters waiting under a new category; the aggregate
+    // preserves `waiting_order` (could be mid-list), so the correct position
+    // is not on the wire — mark stale for the provider to refetch.
+    expect(next.stale).toBe(true);
   });
 
   it('removes the waiting ticket when transferred out of my categories', () => {
@@ -445,6 +541,8 @@ describe('queueReducer — TICKET_TRANSFERRED', () => {
       }),
     );
     expect(next.waiting).toHaveLength(0);
+    // The ticket left this counter's view entirely — no refetch needed.
+    expect(next.stale).toBe(false);
   });
 
   it('evicts the active ticket when transferred away (STATUS_UPDATED + TICKET_TRANSFERRED, FR-CLR-03)', () => {
