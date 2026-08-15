@@ -127,6 +127,12 @@ export function prdWizardPayload() {
     // payload carries. Purely visual canvas metadata; not consumed by
     // caller/tv/kiosk (ISP).
     endSources: [],
+    // startSources: the "start sources" for the admin state-machine editor — the
+    // flat array of state NAMES the manager dragged an explicit arrow from the
+    // Start terminal marker to. `[]` = none recorded, which is what the standard
+    // wizard payload carries. Purely visual canvas metadata; not consumed by
+    // caller/tv/kiosk (ISP).
+    startSources: [],
     // printerConfiguration: which printer the kiosk uses — chrome mode = zero
     // behavior change (the kiosk keeps using Chrome's print dialog). The
     // standard wizard payload keeps the existing chrome behavior.

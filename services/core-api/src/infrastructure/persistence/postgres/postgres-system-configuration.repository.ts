@@ -38,6 +38,10 @@ import {
   type EndSourcesDto,
 } from '../../../domain/store-config/value-objects/end-sources';
 import {
+  StartSources,
+  type StartSourcesDto,
+} from '../../../domain/store-config/value-objects/start-sources';
+import {
   PrinterConfiguration,
   type PrinterConfigurationDto,
 } from '../../../domain/store-config/value-objects/printer-configuration';
@@ -84,6 +88,7 @@ interface ConfigRow {
   node_actions: NodeActionsMap | null;
   terminal_nodes: TerminalNodesProps | null;
   end_sources: EndSourcesDto | null;
+  start_sources: StartSourcesDto | null;
   printer_configuration: PrinterConfigurationDto | null;
 }
 
@@ -111,8 +116,8 @@ export class PostgresSystemConfigurationRepository implements ISystemConfigurati
   async save(config: SystemConfiguration): Promise<void> {
     await withDbClient(this.pool, async (client) => {
       await client.query(
-        `INSERT INTO system_configuration (id, store_name, is_initial_setup_completed, state_machine, daily_reset_policy, brand_color, service_themes, tv_panel_layout, edge_routing_layout, node_positions, node_actions, terminal_nodes, end_sources, printer_configuration)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        `INSERT INTO system_configuration (id, store_name, is_initial_setup_completed, state_machine, daily_reset_policy, brand_color, service_themes, tv_panel_layout, edge_routing_layout, node_positions, node_actions, terminal_nodes, end_sources, start_sources, printer_configuration)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
          ON CONFLICT (id) DO UPDATE SET
            store_name                = EXCLUDED.store_name,
            is_initial_setup_completed = EXCLUDED.is_initial_setup_completed,
@@ -126,6 +131,7 @@ export class PostgresSystemConfigurationRepository implements ISystemConfigurati
            node_actions              = EXCLUDED.node_actions,
            terminal_nodes            = EXCLUDED.terminal_nodes,
            end_sources               = EXCLUDED.end_sources,
+           start_sources             = EXCLUDED.start_sources,
            printer_configuration     = EXCLUDED.printer_configuration`,
         [
           config.id.value,
@@ -147,6 +153,7 @@ export class PostgresSystemConfigurationRepository implements ISystemConfigurati
           JSON.stringify(config.nodeActions.toDto()),
           JSON.stringify(config.terminalNodes.toDto()),
           JSON.stringify(config.endSources.toDto()),
+          JSON.stringify(config.startSources.toDto()),
           JSON.stringify(config.printerConfiguration.toDto()),
         ],
       );
@@ -266,6 +273,13 @@ function toConfig(row: ConfigRow): SystemConfiguration {
     // Mirrors the terminalNodes fallback. State-membership cross-check runs in
     // the save use case (the VO stays free of a StateMachine dependency).
     endSources: EndSources.of(row.end_sources ?? undefined),
+    // Same boot-window fallback for start_sources (0018 migration). `of()`
+    // recovers a null/undefined column to the empty default array (no start
+    // sources recorded), and a pre-migration row's SELECT * simply lacks the column (pg
+    // returns undefined here) — both paths reconstitute StartSources.DEFAULT.
+    // Mirrors the endSources fallback. State-membership cross-check runs in
+    // the save use case (the VO stays free of a StateMachine dependency).
+    startSources: StartSources.of(row.start_sources ?? undefined),
     // Same boot-window fallback for printer_configuration (0013 migration).
     // `of()` recovers a null/undefined column to the chrome default (zero
     // behavior change — the kiosk keeps using Chrome's print dialog), and a

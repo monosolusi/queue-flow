@@ -56,7 +56,7 @@ describe('StateMachineEditor (shared editor — wizard + AdminPanel)', () => {
       mode: 'custom' as const,
       states: [...DEFAULT_STATE_MACHINE.states, 'EXTRA'],
       transitions: DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t, requeuePolicy: t.requeuePolicy ?? { kind: 'KEEP' } })),
-      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderEditor(customForm, [], onChange);
     // The EXTRA state's remove button is enabled (not referenced).
     const extraRow = screen.getAllByLabelText(/^Status \d+$/).find(
@@ -140,7 +140,7 @@ describe('StateMachineEditor (shared editor — wizard + AdminPanel)', () => {
     renderEditor({
       mode: 'custom',
       states: ['WAITING', 'CALLING'],
-      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', requeuePolicy: { kind: 'KEEP' } as const }],      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    });
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', requeuePolicy: { kind: 'KEEP' } as const }],      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    });
 
     const warning = screen.getByTestId('sm-standard-warning');
     expect(warning).toHaveTextContent('COMPLETED');
@@ -155,7 +155,7 @@ describe('StateMachineEditor (shared editor — wizard + AdminPanel)', () => {
     const value = {
       mode: 'custom' as const,
       states: ['WAITING', 'CALLING'],
-      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: '', requeuePolicy: { kind: 'KEEP' } as const }],      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: '', requeuePolicy: { kind: 'KEEP' } as const }],      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     renderEditor(value, validateCustomStateMachine(value));
     expect(screen.getByTestId('sm-editor')).toHaveAttribute(
       'aria-describedby',

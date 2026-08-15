@@ -80,6 +80,7 @@ describe('Print-proxy REST surface (integration — FR-printer-config)', () => {
       nodeActions: d.nodeActions,
       terminalNodes: d.terminalNodes,
       endSources: d.endSources,
+      startSources: d.startSources,
       printerConfiguration: printer,
     });
     void config.save(cfg);

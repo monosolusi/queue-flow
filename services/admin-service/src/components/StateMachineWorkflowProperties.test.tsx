@@ -34,6 +34,7 @@ function formWith(states: string[] = ['CALLING', 'WAITING']): StateMachineForm {
     nodeActions: {},
     descriptions: {},
     endSources: [],
+    startSources: [],
     terminalNodes: { start: 'auto', end: 'auto' },
   };
 }
@@ -78,6 +79,7 @@ function handlersStub(): { handlers: WorkflowHandlers; onRequeue: ReturnType<typ
     onDeleteTerminal: vi.fn(),
     onDropTerminal: vi.fn(),
     onRemoveEndSource: vi.fn(),
+    onRemoveStartSource: vi.fn(),
   };
   return { handlers, onRequeue };
 }
@@ -135,6 +137,7 @@ describe('StateMachineWorkflowProperties — Kebijakan Antrian Ulang control', (
       nodeActions: {},
       descriptions: {},
       endSources: [],
+      startSources: [],
       terminalNodes: { start: 'auto', end: 'auto' },
     };
     const edge = edgeWith({}, 'WAITING->CALLING#0', 'WAITING', 'CALLING');
@@ -306,6 +309,7 @@ describe('StateMachineWorkflowProperties — node "Transisi keluar" sub-view req
       nodeActions: {},
       descriptions: {},
       endSources: [],
+      startSources: [],
       terminalNodes: { start: 'auto', end: 'auto' },
     };
     const edge = edgeWith({}, 'WAITING->CALLING#0', 'WAITING', 'CALLING');

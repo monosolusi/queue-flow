@@ -17,6 +17,7 @@ import { NodePositions, type NodePositionsDto } from '../../domain/store-config'
 import { NodeActions, type NodeActionsDto } from '../../domain/store-config';
 import { TerminalNodes, type TerminalNodesDto } from '../../domain/store-config';
 import { EndSources, type EndSourcesDto } from '../../domain/store-config';
+import { StartSources, type StartSourcesDto } from '../../domain/store-config';
 import { PrinterConfiguration, type PrinterConfigurationDto } from '../../domain/store-config';
 import { type IDailyResetSchedulerPort } from '../../domain/store-config';
 import {
@@ -182,6 +183,20 @@ export interface SaveSystemConfigurationCommand {
    *  `nodePositions`/`nodeActions`/`terminalNodes`). Not audited (admin-only
    *  config, not in the NFR-SEC-02 list). */
   readonly endSources: EndSourcesDto;
+  /** Explicit "start sources" for the admin state-machine editor — a flat array
+   *  of state NAMES the manager dragged an explicit arrow from the Start
+   *  terminal marker (`__start`) to; multiple allowed. Purely visual canvas
+   *  metadata (like `nodePositions`/`endSources`), with NO domain / queue-engine
+   *  meaning; NOT consumed by caller / tv / kiosk (ISP). Required on the wire;
+   *  the VO recovers a null/undefined to the empty default (no start sources
+   *  recorded — how the admin canvas renders that is its own concern) and
+   *  rejects a present-but-malformed value (non-array, non-string/empty/
+   *  duplicate entries). State-membership cross-checked pre-tx (every entry ⊆
+   *  the active state schema states), mirroring
+   *  `nodePositions`/`nodeActions`/`endSources`. Not change-gated (like
+   *  `nodePositions`/`nodeActions`/`terminalNodes`/`endSources`). Not audited
+   *  (admin-only config, not in the NFR-SEC-02 list). */
+  readonly startSources: StartSourcesDto;
   /** Printer configuration (which printer the kiosk uses — Chrome's default
    *  dialog, or a network ESC/POS printer proxied through core-api over raw
    *  TCP). Required on the wire; the VO recovers a null/undefined to the chrome
@@ -204,6 +219,7 @@ export interface SaveSystemConfigurationResult {
   readonly nodeActions: NodeActionsDto;
   readonly terminalNodes: TerminalNodesDto;
   readonly endSources: EndSourcesDto;
+  readonly startSources: StartSourcesDto;
   readonly printerConfiguration: PrinterConfigurationDto;
 }
 
@@ -353,6 +369,13 @@ export class SaveSystemConfigurationUseCase {
     // state-membership cross-check here — it runs below, mirroring
     // `nodePositions`/`nodeActions` (the VO stays free of a StateMachine dep).
     const endSources = EndSources.of(command.endSources);
+    // Explicit start sources — same shape: pure admin appearance, not
+    // change-gated, no post-commit side-effect. Validated pre-tx so a malformed
+    // array (non-array raw, non-string/empty/duplicate entry) fails fast. NO
+    // state-membership cross-check here — it runs below, mirroring
+    // `nodePositions`/`nodeActions`/`endSources` (the VO stays free of a
+    // StateMachine dep).
+    const startSources = StartSources.of(command.startSources);
     // Printer configuration — same shape: pure operational config, not
     // change-gated, no post-commit side-effect. Validated pre-tx so a malformed
     // printer config (bad mode/paperWidth/cutMode enum, non-integer port,
@@ -478,6 +501,21 @@ export class SaveSystemConfigurationUseCase {
         );
       }
     }
+    // State-membership cross-check (anti-corruption): the VO stays free of a
+    // `StateMachine` dependency (DIP), so it cannot validate that a start-source
+    // entry corresponds to a real state. That check belongs here, in the use
+    // case, which already built the state machine. Entries are state names, so
+    // they must be ⊆ the active state-schema STATES. Done pre-tx so a
+    // start-source entry that names no state fails fast (NFR-REL-02 — no illegal
+    // start-sources array burns a write). Mirrors the `nodePositions`/
+    // `nodeActions`/`stateDescriptions`/`endSources` cross-checks.
+    for (const entry of startSources.keys()) {
+      if (!stateNames.has(entry)) {
+        throw new InvalidValueObjectException(
+          `start sources entry '${entry}' is not a state in the active state machine`,
+        );
+      }
+    }
 
     // Whether the daily-reset policy changed (or this is the initial setup).
     // Hoisted out of the tx so the post-commit re-arm (below) can read it
@@ -526,6 +564,7 @@ export class SaveSystemConfigurationUseCase {
         nodeActions,
         terminalNodes,
         endSources,
+        startSources,
         printerConfiguration,
       });
       system.completeInitialSetup(); // idempotent — validates store name, flips the flag
@@ -582,6 +621,7 @@ export class SaveSystemConfigurationUseCase {
         nodeActions: system.nodeActions.toDto(),
         terminalNodes: system.terminalNodes.toDto(),
         endSources: system.endSources.toDto(),
+        startSources: system.startSources.toDto(),
         printerConfiguration: system.printerConfiguration.toDto(),
       };
     });

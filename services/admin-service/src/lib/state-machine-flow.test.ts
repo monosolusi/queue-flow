@@ -137,7 +137,7 @@ describe('formToFlow', () => {
           ? { ...t, requeuePolicy: t.requeuePolicy ?? DEFAULT_REQUEUE_POLICY, sourceSide: 'bottom' as const, targetSide: 'top' as const }
           : { ...t, requeuePolicy: t.requeuePolicy ?? DEFAULT_REQUEUE_POLICY },
       ),
-      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const { edges } = formToFlow(form, {});
     const waitingCalling = edges.find((e) => e.source === 'WAITING' && e.target === 'CALLING')!;
     expect(waitingCalling.sourceHandle).toBe(HANDLE_IDS.bottom);
@@ -163,7 +163,8 @@ describe('formToFlow', () => {
     const form: StateMachineForm = {
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' }, sourceSide: 'bottom' }],      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' }, sourceSide: 'bottom' }],
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const { edges } = formToFlow(form, {});
     expect(edges[0].sourceHandle).toBe(HANDLE_IDS.bottom);
     expect(edges[0].targetHandle).toBe(DEFAULT_TARGET_HANDLE);
@@ -200,7 +201,7 @@ describe('formToFlow', () => {
     // snap the nodes back to their pre-save locations.
     const form: StateMachineForm = {
       ...defaultStateMachineForm(),
-      positions: { WAITING: { x: 99, y: 88 } }, nodeActions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: { WAITING: { x: 99, y: 88 } }, nodeActions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const positions = { WAITING: { x: 10, y: 20 } }; // stale oldPositions
     const { nodes } = formToFlow(form, positions);
     const waiting = nodes.find((n) => n.id === 'WAITING')!;
@@ -402,8 +403,9 @@ describe('flowToGraph', () => {
       states: ['WAITING', 'ONHOLD', 'CALLING'],
       transitions: [
         { from: 'ONHOLD', to: 'WAITING', actionLabel: 'Kembali', requeuePolicy: { kind: 'KEEP' } },
-        { from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut', requeuePolicy: { kind: 'KEEP' } },      ],
-      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+        { from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut', requeuePolicy: { kind: 'KEEP' } },
+      ],
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const nodes: import('./state-machine-flow').FlowNode[] = [
       { id: 'WAITING', type: 'state', position: { x: 0, y: 0 }, data: { name: 'WAITING', description: '' } },
       { id: 'ONHOLD', type: 'state', position: { x: 0, y: 0 }, data: { name: 'ONHOLD', description: '' } },
@@ -472,16 +474,14 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     COMPLETED: { x: 720, y: 0 },
   };
 
-  it('emits a Start marker + Start→source edge for the default graph (WAITING is the sole source)', () => {
-    // The PRD §7 default graph: WAITING is the only in-degree-0 state
-    // (CALLING has WAITING→CALLING and SKIPPED→CALLING incoming; SERVING has
-    // CALLING→SERVING; SKIPPED has CALLING→SKIPPED; COMPLETED has
-    // SERVING→COMPLETED). So the Start marker points at WAITING only.
+  it('emits a Start marker + Start→source edge when startSources lists the state', () => {
+    // Start is MANUAL-ONLY now: the Start→WAITING edge comes from
+    // `startSources: ['WAITING']`, not from topology. The marker node emits
+    // unconditionally for a non-empty graph — `startSources` controls the EDGES.
     const { nodes, edges } = deriveTerminalMarkers(
       [...DEFAULT_STATE_MACHINE.states],
-      DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t, requeuePolicy: t.requeuePolicy ?? DEFAULT_REQUEUE_POLICY })),
-      // Feed real positions so the marker x is offset from the leftmost node.
       DEFAULT_POSITIONS,
+      ['WAITING'],
       [],
     );
     const start = nodes.find((n) => n.id === START_NODE_ID);
@@ -504,12 +504,13 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
   it('draws NO End edge for the default graph out-degree-0 state until it is an endSource', () => {
     // COMPLETED is the only out-degree-0 state in the default graph. It used to
     // get an automatic COMPLETED→__end arrow; End is manual-only now, so with
-    // `endSources: []` the marker renders bare. Manager feedback: "node masih
-    // otomatis linked ke end, seharusnya manual linked."
+    // `endSources: []` the marker renders bare. Start is also bare
+    // (`startSources: []`). Manager feedback: "node masih otomatis linked ke
+    // end, seharusnya manual linked."
     const bare = deriveTerminalMarkers(
       [...DEFAULT_STATE_MACHINE.states],
-      DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t, requeuePolicy: t.requeuePolicy ?? DEFAULT_REQUEUE_POLICY })),
       DEFAULT_POSITIONS,
+      [],
       [],
     );
     const end = bare.nodes.find((n) => n.id === END_NODE_ID);
@@ -525,8 +526,8 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     // positive control that makes the emptiness above non-vacuous.
     const linked = deriveTerminalMarkers(
       [...DEFAULT_STATE_MACHINE.states],
-      DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t, requeuePolicy: t.requeuePolicy ?? DEFAULT_REQUEUE_POLICY })),
       DEFAULT_POSITIONS,
+      [],
       ['COMPLETED'],
     );
     const endEdges = linked.edges.filter((e) => e.target === END_NODE_ID);
@@ -540,46 +541,42 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     expect(endEdges[0].targetHandle).toBe(HANDLE_IDS.left);
   });
 
-  it('emits no Start marker for a pure cycle (every state has an incoming edge)', () => {
-    // A↔B: both A and B have incoming edges → no sources → no Start marker.
-    // The End marker still emits (manual-only, always available as a drop
-    // target) but draws no edge with `endSources: []`.
+  it('emits a BARE Start marker for a pure cycle (no startSources → no Start edges)', () => {
+    // A↔B: Start is manual-only now, so with `startSources: []` the Start marker
+    // emits BARE (no edges) — it is still the drag source for a manual link. The
+    // End marker emits bare too.
     const { nodes, edges } = deriveTerminalMarkers(
       ['A', 'B'],
-      [
-        { from: 'A', to: 'B', actionLabel: 'a', requeuePolicy: { kind: 'KEEP' } },
-        { from: 'B', to: 'A', actionLabel: 'b', requeuePolicy: { kind: 'KEEP' } },      ],
       { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
       [],
+      [],
     );
-    expect(nodes.find((n) => n.id === START_NODE_ID)).toBeUndefined();
-    expect(nodes.map((n) => n.id)).toEqual([END_NODE_ID]);
+    expect(nodes.find((n) => n.id === START_NODE_ID)).toBeDefined();
+    expect(nodes.map((n) => n.id)).toEqual([START_NODE_ID, END_NODE_ID]);
     expect(edges).toHaveLength(0);
   });
 
   it('emits no markers for an empty state list', () => {
-    const { nodes, edges } = deriveTerminalMarkers([], [], {}, []);
+    const { nodes, edges } = deriveTerminalMarkers([], {}, [], []);
     expect(nodes).toHaveLength(0);
     expect(edges).toHaveLength(0);
   });
 
   it('emits no markers for an empty state list even when endSources is non-empty', () => {
     // The `states.length === 0` early return is the ONLY case that withholds
-    // the End marker node — a stale endSource on an empty graph draws nothing.
-    const { nodes, edges } = deriveTerminalMarkers([], [], {}, ['GONE']);
+    // the markers — a stale endSource on an empty graph draws nothing.
+    const { nodes, edges } = deriveTerminalMarkers([], {}, [], ['GONE']);
     expect(nodes).toHaveLength(0);
     expect(edges).toHaveLength(0);
   });
 
-  it('emits a Start edge but no End edge when nothing is an endSource', () => {
-    // A→B, B→B (self-loop): A has in-degree 0 (a source); B has out-degree 1 so
-    // it is not even a leaf. Start points at A; End emits as a bare drop target.
+  it('emits a Start edge but no End edge when startSources is set but endSources is empty', () => {
+    // A→B: Start points at A (from `startSources: ['A']`); End emits as a bare
+    // drop target.
     const { nodes, edges } = deriveTerminalMarkers(
       ['A', 'B'],
-      [
-        { from: 'A', to: 'B', actionLabel: 'a', requeuePolicy: { kind: 'KEEP' } },
-        { from: 'B', to: 'B', actionLabel: 'loop', requeuePolicy: { kind: 'KEEP' } },      ],
       { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
+      ['A'],
       [],
     );
     expect(nodes.find((n) => n.id === START_NODE_ID)).toBeDefined();
@@ -593,7 +590,8 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     // React would render duplicate arrows on top of each other.
     const { edges } = deriveTerminalMarkers(
       ['A', 'B'],
-      [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } }],      { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
+      { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
+      [],
       ['A', 'B', 'A'],
     );
     const endEdges = edges.filter((e) => e.target === END_NODE_ID);
@@ -603,7 +601,8 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
   it('skips an endSource with no real position (a stale name draws nothing)', () => {
     const { nodes, edges } = deriveTerminalMarkers(
       ['A', 'B'],
-      [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } }],      { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
+      { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
+      [],
       ['GONE'],
     );
     // The marker still emits; the stale entry contributes no edge.
@@ -611,11 +610,24 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     expect(edges.filter((e) => e.target === END_NODE_ID)).toHaveLength(0);
   });
 
-  it('places Start.x left of min real x and End.x right of its endSource', () => {
+  it('skips a startSource with no real position (a stale name draws nothing)', () => {
+    const { nodes, edges } = deriveTerminalMarkers(
+      ['A', 'B'],
+      { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
+      ['GONE'],
+      [],
+    );
+    // The Start marker still emits; the stale entry contributes no edge.
+    expect(nodes.find((n) => n.id === START_NODE_ID)).toBeDefined();
+    expect(edges.filter((e) => e.source === START_NODE_ID)).toHaveLength(0);
+  });
+
+  it('places Start.x left of its startSource and End.x right of its endSource', () => {
     const real = { A: { x: 100, y: 0 }, B: { x: 300, y: 0 } };
     const { nodes } = deriveTerminalMarkers(
       ['A', 'B'],
-      [{ from: 'A', to: 'B', actionLabel: 'a', requeuePolicy: { kind: 'KEEP' } }],      real,
+      real,
+      ['A'],
       ['B'],
     );
     const start = nodes.find((n) => n.id === START_NODE_ID)!;
@@ -630,19 +642,18 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
 
   it('bounds the markers by the CONNECTED states, not by a stray node dropped past them', () => {
     // A wired A→B chain plus a stray status the manager dropped to the RIGHT of
-    // B (dropping into empty space is the common case). The End marker connects
-    // only to B (its sole endSource), so it sits one rank right of B — NOT one
-    // rank right of the stray, which would stretch the B→End edge past a node it
-    // has no edge to. Same on the left for Start (the stray is also right of the
-    // source A, so the Start bound is unaffected here — asserted for symmetry).
+    // B. The End marker connects only to B (its sole endSource), so it sits one
+    // rank right of B — NOT one rank right of the stray. The Start marker
+    // connects only to A (its sole startSource), so it sits one rank left of A.
     const { nodes } = deriveTerminalMarkers(
       ['A', 'B', 'STRAY'],
-      [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } }],      { A: { x: 0, y: 0 }, B: { x: 240, y: 0 }, STRAY: { x: 900, y: 0 } },
+      { A: { x: 0, y: 0 }, B: { x: 240, y: 0 }, STRAY: { x: 900, y: 0 } },
+      ['A'],
       ['B'],
     );
     const start = nodes.find((n) => n.id === START_NODE_ID)!;
     const end = nodes.find((n) => n.id === END_NODE_ID)!;
-    // Start: one rank (240) left of the leftmost SOURCE (A at x=0).
+    // Start: one rank (240) left of the leftmost START SOURCE (A at x=0).
     expect(start.position.x).toBe(0 - 240);
     // End: one rank right of the rightmost END SOURCE (B at x=240) — not STRAY.
     expect(end.position.x).toBe(240 + 240);
@@ -651,16 +662,18 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     expect(end.position.y).toBe(0);
   });
 
-  it('parks an unconnected End marker at the right edge of the whole diagram', () => {
-    // With no endSources the End marker spans nothing, so the "bound by what it
-    // connects to" rule has no input — it falls back to every real node and sits
-    // one rank right of the rightmost (STRAY at x=900). It must stay on-canvas
-    // and reachable: it is the drop target for the first manual link.
+  it('parks an unconnected marker at the edge of the whole diagram', () => {
+    // With no startSources the Start marker spans nothing, so it falls back to
+    // every real node and parks one rank left of the leftmost (A at x=0).
+    // With no endSources the End marker does the same at the right (STRAY at
+    // x=900). Both stay on-canvas and reachable.
     const { nodes } = deriveTerminalMarkers(
       ['A', 'B', 'STRAY'],
-      [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } }],      { A: { x: 0, y: 0 }, B: { x: 240, y: 0 }, STRAY: { x: 900, y: 0 } },
+      { A: { x: 0, y: 0 }, B: { x: 240, y: 0 }, STRAY: { x: 900, y: 0 } },
+      [],
       [],
     );
+    expect(nodes.find((n) => n.id === START_NODE_ID)!.position.x).toBe(0 - 240);
     expect(nodes.find((n) => n.id === END_NODE_ID)!.position.x).toBe(900 + 240);
   });
 
@@ -670,7 +683,8 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     // vertical middle. A stray at y=400 pulls the center down accordingly.
     const { nodes } = deriveTerminalMarkers(
       ['A', 'B', 'STRAY'],
-      [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } }],      { A: { x: 0, y: 0 }, B: { x: 240, y: 0 }, STRAY: { x: 120, y: 400 } },
+      { A: { x: 0, y: 0 }, B: { x: 240, y: 0 }, STRAY: { x: 120, y: 400 } },
+      ['A'],
       ['B'],
     );
     // yCenter = (minY 0 + maxY 400) / 2 = 200 for both markers.
@@ -679,11 +693,11 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
   });
 
   it('defaults bounds to 0 when realPositions is empty (no NaN)', () => {
-    // A wired A→B graph (A is the sole source) so the Start marker emits, with
-    // realPositions empty → minX/maxX/minY/maxY default to 0. Every bound list
-    // is empty here — the source X list, the endSource X list AND the
+    // With realPositions empty → minX/maxX/minY/maxY default to 0. Every bound
+    // list is empty here — the startSource X list, the endSource X list AND the
     // all-real-nodes fallback — so this exercises every NaN guard at once.
-    const { nodes } = deriveTerminalMarkers(['A', 'B'], [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } }], {}, []);    const start = nodes.find((n) => n.id === START_NODE_ID)!;
+    const { nodes } = deriveTerminalMarkers(['A', 'B'], {}, ['A'], []);
+    const start = nodes.find((n) => n.id === START_NODE_ID)!;
     const end = nodes.find((n) => n.id === END_NODE_ID)!;
     expect(start.position).toEqual({ x: 0 - 240, y: 0 });
     expect(end.position).toEqual({ x: 0 + 240, y: 0 });
@@ -693,58 +707,49 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     // The endSource is a real state name but carries no position, so it is
     // skipped for the edge AND drops out of the X bound; the all-real-nodes
     // fallback is empty too → 0, never NaN.
-    const { nodes } = deriveTerminalMarkers(['A', 'B'], [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } }], {}, ['B']);    expect(nodes.find((n) => n.id === END_NODE_ID)!.position).toEqual({ x: 240, y: 0 });
+    const { nodes } = deriveTerminalMarkers(['A', 'B'], {}, [], ['B']);
+    expect(nodes.find((n) => n.id === END_NODE_ID)!.position).toEqual({ x: 240, y: 0 });
   });
 
-  it('ignores transitions referencing a state not in the schema (defensive)', () => {
-    // A transition B→C where C is not in `states` must not count toward the
-    // degree tallies nor seed any marker for C.
-    const { nodes, edges } = deriveTerminalMarkers(
+  it('ignores a startSource/endSource referencing a state not in realPositions (defensive)', () => {
+    // A startSource/endSource whose name has no real position draws no edge
+    // (it is skipped) and does not contribute to the X bounds.
+    const { edges } = deriveTerminalMarkers(
       ['A', 'B'],
-      [
-        { from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } },
-        { from: 'B', to: 'C', actionLabel: 'x', requeuePolicy: { kind: 'KEEP' } },      ],
       { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
-      ['B'],
+      ['A', 'GONE'],
+      ['B', 'GONE'],
     );
-    // A has in-degree 0 + out-degree 1 → a real source → Start emits, pointing
-    // at A only. (B→C is ignored, so it cannot make C look like a target.)
-    expect(nodes.find((n) => n.id === START_NODE_ID)).toBeDefined();
+    // Start points at A only; End points at B only.
     expect(edges.filter((e) => e.source === START_NODE_ID).map((e) => e.target)).toEqual(['A']);
-    // End is fed by its endSource B — unaffected by the invalid B→C edge.
-    expect(nodes.find((n) => n.id === END_NODE_ID)).toBeDefined();
     expect(edges.filter((e) => e.target === END_NODE_ID).map((e) => e.source)).toEqual(['B']);
-    // No terminal edge references C.
-    expect(edges.every((e) => e.source !== 'C' && e.target !== 'C')).toBe(true);
+    // No terminal edge references GONE.
+    expect(edges.every((e) => e.source !== 'GONE' && e.target !== 'GONE')).toBe(true);
   });
 
-  it('emits no Start marker for a lone state whose only transition references an unknown state', () => {
-    // The defensive guard and the isolated-state rule compose: dropping the
-    // invalid A→C edge leaves A with degree 0 on both sides → A is isolated →
-    // not a source → no Start marker. The End marker emits as a bare drop
-    // target, with no edge (and none referencing C).
+  it('emits a BARE Start marker for a lone state (no startSources → no edges)', () => {
+    // Start is manual-only: with `startSources: []`, the marker emits bare (no
+    // edges). The End marker emits bare too.
     const { nodes, edges } = deriveTerminalMarkers(
       ['A'],
-      [{ from: 'A', to: 'C', actionLabel: 'x', requeuePolicy: { kind: 'KEEP' } }],      { A: { x: 0, y: 0 } },
+      { A: { x: 0, y: 0 } },
+      [],
       [],
     );
-    expect(nodes.map((n) => n.id)).toEqual([END_NODE_ID]);
+    expect(nodes.map((n) => n.id)).toEqual([START_NODE_ID, END_NODE_ID]);
     expect(edges).toHaveLength(0);
   });
 
-  it('excludes an isolated state from the Start edges and never auto-links it to End', () => {
-    // The manager's earlier bug: a stray status added from the palette (no
-    // transisi yet) has in-degree 0 AND out-degree 0, so it used to satisfy both
-    // predicates and got a __start→C edge AND a C→__end edge — reading as the
-    // flow's entry AND its exit at once. It is not yet wired in, so it gets
-    // neither. The wired A→B chain alongside it keeps its Start edge, and B (a
-    // leaf) reaches End only because it is listed as an endSource.
+  it('excludes an isolated state from the Start/End edges (only listed sources get edges)', () => {
+    // A→B chain plus a stray C. Start points only at A (from `startSources`);
+    // End points only at B (from `endSources`). The stray C gets no edge.
     const { nodes, edges } = deriveTerminalMarkers(
       ['A', 'B', 'C'],
-      [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } }],      { A: { x: 0, y: 0 }, B: { x: 240, y: 0 }, C: { x: 240, y: 200 } },
+      { A: { x: 0, y: 0 }, B: { x: 240, y: 0 }, C: { x: 240, y: 200 } },
+      ['A'],
       ['B'],
     );
-    // Both markers emit — the chain has a real source (A) and a manual End link.
+    // Both markers emit — Start has a source (A) and End has a source (B).
     expect(nodes.find((n) => n.id === START_NODE_ID)).toBeDefined();
     expect(nodes.find((n) => n.id === END_NODE_ID)).toBeDefined();
     // Exactly one Start edge (→A) and one End edge (B→).
@@ -758,53 +763,51 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     expect(edges.every((e) => e.source !== 'C' && e.target !== 'C')).toBe(true);
   });
 
-  it('emits no Start marker and no edges for a graph of only isolated states', () => {
-    // No state is wired to anything → no entry point → no Start marker and no
-    // edges. (A fresh custom flow the manager has only dropped nodes onto looks
-    // like this.) The End marker emits bare so the manager can start linking.
+  it('emits BARE markers for a graph of only isolated states (no sources → no edges)', () => {
+    // No state is listed as a startSource or endSource → no edges. Both markers
+    // still emit (bare) — they are the drag source/drop target for the first
+    // manual link.
     const { nodes, edges } = deriveTerminalMarkers(
       ['A', 'B', 'C'],
-      [],
       { A: { x: 0, y: 0 }, B: { x: 240, y: 0 }, C: { x: 480, y: 0 } },
       [],
+      [],
     );
-    expect(nodes.map((n) => n.id)).toEqual([END_NODE_ID]);
+    expect(nodes.map((n) => n.id)).toEqual([START_NODE_ID, END_NODE_ID]);
     expect(edges).toHaveLength(0);
   });
 
-  it('still emits Start + End for a pure chain, and no Start for a pure cycle (regression guard)', () => {
+  it('emits Start + End for a chain with explicit sources, BARE markers for a cycle', () => {
     // The isolated-state exclusion must not disturb the two established shapes.
+    // Chain: Start→A (from startSources), C→End (from endSources).
     const chain = deriveTerminalMarkers(
       ['A', 'B', 'C'],
-      [
-        { from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } },
-        { from: 'B', to: 'C', actionLabel: 'next', requeuePolicy: { kind: 'KEEP' } },      ],
       { A: { x: 0, y: 0 }, B: { x: 240, y: 0 }, C: { x: 480, y: 0 } },
+      ['A'],
       ['C'],
     );
     expect(chain.nodes.find((n) => n.id === START_NODE_ID)).toBeDefined();
     expect(chain.nodes.find((n) => n.id === END_NODE_ID)).toBeDefined();
     expect(chain.edges.map((e) => e.id)).toEqual([`${START_NODE_ID}->A`, `C->${END_NODE_ID}`]);
 
+    // Cycle: no startSources/endSources → BARE markers, no edges.
     const cycle = deriveTerminalMarkers(
       ['A', 'B'],
-      [
-        { from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } },
-        { from: 'B', to: 'A', actionLabel: 'back', requeuePolicy: { kind: 'KEEP' } },      ],
       { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
       [],
+      [],
     );
-    expect(cycle.nodes.map((n) => n.id)).toEqual([END_NODE_ID]);
+    expect(cycle.nodes.map((n) => n.id)).toEqual([START_NODE_ID, END_NODE_ID]);
     expect(cycle.edges).toHaveLength(0);
   });
 
   it('draws an End edge from a WIRED LEAF only when it is an endSource (the manager repro)', () => {
-    // The exact regression: A→B leaves B with in-degree 1 and out-degree 0 — a
-    // freshly wired-in leaf status. It used to be auto-linked to End the moment
-    // the transition was drawn. Now it reaches End only on an explicit link.
+    // A→B leaves B as a freshly wired-in leaf status. It reaches End only on an
+    // explicit link (listing it as an endSource), NOT automatically.
     const auto = deriveTerminalMarkers(
       ['A', 'B'],
-      [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } }],      { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
+      { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
+      ['A'],
       [],
     );
     expect(auto.edges.filter((e) => e.target === END_NODE_ID)).toHaveLength(0);
@@ -813,7 +816,8 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     // edge — so the emptiness above is a real absence, not an unreachable id.
     const manual = deriveTerminalMarkers(
       ['A', 'B'],
-      [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } }],      { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
+      { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
+      ['A'],
       ['B'],
     );
     expect(manual.edges.filter((e) => e.target === END_NODE_ID).map((e) => e.id)).toEqual([
@@ -821,40 +825,31 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     ]);
   });
 
-  /**
-   * Manager feedback: "current node cannot have self-loop, and if the current
-   * node have 2 transisi masuk juga hilang — contoh, WAITING memiliki transisi
-   * masuk dari Start dan aku mau bikin self-loop, kemudian yang dari Start
-   * hilang." A self-loop used to count toward BOTH degrees, so the status it sat
-   * on stopped being in-degree 0 and silently lost its `__start -> S` arrow. A
-   * self-loop is flow that leaves a status and returns to it: it must not change
-   * where the flow ENTERS. (End is manual-only since #106, so the symmetric
-   * exit case no longer exists — nothing derives an End arrow from topology.)
-   */
-  it('a self-loop on the entry state KEEPS its __start edge', () => {
+  it('a self-loop on the startSource KEEPS its __start edge (self-loops are irrelevant now)', () => {
+    // Start is manual-only: a self-loop never affected Start edges (they come
+    // from `startSources`, not topology). The self-loop is now fully irrelevant
+    // to the marker. Manager feedback: "waiting memiliki transisi masuk dari
+    // start … aku bikin self-loop kemudian yg dr start hilang" — that was the
+    // auto-derive bug this test guarded; it is gone, but the test still
+    // verifies a self-loop does not interfere.
     const { nodes, edges } = deriveTerminalMarkers(
       ['A', 'B'],
-      [
-        { from: 'A', to: 'B', actionLabel: 'a', requeuePolicy: { kind: 'KEEP' } },
-        { from: 'A', to: 'A', actionLabel: 'loop', requeuePolicy: { kind: 'KEEP' } },      ],
       { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
+      ['A'],
       [],
     );
     expect(nodes.find((n) => n.id === START_NODE_ID)).toBeDefined();
     expect(edges.filter((e) => e.source === START_NODE_ID).map((e) => e.target)).toEqual(['A']);
   });
 
-  it('a status whose ONLY transition is a self-loop is not an entry point', () => {
-    // The PR #103 invariant survives the self-loop fix: a self-loop wires a
-    // status to itself, not into the flow, so it stays degree-0 on both sides
-    // and gets no Start arrow. The assertion is non-vacuous because the same
-    // call positively emits the __start -> A edge.
+  it('a status NOT in startSources gets no __start edge even if it has a self-loop', () => {
+    // LOOPY has a self-loop but is NOT listed in `startSources` → no Start edge.
+    // A IS listed → gets the edge. The assertion is non-vacuous because the same
+    // call positively emits the __start → A edge.
     const { edges } = deriveTerminalMarkers(
       ['A', 'B', 'LOOPY'],
-      [
-        { from: 'A', to: 'B', actionLabel: 'a', requeuePolicy: { kind: 'KEEP' } },
-        { from: 'LOOPY', to: 'LOOPY', actionLabel: 'loop', requeuePolicy: { kind: 'KEEP' } },      ],
       { A: { x: 0, y: 0 }, B: { x: 240, y: 0 }, LOOPY: { x: 240, y: 200 } },
+      ['A'],
       [],
     );
     const fromStart = edges.filter((e) => e.source === START_NODE_ID).map((e) => e.target);
@@ -863,27 +858,27 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
   });
 
 });
-
 describe('formToFlowWithMarkers', () => {
-  it('returns state nodes + Start/End markers for the default graph (7 nodes, 6 edges)', () => {
+  it('returns state nodes + Start/End markers for the default graph (7 nodes, 5 edges)', () => {
     const form = defaultStateMachineForm();
     const { nodes, edges } = formToFlowWithMarkers(form, {});
-    // 5 state nodes + 1 Start + 1 End = 7. The End marker emits even though the
-    // default graph declares no endSources — it is the manual link's drop target.
+    // 5 state nodes + 1 Start + 1 End = 7. BOTH markers emit even though the
+    // default graph declares no startSources/endSources — Start is the manual
+    // link's drag source, End is the drop target.
     expect(nodes).toHaveLength(DEFAULT_STATE_MACHINE.states.length + 2);
     expect(nodes.filter((n) => n.type === 'state')).toHaveLength(5);
     expect(nodes.find((n) => n.id === START_NODE_ID)?.type).toBe(START_NODE_TYPE);
     expect(nodes.find((n) => n.id === END_NODE_ID)?.type).toBe(END_NODE_TYPE);
-    // 5 transition edges + 1 Start→WAITING = 6. No End edge: `endSources` is
-    // empty and nothing about the topology adds one.
-    expect(edges).toHaveLength(DEFAULT_STATE_MACHINE.transitions.length + 1);
+    // 5 transition edges + 0 Start edges + 0 End edges = 5. Both markers are
+    // BARE (startSources/endSources are empty — Start is manual-only now).
+    expect(edges).toHaveLength(DEFAULT_STATE_MACHINE.transitions.length);
     expect(edges.filter((e) => e.type === 'transition')).toHaveLength(5);
-    expect(edges.filter((e) => e.type === TERMINAL_EDGE_TYPE)).toHaveLength(1);
+    expect(edges.filter((e) => e.type === TERMINAL_EDGE_TYPE)).toHaveLength(0);
 
-    // Positive control: the same graph WITH an endSource adds exactly one more
+    // Positive control: the same graph WITH an endSource adds exactly one
     // terminal edge, so the count above is a real absence.
     const linked = formToFlowWithMarkers({ ...form, endSources: ['COMPLETED'] }, {});
-    expect(linked.edges.filter((e) => e.type === TERMINAL_EDGE_TYPE)).toHaveLength(2);
+    expect(linked.edges.filter((e) => e.type === TERMINAL_EDGE_TYPE)).toHaveLength(1);
   });
 
   it('round-trips clean through flowToGraph (markers filtered, form intact)', () => {
@@ -938,10 +933,11 @@ describe('flowToGraph filters terminal markers', () => {
 });
 
 describe('formToFlowWithMarkers terminal-node three-state model', () => {
-  // A simple A→B graph: A is the sole source (in-degree 0), B is a leaf the
-  // manager linked to End by hand (`endSources: ['B']`). Under `terminalNodes:
-  // { start: 'auto', end: 'auto' }` BOTH markers emit, pinned:false, positioned
-  // by the deriveTerminalMarkers math (one rank left/right of the real bounds).
+  // A simple A→B graph: the manager linked Start to A by hand
+  // (`startSources: ['A']`) and B to End by hand (`endSources: ['B']`). Under
+  // `terminalNodes: { start: 'auto', end: 'auto' }` BOTH markers emit,
+  // pinned:false, positioned by the deriveTerminalMarkers math (one rank
+  // left/right of the real bounds).
   const abForm = (): StateMachineForm => ({
     mode: 'custom',
     states: ['A', 'B'],
@@ -949,6 +945,7 @@ describe('formToFlowWithMarkers terminal-node three-state model', () => {
     nodeActions: {},
     descriptions: {},
     endSources: ['B'],
+    startSources: ['A'],
     terminalNodes: { start: 'auto', end: 'auto' },
   });
 
@@ -997,9 +994,10 @@ describe('formToFlowWithMarkers terminal-node three-state model', () => {
   });
 
   it("an explicit {x,y} emits the Start marker ALWAYS (even with no sources), pinned:true at the given position", () => {
-    // A pure cycle (A→B, B→A): no sources → 'auto' would emit NO Start marker.
-    // An explicit {x,y} overrides that — the marker is willed by the manager
-    // regardless of topology, pinned:true, at the exact position.
+    // A pure cycle (A→B, B→A): no manager-drawn `startSources` → an 'auto' Start
+    // marker is BARE (node present, no arrow). An explicit {x,y} overrides the
+    // position and stamps `pinned:true` — the marker is willed by the manager
+    // regardless of topology, at the exact position.
     const cycleForm: StateMachineForm = {
       mode: 'custom',
       states: ['A', 'B'],
@@ -1010,6 +1008,7 @@ describe('formToFlowWithMarkers terminal-node three-state model', () => {
       nodeActions: {},
       descriptions: {},
       endSources: [],
+      startSources: [],
       terminalNodes: { start: { x: -300, y: 50 }, end: 'auto' },
     };
     const { nodes, edges } = formToFlowWithMarkers(cycleForm, {});
@@ -1023,7 +1022,12 @@ describe('formToFlowWithMarkers terminal-node three-state model', () => {
     expect(edges.filter((e) => e.type === TERMINAL_EDGE_TYPE)).toHaveLength(0);
   });
 
-  it("'auto' on a pure cycle emits NO Start marker (no sources), End stays as a bare drop target", () => {
+  it("'auto' on a pure cycle emits a BARE Start marker (no sources), End stays as a bare drop target", () => {
+    // Start is MANUAL-ONLY and UNCONDITIONAL for any non-empty graph: it must be
+    // on the canvas so the manager has something to drag a connection FROM,
+    // even before any `startSources` entry exists. A pure cycle has no manager-
+    // drawn Start sources → a BARE Start marker (node present, no outgoing
+    // arrow). End mirrors this (bare drop target).
     const cycleForm: StateMachineForm = {
       mode: 'custom',
       states: ['A', 'B'],
@@ -1034,21 +1038,23 @@ describe('formToFlowWithMarkers terminal-node three-state model', () => {
       nodeActions: {},
       descriptions: {},
       endSources: [],
+      startSources: [],
       terminalNodes: { start: 'auto', end: 'auto' },
     };
     const { nodes, edges } = formToFlowWithMarkers(cycleForm, {});
-    expect(nodes.find((n) => n.id === START_NODE_ID)).toBeUndefined();
+    expect(nodes.find((n) => n.id === START_NODE_ID)).toBeDefined();
     expect(nodes.find((n) => n.id === END_NODE_ID)).toBeDefined();
     expect(edges.filter((e) => e.type === TERMINAL_EDGE_TYPE)).toHaveLength(0);
   });
 
-  it("'auto' on a graph of ONLY isolated states emits no Start marker and no terminal edges", () => {
+  it("'auto' on a graph of ONLY isolated states emits a BARE Start marker and a bare End marker (no terminal edges)", () => {
     // The manager just dropped two statuses on a fresh canvas and has drawn no
-    // transisi yet. Neither is an entry point, so there is nothing for the Start
-    // marker to point at → no auto Start. Neither is auto-linked to End either.
-    // The End marker itself DOES render: without it there would be no drop
-    // target, so the manager could never draw the first link (the whole point of
-    // the manual-End rule).
+    // transisi yet. Neither is auto-linked: both Start and End are MANUAL-ONLY,
+    // so neither draws an arrow. Both markers STILL render: Start is the drag
+    // source the manager draws the first manual link FROM, End is the drop
+    // target the manager draws it INTO — withholding either before a link
+    // exists would make the first manual link impossible (the whole point of
+    // the manual-Start / manual-End rule).
     const strayOnly: StateMachineForm = {
       mode: 'custom',
       states: ['A', 'B'],
@@ -1057,10 +1063,11 @@ describe('formToFlowWithMarkers terminal-node three-state model', () => {
       nodeActions: {},
       descriptions: {},
       endSources: [],
+      startSources: [],
       terminalNodes: { start: 'auto', end: 'auto' },
     };
     const { nodes, edges } = formToFlowWithMarkers(strayOnly, {});
-    expect(nodes.find((n) => n.id === START_NODE_ID)).toBeUndefined();
+    expect(nodes.find((n) => n.id === START_NODE_ID)).toBeDefined();
     expect(nodes.find((n) => n.id === END_NODE_ID)).toBeDefined();
     expect(edges.filter((e) => e.type === TERMINAL_EDGE_TYPE)).toHaveLength(0);
     // The two state nodes still render.
@@ -1115,6 +1122,7 @@ describe('formToFlowWithMarkers terminal-node three-state model', () => {
       nodeActions: {},
       descriptions: {},
       endSources: [],
+      startSources: [],
       terminalNodes: { start: { x: -300, y: 50 }, end: 'auto' },
     };
     const { nodes, edges } = formToFlowWithMarkers(pinnedOnStray, {});
@@ -1140,6 +1148,7 @@ describe('formToFlowWithMarkers terminal-node three-state model', () => {
       nodeActions: {},
       descriptions: {},
       endSources: [],
+      startSources: [],
       terminalNodes: { start: 'auto', end: 'hidden' },
     };
     const { nodes, edges } = formToFlowWithMarkers(strayOnly, {});
@@ -1373,7 +1382,8 @@ describe('side ↔ handle mappers', () => {
     const form: StateMachineForm = {
       mode: 'custom',
       states: ['A', 'B'],
-      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' }, sourceSide: 'bottom', targetSide: 'top' }],      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' }, sourceSide: 'bottom', targetSide: 'top' }],
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const { nodes, edges } = formToFlow(form, {});
     const { transitions } = flowToGraph(nodes, edges);
     expect(transitions[0].sourceSide).toBe('bottom');
@@ -1396,6 +1406,7 @@ describe('formToFlowWithMarkers End connections (endSources)', () => {
     nodeActions: {},
     descriptions: {},
     endSources,
+    startSources: [],
     terminalNodes: { start: 'auto', end: 'auto' },
   });
 

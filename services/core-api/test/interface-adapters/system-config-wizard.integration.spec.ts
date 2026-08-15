@@ -69,6 +69,7 @@ function wizardPayload() {
     nodeActions: {},
     terminalNodes: { start: 'auto', end: 'auto' },
     endSources: [],
+    startSources: [],
     printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
   };
 }
@@ -711,5 +712,71 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
     const res = await request(app.getHttpServer()).get('/api/system/config');
     expect(res.status).toBe(200);
     expect(res.body.endSources).toEqual([]);
+  });
+
+  it('PUT with a missing startSources field is 400, not 500 (boundary presence guard)', async () => {
+    // startSources is a required top-level field — a missing one must 400 (not
+    // 500 when the use case dereferences `undefined`).
+    const { startSources: _omit, ...bad } = wizardPayload();
+    const res = await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad);
+    expect(res.status).toBe(400);
+    const cfg = await request(app.getHttpServer()).get('/api/system/config');
+    expect(cfg.body.isInitialSetupCompleted).toBe(false);
+  });
+
+  it('PUT with a malformed startSources (non-array / non-string entry) is 400 (boundary shape guard)', async () => {
+    // startSources present but a string → top-level shape guard (array).
+    const bad1 = wizardPayload() as unknown as Record<string, unknown>;
+    bad1.startSources = 'WAITING';
+    expect(
+      (await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad1)).status,
+    ).toBe(400);
+
+    // startSources present but an object → top-level shape guard (array).
+    const bad2 = wizardPayload() as unknown as Record<string, unknown>;
+    bad2.startSources = { WAITING: true };
+    expect(
+      (await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad2)).status,
+    ).toBe(400);
+
+    // startSources entry a non-string → nested-shape guard (would TypeError in
+    // the VO before a clean throw on a non-string element).
+    const bad3 = wizardPayload() as unknown as Record<string, unknown>;
+    bad3.startSources = ['WAITING', 5];
+    expect(
+      (await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad3)).status,
+    ).toBe(400);
+
+    // None of the rejected payloads silently completed setup.
+    const cfg = await request(app.getHttpServer()).get('/api/system/config');
+    expect(cfg.body.isInitialSetupCompleted).toBe(false);
+  });
+
+  it('PUT with a startSources entry that is not a state is 400 (cross-check, INVALID_VALUE_OBJECT)', async () => {
+    const bad = wizardPayload() as unknown as Record<string, unknown>;
+    bad.startSources = ['NOPE'];
+    const res = await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad);
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_VALUE_OBJECT');
+    const cfg = await request(app.getHttpServer()).get('/api/system/config');
+    expect(cfg.body.isInitialSetupCompleted).toBe(false);
+  });
+
+  it('PUT saves startSources (multiple explicit start sources) and a re-GET returns them (round-trip)', async () => {
+    const sources = ['WAITING', 'COMPLETED'];
+    const payload = wizardPayload() as unknown as Record<string, unknown>;
+    payload.startSources = sources;
+    const res = await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(payload);
+    expect(res.status).toBe(200);
+    expect(res.body.startSources).toEqual(sources);
+
+    const cfg = await request(app.getHttpServer()).get('/api/system/config');
+    expect(cfg.body.startSources).toEqual(sources);
+  });
+
+  it('a clean store prefills startSources with [] (none recorded)', async () => {
+    const res = await request(app.getHttpServer()).get('/api/system/config');
+    expect(res.status).toBe(200);
+    expect(res.body.startSources).toEqual([]);
   });
 });

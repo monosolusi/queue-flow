@@ -32,6 +32,7 @@ function defaultForm(): StateMachineForm {
     nodeActions: {},
     descriptions: {},
     endSources: [],
+    startSources: [],
     terminalNodes: { start: 'auto', end: 'auto' },
   };
 }
@@ -71,6 +72,7 @@ function richForm(): StateMachineForm {
     descriptions: { VERIFIKASI: 'Petugas memeriksa berkas pelanggan' },
     terminalNodes: { start: 'hidden', end: { x: 960, y: 30 } },
     endSources: ['SERVING'],
+    startSources: [],
   };
 }
 
@@ -87,6 +89,7 @@ function selfLoopForm(): StateMachineForm {
     nodeActions: {},
     descriptions: {},
     endSources: [],
+    startSources: [],
     terminalNodes: { start: 'auto', end: 'auto' },
   };
 }
@@ -104,6 +107,7 @@ function singleStateForm(): StateMachineForm {
     nodeActions: {},
     descriptions: {},
     endSources: [],
+    startSources: [],
     terminalNodes: { start: 'auto', end: 'auto' },
   };
 }
@@ -172,7 +176,6 @@ const DEFAULT_GRAPH_XML = `<?xml version="1.0" encoding="UTF-8"?>
   <task>
     <name>WAITING</name>
     <metadata><![CDATA[{"xy":[0,0]}]]></metadata>
-    <initial>true</initial>
     <labels>
       <label language-id="id_ID">WAITING</label>
     </labels>
@@ -414,35 +417,43 @@ describe('formToXml — Kaleo workflow-definition shape', () => {
 });
 
 describe('formToXml — <initial> derivation', () => {
-  it('marks the graph entry status <initial>true</initial> and no other', () => {
-    const xml = formToXml(defaultForm());
+  it('marks a manager-declared start source <initial>true</initial> and no other', () => {
+    // Start is MANUAL-ONLY: `<initial>` comes from `form.startSources`, not from
+    // a topology predicate. A manager who declares WAITING as the entry sees
+    // exactly one `<initial>true</initial>`.
+    const form: StateMachineForm = { ...defaultForm(), startSources: ['WAITING'] };
+    const xml = formToXml(form);
     expect(xml).toContain('<name>WAITING</name>\n    <metadata><![CDATA[{"xy":[0,0]}]]></metadata>\n    <initial>true</initial>');
-    // Exactly one status is the entry point in the default graph.
+    // Exactly one status is the entry point.
     expect((xml.match(/<initial>true<\/initial>/g) ?? []).length).toBe(1);
   });
 
-  it('marks EVERY entry status when a graph has more than one (deviates from Kaleo on purpose)', () => {
+  it('marks EVERY manager-declared start source when a graph has more than one (deviates from Kaleo on purpose)', () => {
     // Kaleo definitions carry exactly one <initial>. A QMS manager can wire two
-    // independent lanes, and the canvas already draws a Start arrow into each —
-    // matching the diagram beats single-initial conformance.
+    // independent lanes, and the canvas draws a Start arrow into each start
+    // source — matching the diagram beats single-initial conformance. Both
+    // declared `startSources` entries get `<initial>true</initial>`.
     const form: StateMachineForm = {
       ...defaultForm(),
       mode: 'custom',
       states: ['ANTRI_A', 'ANTRI_B', 'SELESAI'],
       transitions: [
         { from: 'ANTRI_A', to: 'SELESAI', actionLabel: 'Selesai Layan', requeuePolicy: { kind: 'KEEP' } },
-        { from: 'ANTRI_B', to: 'SELESAI', actionLabel: 'Selesai Layan', requeuePolicy: { kind: 'KEEP' } },      ],
+        { from: 'ANTRI_B', to: 'SELESAI', actionLabel: 'Selesai Layan', requeuePolicy: { kind: 'KEEP' } },
+      ],
+      startSources: ['ANTRI_A', 'ANTRI_B'],
     };
     const xml = formToXml(form);
     expect((xml.match(/<initial>true<\/initial>/g) ?? []).length).toBe(2);
   });
 
-  it('a self-loop does not stop its status from being the entry point', () => {
-    // The shared `deriveAutoSources` excludes self-loops from the degree count
-    // (the same predicate the canvas Start marker uses), so a self-loop on the
-    // entry status must not silently drop its <initial>.
+  it('a self-loop on a declared start source does not drop its <initial>', () => {
+    // Start is manual-only — the entry set is whatever the manager declared in
+    // `startSources`, full stop. A self-loop on the entry status is irrelevant:
+    // the manager declared WAITING as the entry, so it stays `<initial>true`.
     const form: StateMachineForm = {
       ...selfLoopForm(),
+      startSources: ['WAITING'],
       transitions: [
         { from: 'WAITING', to: 'WAITING', actionLabel: 'Tunggu Lagi', requeuePolicy: { kind: 'KEEP' } },
         { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', requeuePolicy: { kind: 'KEEP' } },
@@ -452,10 +463,14 @@ describe('formToXml — <initial> derivation', () => {
     expect(xml).toContain('<name>WAITING</name>\n    <metadata><![CDATA[{"xy":[0,0]}]]></metadata>\n    <initial>true</initial>');
   });
 
-  it('marks no status initial when the only transition is a self-loop (isolated, not an entry)', () => {
-    // A status whose ONLY wiring is a self-loop is degree-0 on both sides — it
-    // is wired to itself, not into the flow — so it is neither entry nor exit.
+  it('marks no status initial when no start source is declared (manual-only — no backfill)', () => {
+    // Start is MANUAL-ONLY with NO topology backfill: a graph whose
+    // `startSources` is empty emits NO `<initial>` — not even for a state that
+    // happens to have in-degree 0. A self-loop-only status is no longer special
+    // either; it is simply not in `startSources`.
     expect(formToXml(singleStateForm())).not.toContain('<initial>');
+    // The default graph itself has `startSources: []` → no `<initial>`.
+    expect(formToXml(defaultForm())).not.toContain('<initial>');
   });
 });
 
@@ -606,6 +621,7 @@ describe('formToXml — sparse metadata', () => {
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } }],      positions: { A: { x: 0, y: 0 }, B: { x: 240, y: 0 } },
       endSources: ['A', 'B'],
+      startSources: [],
     };
     expect(formToXml(withSources)).toContain('"endSources":["A","B"]');
     expect(formToXml({ ...withSources, endSources: [] })).not.toContain('endSources');
@@ -904,9 +920,13 @@ describe('xmlToForm — lenient reading', () => {
     if (!result.ok) return;
     expect(result.form.states).toEqual(['A', 'B']);
     expect(result.form.transitions).toEqual([
-      { from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } },    ]);
-    // A is still re-derived as the entry status on the way back out.
-    expect(formToXml(result.form)).toContain('<initial>true</initial>');
+      { from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } },
+    ]);
+    // A is NOT re-derived as the entry status on the way back out: Start is
+    // MANUAL-ONLY now, and this hand-written XML carries no root
+    // `startSources` metadata, so the parsed form has `startSources: []` and
+    // the re-serialized output emits no `<initial>`.
+    expect(formToXml(result.form)).not.toContain('<initial>');
   });
 
   it('accepts a case-insensitive execution-type', () => {
@@ -1233,3 +1253,92 @@ describe('xmlToForm — errors (never throws, always Indonesian)', () => {
   });
 });
 
+describe('formToXml / xmlToForm — requeuePolicy (→ WAITING queue-order declaration)', () => {
+  /** A form with one `CALLING → WAITING` edge carrying a policy. */
+  function formWithPolicy(policy: StateMachineForm['transitions'][number]['requeuePolicy']): StateMachineForm {
+    const base = defaultForm();
+    return {
+      ...base,
+      mode: 'custom',
+      states: ['WAITING', 'CALLING'],
+      transitions: [
+        { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', requeuePolicy: { kind: 'KEEP' } },
+        { from: 'CALLING', to: 'WAITING', actionLabel: 'Kembalikan ke Antrian', requeuePolicy: policy! },
+      ],
+      positions: { WAITING: { x: 0, y: 0 }, CALLING: { x: 240, y: 0 } },
+      nodeActions: {},
+      descriptions: {},
+      endSources: [],
+      startSources: [],
+      terminalNodes: { start: 'auto', end: 'auto' },
+    };
+  }
+
+  it('omits the requeuePolicy key for a KEEP edge (sparse — the source stays quiet about it)', () => {
+    const xml = formToXml(formWithPolicy({ kind: 'KEEP' }));
+    // KEEP is the default — never serialized.
+    expect(xml).not.toContain('"requeuePolicy"');
+  });
+
+  it('round-trips a BACK_N edge losslessly via the transition <metadata> JSON', () => {
+    const form = formWithPolicy({ kind: 'BACK_N', n: 2 });
+    const xml = formToXml(form);
+    // The BACK_N policy rides the transition <metadata> CDATA JSON, sparse —
+    // only the BACK_N edge carries it, the WAITING → CALLING edge does not.
+    expect(xml).toContain('"requeuePolicy":{"kind":"BACK_N","n":2}');
+
+    const result = xmlToForm(xml);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const parsed = result.form.transitions.find((t) => t.from === 'CALLING' && t.to === 'WAITING');
+    expect(parsed?.requeuePolicy).toEqual({ kind: 'BACK_N', n: 2 });
+    // The other edge reconstitutes as KEEP (absent in the XML → the default).
+    const other = result.form.transitions.find((t) => t.from === 'WAITING' && t.to === 'CALLING');
+    expect(other?.requeuePolicy).toEqual({ kind: 'KEEP' });
+  });
+
+  it('round-trips a TO_BACK edge losslessly (no n key)', () => {
+    const form = formWithPolicy({ kind: 'TO_BACK' });
+    const xml = formToXml(form);
+    expect(xml).toContain('"requeuePolicy":{"kind":"TO_BACK"}');
+    expect(xml).not.toContain('"n"');
+
+    const result = xmlToForm(xml);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const parsed = result.form.transitions.find((t) => t.from === 'CALLING' && t.to === 'WAITING');
+    expect(parsed?.requeuePolicy).toEqual({ kind: 'TO_BACK' });
+    expect('n' in (parsed!.requeuePolicy as object)).toBe(false);
+  });
+
+  it('xmlToForm rejects a BACK_N payload with a missing n', () => {
+    const xml = `<?xml version="1.0"?><workflow-definition xmlns="urn:liferay.com:liferay-workflow_7.4.0">
+      <task><name>WAITING</name><metadata><![CDATA[{"xy":[0,0]}]]></metadata>
+        <transitions><transition><labels><label language-id="id_ID">Kembali</label></labels><target>CALLING</target></transition></transitions>
+      </task>
+      <task><name>CALLING</name><metadata><![CDATA[{"xy":[240,0]}]]></metadata>
+        <transitions><transition><labels><label language-id="id_ID">Kembalikan</label></labels><target>WAITING</target><metadata><![CDATA[{"requeuePolicy":{"kind":"BACK_N"}}]]></metadata></transition></transitions>
+      </task>
+    </workflow-definition>`;
+    const result = xmlToForm(xml);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain('bilangan cacah');
+  });
+
+  it('xmlToForm rejects an unknown kind', () => {
+    const xml = `<?xml version="1.0"?><workflow-definition xmlns="urn:liferay.com:liferay-workflow_7.4.0">
+      <task><name>WAITING</name><metadata><![CDATA[{"xy":[0,0]}]]></metadata>
+        <transitions><transition><labels><label language-id="id_ID">Kembali</label></labels><target>CALLING</target></transition></transitions>
+      </task>
+      <task><name>CALLING</name><metadata><![CDATA[{"xy":[240,0]}]]></metadata>
+        <transitions><transition><labels><label language-id="id_ID">Kembalikan</label></labels><target>WAITING</target><metadata><![CDATA[{"requeuePolicy":{"kind":"FORWARD"}}]]></metadata></transition></transitions>
+      </task>
+    </workflow-definition>`;
+    const result = xmlToForm(xml);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain('"KEEP"');
+    expect(result.error).toContain('"BACK_N"');
+  });
+});

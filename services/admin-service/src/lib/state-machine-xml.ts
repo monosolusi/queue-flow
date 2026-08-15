@@ -69,6 +69,7 @@
  * | `nodeActions[name]` | `<actions><action>` + action `<metadata>` JSON |
  * | `terminalNodes` | ROOT `<metadata>` JSON `terminalNodes` (sparse) |
  * | `endSources` | ROOT `<metadata>` JSON `endSources` (sparse) |
+ * | `startSources` | ROOT `<metadata>` JSON `startSources` (sparse) |
  * | `mode` | NOT serialized — a client-only UI preset |
  *
  * Positions are the single source of truth shared with the Diagram view: an
@@ -98,7 +99,6 @@ import {
   DEFAULT_REQUEUE_POLICY,
   DEFAULT_SOURCE_SIDE,
   DEFAULT_TARGET_SIDE,
-  deriveAutoSources,
   EDGE_SIDES,
   isDefaultSides,
   REQUEUE_POLICIES,
@@ -281,13 +281,14 @@ function canonTerminal(state: TerminalNodeStateDto): TerminalNodeStateDto {
 }
 
 /**
- * The ROOT `<metadata>` payload — the two graph-wide facets Kaleo has no slot
- * for at all: the Start/End terminal-marker state and the explicit End
- * connections. **Sparse**: each key is omitted when it holds its default
- * (`auto/auto` terminals, empty `endSources`), and `null` is returned when both
- * are default so the `<metadata>` element itself is omitted and a default
- * graph's XML stays clean. Mirrors the sparse edge-sides rule below and the
- * sparse `toEdgeRoutingLayoutDto` wire map.
+ * The ROOT `<metadata>` payload — the three graph-wide facets Kaleo has no slot
+ * for at all: the Start/End terminal-marker state, the explicit End connections,
+ * and the explicit Start connections. **Sparse**: each key is omitted when it
+ * holds its default (`auto/auto` terminals, empty `endSources`, empty
+ * `startSources`), and `null` is returned when all are default so the
+ * `<metadata>` element itself is omitted and a default graph's XML stays clean.
+ * Mirrors the sparse edge-sides rule below and the sparse
+ * `toEdgeRoutingLayoutDto` wire map.
  */
 function rootMetadata(form: StateMachineForm): Record<string, unknown> | null {
   const meta: Record<string, unknown> = {};
@@ -296,6 +297,7 @@ function rootMetadata(form: StateMachineForm): Record<string, unknown> | null {
     meta.terminalNodes = { start: canonTerminal(start), end: canonTerminal(end) };
   }
   if (form.endSources.length > 0) meta.endSources = [...form.endSources];
+  if (form.startSources.length > 0) meta.startSources = [...form.startSources];
   return Object.keys(meta).length > 0 ? meta : null;
 }
 
@@ -331,10 +333,9 @@ export function formToXml(form: StateMachineForm): string {
   // a spread.
   const auto = autoLayout(form.states, form.transitions);
   // Kaleo marks the flow's entry node `<initial>true</initial>`. The entry
-  // states are DERIVED from topology via the shared `deriveAutoSources` (the
-  // SAME predicate the canvas's Start marker uses, self-loops excluded from the
-  // degree count) — never a stored field — so the XML and the diagram can never
-  // disagree about where the flow starts.
+  // states come from the MANAGER-DRAWN `form.startSources` (the SAME list the
+  // canvas's Start marker uses — manual-only, no topology predicate) — so the
+  // XML and the diagram can never disagree about where the flow starts.
   //
   // DEVIATION from Kaleo: Kaleo definitions have exactly ONE `<initial>` node.
   // A QMS graph may legitimately have several entry statuses (the manager wires
@@ -342,7 +343,7 @@ export function formToXml(form: StateMachineForm): string {
   // — so every entry status is marked. A Kaleo importer would reject that; QMS
   // never feeds this XML to Liferay (it is a view over `StateMachineForm`), so
   // matching the diagram is worth more than single-initial conformance.
-  const initialStates = new Set(deriveAutoSources(form.states, form.transitions));
+  const initialStates = new Set(form.startSources);
   // The `<task>`/`<state>` choice comes from the SAME shared degree predicate,
   // for the same reason: a status the flow leaves is a `<task>`, a status it
   // rests at is a `<state>`. Self-loops are excluded from the count here too, so
@@ -602,15 +603,16 @@ function parseTerminalState(value: unknown, tag: 'Mulai' | 'Selesai'): Parsed<Te
 }
 
 /**
- * Reads the root `<metadata>` — the graph-wide `terminalNodes` + `endSources`.
- * `knownStates` filters `endSources` defensively (drop a name that is not a
- * parsed status), mirroring the same rule the former codec applied: a stale
- * entry referencing a removed status never survives the round-trip.
+ * Reads the root `<metadata>` — the graph-wide `terminalNodes` + `endSources` +
+ * `startSources`. `knownStates` filters `endSources`/`startSources` defensively
+ * (drop a name that is not a parsed status), mirroring the same rule the former
+ * codec applied: a stale entry referencing a removed status never survives the
+ * round-trip.
  */
 function parseRootMetadata(
   root: Element,
   knownStates: ReadonlySet<string>,
-): Parsed<{ terminalNodes: { start: TerminalNodeStateDto; end: TerminalNodeStateDto }; endSources: string[] }> {
+): Parsed<{ terminalNodes: { start: TerminalNodeStateDto; end: TerminalNodeStateDto }; endSources: string[]; startSources: string[] }> {
   const meta = parseMetadata(root, 'alur status');
   if (!meta.ok) return meta;
   const raw = meta.value.terminalNodes;
@@ -630,7 +632,17 @@ function parseRootMetadata(
   const endSources = ((endSourcesRaw ?? []) as unknown[]).filter(
     (s): s is string => typeof s === 'string' && knownStates.has(s),
   );
-  return { ok: true, value: { terminalNodes: { start: start.value, end: end.value }, endSources } };
+  // `startSources` mirrors `endSources`: a flat array of state names, filtered
+  // to known states defensively (a stale entry referencing a removed status
+  // never survives the round-trip).
+  const startSourcesRaw = meta.value.startSources;
+  if (startSourcesRaw !== undefined && !Array.isArray(startSourcesRaw)) {
+    return { ok: false, error: 'Bagian "startSources" pada <metadata> harus berupa daftar nama status.' };
+  }
+  const startSources = ((startSourcesRaw ?? []) as unknown[]).filter(
+    (s): s is string => typeof s === 'string' && knownStates.has(s),
+  );
+  return { ok: true, value: { terminalNodes: { start: start.value, end: end.value }, endSources, startSources } };
 }
 
 /** Reads the `<actions>` block of a node into the QMS `NodeActionDto[]`. An
@@ -866,8 +878,8 @@ export function xmlToForm(xml: string): XmlToFormOk | XmlToFormErr {
     transitions.push(...nodeTransitions.value);
   }
 
-  // The root metadata is read AFTER the nodes so `endSources` can be filtered
-  // against the parsed status names.
+  // The root metadata is read AFTER the nodes so `endSources`/`startSources`
+  // can be filtered against the parsed status names.
   const rootMeta = parseRootMetadata(root, new Set(states));
   if (!rootMeta.ok) return { ok: false, error: rootMeta.error };
 
@@ -880,6 +892,7 @@ export function xmlToForm(xml: string): XmlToFormOk | XmlToFormErr {
     descriptions,
     terminalNodes: rootMeta.value.terminalNodes,
     endSources: rootMeta.value.endSources,
+    startSources: rootMeta.value.startSources,
   };
   const errors = validateCustomStateMachine(form);
   if (errors.length > 0) {

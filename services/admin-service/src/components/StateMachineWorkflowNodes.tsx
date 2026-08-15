@@ -153,6 +153,14 @@ export interface WorkflowHandlers {
    * incoming End edge is manager-drawn, so every row in that list is removable.
    */
   onRemoveEndSource: (source: string) => void;
+  /**
+   * Remove a Start connection (a manager-drawn arrow from the Start marker to
+   * `target`). Non-stamping (re-seeds the canvas; the terminal edge disappears).
+   * Used by the Start-marker panel's "Transisi keluar" delete button. Mirrors
+   * {@link onRemoveEndSource}. Every outgoing Start edge is manager-drawn, so
+   * every row in that list is removable.
+   */
+  onRemoveStartSource: (target: string) => void;
 }
 
 export const WorkflowContext = createContext<WorkflowHandlers | null>(null);
@@ -300,31 +308,42 @@ export function TransitionEdge(props: EdgeProps): JSX.Element {
 
 /**
  * A canvas-only Start terminal marker — a compact BPMN-style "play" affordance
- * (▶ glyph) with a "Mulai" label. Auto-derived by `deriveTerminalMarkers` for
- * the graph's real entry states (in-degree 0 AND out-degree > 0 — an isolated,
- * not-yet-wired status is NOT an entry point, and a transition from a status to
- * ITSELF counts for neither degree, so a self-loop never costs a status its
- * Start arrow); NOT in the form/wire/XML. ONE
- * `<Handle type="source" position={Position.Right} id={HANDLE_IDS.right}
- * isConnectable={false} />` — non-interactive (the manager cannot drag a
- * transition from a marker; the marker is a visual entry cue, not a state).
- * The programmatic terminal edges still attach since React Flow renders an
- * edge to a node's handle regardless of the handle's `isConnectable` (the same
- * mechanism that lets the existing read-only default-mode edges render).
+ * (▶ glyph) with a "Mulai" label. Its outgoing arrows are MANUAL ONLY (mirrors
+ * {@link EndNode}): nothing about the graph shape links the Start marker to a
+ * state, so every arrow comes from a manager drag recorded in `form.startSources`
+ * (multiple allowed). The marker therefore renders even with ZERO outgoing
+ * arrows — it is the drag source the first manual link is drawn from, so
+ * withholding it would make the link impossible. NOT in the wire `transitions`
+ * (the terminal edges are filtered at `flowToGraph`). FOUR TYPELESS
+ * `<Handle type="source">`s — one per side, ids matching {@link HANDLE_IDS} —
+ * exactly like {@link EndNode}. Under the parent's `ConnectionMode.Loose` a
+ * `source`-typed handle both STARTS and RECEIVES a connection, so the manager
+ * can drag from ANY side of this marker and drop onto any state's handle. Four
+ * sides is purely additive discoverability (mirrors the EndNode fix for the
+ * "selalu tidak bisa menghubungkan" complaint): the marker still never
+ * RECEIVES an edge as a target, because `isValidConnection` rejects
+ * `to === START_NODE_ID` and `onConnect` carries the same terminal guard.
+ * `isConnectable` is gated on `mode === 'custom'` so the read-only default-mode
+ * canvas stays non-interactive; the terminal edges still attach regardless of
+ * `isConnectable` (same mechanism as `EndNode`), and the outgoing edges keep
+ * sourcing from the RIGHT handle so the canonical L→R routing is unchanged.
  *
- * Inline `<svg>` (no external assets — NFR-REL-01) using `currentColor` so it
- * adapts to the design tokens + light/dark mode. The `data-testid` makes the
- * marker a reliable click target in tests (selection drives the properties
- * panel's marker branch). No description — the marker is not a state.
+ * Inline `<svg>` (no external assets — NFR-REL-01) using `currentColor`.
  */
 export function StartNode({ }: NodeProps): JSX.Element {
+  const ctx = useContext(WorkflowContext);
+  if (!ctx) return <></>;
+  const connectable = ctx.mode === 'custom';
   return (
     <div
       className="terminal-node terminal-node--start"
       data-testid="sm-node-start"
       aria-label="Titik awal alur"
     >
-      <Handle type="source" position={Position.Right} id={HANDLE_IDS.right} isConnectable={false} />
+      <Handle type="source" position={Position.Top} id={HANDLE_IDS.top} isConnectable={connectable} />
+      <Handle type="source" position={Position.Right} id={HANDLE_IDS.right} isConnectable={connectable} />
+      <Handle type="source" position={Position.Bottom} id={HANDLE_IDS.bottom} isConnectable={connectable} />
+      <Handle type="source" position={Position.Left} id={HANDLE_IDS.left} isConnectable={connectable} />
       <span className="terminal-node__glyph" aria-hidden="true">
         <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
           <path d="M8 5l12 7-12 7z" fill="currentColor" />

@@ -3,7 +3,7 @@ import { Outlet } from 'react-router-dom';
 import type { IAdminApi } from '../../api/admin-api';
 import { useSystemConfigContext } from '../../config/system-config-context';
 import { applyBrandColor, applyThemeMode } from '../../lib/theme';
-import { toEdgeRoutingLayoutDto, toEndSourcesDto, toNodeActionsDto, toNodePositionsDto, toStateMachineDto, toTerminalNodesDto } from '../../lib/state-machine';
+import { toEdgeRoutingLayoutDto, toEndSourcesDto, toNodeActionsDto, toNodePositionsDto, toStartSourcesDto, toStateMachineDto, toTerminalNodesDto } from '../../lib/state-machine';
 import { useToast } from '../../toast/useToast';
 import { type PanelState, toForm } from './form';
 
@@ -139,6 +139,11 @@ export function ConfigDraftProvider({
           // `onConnect`-to-End path + the panel "Transisi masuk" delete build
           // it). Mirrors `terminalNodes` passthrough.
           endSources: toEndSourcesDto(form.stateMachine),
+          // Explicit Start connections travel the wire in the separate
+          // `startSources` field (the client is the source of truth — the
+          // `onConnect`-from-Start path + the panel "Transisi keluar" delete
+          // build it). Mirrors `endSources` passthrough. Start is manual-only.
+          startSources: toStartSourcesDto(form.stateMachine),
           brandColor: form.brandColor,
           serviceThemes: form.serviceThemes,
           // Payload-only passthrough — the TV-layout editor lives on the

@@ -11,6 +11,7 @@ import { NodePositions, type NodePositionsDto } from '../../domain/store-config'
 import { NodeActions, type NodeActionsDto } from '../../domain/store-config';
 import { TerminalNodes, type TerminalNodesDto } from '../../domain/store-config';
 import { EndSources, type EndSourcesDto } from '../../domain/store-config';
+import { StartSources, type StartSourcesDto } from '../../domain/store-config';
 import { PrinterConfiguration, type PrinterConfigurationDto } from '../../domain/store-config';
 import type { PriorityPolicy, RequeuePolicy } from '../../domain/shared';
 
@@ -105,6 +106,12 @@ export interface SystemConfigurationDto {
    *  NOT consumed by caller / tv / kiosk (ISP — TS structural typing ignores
    *  the extra response field on their narrower DTOs). */
   readonly endSources: EndSourcesDto;
+  /** Explicit "start sources" for the admin state-machine editor — a flat array
+   *  of state NAMES the manager dragged an explicit arrow from the Start
+   *  terminal marker. Purely visual canvas metadata (like `nodePositions`/
+   *  `endSources`); NOT consumed by caller / tv / kiosk (ISP — TS structural
+   *  typing ignores the extra response field on their narrower DTOs). */
+  readonly startSources: StartSourcesDto;
   /** Printer configuration (which printer the kiosk uses — Chrome's default
    *  dialog, or a network ESC/POS printer proxied through core-api over raw
    *  TCP). */
@@ -206,6 +213,9 @@ export class GetSystemConfigurationUseCase {
         // Default end sources — empty array = none recorded on a clean store
         // (how the admin canvas renders that is its own presentation concern).
         endSources: EndSources.DEFAULT.toDto(),
+        // Default start sources — empty array = none recorded on a clean store
+        // (how the admin canvas renders that is its own presentation concern).
+        startSources: StartSources.DEFAULT.toDto(),
         // Default printer configuration — chrome mode = zero behavior change
         // (the kiosk keeps using Chrome's print dialog), so a clean store
         // prefills the admin printer section with the existing chrome behavior.
@@ -232,6 +242,7 @@ export class GetSystemConfigurationUseCase {
       nodeActions: system.nodeActions.toDto(),
       terminalNodes: system.terminalNodes.toDto(),
       endSources: system.endSources.toDto(),
+      startSources: system.startSources.toDto(),
       printerConfiguration: system.printerConfiguration.toDto(),
       categories: allCategories
         .slice()

@@ -40,6 +40,7 @@ import {
   mergeEdgeSides,
   toEdgeRoutingLayoutDto,
   toEndSourcesDto,
+  toStartSourcesDto,
   toNodeActionsDto,
   toNodePositionsDto,
   toStateMachineDto,
@@ -400,6 +401,10 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
         // (no End-connection UI), exactly like `terminalNodes`. Coerce
         // defensively.
         const smEndSources = [...(config.endSources ?? [])];
+        // Explicit Start connections are payload-only passthrough on the wizard
+        // (no Start-connection UI), exactly like `endSources`. Coerce
+        // defensively.
+        const smStartSources = [...(config.startSources ?? [])];
         setForm({
           storeName: config.storeName,
           brandColor: config.brandColor || DEFAULT_BRAND_COLOR,
@@ -423,7 +428,7 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
           // default-structure graph with custom routing loads as custom, and a
           // wizard re-edit preserves the handles on re-save.
           stateMachine: {
-            mode: isDefaultGraph(config.stateMachine.states, smMergedTransitions, smPositions, smTerminalNodes, smEndSources)
+            mode: isDefaultGraph(config.stateMachine.states, smMergedTransitions, smPositions, smTerminalNodes, smEndSources, smStartSources)
               ? 'default'
               : 'custom',
             states: [...config.stateMachine.states],
@@ -433,6 +438,7 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
             descriptions: smDescriptions,
             terminalNodes: smTerminalNodes,
             endSources: smEndSources,
+            startSources: smStartSources,
           },
           dailyReset: {
             mode: config.dailyResetPolicy.mode,
@@ -626,6 +632,10 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
         // (no End-connection UI); `[]` for a first-run store (mirrors
         // `terminalNodes`).
         endSources: toEndSourcesDto(form.stateMachine),
+        // Explicit Start connections — payload-only passthrough on the wizard
+        // (no Start-connection UI); `[]` for a first-run store (mirrors
+        // `endSources`). Start is manual-only — no backfill from topology.
+        startSources: toStartSourcesDto(form.stateMachine),
         dailyReset: {
           mode: form.dailyReset.mode,
           cronExpression: form.dailyReset.mode === 'AUTOMATIC_CRON' ? form.dailyReset.cronExpression : null,

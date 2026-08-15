@@ -11,7 +11,6 @@ import {
   defaultStateMachineForm,
   describeState,
   descriptionFor,
-  deriveAutoSources,
   graphSignature,
   stateDegrees,
   isDefaultGraph,
@@ -24,6 +23,7 @@ import {
   toNodePositionsDto,
   toStateMachineDto,
   toEndSourcesDto,
+  toStartSourcesDto,
   toTerminalNodesDto,
   updateState,
   updateStateDescription,
@@ -43,7 +43,7 @@ describe('toStateMachineDto (wire-boundary mapping)', () => {
       mode: 'custom',
       states: ['WAITING', 'CALLING'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', requeuePolicy: { kind: 'KEEP' } as const }],
-      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     expect(toStateMachineDto(form)).toEqual({
       states: ['WAITING', 'CALLING'],
       // `requeuePolicy` is sparse on the wire — OMIT for KEEP (the default),
@@ -65,7 +65,7 @@ describe('toStateMachineDto (wire-boundary mapping)', () => {
       mode: 'default',
       states: ['WAITING', 'BOGUS'],
       transitions: [{ from: 'WAITING', to: 'BOGUS', actionLabel: 'Setengah Jadi', requeuePolicy: { kind: 'KEEP' } as const }],
-      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     expect(toStateMachineDto(abandoned)).toEqual({
       states: [...DEFAULT_STATE_MACHINE.states],
       // Wire is sparse: requeuePolicy is omitted when KEEP (the default), so
@@ -90,7 +90,7 @@ describe('validateCustomStateMachine (Indonesian, no internal terms)', () => {
   });
 
   it('reports an empty schema in manager-facing Indonesian', () => {
-    const errors = validateCustomStateMachine({ mode: 'custom', states: [], transitions: [], positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const });
+    const errors = validateCustomStateMachine({ mode: 'custom', states: [], transitions: [], positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const });
     expect(errors).toContain('Alur status harus memiliki minimal satu status.');
     expect(errors).toContain('Alur status harus memiliki minimal satu transisi.');
     // "state machine" / "state" is developer vocabulary — the editor is on
@@ -103,7 +103,7 @@ describe('validateCustomStateMachine (Indonesian, no internal terms)', () => {
       mode: 'custom',
       states: ['WAITING', 'WAITING', ' '],
       transitions: [{ from: 'WAITING', to: 'GHOST', actionLabel: 'Panggil', requeuePolicy: { kind: 'KEEP' } as const }],
-      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    });
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    });
     expect(errors).toContain("Status 'WAITING' duplikat.");
     expect(errors).toContain('Nama status tidak boleh kosong.');
     expect(errors).toContain("Transisi 'WAITING'→'GHOST': status 'GHOST' tidak dikenal.");
@@ -118,7 +118,7 @@ describe('validateCustomStateMachine (Indonesian, no internal terms)', () => {
         { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', requeuePolicy: { kind: 'KEEP' } as const },
         { from: 'WAITING', to: 'CALLING', actionLabel: '', requeuePolicy: { kind: 'KEEP' } as const },
       ],
-      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    });
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    });
     expect(errors).toContain("Transisi 'WAITING'→'CALLING' duplikat.");
     expect(errors).toContain('Label aksi tidak boleh kosong.');
   });
@@ -131,7 +131,7 @@ describe('validateCustomStateMachine (Indonesian, no internal terms)', () => {
       mode: 'custom',
       states: ['WAITING', 'CALLING'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', requeuePolicy: { kind: 'KEEP' } as const }],
-      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     expect(validateCustomStateMachine(noCompleted)).toEqual([]);
     expect(missingCanonicalStates(noCompleted).length).toBeGreaterThan(0);
   });
@@ -146,7 +146,7 @@ describe('missingCanonicalStates (non-blocking dropped-standard-status warning)'
     // A `mode: 'default'` form is force-reset to the standard graph at the wire
     // boundary, so its live `states` can never be what gets saved.
     expect(
-      missingCanonicalStates({ mode: 'default', states: [], transitions: [], positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const }),
+      missingCanonicalStates({ mode: 'default', states: [], transitions: [], positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const }),
     ).toEqual([]);
   });
 
@@ -155,7 +155,7 @@ describe('missingCanonicalStates (non-blocking dropped-standard-status warning)'
       mode: 'custom',
       states: ['WAITING', 'CALLING'],
       transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil Berikutnya', requeuePolicy: { kind: 'KEEP' } as const }],
-      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    });
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    });
     expect(missing.map((m) => m.state)).toEqual(['SERVING', 'SKIPPED', 'COMPLETED']);
     // The consequence names the caller BUTTON / the report metric, never the
     // backend mechanism — the reader is a non-technical store manager.
@@ -172,7 +172,7 @@ describe('missingCanonicalStates (non-blocking dropped-standard-status warning)'
       mode: 'custom',
       states: [' WAITING ', 'CALLING', 'SERVING', 'SKIPPED', 'COMPLETED'],
       transitions: [{ from: 'CALLING', to: 'SERVING', actionLabel: 'Mulai Melayani', requeuePolicy: { kind: 'KEEP' } as const }],
-      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    });
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    });
     expect(padded).toEqual([]);
   });
 });
@@ -195,7 +195,7 @@ describe('describeState (client-side description derivation)', () => {
         { from: 'ONHOLD', to: 'WAITING', actionLabel: 'Kembali', requeuePolicy: { kind: 'KEEP' } as const },
         { from: 'ONHOLD', to: 'CALLING', actionLabel: 'Lanjut', requeuePolicy: { kind: 'KEEP' } as const },
       ],
-      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     expect(describeState(form, 'ONHOLD')).toBe('2 transisi keluar');
   });
 
@@ -204,7 +204,7 @@ describe('describeState (client-side description derivation)', () => {
       mode: 'custom',
       states: ['WAITING', 'ONHOLD'],
       transitions: [{ from: 'WAITING', to: 'ONHOLD', actionLabel: 'Tahan', requeuePolicy: { kind: 'KEEP' } as const }],
-      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     // ONHOLD has no outgoing transition (only incoming) — the 0-outgoing branch.
     expect(describeState(form, 'ONHOLD')).toBe('Status kustom');
   });
@@ -227,7 +227,7 @@ describe('describeState (client-side description derivation)', () => {
       mode: 'custom',
       states: ['WAITING', 'ONHOLD'],
       transitions: [{ from: 'WAITING', to: 'ONHOLD', actionLabel: 'Tahan', requeuePolicy: { kind: 'KEEP' } as const }],
-      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     describeState(form, 'ONHOLD'); // derive (no-op on the wire shape)
     const dto = toStateMachineDto(form);
     expect((dto as unknown as Record<string, unknown>).description).toBeUndefined();
@@ -282,7 +282,7 @@ describe('connection sides (sourceSide / targetSide)', () => {
           sourceSide: 'bottom',          targetSide: 'top',
         },
       ],
-      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const dto = toStateMachineDto(form);
     // Only the canvas-only connection sides are stripped. `requeuePolicy` is
     // sparse — OMIT for KEEP — so the wire transition carries only
@@ -305,7 +305,7 @@ describe('connection sides (sourceSide / targetSide)', () => {
         { from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const }, // default → omitted
         { from: 'B', to: 'C', actionLabel: 'up', requeuePolicy: { kind: 'KEEP' } as const, sourceSide: 'bottom', targetSide: 'top' },
       ],
-      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     expect(toEdgeRoutingLayoutDto(form)).toEqual({
       'B->C': { sourceSide: 'bottom', targetSide: 'top' },
     });
@@ -321,7 +321,7 @@ describe('connection sides (sourceSide / targetSide)', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const }],
-      positions: { A: { x: 10, y: 20 }, B: { x: 30, y: 40 } }, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: { A: { x: 10, y: 20 }, B: { x: 30, y: 40 } }, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     expect(toNodePositionsDto(form)).toEqual({
       A: { x: 10, y: 20 },
       B: { x: 30, y: 40 },
@@ -344,12 +344,12 @@ describe('connection sides (sourceSide / targetSide)', () => {
       transitions: [
         { from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const, sourceSide: DEFAULT_SOURCE_SIDE, targetSide: DEFAULT_TARGET_SIDE },
       ],
-      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const absent: StateMachineForm = {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const }],
-      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     expect(graphSignature(explicit)).toBe(graphSignature(absent));
   });
 
@@ -358,12 +358,12 @@ describe('connection sides (sourceSide / targetSide)', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const, sourceSide: 'bottom', targetSide: 'top' }],
-      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const horizontal: StateMachineForm = {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const }],
-      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     expect(graphSignature(vertical)).not.toBe(graphSignature(horizontal));
   });
 
@@ -376,12 +376,12 @@ describe('connection sides (sourceSide / targetSide)', () => {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const }],
-      positions: { A: { x: 10, y: 20 } }, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: { A: { x: 10, y: 20 } }, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const moved: StateMachineForm = {
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const }],
-      positions: { A: { x: 99, y: 20 } }, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: { A: { x: 99, y: 20 } }, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     expect(graphSignature(positioned)).not.toBe(graphSignature(moved));
   });
 
@@ -498,6 +498,7 @@ describe('graphSignature with terminalNodes', () => {
       nodeActions: {},
       descriptions: {},
       endSources: [],
+      startSources: [],
     };
     const fromConstant: StateMachineForm = { ...base, terminalNodes: { ...DEFAULT_TERMINAL_NODES } };
     const fromLiteral: StateMachineForm = { ...base, terminalNodes: { start: 'auto', end: 'auto' } };
@@ -513,6 +514,7 @@ describe('graphSignature with terminalNodes', () => {
       nodeActions: {},
       descriptions: {},
       endSources: [],
+      startSources: [],
     };
     const auto: StateMachineForm = { ...base, terminalNodes: { start: 'auto', end: 'auto' } };
     const pinned: StateMachineForm = {
@@ -531,6 +533,7 @@ describe('graphSignature with terminalNodes', () => {
       nodeActions: {},
       descriptions: {},
       endSources: [],
+      startSources: [],
     };
     const auto: StateMachineForm = { ...base, terminalNodes: { start: 'auto', end: 'auto' } };
     const hidden: StateMachineForm = { ...base, terminalNodes: { start: 'hidden', end: 'auto' } };
@@ -546,6 +549,7 @@ describe('graphSignature with terminalNodes', () => {
       nodeActions: {},
       descriptions: {},
       endSources: [],
+      startSources: [],
     };
     const at1: StateMachineForm = {
       ...base,
@@ -570,7 +574,7 @@ describe('transition mutations (updateState / updateTransition / addTransition)'
       transitions: [
         { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', requeuePolicy: { kind: 'KEEP' } as const, sourceSide: 'bottom', targetSide: 'top' },
       ],
-      positions: { WAITING: { x: 10, y: 20 }, CALLING: { x: 30, y: 40 } }, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: { WAITING: { x: 10, y: 20 }, CALLING: { x: 30, y: 40 } }, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const renamed = updateState(form, 0, 'PENDING');
     expect(renamed.transitions[0].from).toBe('PENDING');
     expect(renamed.transitions[0].sourceSide).toBe('bottom');
@@ -585,8 +589,9 @@ describe('transition mutations (updateState / updateTransition / addTransition)'
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const, sourceSide: 'bottom', targetSide: 'top' }],
-      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
-    const patched = updateTransition(form, 0, { actionLabel: 'go fast', requeuePolicy: { kind: 'KEEP' } as const });    expect(patched.transitions[0].actionLabel).toBe('go fast');
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+    const patched = updateTransition(form, 0, { actionLabel: 'go fast', requeuePolicy: { kind: 'KEEP' } as const });
+    expect(patched.transitions[0].actionLabel).toBe('go fast');
     expect(patched.transitions[0].sourceSide).toBe('bottom');
     expect(patched.transitions[0].targetSide).toBe('top');
   });
@@ -596,7 +601,7 @@ describe('transition mutations (updateState / updateTransition / addTransition)'
       mode: 'custom',
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const }],
-      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const added = addTransition(form);
     expect(added.transitions[1].sourceSide).toBeUndefined();
     expect(added.transitions[1].targetSide).toBeUndefined();
@@ -618,7 +623,7 @@ describe('node actions (node-level, panel-only)', () => {
         ],
       },
       descriptions: {},
-      endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
+      endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
     };
     expect(toNodeActionsDto(form)).toEqual({
       A: [{ executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'B' }],
@@ -645,7 +650,7 @@ describe('node actions (node-level, panel-only)', () => {
       states: ['A', 'B'],
       transitions: [{ from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const }],
       positions: {},
-      nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
+      nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
     };
     const withActions: StateMachineForm = {
       ...base,
@@ -666,7 +671,7 @@ describe('node actions (node-level, panel-only)', () => {
         WAITING: [{ executionType: 'ON_ENTRY', type: 'UPDATE_STATUS', value: 'CALLING' }],
       },
       descriptions: {},
-      endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
+      endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
     };
     const renamed = updateState(form, 0, 'PENDING');
     expect(renamed.nodeActions.PENDING).toEqual([
@@ -686,7 +691,7 @@ describe('node actions (node-level, panel-only)', () => {
         B: [{ executionType: 'ON_EXIT', type: 'UPDATE_STATUS', value: 'A' }],
       },
       descriptions: {},
-      endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
+      endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
     };
     const removed = removeState(form, 0);
     expect(removed.nodeActions.A).toBeUndefined();
@@ -743,7 +748,7 @@ describe('descriptionFor / updateStateDescription (per-state override + fallback
       positions: { WAITING: { x: 10, y: 20 } },
       nodeActions: {},
       descriptions: { WAITING: 'Antrian dimulai di sini' },
-      endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
+      endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
     };
     const renamed = updateState(form, 0, 'PENDING');
     expect(renamed.descriptions.PENDING).toBe('Antrian dimulai di sini');
@@ -758,7 +763,7 @@ describe('descriptionFor / updateStateDescription (per-state override + fallback
       positions: { A: { x: 10, y: 20 }, B: { x: 30, y: 40 } },
       nodeActions: {},
       descriptions: { A: 'Status A', B: 'Status B' },
-      endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
+      endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
     };
     const removed = removeState(form, 0);
     expect(removed.descriptions.A).toBeUndefined();
@@ -800,7 +805,7 @@ describe('mergeEdgeSides (wire map → form transitions)', () => {
         { from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } as const }, // default
         { from: 'B', to: 'C', actionLabel: 'up', requeuePolicy: { kind: 'KEEP' } as const, sourceSide: 'bottom', targetSide: 'top' }, // vertical
       ],
-      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
     const wire = toEdgeRoutingLayoutDto(form);
     const merged = mergeEdgeSides(
       form.transitions.map((t) => ({ from: t.from, to: t.to, actionLabel: t.actionLabel, requeuePolicy: { kind: 'KEEP' } as const })),
@@ -831,6 +836,7 @@ describe('toEndSourcesDto (wire-boundary mapping)', () => {
       ...defaultStateMachineForm(),
       mode: 'custom',
       endSources: ['WAITING', 'CALLING'],
+      startSources: [],
     };
     const dto = toEndSourcesDto(form);
     expect(dto).toEqual(['WAITING', 'CALLING']);
@@ -844,6 +850,25 @@ describe('toEndSourcesDto (wire-boundary mapping)', () => {
   });
 });
 
+describe('toStartSourcesDto (wire-boundary mapping)', () => {
+  it('returns a fresh array copy of form.startSources', () => {
+    const form: StateMachineForm = {
+      ...defaultStateMachineForm(),
+      mode: 'custom',
+      startSources: ['WAITING', 'CALLING'],
+    };
+    const dto = toStartSourcesDto(form);
+    expect(dto).toEqual(['WAITING', 'CALLING']);
+    // A fresh array — mutating the dto must not leak back into the form.
+    expect(dto).not.toBe(form.startSources);
+  });
+
+  it('returns [] when startSources is empty (the default — no topology backfill)', () => {
+    const form = defaultStateMachineForm();
+    expect(toStartSourcesDto(form)).toEqual([]);
+  });
+});
+
 describe('endSources cascade (rename / delete)', () => {
   it('updateState (rename) renames an endSources entry referencing the old name', () => {
     const form: StateMachineForm = {
@@ -854,6 +879,7 @@ describe('endSources cascade (rename / delete)', () => {
       nodeActions: {},
       descriptions: {},
       endSources: ['WAITING', 'ONHOLD'],
+      startSources: [],
       terminalNodes: { start: 'auto', end: 'auto' },
     };
     // Rename ONHOLD (index 2) → DONE.
@@ -872,11 +898,50 @@ describe('endSources cascade (rename / delete)', () => {
       nodeActions: {},
       descriptions: {},
       endSources: ['WAITING', 'ONHOLD'],
+      startSources: [],
       terminalNodes: { start: 'auto', end: 'auto' },
     };
     // Delete ONHOLD (index 2).
     const next = removeState(form, 2);
     expect(next.endSources).toEqual(['WAITING']);
+    expect(next.states).not.toContain('ONHOLD');
+  });
+});
+
+describe('startSources cascade (rename / delete)', () => {
+  it('updateState (rename) renames a startSources entry referencing the old name', () => {
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['WAITING', 'CALLING', 'ONHOLD'],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', requeuePolicy: { kind: 'KEEP' } as const }],
+      positions: {},
+      nodeActions: {},
+      descriptions: {},
+      endSources: [],
+      startSources: ['WAITING', 'ONHOLD'],
+      terminalNodes: { start: 'auto', end: 'auto' },
+    };
+    // Rename ONHOLD (index 2) → DONE.
+    const next = updateState(form, 2, 'DONE');
+    expect(next.startSources).toEqual(['WAITING', 'DONE']);
+    expect(next.states).toContain('DONE');
+  });
+
+  it('removeState (delete) drops a startSources entry referencing the removed state', () => {
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['WAITING', 'CALLING', 'ONHOLD'],
+      transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', requeuePolicy: { kind: 'KEEP' } as const }],
+      positions: {},
+      nodeActions: {},
+      descriptions: {},
+      endSources: [],
+      startSources: ['WAITING', 'ONHOLD'],
+      terminalNodes: { start: 'auto', end: 'auto' },
+    };
+    // Delete ONHOLD (index 2).
+    const next = removeState(form, 2);
+    expect(next.startSources).toEqual(['WAITING']);
     expect(next.states).not.toContain('ONHOLD');
   });
 });
@@ -895,6 +960,7 @@ describe('graphSignature with endSources', () => {
       positions: {},
       nodeActions: {},
       descriptions: {},
+      startSources: [],
       terminalNodes: { start: 'auto', end: 'auto' } as const,
     };
     const without: StateMachineForm = { ...base, endSources: [] };
@@ -910,10 +976,49 @@ describe('graphSignature with endSources', () => {
       positions: {},
       nodeActions: {},
       descriptions: {},
+      startSources: [],
       terminalNodes: { start: 'auto', end: 'auto' } as const,
     };
     const a: StateMachineForm = { ...base, endSources: ['A', 'B'] };
     const b: StateMachineForm = { ...base, endSources: ['B', 'A'] };
+    expect(graphSignature(a)).toBe(graphSignature(b));
+  });
+});
+
+describe('graphSignature with startSources', () => {
+  // graphSignature INCLUDES startSources (canvas-rendered, like endSources) so
+  // an explicit Start connection add/delete re-seeds the canvas. The array is
+  // canonicalized (sorted) so the signature is order-insensitive.
+
+  it('differs when startSources changes (an explicit Start connection added)', () => {
+    const base = {
+      mode: 'custom' as const,
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      positions: {},
+      nodeActions: {},
+      descriptions: {},
+      endSources: [],
+      terminalNodes: { start: 'auto', end: 'auto' } as const,
+    };
+    const without: StateMachineForm = { ...base, startSources: [] };
+    const withExplicit: StateMachineForm = { ...base, startSources: ['A'] };
+    expect(graphSignature(without)).not.toBe(graphSignature(withExplicit));
+  });
+
+  it('is order-insensitive (a re-GET may echo a different order than sent)', () => {
+    const base = {
+      mode: 'custom' as const,
+      states: ['A', 'B'],
+      transitions: [{ from: 'A', to: 'B', actionLabel: 'go', action: 'UPDATE_STATUS' as const, requeuePolicy: { kind: 'KEEP' } as const }],
+      positions: {},
+      nodeActions: {},
+      descriptions: {},
+      endSources: [],
+      terminalNodes: { start: 'auto', end: 'auto' } as const,
+    };
+    const a: StateMachineForm = { ...base, startSources: ['A', 'B'] };
+    const b: StateMachineForm = { ...base, startSources: ['B', 'A'] };
     expect(graphSignature(a)).toBe(graphSignature(b));
   });
 });
@@ -934,7 +1039,23 @@ describe('isDefaultGraph with endSources', () => {
   });
 });
 
-describe('stateDegrees / deriveAutoSources (the shared degree predicates)', () => {
+describe('isDefaultGraph with startSources', () => {
+  it('a non-empty startSources is a customization (loads as custom, not default)', () => {
+    // A graph that structurally matches the PRD §7 default but has an explicit
+    // Start connection is CUSTOM — the manager dragged an arrow from Start.
+    const states = [...DEFAULT_STATE_MACHINE.states];
+    const transitions = DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t, requeuePolicy: t.requeuePolicy ?? DEFAULT_REQUEUE_POLICY }));
+    expect(isDefaultGraph(states, transitions, {}, DEFAULT_TERMINAL_NODES, [], ['WAITING'])).toBe(false);
+  });
+
+  it('an empty startSources keeps a default-structure graph default', () => {
+    const states = [...DEFAULT_STATE_MACHINE.states];
+    const transitions = DEFAULT_STATE_MACHINE.transitions.map((t) => ({ ...t, requeuePolicy: t.requeuePolicy ?? DEFAULT_REQUEUE_POLICY }));
+    expect(isDefaultGraph(states, transitions, {}, DEFAULT_TERMINAL_NODES, [])).toBe(true);
+  });
+});
+
+describe('stateDegrees (the shared degree predicate)', () => {
   it('counts a normal transition on both ends', () => {
     const { inDeg, outDeg } = stateDegrees(['A', 'B'], [{ from: 'A', to: 'B' }]);
     expect(outDeg.get('A')).toBe(1);
@@ -956,39 +1077,6 @@ describe('stateDegrees / deriveAutoSources (the shared degree predicates)', () =
     expect(outDeg.get('A')).toBe(0);
     expect(inDeg.get('A')).toBe(0);
   });
-
-  it('derives the default graph entry state (WAITING)', () => {
-    expect(
-      deriveAutoSources([...DEFAULT_STATE_MACHINE.states], DEFAULT_STATE_MACHINE.transitions),
-    ).toEqual(['WAITING']);
-  });
-
-  it('keeps an entry state an entry state when it grows a self-loop', () => {
-    // The manager's report: WAITING had a Start arrow, drawing WAITING -> WAITING
-    // made it in-degree 1 and the Start arrow silently vanished.
-    const states = ['A', 'B'];
-    const transitions = [
-      { from: 'A', to: 'B' },
-      { from: 'A', to: 'A' },
-      { from: 'B', to: 'B' },
-    ];
-    expect(deriveAutoSources(states, transitions)).toEqual(['A']);
-  });
-
-  it('treats a self-loop-ONLY state as isolated (not an entry point)', () => {
-    const states = ['A', 'B', 'LOOPY'];
-    const transitions = [
-      { from: 'A', to: 'B' },
-      { from: 'LOOPY', to: 'LOOPY' },
-    ];
-    expect(deriveAutoSources(states, transitions)).toEqual(['A']);
-  });
-
-  it('treats a not-yet-wired state as isolated (the PR #103 invariant)', () => {
-    const states = ['A', 'B', 'STRAY'];
-    const transitions = [{ from: 'A', to: 'B' }];
-    expect(deriveAutoSources(states, transitions)).toEqual(['A']);
-  });
 });
 
 describe('reconcileStateNameRefs (canvas delete/rename cascade)', () => {
@@ -1004,6 +1092,7 @@ describe('reconcileStateNameRefs (canvas delete/rename cascade)', () => {
     },
     descriptions: { COMPLETED: 'Tiket selesai', SERVING: 'Sedang dilayani' },
     endSources: ['COMPLETED'],
+    startSources: ['WAITING'],
   });
 
   it('remaps every reference to the renamed state (a rename preserves intent)', () => {
@@ -1013,6 +1102,9 @@ describe('reconcileStateNameRefs (canvas delete/rename cascade)', () => {
     });
     // The End link follows the rename rather than being dropped.
     expect(out.endSources).toEqual(['SELESAI']);
+    // The Start link follows the rename too (WAITING → SELESAI is NOT this
+    // rename; the startSource 'WAITING' stays because WAITING is still live).
+    expect(out.startSources).toEqual(['WAITING']);
     expect(out.descriptions).toEqual({ SELESAI: 'Tiket selesai', SERVING: 'Sedang dilayani' });
     // Both the KEY and a referencing action VALUE are remapped.
     expect(out.nodeActions.SELESAI).toEqual([
@@ -1033,12 +1125,15 @@ describe('reconcileStateNameRefs (canvas delete/rename cascade)', () => {
     // "Update Status ke <deleted>" has no meaning and would fail the same
     // cross-check.
     expect(out.nodeActions.SERVING).toEqual([]);
+    // startSources keeps WAITING (still live); COMPLETED was not a start source.
+    expect(out.startSources).toEqual(['WAITING']);
   });
 
   it('leaves a fully-live set untouched', () => {
     const input = refs();
     const out = reconcileStateNameRefs(input, ['WAITING', 'SERVING', 'COMPLETED']);
     expect(out.endSources).toEqual(input.endSources);
+    expect(out.startSources).toEqual(input.startSources);
     expect(out.descriptions).toEqual(input.descriptions);
     expect(out.nodeActions).toEqual(input.nodeActions);
   });
@@ -1048,11 +1143,44 @@ describe('reconcileStateNameRefs (canvas delete/rename cascade)', () => {
     // malformed. `onRenameState` refuses a name already on the canvas, so this
     // is unreachable today — the guard costs one Set.
     const out = reconcileStateNameRefs(
-      { nodeActions: {}, descriptions: {}, endSources: ['A', 'B'] },
+      { nodeActions: {}, descriptions: {}, endSources: ['A', 'B'], startSources: [] },
       ['B'],
       { from: 'A', to: 'B' },
     );
     expect(out.endSources).toEqual(['B']);
+  });
+
+  it('de-duplicates a startSource that a rename collapses onto an existing entry', () => {
+    // Mirrors the endSource dedup above: the backend `StartSources.of` rejects
+    // a duplicate, so the cascade must collapse a rename onto an existing entry
+    // rather than emitting two copies.
+    const out = reconcileStateNameRefs(
+      { nodeActions: {}, descriptions: {}, endSources: [], startSources: ['A', 'B'] },
+      ['B'],
+      { from: 'A', to: 'B' },
+    );
+    expect(out.startSources).toEqual(['B']);
+  });
+
+  it('remaps a startSource referencing the renamed state (a rename preserves the Start link)', () => {
+    // A Start source declared on the renamed state must follow the rename —
+    // the manager's Start arrow should survive a rename, not silently drop.
+    const out = reconcileStateNameRefs(
+      { nodeActions: {}, descriptions: {}, endSources: [], startSources: ['WAITING'] },
+      ['SELESAI', 'SERVING'],
+      { from: 'WAITING', to: 'SELESAI' },
+    );
+    expect(out.startSources).toEqual(['SELESAI']);
+  });
+
+  it('prunes a startSource referencing a deleted state', () => {
+    // A Start source on a deleted state must be removed — a stale name would
+    // fail the backend cross-check and lock the manager out of saving.
+    const out = reconcileStateNameRefs(
+      { nodeActions: {}, descriptions: {}, endSources: [], startSources: ['WAITING', 'CALLING'] },
+      ['SERVING'],
+    );
+    expect(out.startSources).toEqual([]);
   });
 
   it('never emits a name outside the live state list', () => {
@@ -1077,15 +1205,19 @@ describe('reconcileStateNameRefs (canvas delete/rename cascade)', () => {
         },
         descriptions: { COMPLETED: 'Tiket selesai', SERVING: 'Sedang dilayani' },
         endSources: ['COMPLETED', 'SERVING'],
+        // A startSource on the dying state + one on a surviving state.
+        startSources: ['COMPLETED', 'WAITING'],
       },
       ['WAITING', 'SERVING'],
     );
     const live = new Set(['WAITING', 'SERVING']);
     // Non-vacuity: each collection the invariant ranges over is non-empty.
     expect(out.endSources).toEqual(['SERVING']);
+    expect(out.startSources).toEqual(['WAITING']);
     expect(Object.keys(out.descriptions)).toEqual(['SERVING']);
     expect(out.nodeActions.SERVING).toHaveLength(1);
     expect(out.endSources.every((s) => live.has(s))).toBe(true);
+    expect(out.startSources.every((s) => live.has(s))).toBe(true);
     expect(Object.keys(out.descriptions).every((k) => live.has(k))).toBe(true);
     expect(Object.keys(out.nodeActions).every((k) => live.has(k))).toBe(true);
     for (const actions of Object.values(out.nodeActions)) {
@@ -1112,6 +1244,7 @@ describe('reconcileStateNameRefs (canvas delete/rename cascade)', () => {
         },
         descriptions: {},
         endSources: [],
+        startSources: [],
       },
       ['SERVING'],
     );
@@ -1131,6 +1264,7 @@ describe('requeuePolicy (→ WAITING queue-order declaration)', () => {
       nodeActions: {},
       descriptions: {},
       endSources: [],
+      startSources: [],
       terminalNodes: { start: 'auto', end: 'auto' } as const,
     };
   }
@@ -1156,6 +1290,7 @@ describe('requeuePolicy (→ WAITING queue-order declaration)', () => {
       nodeActions: {},
       descriptions: {},
       endSources: [],
+      startSources: [],
       terminalNodes: { start: 'auto', end: 'auto' } as const,
     });
     expect(form.transitions[0].requeuePolicy).toEqual({ kind: 'KEEP' });
