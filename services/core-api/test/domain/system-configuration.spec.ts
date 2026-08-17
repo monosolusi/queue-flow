@@ -6,6 +6,7 @@ import {
   DailyResetPolicy,
   EdgeRoutingLayout,
   EndSources,
+  StartSources,
   NodeActions,
   NodePositions,
   PrinterConfiguration,
@@ -236,6 +237,12 @@ describe('SystemConfiguration aggregate', () => {
     expect(config.endSources.toDto()).toEqual([]);
   });
 
+  it('defaults startSources to the empty default array (none recorded)', () => {
+    const config = SystemConfiguration.create(Identifier.generate());
+    expect(config.startSources).toBe(StartSources.DEFAULT);
+    expect(config.startSources.toDto()).toEqual([]);
+  });
+
   it('defaults printerConfiguration to the chrome default (zero behavior change — Chrome print dialog)', () => {
     const config = SystemConfiguration.create(Identifier.generate());
     expect(config.printerConfiguration).toBe(PrinterConfiguration.DEFAULT);
@@ -264,6 +271,7 @@ describe('SystemConfiguration aggregate', () => {
       nodeActions: NodeActions.DEFAULT,
       terminalNodes: TerminalNodes.DEFAULT,
       endSources: EndSources.DEFAULT,
+      startSources: StartSources.DEFAULT,
       printerConfiguration: PrinterConfiguration.DEFAULT,
     });
     expect(config.brandColor.value).toBe('#aabbcc');
@@ -284,6 +292,7 @@ describe('SystemConfiguration aggregate', () => {
       nodeActions: NodeActions.DEFAULT,
       terminalNodes: TerminalNodes.DEFAULT,
       endSources: EndSources.DEFAULT,
+      startSources: StartSources.DEFAULT,
       printerConfiguration: PrinterConfiguration.DEFAULT,
     });
     expect(config.serviceThemes.toDto()).toEqual({
@@ -312,6 +321,7 @@ describe('SystemConfiguration aggregate', () => {
       nodeActions: NodeActions.DEFAULT,
       terminalNodes: TerminalNodes.DEFAULT,
       endSources: EndSources.DEFAULT,
+      startSources: StartSources.DEFAULT,
       printerConfiguration: PrinterConfiguration.DEFAULT,
     });
     expect(config.tvPanelLayout.toDto()).toEqual([
@@ -337,6 +347,7 @@ describe('SystemConfiguration aggregate', () => {
       nodeActions: NodeActions.DEFAULT,
       terminalNodes: TerminalNodes.DEFAULT,
       endSources: EndSources.DEFAULT,
+      startSources: StartSources.DEFAULT,
       printerConfiguration: PrinterConfiguration.DEFAULT,
     });
     expect(config.edgeRoutingLayout.toDto()).toEqual({
@@ -362,6 +373,7 @@ describe('SystemConfiguration aggregate', () => {
       nodeActions: NodeActions.DEFAULT,
       terminalNodes: TerminalNodes.DEFAULT,
       endSources: EndSources.DEFAULT,
+      startSources: StartSources.DEFAULT,
       printerConfiguration: PrinterConfiguration.DEFAULT,
     });
     expect(config.nodePositions.toDto()).toEqual({
@@ -385,9 +397,31 @@ describe('SystemConfiguration aggregate', () => {
       nodeActions: NodeActions.DEFAULT,
       terminalNodes: TerminalNodes.DEFAULT,
       endSources: EndSources.of(['WAITING', 'COMPLETED']),
+      startSources: StartSources.DEFAULT,
       printerConfiguration: PrinterConfiguration.DEFAULT,
     });
     expect(config.endSources.toDto()).toEqual(['WAITING', 'COMPLETED']);
+  });
+
+  it('reconstitute carries a custom start sources array through', () => {
+    const config = SystemConfiguration.reconstitute({
+      id: Identifier.generate(),
+      storeName: 'Toko Brand',
+      isInitialSetupCompleted: true,
+      stateMachine: StateMachine.DEFAULT,
+      dailyResetPolicy: DailyResetPolicy.DEFAULT,
+      brandColor: BrandColor.DEFAULT,
+      serviceThemes: ServiceThemes.DEFAULT,
+      tvPanelLayout: TvPanelLayout.DEFAULT,
+      edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
+      nodePositions: NodePositions.DEFAULT,
+      nodeActions: NodeActions.DEFAULT,
+      terminalNodes: TerminalNodes.DEFAULT,
+      endSources: EndSources.DEFAULT,
+      startSources: StartSources.of(['WAITING', 'COMPLETED']),
+      printerConfiguration: PrinterConfiguration.DEFAULT,
+    });
+    expect(config.startSources.toDto()).toEqual(['WAITING', 'COMPLETED']);
   });
 
   it('reconstitute carries a custom network-escpos printer configuration through', () => {
@@ -405,6 +439,7 @@ describe('SystemConfiguration aggregate', () => {
       nodeActions: NodeActions.DEFAULT,
       terminalNodes: TerminalNodes.DEFAULT,
       endSources: EndSources.DEFAULT,
+      startSources: StartSources.DEFAULT,
       printerConfiguration: PrinterConfiguration.of({
         mode: 'network-escpos',
         paperWidth: 58,

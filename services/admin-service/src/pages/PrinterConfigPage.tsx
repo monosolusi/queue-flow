@@ -14,7 +14,7 @@ import { useSystemConfigContext } from '../config/system-config-context';
 import { PageHeader } from '../components/PageHeader';
 import { useToast } from '../toast/useToast';
 import { toForm } from './admin-config/form';
-import { toEdgeRoutingLayoutDto, toEndSourcesDto, toNodeActionsDto, toNodePositionsDto, toStateMachineDto, toTerminalNodesDto } from '../lib/state-machine';
+import { toEdgeRoutingLayoutDto, toEndSourcesDto, toNodeActionsDto, toNodePositionsDto, toStartSourcesDto, toStateMachineDto, toTerminalNodesDto } from '../lib/state-machine';
 
 /**
  * AC6 — wire a field error message to its input via `aria-describedby` +
@@ -131,6 +131,10 @@ export function PrinterConfigPage({ api }: { api: IAdminApi }) {
           // edits neither End connections nor the graph); mirrors
           // `terminalNodes`.
           endSources: toEndSourcesDto(form.stateMachine),
+          // Explicit Start connections — payload-only passthrough (this page
+          // edits neither Start connections nor the graph); mirrors
+          // `endSources`. Start is manual-only — no backfill from topology.
+          startSources: toStartSourcesDto(form.stateMachine),
           brandColor: form.brandColor,
           serviceThemes: form.serviceThemes,
           // Passthrough — the TV-layout editor lives on `/tv-layout`; the full

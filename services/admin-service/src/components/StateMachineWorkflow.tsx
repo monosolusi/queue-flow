@@ -78,6 +78,7 @@ import {
   flowToGraph,
   formToFlowWithMarkers,
   hasEndSource,
+  hasStartSource,
   isTerminalNodeId,
   nextStateName,
   withDescriptions,
@@ -289,22 +290,23 @@ export function StateMachineWorkflow({
         nextEdges,
         value.terminalNodes,
       );
-      // `nodeActions`, `descriptions` and `endSources` all reference states BY
-      // NAME, and `flowToGraph` rebuilds `states` from the canvas nodes — so a
-      // delete/rename here can strand an entry pointing at a state that no
-      // longer exists. The save use case cross-checks all three and 400s on a
-      // stale entry, and no panel lists it (they all render live states only),
-      // so the manager would be locked out of saving with no in-app way to fix
-      // it. `reconcileStateNameRefs` prunes the dead names and REMAPS the
-      // renamed one (a rename must carry the manager's work to the new name,
-      // not silently drop it). `positions` needs no such pass — `flowToGraph`
-      // rebuilds it from the live nodes. Callers that rename pass `rename`;
-      // every other caller prunes only.
-      const { nodeActions, descriptions, endSources } = reconcileStateNameRefs(
+      // `nodeActions`, `descriptions`, `endSources` and `startSources` all
+      // reference states BY NAME, and `flowToGraph` rebuilds `states` from the
+      // canvas nodes — so a delete/rename here can strand an entry pointing at a
+      // state that no longer exists. The save use case cross-checks all four and
+      // 400s on a stale entry, and no panel lists it (they all render live
+      // states only), so the manager would be locked out of saving with no
+      // in-app way to fix it. `reconcileStateNameRefs` prunes the dead names and
+      // REMAPS the renamed one (a rename must carry the manager's work to the new
+      // name, not silently drop it). `positions` needs no such pass —
+      // `flowToGraph` rebuilds it from the live nodes. Callers that rename pass
+      // `rename`; every other caller prunes only.
+      const { nodeActions, descriptions, endSources, startSources } = reconcileStateNameRefs(
         {
           nodeActions: value.nodeActions,
           descriptions: value.descriptions,
           endSources: value.endSources,
+          startSources: value.startSources,
         },
         states,
         rename,
@@ -321,6 +323,7 @@ export function StateMachineWorkflow({
         descriptions,
         terminalNodes,
         endSources,
+        startSources,
       };
       // REBUILD the marker nodes from the form so auto markers re-attach to the
       // (possibly moved) state bounds after a state drag — an auto marker's
@@ -346,7 +349,7 @@ export function StateMachineWorkflow({
       lastEmitted.current = graphSignature(form);
       onChange(form);
     },
-    [value.mode, value.nodeActions, value.descriptions, value.terminalNodes, value.endSources, onChange],
+    [value.mode, value.nodeActions, value.descriptions, value.terminalNodes, value.endSources, value.startSources, onChange],
   );
 
   // Lift a FORM-ONLY edit (a node-action add/delete/edit touches no nodes/edges,
@@ -443,6 +446,22 @@ export function StateMachineWorkflow({
         onChange({ ...value, endSources: [...value.endSources, from] });
         return;
       }
+      // Dragging a connection FROM the Start marker is a SPECIAL CASE (mirrors
+      // the End branch above): it does NOT create a real transition edge (the
+      // Start marker is canvas-only, NOT a state — `__start` must never reach
+      // the wire `transitions`). Instead it appends `to` to `form.startSources`
+      // (NON-stamping raw `onChange`), and the sync effect sees `graphSignature`
+      // changed (startSources included) → re-seeds → `formToFlowWithMarkers`
+      // emits the explicit terminal edge.
+      if (from === START_NODE_ID) {
+        if (isTerminalNodeId(to)) return; // Start has no outgoing to markers.
+        // Defensive duplicate guard: the live `isValidConnection` below already
+        // rejects a repeat, but keep the check so a real connection that
+        // bypassed the live guard never seeds a second edge to the same target.
+        if (hasStartSource(edges, to)) return;
+        onChange({ ...value, startSources: [...value.startSources, to] });
+        return;
+      }
       // Terminal-marker guard, mirroring the live `isValidConnection`. Under
       // `ConnectionMode.Loose` React Flow can fire `onConnect` for a pair the
       // live guard rejected (the same premise the duplicate guard below rests
@@ -506,10 +525,20 @@ export function StateMachineWorkflow({
         if (isTerminalNodeId(from)) return false;
         return !hasEndSource(edges, from);
       }
-      // Start marker: no incoming connections (it is an entry cue only).
+      // Start marker: no incoming connections (it is an entry cue only — the
+      // manager drags FROM it, never INTO it).
       if (to === START_NODE_ID) return false;
-      // End has no outgoing; Start has no outgoing (entry marker only).
-      if (from === END_NODE_ID || from === START_NODE_ID) return false;
+      // Start marker: the manager MAY drag a connection from Start to ANY real
+      // state (multiple Start connections allowed) — this is the ONLY way a
+      // state reaches the Start marker now that nothing is auto-linked. Reject
+      // only a repeat (the target is already a startSource). Mirrors the End
+      // branch above.
+      if (from === START_NODE_ID) {
+        if (isTerminalNodeId(to)) return false;
+        return !hasStartSource(edges, to);
+      }
+      // End has no outgoing.
+      if (from === END_NODE_ID) return false;
       // Any other terminal-marker combo (marker→marker, marker→state other
       // than End) is rejected — the markers are canvas-only and never reach
       // the form/wire. Defensive (the handles are `isConnectable={false}` in
@@ -808,6 +837,14 @@ export function StateMachineWorkflow({
       // this removes any of them — nothing on the End marker is topology-owned.
       onRemoveEndSource: (source) => {
         onChange({ ...value, endSources: value.endSources.filter((s) => s !== source) });
+      },
+      // Remove a Start connection (a manager-drawn arrow from the Start marker).
+      // Non-stamping (raw `onChange`, no `lastEmitted` stamp) so the sync effect
+      // sees `graphSignature` changed (startSources included) → re-seeds → the
+      // terminal edge disappears from the canvas. Mirrors `onRemoveEndSource`.
+      // Every outgoing Start edge is manager-drawn, so this removes any of them.
+      onRemoveStartSource: (target) => {
+        onChange({ ...value, startSources: value.startSources.filter((s) => s !== target) });
       },
     }),
     [value, nodes, edges, commit, lift, selectedNodeId, selectedEdgeId, toast, mintEdgeId],

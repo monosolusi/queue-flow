@@ -10,6 +10,7 @@ import {
   type NodePositionsDto,
   type RequeuePolicyDto,
   type RequeuePolicyKind,
+  type StartSourcesDto,
   type StateMachineDto,
   type StateTransitionDto,
   type TerminalNodesDto,
@@ -192,9 +193,9 @@ export interface StateMachineForm {
    * markers, not state names). `'auto'` derives the marker position from the
    * real node bounds; `{x,y}` is a manager-pinned explicit position; `'hidden'`
    * omits the marker. This field controls marker PRESENCE + POSITION only: the
-   * Start marker's edges stay auto-derived from topology, and the End marker's
-   * come from {@link StateMachineForm.endSources}. Travels the wire in the
-   * separate `terminalNodes` field (built by `toTerminalNodesDto`).
+   * Start marker's edges come from {@link StateMachineForm.startSources}, and
+   * the End marker's come from {@link StateMachineForm.endSources}. Travels the
+   * wire in the separate `terminalNodes` field (built by `toTerminalNodesDto`).
    *
    * Canvas-rendered (unlike `nodeActions`): `formToFlowWithMarkers` consults it
    * for marker presence + position, and `flowToGraph` captures it back from the
@@ -217,6 +218,29 @@ export interface StateMachineForm {
    * delete to the entry (state-name-keyed by value, mirrors `nodeActions`).
    */
   endSources: string[];
+  /**
+   * Explicit Start-marker connections — a flat array of state NAMES the manager
+   * dragged a connection from the Start terminal marker to (multiple allowed).
+   * Start edges go Start→state (the manager drags FROM Start), so each entry is
+   * a status the manager wired the flow's entry into. Canvas-rendered (like
+   * `endSources`): `formToFlowWithMarkers` emits one terminal edge per entry —
+   * and NOTHING else feeds the Start marker, so this is the complete set of
+   * arrows out of it. A change MUST re-seed the canvas → `graphSignature`
+   * INCLUDES `startSources`. Travels the wire in the separate top-level
+   * `startSources` field (built by {@link toStartSourcesDto}), NOT inside
+   * `stateMachine` (the Start marker is a canvas-only affordance, NOT a real
+   * state — `__start` never reaches the wire `transitions`). The
+   * `updateState`/`removeState` helpers cascade a rename/delete to the entry
+   * (state-name-keyed by value, mirrors `endSources`).
+   *
+   * MANUAL-ONLY (mirrors `endSources`): nothing about the graph shape derives a
+   * Start arrow, so `[]` means the Start marker renders with no outgoing arrow
+   * at all (it still renders: it is the drag source the manager draws the first
+   * connection from). There is NO backfill from topology — a store configured
+   * before this field existed loads with `startSources: []` and a bare Start
+   * marker, and the manager draws the entry connections explicitly.
+   */
+  startSources: string[];
 }
 
 /** The PRD §7 default graph prefilled into the editor's default mode. */
@@ -239,6 +263,12 @@ export function defaultStateMachineForm(): StateMachineForm {
     // No End connections — the PRD §7 default graph declares none, so the End
     // marker renders with no incoming arrow until the manager draws one.
     endSources: [],
+    // No Start connections — the Start marker is MANUAL-ONLY (mirrors End). The
+    // PRD §7 default graph declares no explicit Start connections, so the Start
+    // marker renders bare until the manager draws a connection from it. There is
+    // NO backfill from topology — a store configured before this field existed
+    // loads with `[]` and the manager wires the entry explicitly.
+    startSources: [],
   };
 }
 
@@ -261,6 +291,7 @@ export function isDefaultGraph(
   positions: Record<string, { x: number; y: number }> = {},
   terminalNodes: TerminalNodesDto = DEFAULT_TERMINAL_NODES,
   endSources: readonly string[] = [],
+  startSources: readonly string[] = [],
 ): boolean {
   if (Object.keys(positions).length > 0) return false;
   // A manager-pinned or hidden terminal marker is a customization (auto/auto
@@ -271,6 +302,11 @@ export function isDefaultGraph(
   // — the manager dragged a new arrow into End), so a store with a non-empty
   // `endSources` loads as `mode: 'custom'` (editable), not read-only default.
   if (endSources.length > 0) return false;
+  // An explicit Start connection is a customization (the default graph has none
+  // — the manager dragged a new arrow from Start), so a store with a non-empty
+  // `startSources` loads as `mode: 'custom'` (editable), not read-only default.
+  // Mirrors the `endSources` guard above.
+  if (startSources.length > 0) return false;
   if (states.length !== DEFAULT_STATE_MACHINE.states.length) return false;
   if (transitions.length !== DEFAULT_STATE_MACHINE.transitions.length) return false;
   const sameStates = states.every((s, i) => s === DEFAULT_STATE_MACHINE.states[i]);
@@ -480,6 +516,22 @@ export function toEndSourcesDto(form: StateMachineForm): EndSourcesDto {
   return [...form.endSources];
 }
 
+/**
+ * Builds the explicit Start-connections wire array from the form. A shallow copy
+ * of `form.startSources` (the form is the source of truth — built by the
+ * `onConnect`-from-Start path + the panel "Transisi keluar" delete, or by
+ * `xmlToForm` on a Source edit). `[]` means "no Start connections drawn" — and
+ * since nothing else feeds the Start marker, no arrows out of it at all.
+ * Mirrors {@link toEndSourcesDto}'s doc style: read `form.startSources` directly,
+ * do not special-case mode (default mode force-resets the graph in
+ * `toStateMachineDto` and the default canvas carries no explicit Start
+ * connections, so the array is `[]` regardless — `defaultStateMachineForm` seeds
+ * `[]` and the default radio calls it).
+ */
+export function toStartSourcesDto(form: StateMachineForm): StartSourcesDto {
+  return [...form.startSources];
+}
+
 /** Horizontal gap between ranks (left-to-right flow). */
 const X_SPACING = 240;
 /** Vertical gap between nodes stacked within a rank. */
@@ -617,17 +669,26 @@ export function autoLayout(
 
 /**
  * In-degree + out-degree per state — the single source of truth for the
- * "entry/exit point" predicates. Pure + framework-free.
+ * "exit point" predicate (the End-marker properties panel's "Transisi masuk"
+ * list). Pure + framework-free.
  *
  * Lives here in the form-model lib rather than in the React Flow layer for the
- * same reason {@link autoLayout} does: "which statuses are this graph's entry
- * and exit points" is a property of the graph itself, not of the canvas that
- * draws it. Three consumers depend on it — the canvas Start/End markers
- * (`deriveTerminalMarkers`), the End-marker properties panel's "Transisi masuk"
- * list, and the XML codec's `<initial>` flag — and the codec is a DOM-layer
- * module that must never import from `state-machine-flow.ts`. One home here
- * keeps the dependency direction clean (DOM → pure, canvas → pure, never
- * DOM → canvas) AND keeps the three consumers from drifting apart.
+ * same reason {@link autoLayout} does: "which statuses are this graph's exit
+ * points" is a property of the graph itself, not of the canvas that draws it.
+ * Two consumers depend on it — the End-marker properties panel's "Transisi
+ * masuk" list, and the XML codec's `<task>` vs `<state>` tag choice — and the
+ * codec is a DOM-layer module that must never import from
+ * `state-machine-flow.ts`. One home here keeps the dependency direction clean
+ * (DOM → pure, canvas → pure, never DOM → canvas) AND keeps the two consumers
+ * from drifting apart.
+ *
+ * (The Start marker's entry states used to be auto-derived from the in-degree-0
+ * half here via `deriveAutoSources`; that derivation is GONE — Start is now
+ * manual-only via `form.startSources`, mirroring the End marker's
+ * `endSources`. The in-degree half is retained only because the End-marker
+ * panel's "Transisi masuk" list reads `inDeg` to filter `endSources` to live
+ * states with incoming transitions, and the out-degree half is retained because
+ * the XML codec picks Kaleo's `<task>` vs `<state>` tag from `outDeg`.)
  *
  * Two counting rules, both load-bearing:
  *  1. Only transitions whose `from` AND `to` are BOTH in `states` count — a
@@ -636,16 +697,16 @@ export function autoLayout(
  *  2. A SELF-LOOP (`from === to`) counts for NEITHER degree. A self-loop is flow
  *     that leaves a status and returns to the same status: it brings no flow
  *     INTO the graph and takes none OUT, so it must never change whether a
- *     status is the flow's entry or exit. Counting it (the pre-fix behavior)
- *     made a status with a self-loop stop being in-degree 0, which silently
- *     dropped its `__start → S` terminal arrow — the manager's "WAITING punya
- *     transisi masuk dari Mulai, lalu aku bikin self-loop dan yang dari Mulai
- *     hilang" report.
+ *     status is the flow's exit. Counting it (the pre-fix behavior) made a
+ *     status with a self-loop stop being in-degree 0, which silently dropped its
+ *     `__start → S` terminal arrow (under the since-removed auto-derive) — the
+ *     manager's "WAITING punya transisi masuk dari Mulai, lalu aku bikin
+ *     self-loop dan yang dari Mulai hilang" report.
  *
  * Consequence (deliberate): a status whose ONLY transition is a self-loop stays
- * degree 0 on BOTH sides — i.e. ISOLATED — and an isolated status is not an
- * entry point (see {@link deriveAutoSources}). A self-loop wires the status to
- * itself, not into the flow.
+ * degree 0 on BOTH sides — i.e. ISOLATED — and an isolated status has no
+ * incoming transitions so the End-marker panel lists none for it. A self-loop
+ * wires the status to itself, not into the flow.
  *
  * The out-degree half has a second consumer: the XML codec picks Kaleo's
  * `<task>` vs `<state>` tag from `outDeg`, so a self-looping status still
@@ -669,27 +730,6 @@ export function stateDegrees(
     outDeg.set(t.from, (outDeg.get(t.from) ?? 0) + 1);
   }
   return { inDeg, outDeg };
-}
-
-/**
- * The graph's real ENTRY states — in-degree 0 AND out-degree > 0 (per
- * {@link stateDegrees}): nothing flows in, something flows out. An ISOLATED
- * state (degree 0 on BOTH sides) is excluded: it satisfies the in-degree-0
- * predicate AND the out-degree-0 one at once, so without the exclusion a stray,
- * just-added status would be auto-linked to Start AND End at the same time (the
- * manager's "a stray status with no transisi is automatically linked to Start
- * and End" feedback) — a not-yet-wired status has no entry/exit semantics yet.
- *
- * Shared by the canvas's `deriveTerminalMarkers` (which draws the `__start → S`
- * arrows) and the XML codec's `<initial>true</initial>` flag, so the diagram and
- * the Sumber view can never disagree about where the flow starts.
- */
-export function deriveAutoSources(
-  states: readonly string[],
-  transitions: readonly { from: string; to: string }[],
-): string[] {
-  const { inDeg, outDeg } = stateDegrees(states, transitions);
-  return states.filter((s) => (inDeg.get(s) ?? 0) === 0 && (outDeg.get(s) ?? 0) > 0);
 }
 
 /**
@@ -908,16 +948,18 @@ export function updateStateDescription(
 }
 
 /**
- * The three form fields that reference states BY NAME rather than by position
+ * The four form fields that reference states BY NAME rather than by position
  * in `states`: `nodeActions` (keyed by name, and each action's `value` is a
- * name too), `descriptions` (keyed by name), and `endSources` (an array OF
- * names). Grouped as one shape because they share one failure mode and one
- * cascade rule — see {@link reconcileStateNameRefs}.
+ * name too), `descriptions` (keyed by name), `endSources` (an array OF names),
+ * and `startSources` (an array OF names). Grouped as one shape because they
+ * share one failure mode and one cascade rule — see
+ * {@link reconcileStateNameRefs}.
  */
 export interface StateNameRefs {
   readonly nodeActions: NodeActionsDto;
   readonly descriptions: Record<string, string>;
   readonly endSources: readonly string[];
+  readonly startSources: readonly string[];
 }
 
 /**
@@ -925,10 +967,10 @@ export interface StateNameRefs {
  * optionally remapping a rename. Pure + framework-free.
  *
  * **Why this exists (a save-blocking landmine).** The save use case
- * cross-checks all three against the active state schema and throws on any
+ * cross-checks all four against the active state schema and throws on any
  * entry that is not a live state — `node actions key 'X' is not a state in the
- * active state machine`, the same for `state descriptions key`, and `end
- * sources entry`. Each becomes an HTTP 400 on EVERY subsequent save. The
+ * active state machine`, the same for `state descriptions key`, `end sources
+ * entry`, and `start sources entry`. Each becomes an HTTP 400 on EVERY subsequent save. The
  * stranded entry is invisible in the UI (every panel lists only live states),
  * so there is NO in-app route to clear it: the manager is locked out of saving
  * until someone hand-edits the XML Source. The canvas delete/rename path
@@ -936,10 +978,10 @@ export interface StateNameRefs {
  * {@link updateState}/{@link removeState} already do for their own path.
  *
  * **Rename REMAPS, it does not prune.** A rename must preserve the manager's
- * intent: the description, the node actions and the End link follow the status
- * to its new name. Pruning alone would satisfy the cross-check while silently
- * throwing the manager's work away. Only names that are gone for good (a
- * delete) are dropped.
+ * intent: the description, the node actions, the End link and the Start link
+ * follow the status to its new name. Pruning alone would satisfy the
+ * cross-check while silently throwing the manager's work away. Only names that
+ * are gone for good (a delete) are dropped.
  *
  * Applied in one pass per field: map the name through the rename first, then
  * keep it only if it is a live state.
@@ -962,12 +1004,15 @@ export interface StateNameRefs {
  *    malformed; a rename onto an existing name cannot reach here today because
  *    `onRenameState` refuses a name already on the canvas, but the guard costs
  *    one `Set`).
+ *  - `startSources` — mirrors `endSources`: the array VALUES are remapped/
+ *    pruned, and de-duplicated defensively (the backend `StartSources.of`
+ *    rejects a duplicate entry as malformed; same one-`Set` guard).
  */
 export function reconcileStateNameRefs(
   refs: StateNameRefs,
   liveStates: readonly string[],
   rename?: { readonly from: string; readonly to: string },
-): { nodeActions: NodeActionsDto; descriptions: Record<string, string>; endSources: string[] } {
+): { nodeActions: NodeActionsDto; descriptions: Record<string, string>; endSources: string[]; startSources: string[] } {
   const live = new Set(liveStates);
   const mapName = (name: string): string =>
     rename !== undefined && name === rename.from ? rename.to : name;
@@ -990,8 +1035,8 @@ export function reconcileStateNameRefs(
   const endSources: string[] = [];
   const seen = new Set<string>();
   // `?? []` mirrors the `?? {}` on the two maps above: `StateNameRefs` types all
-  // three as required, but many test fixtures build partial forms behind a type
-  // assertion, so the defensive coalesce stays consistent across all three.
+  // four as required, but many test fixtures build partial forms behind a type
+  // assertion, so the defensive coalesce stays consistent across all four.
   for (const source of refs.endSources ?? []) {
     const next = mapName(source);
     if (!live.has(next) || seen.has(next)) continue;
@@ -999,7 +1044,19 @@ export function reconcileStateNameRefs(
     endSources.push(next);
   }
 
-  return { nodeActions, descriptions, endSources };
+  // `startSources` mirrors `endSources`: remap the name, keep only live states,
+  // de-duplicate defensively (a separate `seenStart` set so an End entry and a
+  // Start entry with the same name do not collide — they are independent lists).
+  const startSources: string[] = [];
+  const seenStart = new Set<string>();
+  for (const source of refs.startSources ?? []) {
+    const next = mapName(source);
+    if (!live.has(next) || seenStart.has(next)) continue;
+    seenStart.add(next);
+    startSources.push(next);
+  }
+
+  return { nodeActions, descriptions, endSources, startSources };
 }
 
 // --- form mutation helpers (pure over the StateMachineForm slice) ------------
@@ -1085,7 +1142,10 @@ export function updateState(form: StateMachineForm, i: number, value: string): S
   // explicit End edge follows the renamed status (mirrors the nodeActions/
   // positions rename propagation).
   const endSources = form.endSources.map((s) => (s === oldName ? value : s));
-  return { ...form, states, transitions, positions, nodeActions, descriptions, endSources };
+  // The explicit Start-connections array mirrors `endSources`: a renamed source
+  // must update its entry so the explicit Start edge follows the renamed status.
+  const startSources = form.startSources.map((s) => (s === oldName ? value : s));
+  return { ...form, states, transitions, positions, nodeActions, descriptions, endSources, startSources };
 }
 
 export function addState(form: StateMachineForm): StateMachineForm {
@@ -1116,6 +1176,11 @@ export function removeState(form: StateMachineForm, i: number): StateMachineForm
   // would survive a re-add and silently re-attach to a re-created status under
   // the same name — and the canvas would render an End edge to a removed state.
   const endSources = form.endSources.filter((s) => s !== removedName);
+  // Drop the explicit Start-connections entry too (mirrors `endSources`), or
+  // the stale connection would survive a re-add and silently re-attach to a
+  // re-created status under the same name — and the canvas would render a Start
+  // edge from the Start marker to a removed state.
+  const startSources = form.startSources.filter((s) => s !== removedName);
   return {
     ...form,
     states: form.states.filter((_, idx) => idx !== i),
@@ -1123,6 +1188,7 @@ export function removeState(form: StateMachineForm, i: number): StateMachineForm
     nodeActions,
     descriptions,
     endSources,
+    startSources,
   };
 }
 
@@ -1180,6 +1246,14 @@ export function removeState(form: StateMachineForm, i: number): StateMachineForm
  * canonicalized (sorted) so the signature is order-insensitive (the wire array
  * has no inherent order; a re-GET may echo a different order than the client
  * sent — the sorted signature stays stable across the round-trip).
+ *
+ * INCLUDES `startSources` (canvas-rendered, mirrors `endSources`): an explicit
+ * Start connection add/delete is a structural canvas change the guards must
+ * detect — a source-view startSources edit re-seeds the canvas, and the
+ * `onConnect`-from-Start / panel-delete paths (non-stamping — raw `onChange` →
+ * the sync effect re-seeds) show up as an external signature change. The array
+ * is canonicalized (sorted) for the same order-insensitivity reason as
+ * `endSources`.
  */
 export function graphSignature(form: StateMachineForm): string {
   const canonTerminal = (v: TerminalNodesDto['start']): string =>
@@ -1204,5 +1278,6 @@ export function graphSignature(form: StateMachineForm): string {
       .sort(),
     tn: { start: canonTerminal(form.terminalNodes.start), end: canonTerminal(form.terminalNodes.end) },
     e: [...form.endSources].sort(),
+    ss: [...form.startSources].sort(),
   });
 }

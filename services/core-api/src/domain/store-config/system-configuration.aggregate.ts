@@ -5,6 +5,7 @@ import { BrandColor } from './value-objects/brand-color';
 import { DailyResetPolicy } from './value-objects/daily-reset-policy';
 import { EdgeRoutingLayout } from './value-objects/edge-routing-layout';
 import { EndSources } from './value-objects/end-sources';
+import { StartSources } from './value-objects/start-sources';
 import { NodeActions } from './value-objects/node-actions';
 import { NodePositions } from './value-objects/node-positions';
 import { PrinterConfiguration } from './value-objects/printer-configuration';
@@ -32,6 +33,7 @@ export class SystemConfiguration extends AggregateRoot {
   private _nodeActions: NodeActions;
   private _terminalNodes: TerminalNodes;
   private _endSources: EndSources;
+  private _startSources: StartSources;
   private _printerConfiguration: PrinterConfiguration;
 
   private constructor(
@@ -48,6 +50,7 @@ export class SystemConfiguration extends AggregateRoot {
     nodeActions: NodeActions,
     terminalNodes: TerminalNodes,
     endSources: EndSources,
+    startSources: StartSources,
     printerConfiguration: PrinterConfiguration,
   ) {
     super(id);
@@ -63,6 +66,7 @@ export class SystemConfiguration extends AggregateRoot {
     this._nodeActions = nodeActions;
     this._terminalNodes = terminalNodes;
     this._endSources = endSources;
+    this._startSources = startSources;
     this._printerConfiguration = printerConfiguration;
   }
 
@@ -70,7 +74,7 @@ export class SystemConfiguration extends AggregateRoot {
    * brand color, service themes, TV panel layout, edge routing layout, node
    * positions, and printer configuration. `brandColor` + `serviceThemes` +
    * `tvPanelLayout` + `edgeRoutingLayout` + `nodePositions` + `nodeActions` +
-   * `terminalNodes` + `endSources` + `printerConfiguration` default so the dev
+   * `terminalNodes` + `endSources` + `startSources` + `printerConfiguration` default so the dev
    * seed and acceptance `seedPrdConfig` (2-arg calls) need no change. */
   public static create(
     id: Identifier,
@@ -83,6 +87,7 @@ export class SystemConfiguration extends AggregateRoot {
     nodeActions: NodeActions = NodeActions.DEFAULT,
     terminalNodes: TerminalNodes = TerminalNodes.DEFAULT,
     endSources: EndSources = EndSources.DEFAULT,
+    startSources: StartSources = StartSources.DEFAULT,
     printerConfiguration: PrinterConfiguration = PrinterConfiguration.DEFAULT,
   ): SystemConfiguration {
     return new SystemConfiguration(
@@ -99,6 +104,7 @@ export class SystemConfiguration extends AggregateRoot {
       nodeActions,
       terminalNodes,
       endSources,
+      startSources,
       printerConfiguration,
     );
   }
@@ -117,6 +123,7 @@ export class SystemConfiguration extends AggregateRoot {
     nodeActions: NodeActions;
     terminalNodes: TerminalNodes;
     endSources: EndSources;
+    startSources: StartSources;
     printerConfiguration: PrinterConfiguration;
   }): SystemConfiguration {
     return new SystemConfiguration(
@@ -133,6 +140,7 @@ export class SystemConfiguration extends AggregateRoot {
       params.nodeActions,
       params.terminalNodes,
       params.endSources,
+      params.startSources,
       params.printerConfiguration,
     );
   }
@@ -183,6 +191,10 @@ export class SystemConfiguration extends AggregateRoot {
 
   public get endSources(): EndSources {
     return this._endSources;
+  }
+
+  public get startSources(): StartSources {
+    return this._startSources;
   }
 
   public get printerConfiguration(): PrinterConfiguration {

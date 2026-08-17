@@ -123,16 +123,22 @@ export function toForm(config: SystemConfigurationDto): AdminForm {
   // — the backend always returns `endSources` (defaulting to `[]`); the `?? []`
   // is belt-and-suspenders (same pattern as `terminalNodes`).
   const endSources = [...(config.endSources ?? [])];
+  // Explicit Start connections — a flat array of state names. Coerce
+  // defensively — the backend always returns `startSources` (defaulting to
+  // `[]`); the `?? []` is belt-and-suspenders (same pattern as `endSources`).
+  // Start is manual-only — no backfill from topology.
+  const startSources = [...(config.startSources ?? [])];
   return {
     storeName: config.storeName,
     // Build a StateMachineForm with the client-only `mode` preset inferred by
     // deep-equal against the PRD §7 default graph (mirrors the wizard's prefill
     // inference). `mode` is stripped at save (never on the wire). The inference
-    // now passes `positions` + `terminalNodes` + `endSources` so a store with
-    // saved positions, non-auto terminal markers, OR explicit End connections
-    // loads editable (`mode: 'custom'`), not read-only default.
+    // now passes `positions` + `terminalNodes` + `endSources` + `startSources`
+    // so a store with saved positions, non-auto terminal markers, OR explicit
+    // End/Start connections loads editable (`mode: 'custom'`), not read-only
+    // default.
     stateMachine: {
-      mode: isDefaultGraph(config.stateMachine.states, mergedTransitions, positions, terminalNodes, endSources)
+      mode: isDefaultGraph(config.stateMachine.states, mergedTransitions, positions, terminalNodes, endSources, startSources)
         ? 'default'
         : 'custom',
       states: [...config.stateMachine.states],
@@ -142,6 +148,7 @@ export function toForm(config: SystemConfigurationDto): AdminForm {
       descriptions,
       terminalNodes,
       endSources,
+      startSources,
     },
     brandColor: config.brandColor || DEFAULT_BRAND_COLOR,
     // Coerce a partial/degraded GET projection into a complete 4-surface map

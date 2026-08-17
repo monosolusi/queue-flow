@@ -48,7 +48,7 @@ function configuredStore(): SystemConfigurationDto {
     serviceThemes: { ...DEFAULT_SERVICE_THEMES },
     tvPanelLayout: DEFAULT_TV_GRID_LAYOUT.map((w) => ({ ...w })),
     edgeRoutingLayout: {},
-    nodePositions: {}, nodeActions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
+    nodePositions: {}, nodeActions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
     printerConfiguration: { ...DEFAULT_PRINTER_CONFIGURATION },
   };
 }
@@ -67,7 +67,7 @@ function makeApi(
           serviceThemes: payload.serviceThemes,
           tvPanelLayout: payload.tvPanelLayout,
           edgeRoutingLayout: {},
-          nodePositions: {}, nodeActions: {}, endSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
+          nodePositions: {}, nodeActions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
           printerConfiguration: payload.printerConfiguration,
         })),
   );

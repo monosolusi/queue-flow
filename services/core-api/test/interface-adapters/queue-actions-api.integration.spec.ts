@@ -9,6 +9,7 @@ import {
   DailyResetPolicy,
   EdgeRoutingLayout,
   EndSources,
+  StartSources,
   NodeActions,
   NodePositions,
   PrinterConfiguration,
@@ -62,6 +63,7 @@ describe('GET /api/queue/actions (integration — caller dynamic actions, FR-CLR
       nodeActions: NodeActions.DEFAULT,
       terminalNodes: TerminalNodes.DEFAULT,
       endSources: EndSources.DEFAULT,
+      startSources: StartSources.DEFAULT,
       printerConfiguration: PrinterConfiguration.DEFAULT,
     });
     await repos(app).systemConfig.save(config);

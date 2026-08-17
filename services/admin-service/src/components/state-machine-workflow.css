@@ -426,23 +426,21 @@
 }
 
 /* --- Canvas-only Start/End terminal markers ----------------------------------
-   Visual affordances for the graph's entry and exit. Start is auto-derived for
-   the real entry states (in-degree 0 with out-degree > 0 — an isolated,
-   not-yet-wired status is not one, and a transition from a status to itself
-   counts for neither degree); End is manual-only (its arrows come from
-   the manager-drawn `endSources`) and renders even with none. NOT state cards —
-   they carry no name/description on the form, so they render as compact pills:
-   a small glyph + label, accent-tinted for Start (the entry cue), a bold muted
-   ring for End (the exit cue). Token-driven (light/dark + brand re-theme for
-   free); no hardcoded color literal (the styles.test.ts static guard rejects hex
-   in the `.sm-source-*` rules; the same token-only convention applies here).
-   The Start marker's handle is `isConnectable={false}` → no `connectable` class
-   → the base `.react-flow__handle { opacity: 0 }` rule hides it (and the
-   `::before` hit area has `pointer-events: none`), so Start stays
-   non-interactive. The End marker's four handles (one per side, mirroring a
-   state node) ARE connectable in custom mode, so they pick up the shared
-   three-tier handle opacity above — load-bearing, since dragging into one of
-   them is the ONLY way to link a status to End. */
+   Visual affordances for the graph's entry and exit. BOTH are manual-only now:
+   Start's arrows come from the manager-drawn `startSources` (mirrors End's
+   `endSources`) and renders even with none (a BARE marker); End's arrows come
+   from the manager-drawn `endSources` and renders even with none. NOT state
+   cards — they carry no name/description on the form, so they render as compact
+   pills: a small glyph + label, accent-tinted for Start (the entry cue), a bold
+   muted ring for End (the exit cue). Token-driven (light/dark + brand re-theme
+   for free); no hardcoded color literal (the styles.test.ts static guard
+   rejects hex in the `.sm-source-*` rules; the same token-only convention
+   applies here). The Start marker's four handles (one per side, mirroring a
+   state node + the End marker) ARE connectable in custom mode, so they pick up
+   the shared three-tier handle opacity above — load-bearing, since dragging
+   from one of them is the ONLY way to link the Start marker to a status. The
+   End marker's four handles are connectable in custom mode for the same reason
+   (dragging into one of them is the ONLY way to link a status to End). */
 .terminal-node {
   display: flex;
   align-items: center;

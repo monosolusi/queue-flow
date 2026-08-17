@@ -331,6 +331,101 @@ describe('StateMachineWorkflow connection mode (every side accepts a drop)', () 
     });
   });
 
+  describe('Start marker connections (startSources)', () => {
+    /**
+     * The Start marker's outgoing arrows are MANUAL ONLY, mirroring the End
+     * block above: nothing about the graph shape links Start to a state (no
+     * topology predicate — `deriveAutoSources` is gone). The manager drags a
+     * connection FROM Start TO any state; `startSources` is the persisted wire
+     * contract. These tests cover `isValidConnection` (the gate) and `onConnect`
+     * (the stamp path). The live drag needs real pointer geometry jsdom cannot
+     * provide.
+     */
+    function customForm(overrides: Partial<StateMachineForm> = {}): StateMachineForm {
+      return {
+        ...defaultStateMachineForm(),
+        mode: 'custom',
+        states: ['WAITING', 'CALLING', 'SERVING'],
+        transitions: [
+          { from: 'WAITING', to: 'CALLING', actionLabel: 'Panggil', requeuePolicy: { kind: 'KEEP' } },
+          { from: 'CALLING', to: 'SERVING', actionLabel: 'Layan', requeuePolicy: { kind: 'KEEP' } },
+        ],
+        ...overrides,
+      };
+    }
+
+    it('isValidConnection accepts a new Start connection to a real state', () => {
+      const form = customForm({ startSources: [] });
+      render(<StateMachineWorkflow value={form} onChange={vi.fn()} errors={[]} />);
+      const isValid = capturedReactFlowProps!.isValidConnection!;
+      const result = isValid({
+        source: START_NODE_ID,
+        target: 'WAITING',
+        sourceHandleId: 's-top',
+        targetHandleId: 't-top',
+      } as unknown as Connection);
+      expect(result).toBe(true);
+    });
+
+    it('isValidConnection rejects a Start connection whose target is the End marker', () => {
+      const form = customForm({ startSources: [] });
+      render(<StateMachineWorkflow value={form} onChange={vi.fn()} errors={[]} />);
+      const isValid = capturedReactFlowProps!.isValidConnection!;
+      const result = isValid({
+        source: START_NODE_ID,
+        target: END_NODE_ID,
+        sourceHandleId: 's-top',
+        targetHandleId: 't-top',
+      } as unknown as Connection);
+      expect(result).toBe(false);
+    });
+
+    it('isValidConnection rejects a duplicate Start connection (a state already in startSources)', () => {
+      const form = customForm({ startSources: ['WAITING'] });
+      render(<StateMachineWorkflow value={form} onChange={vi.fn()} errors={[]} />);
+      const isValid = capturedReactFlowProps!.isValidConnection!;
+      const result = isValid({
+        source: START_NODE_ID,
+        target: 'WAITING',
+        sourceHandleId: 's-top',
+        targetHandleId: 't-top',
+      } as unknown as Connection);
+      expect(result).toBe(false);
+    });
+
+    it('onConnect stamps a new Start connection via startSources (non-stamping onChange)', () => {
+      const onChange = vi.fn();
+      const form = customForm({ startSources: [] });
+      render(<StateMachineWorkflow value={form} onChange={onChange} errors={[]} />);
+      const onConnect = capturedReactFlowProps!.onConnect!;
+      onConnect({
+        source: START_NODE_ID,
+        target: 'WAITING',
+        sourceHandleId: 's-top',
+        targetHandleId: 't-top',
+      } as unknown as Connection);
+      expect(onChange).toHaveBeenCalledOnce();
+      const [next] = onChange.mock.calls[0];
+      // Non-stamping: startSources is the only mutated field, no transition added.
+      expect(next.startSources).toEqual(['WAITING']);
+      expect(next.transitions).toEqual(form.transitions);
+    });
+
+    it('onConnect from Start ignores a duplicate (no onChange, no double-add)', () => {
+      const onChange = vi.fn();
+      const form = customForm({ startSources: ['WAITING'] });
+      render(<StateMachineWorkflow value={form} onChange={onChange} errors={[]} />);
+      const onConnect = capturedReactFlowProps!.onConnect!;
+      onConnect({
+        source: START_NODE_ID,
+        target: 'WAITING',
+        sourceHandleId: 's-top',
+        targetHandleId: 't-top',
+      } as unknown as Connection);
+      expect(onChange).not.toHaveBeenCalled();
+    });
+  });
+
   describe('self-loop drawn on the canvas (onConnectEnd fallback)', () => {
     /**
      * Manager feedback: "current node cannot have self-loop". The natural

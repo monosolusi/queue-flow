@@ -27,6 +27,7 @@ import {
   TvPanelLayout,
   EdgeRoutingLayout,
   EndSources,
+  StartSources,
   NodeActions,
   NodePositions,
   PrinterConfiguration,
@@ -341,6 +342,7 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
         nodeActions: NodeActions.DEFAULT,
         terminalNodes: TerminalNodes.DEFAULT,
         endSources: EndSources.DEFAULT,
+        startSources: StartSources.DEFAULT,
         printerConfiguration: PrinterConfiguration.DEFAULT,
       }),
     );
@@ -496,6 +498,7 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
           nodeActions: NodeActions.DEFAULT,
           terminalNodes: TerminalNodes.DEFAULT,
           endSources: EndSources.DEFAULT,
+          startSources: StartSources.DEFAULT,
           printerConfiguration: PrinterConfiguration.DEFAULT,
         }),
       );

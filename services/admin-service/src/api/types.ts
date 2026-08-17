@@ -241,12 +241,9 @@ export type NodeActionsDto = Record<string, NodeActionDto[]>;
  * marker position from the real node bounds (the default; current UX).
  * `{x,y}` — manager-pinned explicit position. `'hidden'` — manager deleted;
  * marker omitted. Mirrors core-api's `TerminalNodeState` VO. This field controls
- * marker PRESENCE + POSITION only. The Start marker's edges are auto-derived
- * from topology (sources = in-degree 0 AND out-degree > 0 — an isolated,
- * not-yet-wired state is not one, and a transition from a status to ITSELF
- * counts for neither degree, so a self-loop never costs a status its Start
- * arrow); the End marker's edges are manual only and come from
- * {@link EndSourcesDto}.
+ * marker PRESENCE + POSITION only. Both markers' edges are manual only — the
+ * Start marker's outgoing edges come from {@link StartSourcesDto} and the End
+ * marker's incoming edges come from {@link EndSourcesDto}.
  */
 export type TerminalNodeStateDto = 'auto' | 'hidden' | { readonly x: number; readonly y: number };
 
@@ -286,6 +283,28 @@ export type EndSourcesDto = readonly string[];
  * {@link DEFAULT_TERMINAL_NODES}).
  */
 export const DEFAULT_END_SOURCES: EndSourcesDto = [];
+
+/**
+ * The Start marker's OUTGOING arrows — a flat list of state names the Start
+ * marker connects to (one `__start → S` terminal edge per entry). Mirrors
+ * {@link EndSourcesDto} field-for-field and mirrors core-api's `startSources`
+ * field-for-field. This is the SOLE source of the Start marker's outgoing
+ * arrows — nothing about the graph shape adds one (the auto-derive-from-
+ * topology rule is GONE) — so `[]` means the Start marker renders BARE (no
+ * arrow); it still renders (it is the drag source the manager drags from).
+ * Every entry draws exactly one arrow. Not change-gated for audit (an
+ * appearance concern, like {@link EndSourcesDto}).
+ */
+export type StartSourcesDto = readonly string[];
+
+/**
+ * Empty start-sources list — "no Start connections drawn yet". Matches the
+ * backend `StartSources.DEFAULT`, and is what {@link DEFAULT_STATE_MACHINE}
+ * carries: the PRD §7 default graph declares no Start connections (Start is
+ * manual-only — no backfill from topology), so the default-graph Start marker
+ * renders BARE until the manager draws a connection from it.
+ */
+export const DEFAULT_START_SOURCES: StartSourcesDto = [];
 
 /** How the kiosk produces a thermal-printer receipt. `chrome` prints via the
  *  browser's print dialog (the default — zero setup, uses the manager's
@@ -404,6 +423,13 @@ export interface SystemConfigurationDto {
    *  End simply has no incoming End arrows; `toForm` keeps a defensive `?? []`
    *  coercion (belt-and-suspenders, same as `terminalNodes`). */
   readonly endSources: EndSourcesDto;
+  /** Explicit Start-marker connections (a flat array of state names the manager
+   *  dragged out of the Start terminal marker). Always present — the backend
+   *  defaults to {@link DEFAULT_START_SOURCES} so a store that never drags from
+   *  Start simply has no outgoing Start arrows (the marker renders BARE);
+   *  `toForm` keeps a defensive `?? []` coercion (belt-and-suspenders, same as
+   *  `endSources`). Start is MANUAL-ONLY — no backfill from topology. */
+  readonly startSources: StartSourcesDto;
   /** Printer configuration for the kiosk receipt printer. Always present — the
    *  backend defaults to {@link DEFAULT_PRINTER_CONFIGURATION} so a store that
    *  never configures the printer keeps the chrome default (zero behavior
@@ -472,6 +498,12 @@ export interface SaveSystemConfigurationPayload {
    *  array, built by `toEndSourcesDto`; `[]` when the manager never dragged into
    *  End). */
   readonly endSources: EndSourcesDto;
+  /** Explicit Start-marker connections — REQUIRED on the PUT (the client is the
+   *  source of truth for explicit Start connections now and always sends the
+   *  array, built by `toStartSourcesDto`; `[]` when the manager never dragged
+   *  from Start — the marker renders BARE). Start is MANUAL-ONLY — no backfill
+   *  from topology. */
+  readonly startSources: StartSourcesDto;
   /** Printer configuration — REQUIRED on the PUT (the client is the source of
    *  truth for the printer mode + settings); the dedicated `/printer-config`
    *  page edits it, every other full-save site passes it through unchanged. */
@@ -505,6 +537,10 @@ export interface SaveSystemConfigurationResult {
    *  ignores the result body and re-GETs, so this is not load-bearing; kept for
    *  contract completeness (mirrors `terminalNodes`). */
   readonly endSources: EndSourcesDto;
+  /** Always echoed by the backend (mirrors the persisted array). The save path
+   *  ignores the result body and re-GETs, so this is not load-bearing; kept for
+   *  contract completeness (mirrors `endSources`). */
+  readonly startSources: StartSourcesDto;
   /** Always echoed by the backend (the save result mirrors the persisted config).
    *  The save path ignores the result body and re-GETs, so this is not
    *  load-bearing; kept for contract completeness (mirrors `nodePositions`). */
@@ -583,12 +619,11 @@ export const DEFAULT_NODE_ACTIONS: NodeActionsDto = {};
 
 /**
  * Auto/auto terminal markers — "derive both markers' POSITION from the real
- * node bounds". Position is all that `'auto'` governs for End: its incoming
- * EDGES are manual-only ({@link EndSourcesDto}), and its presence is
- * unconditional. For Start, `'auto'` additionally means its edges are derived
- * from the topology. Matches the backend `TerminalNodes.DEFAULT` so a store
- * that never touches the markers gets both affordances on the canvas
- * (mirroring {@link DEFAULT_NODE_ACTIONS}).
+ * node bounds". Position is all that `'auto'` governs for either marker: its
+ * EDGES are manual-only ({@link StartSourcesDto} for Start, {@link EndSourcesDto}
+ * for End), and its presence is unconditional. Matches the backend
+ * `TerminalNodes.DEFAULT` so a store that never touches the markers gets both
+ * affordances on the canvas (mirroring {@link DEFAULT_NODE_ACTIONS}).
  */
 export const DEFAULT_TERMINAL_NODES: TerminalNodesDto = { start: 'auto', end: 'auto' };
 
@@ -619,6 +654,7 @@ export const REQUIRED_CONFIG_FIELDS: readonly (keyof SaveSystemConfigurationPayl
   'nodeActions',
   'terminalNodes',
   'endSources',
+  'startSources',
   'printerConfiguration',
 ];
 
