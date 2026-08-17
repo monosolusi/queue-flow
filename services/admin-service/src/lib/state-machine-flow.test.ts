@@ -24,6 +24,7 @@ import {
   DEFAULT_SOURCE_HANDLE,
   DEFAULT_TARGET_HANDLE,
   EDGE_ARROW_MARKER,
+  TERMINAL_ARROW_MARKER,
   type FlowEdge,
   type FlowNode,
 } from './state-machine-flow';
@@ -223,6 +224,52 @@ describe('formToFlow', () => {
       expect(e.markerEnd).toEqual(EDGE_ARROW_MARKER);
     }
     expect(EDGE_ARROW_MARKER.type).toBe('arrowclosed');
+  });
+
+  it('colors both arrowheads from a token, never a hex literal', () => {
+    // The arrowhead used to omit `color` so React Flow fell back to
+    // `defaultMarkerColor = '#b1b1b7'` — a hardcoded literal that neither flips
+    // with the theme nor follows a brand re-theme, exactly what the edge stroke
+    // itself was fixed for. A `var()` is the only clean way in: React Flow
+    // renders the arrow as `<polyline style={{ stroke: color, fill: color }}>`,
+    // an INLINE style no stylesheet rule can beat without `!important`. The
+    // tokens are declared on `.sm-canvas`, an ancestor of the marker `<svg>`.
+    // This mirrors the token-only guard `styles.test.ts` applies to the CSS.
+    // The `currentColor` fallback is required, not optional: without it a token
+    // that fails to reach the polyline makes `stroke` invalid at computed-value
+    // time, which falls back to the SVG initial `stroke: none` — vanishing
+    // arrowheads, the exact complaint this marker was added for.
+    for (const marker of [EDGE_ARROW_MARKER, TERMINAL_ARROW_MARKER]) {
+      // No space after the comma: `getMarkerId` folds the config into the
+      // marker's DOM `id`, which is then referenced as `url('#…')` — an `id` may
+      // not contain ASCII whitespace, and a space in a URL fragment gets
+      // percent-encoded, leaving resolution up to the engine.
+      expect(marker.color).toMatch(/^var\(--[a-z-]+,currentColor\)$/);
+      expect(marker.color).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    }
+    // The two are distinct: a deliberately muted dashed terminal edge must not
+    // be tipped with a full-strength transition arrowhead.
+    expect(TERMINAL_ARROW_MARKER.color).not.toBe(EDGE_ARROW_MARKER.color);
+  });
+
+  it('sizes the arrowhead for the 1.5px stroke it scales with', () => {
+    // React Flow renders the `<marker>` with `markerUnits="strokeWidth"`, so the
+    // arrowhead scales with the path's stroke width, which `.sm-canvas` sets to
+    // 1.5 via `--xy-edge-stroke-width` (`state-machine-workflow.css`) — so the
+    // effective size is `width * 1.5`. 11 reproduces the arrowhead the old `16`
+    // produced at React Flow's default `stroke-width: 1`; leaving it at 16 would
+    // render a ~24px arrowhead. If either half of that pair changes, the other
+    // has to move with it — and the other half lives in the stylesheet, not here.
+    for (const marker of [EDGE_ARROW_MARKER, TERMINAL_ARROW_MARKER]) {
+      expect(marker.width).toBe(11);
+      expect(marker.height).toBe(11);
+    }
+  });
+
+  it('derives the terminal arrowhead from the transition one', () => {
+    // Spread, not copied literals: "identical geometry, different color" should
+    // be structural, so the geometry can never drift between the two markers.
+    expect({ ...TERMINAL_ARROW_MARKER, color: EDGE_ARROW_MARKER.color }).toEqual(EDGE_ARROW_MARKER);
   });
 });
 
@@ -496,7 +543,7 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     expect(startEdges[0].target).toBe('WAITING');
     expect(startEdges[0].type).toBe(TERMINAL_EDGE_TYPE);
     expect(startEdges[0].data.actionLabel).toBe('');
-    expect(startEdges[0].markerEnd).toEqual(EDGE_ARROW_MARKER);
+    expect(startEdges[0].markerEnd).toEqual(TERMINAL_ARROW_MARKER);
     expect(startEdges[0].sourceHandle).toBe(HANDLE_IDS.right);
     expect(startEdges[0].targetHandle).toBe(HANDLE_IDS.left);
   });
@@ -536,7 +583,7 @@ describe('deriveTerminalMarkers (canvas-only Start/End markers)', () => {
     expect(endEdges[0].source).toBe('COMPLETED');
     expect(endEdges[0].type).toBe(TERMINAL_EDGE_TYPE);
     expect(endEdges[0].data.actionLabel).toBe('');
-    expect(endEdges[0].markerEnd).toEqual(EDGE_ARROW_MARKER);
+    expect(endEdges[0].markerEnd).toEqual(TERMINAL_ARROW_MARKER);
     expect(endEdges[0].sourceHandle).toBe(HANDLE_IDS.right);
     expect(endEdges[0].targetHandle).toBe(HANDLE_IDS.left);
   });

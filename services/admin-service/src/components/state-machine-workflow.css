@@ -62,8 +62,42 @@
 }
 
 /* The React Flow canvas wrapper. Explicit height is required by React Flow
-   (it measures the container). */
+   (it measures the container).
+
+   THE EDGE PALETTE LIVES HERE, and the placement is load-bearing twice over.
+
+   1. React Flow 12 themes itself through `--xy-*` custom properties: its own
+      stylesheet reads `stroke: var(--xy-edge-stroke, var(--xy-edge-stroke-default))`
+      and only falls back to the `#b1b1b7` default when the hook is unset. So the
+      canvas is re-themed by SETTING those hooks, never by restating React Flow's
+      rules — restating them would fight the library at matching specificity and
+      would miss the states it covers that we do not (notably the keyboard-focus
+      `:focus-visible` edge, which shares `--xy-edge-stroke-selected`).
+   2. The arrowhead is the one thing the hooks cannot fully drive. React Flow
+      renders it as `<polyline style={{ stroke: color, fill: color }}>` from
+      `EDGE_ARROW_MARKER.color` — an INLINE style no rule can beat without
+      `!important` — and `createMarkerIds` substitutes the `#b1b1b7`
+      `defaultMarkerColor` when a marker declares no color, so omitting it does
+      NOT fall through to `--xy-edge-stroke`. Two differently-colored arrowheads
+      therefore require two marker configs naming these tokens by string. That
+      only resolves because this element is an ancestor of the marker `<svg>`.
+      Renaming a token here silently un-colors its arrowhead, so `styles.test.ts`
+      pins the names against the marker constants (which also carry a
+      `currentColor` fallback for the same reason).
+
+   `--sm-edge-stroke` is mixed toward `--surface`, NOT `transparent`: the closed
+   arrowhead polyline is painted with the same color as BOTH `stroke` and `fill`,
+   so a translucent value composites over itself and renders the arrow markedly
+   darker than the line it tips. */
 .sm-canvas {
+  --sm-edge-stroke: color-mix(in srgb, var(--text) 42%, var(--surface));
+  --sm-terminal-edge-stroke: var(--text-muted);
+  /* Hand the palette to React Flow's own theming hooks. */
+  --xy-edge-stroke: var(--sm-edge-stroke);
+  --xy-edge-stroke-width: 1.5;
+  --xy-edge-stroke-selected: var(--accent);
+  --xy-connectionline-stroke: var(--accent);
+  --xy-connectionline-stroke-width: 1.5;
   flex: 1 1 22rem;
   min-width: 0;
   height: 60vh;
@@ -419,9 +453,21 @@
 .sm-canvas .react-flow:has(.react-flow__connectionline) .react-flow__handle.connectable.connectionindicator:not(.connectingfrom) {
   opacity: 1;
 }
-/* Keep the connection-line + selected-edge accents on-brand too. */
-.sm-canvas .react-flow__connectionline .react-flow__edge-path,
-.sm-canvas .react-flow__edge.selected .react-flow__edge-path {
+/* --- Transition edge hover ----------------------------------------------------
+   The resting stroke, the selected stroke, and the drag-preview line are all set
+   via the `--xy-*` hooks on `.sm-canvas` above — React Flow's own rules apply
+   them, so there is nothing to restate here and no specificity tie to manage.
+   Hover is the one state React Flow does not theme, so it needs a rule.
+
+   Gated on `.selectable`, which React Flow stamps only when `elementsSelectable`
+   is on: in default (read-only) mode an edge cannot be selected, so lighting it
+   up on hover would advertise a click that does nothing. Same reasoning — and
+   the same mechanism — as the `.connectable` gate on the handle rules above.
+
+   React Flow renders a wide invisible `.react-flow__edge-interaction` path for
+   hit-testing, so the whole corridor around a line responds, not just the 1.5px
+   stroke. */
+.sm-canvas .react-flow__edge.selectable:hover .react-flow__edge-path {
   stroke: var(--accent);
 }
 
@@ -480,13 +526,19 @@
 /* --- Canvas-only terminal edges (Start→source / endSource→End) --------------
    A dashed muted line so the terminal edges read distinctly from solid
    transition edges — they are visual affordances, not real transitions. The
-   `markerEnd` stays the default gray (forwarded by `TerminalEdge`'s
-   `BaseEdge`), so the arrow still reads "into the entry" / "out to the exit".
-   Wrapped in `<g className="terminal-edge">` by `TerminalEdge` so this rule
-   targets the path inside it via descendant selector. No hardcoded color —
-   `--text-muted` flips with the theme. */
+   `markerEnd` is `TERMINAL_ARROW_MARKER`, whose color reads the SAME
+   `--sm-terminal-edge-stroke` token as this rule, so the arrow stays as
+   recessive as the line it tips while still reading "into the entry" / "out to
+   the exit". Wrapped in `<g className="terminal-edge">` by `TerminalEdge` so
+   this rule targets the path inside it via descendant selector. No hardcoded
+   color — the token resolves to `--text-muted`, which flips with the theme.
+
+   Order-independent: (0,2,0) beats React Flow's own `.react-flow__edge-path`
+   (0,1,0) on specificity alone. `stroke-width` is deliberately not restated, so
+   the `--xy-edge-stroke-width` hook still applies and both edge kinds keep the
+   same weight, distinguished by color + dash alone. */
 .terminal-edge .react-flow__edge-path {
-  stroke: var(--text-muted);
+  stroke: var(--sm-terminal-edge-stroke);
   stroke-dasharray: 5 4;
 }
 

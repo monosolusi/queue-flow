@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { EDGE_ARROW_MARKER, TERMINAL_ARROW_MARKER } from './lib/state-machine-flow';
 
 /**
  * jsdom runs with `css: false` (vitest.config), so stylesheets are NOT applied
@@ -1186,6 +1187,9 @@ describe('Alur Status Tiket designer — warning relocation + dedicated full-pag
     expect(wfRule('.terminal-node--end')).toContain('border-width: 2.5px');
     // The terminal edge is a dashed line, distinct from solid transition edges.
     expect(wfRule('.terminal-edge .react-flow__edge-path')).toContain('stroke-dasharray');
+    expect(wfRule('.terminal-edge .react-flow__edge-path')).toContain(
+      'stroke: var(--sm-terminal-edge-stroke)',
+    );
     // No rule in the terminal block carries a hardcoded color literal.
     expect(wfRule('.terminal-node')).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
     expect(wfRule('.terminal-node--start')).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
@@ -1193,6 +1197,66 @@ describe('Alur Status Tiket designer — warning relocation + dedicated full-pag
     expect(wfRule('.terminal-node__glyph')).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
     expect(wfRule('.terminal-node__label')).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
     expect(wfRule('.terminal-edge .react-flow__edge-path')).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+  });
+
+  // --- Transition edge stroke (manager feedback: "garisnya... jelek") ---
+  //   React Flow 12 themes itself through `--xy-*` custom properties — its own
+  //   rules read `var(--xy-edge-stroke, var(--xy-edge-stroke-default))` and only
+  //   fall back to the `#b1b1b7` default when the hook is unset. So the canvas is
+  //   re-themed by SETTING the hooks, never by restating React Flow's selectors:
+  //   a restatement fights the library at matching specificity and silently
+  //   misses the states it covers that we do not. jsdom applies no CSS
+  //   (css: false), so the hooks are pinned here.
+  it('re-themes the canvas through React Flow custom properties, not restated rules', () => {
+    const canvas = wfRule('.sm-canvas');
+    expect(canvas).toContain('--xy-edge-stroke: var(--sm-edge-stroke)');
+    expect(canvas).toContain('--xy-edge-stroke-width:');
+    // `--xy-edge-stroke-selected` also covers `.selectable:focus-visible`, so the
+    // KEYBOARD-focused edge is themed too — the one edge state a hand-rolled
+    // `.selected` restatement would leave on React Flow's hardcoded `#555`.
+    expect(canvas).toContain('--xy-edge-stroke-selected: var(--accent)');
+    // The live drag preview is `.react-flow__connection-path`, NOT an
+    // `.react-flow__edge-path` — a rule scoped under `.react-flow__connectionline`
+    // matches nothing, which is how the preview silently kept React Flow's 1px
+    // `#b1b1b7` while the committed edge moved to the token.
+    expect(canvas).toContain('--xy-connectionline-stroke: var(--accent)');
+    expect(canvas).toContain('--xy-connectionline-stroke-width:');
+    expect(canvas).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    // Nothing may restate React Flow's own edge rules; setting the hooks is the
+    // whole mechanism, and a restatement would reintroduce the specificity ties.
+    expect(wfCss).not.toContain('.sm-canvas .react-flow__edge-path {');
+    expect(wfCss).not.toContain('.react-flow__connectionline .react-flow__edge-path');
+  });
+
+  it('lights an edge on hover only where an edge can actually be selected', () => {
+    // React Flow stamps `.selectable` only when `elementsSelectable` is on, and
+    // the canvas passes `elementsSelectable={isCustom}`. Ungated, the read-only
+    // default-mode board would advertise a click that does nothing — the same
+    // reasoning as the `.connectable` gate on the handle rules.
+    expect(wfRule('.sm-canvas .react-flow__edge.selectable:hover .react-flow__edge-path')).toContain(
+      'stroke: var(--accent)',
+    );
+  });
+
+  it('declares every custom property the arrowhead markers reference', () => {
+    // The arrowhead colors are carried across a FILE BOUNDARY that nothing else
+    // checks: `EDGE_ARROW_MARKER.color` is a `var()` string in TypeScript, and
+    // React Flow drops it into an INLINE `style` on the marker `<polyline>` (no
+    // stylesheet rule can reach it without `!important`). If the CSS token is
+    // renamed or dropped, the `var()` resolves to nothing and the arrows render
+    // black — with no type error, no failing render, and no CSS guard tripped.
+    // So assert the two sides agree.
+    for (const marker of [EDGE_ARROW_MARKER, TERMINAL_ARROW_MARKER]) {
+      const name = /^var\((--[a-z-]+),/.exec(marker.color ?? '')?.[1];
+      expect(name, `marker color is not a var() reference: ${marker.color}`).toBeTruthy();
+      expect(wfRule('.sm-canvas')).toContain(`${name}:`);
+    }
+    // `--sm-edge-stroke` must be OPAQUE. React Flow paints the closed arrowhead
+    // polyline with the marker color as BOTH `stroke` and `fill`, so a
+    // translucent value composites over itself and renders the arrow visibly
+    // darker than the line it tips. Mixing toward a color, not `transparent`, is
+    // what keeps them matched.
+    expect(wfRule('.sm-canvas')).toContain('--sm-edge-stroke: color-mix(in srgb, var(--text) 42%, var(--surface))');
   });
 });
 

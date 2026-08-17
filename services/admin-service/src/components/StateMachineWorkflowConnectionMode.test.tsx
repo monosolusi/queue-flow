@@ -38,6 +38,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render } from '@testing-library/react';
 import {
+  ConnectionLineType,
   ConnectionMode,
   type Connection,
   type FinalConnectionState,
@@ -125,6 +126,18 @@ describe('StateMachineWorkflow connection mode (every side accepts a drop)', () 
     // Loose mode is the fix: a source-start drag may land on a `source` handle,
     // so every side accepts a drop (strict mode rejected same-type drops).
     expect(capturedReactFlowProps!.connectionMode).toBe(ConnectionMode.Loose);
+  });
+
+  it('previews a dragged connection with the same step routing the edge gets', () => {
+    // Both edge components route via `getSmoothStepPath`, but React Flow's live
+    // connection line defaults to `ConnectionLineType.Bezier` — so without this
+    // prop the manager drags a curve and then gets a step. Like `connectionMode`,
+    // it has no jsdom DOM surface (React Flow keeps it in its store and only the
+    // real drag renders it), so the captured prop IS the seam.
+    const customForm: StateMachineForm = { ...defaultStateMachineForm(), mode: 'custom' };
+    render(<StateMachineWorkflow value={customForm} onChange={vi.fn()} errors={[]} />);
+    expect(capturedReactFlowProps).not.toBeNull();
+    expect(capturedReactFlowProps!.connectionLineType).toBe(ConnectionLineType.SmoothStep);
   });
 
   describe('End marker connections (endSources)', () => {
