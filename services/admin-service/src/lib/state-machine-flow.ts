@@ -5,9 +5,9 @@
  * different VIEW over the same {@link StateMachineForm} + same
  * `lib/state-machine` helpers; these mappers own only the flow-shape
  * translation, never validation, wire mapping, OR the default-positions
- * derivation (those stay in `lib/state-machine` — `autoLayout` lives there now
- * and is imported here, so the canvas and the XML Source view share one
- * derivation and can never diverge in node positions).
+ * derivation (those stay in `lib/state-machine` — `autoLayout` lives there and
+ * is imported here, so the canvas's default layout is one deterministic
+ * derivation).
  *
  * The wire contract is unchanged: the component lifts graph-structure changes
  * to the parent via `onChange(next: StateMachineForm)`, and AdminPanel's
@@ -162,10 +162,10 @@ export interface FlowEdge {
  * vertical edge (top/bottom handles) renders vertically with NO edge-component
  * change (`TransitionEdge` already forwards `sourcePosition`/`targetPosition`).
  *
- * The ids are the BARE side strings (`'top'`, `'right'`, …) so the wire/XML
+ * The ids are the BARE side strings (`'top'`, `'right'`, …) so the wire
  * `EdgeSide` (the SIDE, not the handle id) round-trips cleanly: `handleToSide`
  * does `handle.split('-')[0]` and validates against the 4 sides, so a handle id
- * of just `'top'` round-trips to side `'top'`. No migration, no wire/XML change.
+ * of just `'top'` round-trips to side `'top'`. No migration, no wire change.
  *
  * Defined here (the framework-free lib) rather than the node component so
  * {@link formToFlow} can seed the default-graph edges with the canonical
@@ -207,10 +207,9 @@ export function sideToHandle(side: EdgeSide): string {
  * comes from the manager-drawn `form.startSources` (mirrors End's
  * `form.endSources`; manager feedback: "node masih otomatis linked ke end,
  * seharusnya manual linked" — the same reasoning applies to Start). They are
- * NOT on the wire `transitions`, NOT in the XML `<transition>`s —
+ * NOT on the wire `transitions` —
  * `flowToGraph` filters them out (see {@link flowToGraph}'s `type === 'state'`
- * / `type === 'transition'` filters), and the XML codec `state-machine-xml.ts`
- * reads `startSources`/`endSources` from the root `<metadata>`. They re-derive
+ * / `type === 'transition'` filters). They re-derive
  * on every canvas re-seed so the markers always reflect the manager-drawn
  * connections. core-api is unchanged — `actionLabel` stays per-{@link Transition}
  * on the wire.
@@ -522,7 +521,7 @@ export function deriveTerminalMarkers(
  * fallback for surviving names). The returned `nodes`/`edges` are the
  * concatenation `[...stateNodes, ...markerNodes]` /
  * `[...transEdges, ...markerEdges]`; {@link flowToGraph} filters the markers
- * back out so the form/wire/XML never see them (but it DOES capture
+ * back out so the form/wire never see them (but it DOES capture
  * `terminalNodes` back from the marker `pinned` flag + positions).
  */
 export function formToFlowWithMarkers(
@@ -598,7 +597,7 @@ export function formToFlowWithMarkers(
  * Captures the connection sides from the edge handles via {@link handleToSide}
  * — the form is the source of truth for handles now, so a manager-drawn edge's
  * chosen side flows back into the form (via `commit` → `onChange`), then
- * `formToXml`/`toEdgeRoutingLayoutDto` omit the default ones → sparse wire.
+ * `toEdgeRoutingLayoutDto` omits the default ones → sparse wire.
  */
 export function flowToGraph(
   nodes: readonly FlowNode[],
@@ -611,7 +610,7 @@ export function flowToGraph(
   terminalNodes: TerminalNodesDto;
 } {
   // Filter the canvas-only terminal markers (Start/End nodes + terminal edges)
-  // so they NEVER reach the form/wire/XML. The markers are a visual affordance
+  // so they NEVER reach the form/wire. The markers are a visual affordance
   // auto-derived by {@link deriveTerminalMarkers} on each re-seed; round-tripping
   // them would corrupt the form (`__start`/`__end` are not real state names).
   const stateNodes = nodes.filter((n) => n.type === 'state');

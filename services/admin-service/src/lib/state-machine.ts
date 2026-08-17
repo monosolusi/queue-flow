@@ -23,17 +23,10 @@ import {
  * `DEFAULT_SOURCE_HANDLE`/`DEFAULT_TARGET_HANDLE` in `state-machine-flow.ts`
  * (the handle-id equivalents). Kept here (the form lib) so the form-model
  * helpers (`isDefaultSides`, `toEdgeRoutingLayoutDto`, `graphSignature`)
- * share one source of truth for "what is default routing"; the DOM-dependent
- * XML codec (`state-machine-xml.ts`) reaches them via import.
+ * share one source of truth for "what is default routing".
  */
 export const DEFAULT_SOURCE_SIDE: EdgeSide = 'right';
 export const DEFAULT_TARGET_SIDE: EdgeSide = 'left';
-
-/** The four valid connection sides — used by `xmlToForm` enum validation at
- *  the parse boundary (sides are layout, not graph structure, so they are not
- *  validated in `validateCustomStateMachine`). Exported so the DOM-dependent
- *  XML codec (`state-machine-xml.ts`) reuses the one enum source of truth. */
-export const EDGE_SIDES: readonly EdgeSide[] = ['top', 'right', 'bottom', 'left'];
 
 /** SME-friendly label for each node-action type. A `Record<NodeActionType,
  *  string>` is an EXHAUSTIVE guard: widening the `NodeActionType` union (in
@@ -51,9 +44,8 @@ export const NODE_ACTION_TYPE_LABELS: Record<NodeActionType, string> = {
 /**
  * Every {@link RequeuePolicyKind}, as the runtime list the compile-time union
  * cannot provide. The single source of truth for what a `→ WAITING` re-queue
- * may do to queue order: the "Kebijakan Antrian Ulang" dropdown's options and
- * the XML codec's accepted set are both derived from it, so neither can drift
- * from the union or from each other.
+ * may do to queue order: the "Kebijakan Antrian Ulang" dropdown's options are
+ * derived from it, so they can never drift from the union.
  *
  * The `satisfies` clause is the exhaustiveness guard — widening the union
  * without adding the member here fails `tsc`.
@@ -62,10 +54,10 @@ export const REQUEUE_POLICIES = ['KEEP', 'TO_BACK', 'BACK_N'] as const satisfies
   readonly RequeuePolicyKind[];
 
 /** Manager-facing wording for each re-queue policy. Keyed off
- *  {@link REQUEUE_POLICIES} rather than the other way round, so the codec's
- *  validation never has to import presentation copy to know which values are
- *  legal. Written as an exhaustive `Record`, so a new policy needs wording
- *  before it compiles. */
+ *  {@link REQUEUE_POLICIES} rather than the other way round, so validation
+ *  never has to import presentation copy to know which values are legal.
+ *  Written as an exhaustive `Record`, so a new policy needs wording before it
+ *  compiles. */
 export const REQUEUE_POLICY_LABELS: Record<RequeuePolicyKind, string> = {
   KEEP: 'Tetap di posisi',
   TO_BACK: 'Paling belakang',
@@ -96,7 +88,6 @@ export interface Transition {
    * `to === 'WAITING'`; `validateCustomStateMachine` rejects a non-KEEP policy
    * on any other edge. Sparse on the wire ({@link toStateMachineDto} omits
    * KEEP), lives on the canvas edge `data` (so `flowToGraph` captures it back),
-   * and rides the XML transition `<metadata>` (sparse — omitted for KEEP).
    */
   requeuePolicy: RequeuePolicyDto;
   /**
@@ -114,9 +105,10 @@ export interface Transition {
 
 /**
  * True when the sides are both default (or absent, which means default). Used
- * by `formToXml` (omit default sides from the Source XML), `toEdgeRoutingLayoutDto`
- * (omit default edges from the sparse wire map), and `isDefaultGraph` (a
- * default-structure graph with custom routing is custom, not default).
+ * by `toEdgeRoutingLayoutDto` (omit default edges from the sparse wire map),
+ * `isDefaultGraph` (a default-structure graph with custom routing is custom,
+ * not default), and the Sumber view's connector legend (show the sides only
+ * when they are non-default).
  */
 export function isDefaultSides(
   sourceSide: EdgeSide | undefined,
@@ -160,8 +152,8 @@ export interface StateMachineForm {
    * State-node canvas positions keyed by state name. `{}` means "use the
    * deterministic `autoLayout`". Positions are now ON the form/wire
    * (mirroring `sourceSide`/`targetSide`): `flowToGraph` captures them from
-   * the canvas, `xmlToForm` parses them from the Source XML, and
-   * `toNodePositionsDto` ships them in the separate `nodePositions` wire map.
+   * the canvas and `toNodePositionsDto` ships them in the separate
+   * `nodePositions` wire map.
    * A drag-stop lifts them via `commit` → `onChange`, and `graphSignature`
    * includes them so a position change is detectable as an external change.
    */
@@ -459,8 +451,8 @@ export function toEdgeRoutingLayoutDto(form: StateMachineForm): EdgeRoutingLayou
 /**
  * Builds the node-positions wire map from the form. A shallow copy of
  * `form.positions` (the form is the source of truth — built by `flowToGraph`
- * on a canvas commit, or by `xmlToForm` on a Source edit). `{}` means "use the
- * deterministic `autoLayout`". Mirrors `toEdgeRoutingLayoutDto`'s doc style:
+ * on a canvas commit). `{}` means "use the deterministic `autoLayout`".
+ * Mirrors `toEdgeRoutingLayoutDto`'s doc style:
  * read `form.positions` directly, do not special-case mode (default mode
  * force-resets the graph in `toStateMachineDto` and the default canvas carries
  * no positions, so the map is `{}` regardless).
@@ -485,8 +477,8 @@ export function toNodeActionsDto(form: StateMachineForm): NodeActionsDto {
 /**
  * Builds the terminal-marker wire map from the form. A deep copy of
  * `form.terminalNodes` (the form is the source of truth — built by
- * `flowToGraph` on a canvas commit, by the panel/drop terminal handlers on a
- * marker edit, or by `xmlToForm` on a Source edit). `auto/auto` means "derive
+ * `flowToGraph` on a canvas commit, or by the panel/drop terminal handlers on a
+ * marker edit). `auto/auto` means "derive
  * both markers from the real node bounds". Mirrors `toNodeActionsDto`'s doc
  * style: read `form.terminalNodes` directly, do not special-case mode (default
  * mode force-resets the graph in `toStateMachineDto` and the default canvas
@@ -504,8 +496,8 @@ export function toTerminalNodesDto(form: StateMachineForm): TerminalNodesDto {
 /**
  * Builds the explicit End-connections wire array from the form. A shallow copy
  * of `form.endSources` (the form is the source of truth — built by the
- * `onConnect`-to-End path + the panel "Transisi masuk" delete, or by
- * `xmlToForm` on a Source edit). `[]` means "no End connections drawn" — and
+ * `onConnect`-to-End path + the panel "Transisi masuk" delete).
+ * `[]` means "no End connections drawn" — and
  * since nothing else feeds the End marker, no arrows into it at all. Mirrors `toTerminalNodesDto`'s doc
  * style: read `form.endSources` directly, do not special-case mode (default
  * mode force-resets the graph in `toStateMachineDto` and the default canvas
@@ -519,8 +511,8 @@ export function toEndSourcesDto(form: StateMachineForm): EndSourcesDto {
 /**
  * Builds the explicit Start-connections wire array from the form. A shallow copy
  * of `form.startSources` (the form is the source of truth — built by the
- * `onConnect`-from-Start path + the panel "Transisi keluar" delete, or by
- * `xmlToForm` on a Source edit). `[]` means "no Start connections drawn" — and
+ * `onConnect`-from-Start path + the panel "Transisi keluar" delete).
+ * `[]` means "no Start connections drawn" — and
  * since nothing else feeds the Start marker, no arrows out of it at all.
  * Mirrors {@link toEndSourcesDto}'s doc style: read `form.startSources` directly,
  * do not special-case mode (default mode force-resets the graph in
@@ -539,13 +531,10 @@ const Y_SPACING = 120;
 
 /**
  * The SINGLE canonical "default positions for an empty `positions` map"
- * derivation, shared by BOTH views of the same {@link StateMachineForm}: the
- * React Flow canvas (`formToFlow` in `state-machine-flow.ts`) AND the editable
- * XML Source view (`formToXml` in `state-machine-xml.ts`). Both import this one
- * function, so the diagram the manager sees and the XML they edit can never
- * diverge in node positions — an un-customized graph (`form.positions = {}`)
- * serializes the SAME coordinates the canvas renders, and the XML is the
- * human-editable single source of truth the diagram arranges from.
+ * derivation, used by the React Flow canvas (`formToFlow` in
+ * `state-machine-flow.ts`) to lay out an un-customized graph
+ * (`form.positions = {}`) deterministically — the same coordinates every time,
+ * so a graph that has never been dragged still reads left-to-right.
  *
  * `rank` = longest path from source nodes (nodes with no incoming edge) in the
  * graph with back-edges removed; `x = rank * X_SPACING` (240). Within a rank,
@@ -564,9 +553,8 @@ const Y_SPACING = 120;
  * Pure + stable: same input ⇒ same output (no `Math.random` / `Date.now`). It
  * lives here in the form-model lib (not in `state-machine-flow.ts`, the React
  * Flow layer) because "the canonical default positions for an empty positions
- * map" is a form-model concern, not a canvas concern — the DOM-dependent XML
- * codec imports it from here so dependency direction stays clean (DOM layer →
- * pure layer, never the reverse).
+ * map" is a form-model concern, not a canvas concern: it is graph reasoning
+ * over the form, so it stays testable without loading the React Flow layer.
  */
 export function autoLayout(
   states: readonly string[],
@@ -589,9 +577,7 @@ export function autoLayout(
     // `originalIndeg`, so a self-loop on the graph's entry status removed the
     // only relaxation seed and every node collapsed onto rank 0. The DFS below
     // already classifies it as a back-edge and drops it from `dagAdj`; this
-    // keeps `originalIndeg` consistent with that. Same rule as
-    // {@link stateDegrees} below (the Start/End marker degrees) — one self-loop
-    // semantic for the whole form model.
+    // keeps `originalIndeg` consistent with that.
     if (t.from === t.to) continue;
     adj.get(t.from)!.push(t.to);
     originalIndeg.set(t.to, (originalIndeg.get(t.to) ?? 0) + 1);
@@ -665,71 +651,6 @@ export function autoLayout(
     });
   }
   return positions;
-}
-
-/**
- * In-degree + out-degree per state — the single source of truth for the
- * "exit point" predicate (the End-marker properties panel's "Transisi masuk"
- * list). Pure + framework-free.
- *
- * Lives here in the form-model lib rather than in the React Flow layer for the
- * same reason {@link autoLayout} does: "which statuses are this graph's exit
- * points" is a property of the graph itself, not of the canvas that draws it.
- * Two consumers depend on it — the End-marker properties panel's "Transisi
- * masuk" list, and the XML codec's `<task>` vs `<state>` tag choice — and the
- * codec is a DOM-layer module that must never import from
- * `state-machine-flow.ts`. One home here keeps the dependency direction clean
- * (DOM → pure, canvas → pure, never DOM → canvas) AND keeps the two consumers
- * from drifting apart.
- *
- * (The Start marker's entry states used to be auto-derived from the in-degree-0
- * half here via `deriveAutoSources`; that derivation is GONE — Start is now
- * manual-only via `form.startSources`, mirroring the End marker's
- * `endSources`. The in-degree half is retained only because the End-marker
- * panel's "Transisi masuk" list reads `inDeg` to filter `endSources` to live
- * states with incoming transitions, and the out-degree half is retained because
- * the XML codec picks Kaleo's `<task>` vs `<state>` tag from `outDeg`.)
- *
- * Two counting rules, both load-bearing:
- *  1. Only transitions whose `from` AND `to` are BOTH in `states` count — a
- *     transition referencing an unknown state is ignored, mirroring
- *     {@link autoLayout}'s defensive guard.
- *  2. A SELF-LOOP (`from === to`) counts for NEITHER degree. A self-loop is flow
- *     that leaves a status and returns to the same status: it brings no flow
- *     INTO the graph and takes none OUT, so it must never change whether a
- *     status is the flow's exit. Counting it (the pre-fix behavior) made a
- *     status with a self-loop stop being in-degree 0, which silently dropped its
- *     `__start → S` terminal arrow (under the since-removed auto-derive) — the
- *     manager's "WAITING punya transisi masuk dari Mulai, lalu aku bikin
- *     self-loop dan yang dari Mulai hilang" report.
- *
- * Consequence (deliberate): a status whose ONLY transition is a self-loop stays
- * degree 0 on BOTH sides — i.e. ISOLATED — and an isolated status has no
- * incoming transitions so the End-marker panel lists none for it. A self-loop
- * wires the status to itself, not into the flow.
- *
- * The out-degree half has a second consumer: the XML codec picks Kaleo's
- * `<task>` vs `<state>` tag from `outDeg`, so a self-looping status still
- * serializes as terminal — matching the canvas, which draws it no exit.
- */
-export function stateDegrees(
-  states: readonly string[],
-  transitions: readonly { from: string; to: string }[],
-): { inDeg: Map<string, number>; outDeg: Map<string, number> } {
-  const stateSet = new Set(states);
-  const inDeg = new Map<string, number>();
-  const outDeg = new Map<string, number>();
-  for (const s of states) {
-    inDeg.set(s, 0);
-    outDeg.set(s, 0);
-  }
-  for (const t of transitions) {
-    if (!stateSet.has(t.from) || !stateSet.has(t.to)) continue;
-    if (t.from === t.to) continue; // self-loop: no flow in, no flow out
-    inDeg.set(t.to, (inDeg.get(t.to) ?? 0) + 1);
-    outDeg.set(t.from, (outDeg.get(t.from) ?? 0) + 1);
-  }
-  return { inDeg, outDeg };
 }
 
 /**
@@ -972,8 +893,7 @@ export interface StateNameRefs {
  * active state machine`, the same for `state descriptions key`, `end sources
  * entry`, and `start sources entry`. Each becomes an HTTP 400 on EVERY subsequent save. The
  * stranded entry is invisible in the UI (every panel lists only live states),
- * so there is NO in-app route to clear it: the manager is locked out of saving
- * until someone hand-edits the XML Source. The canvas delete/rename path
+ * so there would be NO in-app route to clear it. The canvas delete/rename path
  * therefore MUST cascade, exactly as the form-editor helpers
  * {@link updateState}/{@link removeState} already do for their own path.
  *

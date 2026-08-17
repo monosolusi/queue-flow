@@ -69,8 +69,7 @@ const NODE_ACTION_TYPE_OPTIONS: ReadonlyArray<{ value: NodeActionType; label: st
  *  `→ WAITING` re-queue does to queue order. The shared `REQUEUE_POLICIES`
  *  list (the single source of truth in the pure `state-machine.ts`,
  *  exhaustiveness-guarded against the union), so the dropdown can never offer a
- *  value the wire does not accept — nor omit one it does. The XML codec
- *  validates against the same list. Shown only on an edge whose
+ *  value the wire does not accept — nor omit one it does. Shown only on an edge whose
  *  `to === 'WAITING'`. */
 const REQUEUE_POLICY_OPTIONS = REQUEUE_POLICIES;
 

@@ -882,7 +882,7 @@ describe('formToFlowWithMarkers', () => {
   });
 
   it('round-trips clean through flowToGraph (markers filtered, form intact)', () => {
-    // flowToGraph MUST filter the terminal nodes/edges so the form/wire/XML
+    // flowToGraph MUST filter the terminal nodes/edges so the form/wire
     // never see __start/__end. The round-tripped form has 5 states + 5
     // transitions (the markers are dropped).
     const form = defaultStateMachineForm();

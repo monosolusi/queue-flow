@@ -1,16 +1,17 @@
-import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { StateMachineSource } from './StateMachineSource';
-import type { Transition } from '../lib/state-machine';
+import { defaultStateMachineForm, type StateMachineForm, type Transition } from '../lib/state-machine';
 
 /**
- * Isolated presentational tests for the XML Source view — the connector legend
- * (the "indikator konektor" from → to the manager asked for), the textarea
- * affordance, and the inline error region. No router, no draft, no parsing —
- * `StateMachineSource` is a controlled presentational component (the designer
- * page owns parsing), so these tests drive it with raw props the way the
- * designer does. Mirrors the `css:false`-jsdom convention (assert via roles /
- * text / attributes, never computed style).
+ * Isolated presentational tests for the JSON Sumber view — the connector legend
+ * (the "indikator konektor" from → to the manager asked for) and the read-only
+ * textarea affordance. No router, no draft, no parsing — `StateMachineSource`
+ * is a presentational projection of the form (the designer page derives the
+ * text), so these tests drive it with raw props the way the designer does.
+ * Mirrors the `css:false`-jsdom convention (assert via roles / text /
+ * attributes, never computed style).
  */
 
 const DEFAULT_CONNECTORS: Transition[] = [
@@ -20,57 +21,115 @@ const DEFAULT_CONNECTORS: Transition[] = [
   { from: 'SKIPPED', to: 'CALLING', actionLabel: 'Panggil Ulang', requeuePolicy: { kind: 'KEEP' } },
   { from: 'SERVING', to: 'COMPLETED', actionLabel: 'Selesai Layan', requeuePolicy: { kind: 'KEEP' } },];
 
-describe('StateMachineSource (XML Source view)', () => {
-  it('renders the "Sumber XML alur status" label for the textarea', () => {
-    render(
-      <StateMachineSource
-        sourceText='<?xml version="1.0"?><stateMachine/>'
-        onSourceChange={() => {}}
-        error={null}
-        connectors={DEFAULT_CONNECTORS}
-      />,
+/** The default PRD §7 form, optionally re-routed for the sides cases. */
+function formWith(transitions: Transition[] = DEFAULT_CONNECTORS): StateMachineForm {
+  return { ...defaultStateMachineForm(), transitions };
+}
+
+/** What the component should render for `formWith()` — the form minus `mode`. */
+function expectedJson(form: StateMachineForm): string {
+  const { mode: _mode, ...graph } = form;
+  return JSON.stringify(graph, null, 2);
+}
+
+describe('StateMachineSource (JSON Sumber view)', () => {
+  it('renders the read-only JSON label for the textarea', () => {
+    render(<StateMachineSource stateMachine={formWith()} />);
+    expect(screen.getByText('Sumber JSON alur status (baca saja)')).toBeInTheDocument();
+    // The label is wired to the textarea (htmlFor/id) — the reason this stays a
+    // <textarea> rather than a <pre>.
+    expect(screen.getByLabelText('Sumber JSON alur status (baca saja)')).toBe(
+      screen.getByTestId('sm-source'),
     );
-    expect(screen.getByText('Sumber XML alur status')).toBeInTheDocument();
   });
 
-  it('explains the Kaleo shape in the hint (which element is a status, where a transition lives)', () => {
-    // The format changed from the former QMS-custom `<stateMachine>` shape to a
-    // Liferay Kaleo `<workflow-definition>`, so the manager-facing hint has to
-    // explain the new one: a status is a <task> or a <state>, a transition is
-    // nested inside its SOURCE status, and everything Kaleo has no slot for
-    // rides <metadata>. SME-friendly Indonesian — no XPath, no jargon.
-    render(
-      <StateMachineSource
-        sourceText='<?xml version="1.0"?><workflow-definition/>'
-        onSourceChange={() => {}}
-        error={null}
-        connectors={DEFAULT_CONNECTORS}
-      />,
-    );
+  it('renders the form as pretty-printed JSON', () => {
+    const form = formWith();
+    render(<StateMachineSource stateMachine={form} />);
+    expect((screen.getByTestId('sm-source') as HTMLTextAreaElement).value).toBe(expectedJson(form));
+  });
+
+  it('strips the client-only `mode` preset from the projected text', () => {
+    // `mode` is an internal 'default' | 'custom' marker that never reaches
+    // core-api (`toStateMachineDto` drops it). Showing it would put an internal
+    // enum in front of the manager and imply the flow carries a field it does
+    // not. Everything else on the form stays — this view is for reading the
+    // flow being composed, not for previewing the wire payload.
+    render(<StateMachineSource stateMachine={formWith()} />);
+    const parsed = JSON.parse((screen.getByTestId('sm-source') as HTMLTextAreaElement).value);
+    expect(parsed.mode).toBeUndefined();
+    expect(parsed.states).toEqual(formWith().states);
+    expect(parsed.transitions).toHaveLength(DEFAULT_CONNECTORS.length);
+    // The sibling wire-field facets are part of the flow the manager sees.
+    expect(parsed).toHaveProperty('positions');
+    expect(parsed).toHaveProperty('nodeActions');
+    expect(parsed).toHaveProperty('terminalNodes');
+    expect(parsed).toHaveProperty('endSources');
+    expect(parsed).toHaveProperty('startSources');
+  });
+
+  it('is read-only, not disabled (still focusable + selectable for copy)', () => {
+    // `readOnly` keeps the text reachable by keyboard and AT — a `disabled`
+    // textarea is skipped by the tab order, which would defeat the one job this
+    // view has (read + copy the whole flow).
+    render(<StateMachineSource stateMachine={formWith()} />);
+    const textarea = screen.getByTestId('sm-source') as HTMLTextAreaElement;
+    expect(textarea).toHaveAttribute('readonly');
+    expect(textarea).not.toBeDisabled();
+    textarea.focus();
+    expect(textarea).toHaveFocus();
+  });
+
+  it('does not accept typed edits — the flow has one editing surface, the canvas', async () => {
+    // The single-source-of-truth behaviour, driven through the real keyboard
+    // path (`userEvent.type` honours `readOnly` and fires no input events),
+    // rather than `fireEvent.change`, which assigns the DOM value directly —
+    // something `readOnly` does not gate at all.
+    //
+    // Mutation-tested: deleting `readOnly` does NOT redden this test, because
+    // the value is also held by React (a controlled textarea with no `onChange`
+    // snaps back either way). The load-bearing guard for the attribute is the
+    // `toHaveAttribute('readonly')` assertion above, which DOES redden. This
+    // test covers the manager-visible behaviour on top of it.
+    const form = formWith();
+    render(<StateMachineSource stateMachine={form} />);
+    const textarea = screen.getByTestId('sm-source') as HTMLTextAreaElement;
+    // Plain text on purpose — `userEvent.type` reads `{`/`[` as key descriptors.
+    await userEvent.type(textarea, 'HACKED');
+    expect((screen.getByTestId('sm-source') as HTMLTextAreaElement).value).toBe(expectedJson(form));
+  });
+
+  it('points the textarea at the hint so AT users hear where editing lives', () => {
+    // A sighted manager reads the hint above the field; a screen-reader user who
+    // tabs straight into the textarea would otherwise hear only the name + "read
+    // only" and no route to the Diagram view.
+    render(<StateMachineSource stateMachine={formWith()} />);
+    expect(screen.getByTestId('sm-source')).toHaveAttribute('aria-describedby', 'sm-source-hint');
+    expect(document.getElementById('sm-source-hint')).toHaveClass('sm-source__hint');
+  });
+
+  it('renders no error region (nothing here parses, so nothing here can fail)', () => {
+    render(<StateMachineSource stateMachine={formWith()} />);
+    expect(screen.queryByTestId('sm-source-error')).not.toBeInTheDocument();
+    expect(screen.getByTestId('sm-source')).not.toHaveAttribute('aria-invalid');
+  });
+
+  it('explains in the hint that editing happens in the Diagram view', () => {
+    // The pane is read-only, so the copy has to say where the edit affordance
+    // actually is — otherwise the manager reads it as a broken field.
+    render(<StateMachineSource stateMachine={formWith()} />);
     const hint = document.querySelector('.sm-source__hint');
     expect(hint).not.toBeNull();
     const text = hint!.textContent ?? '';
-    expect(text).toContain('Liferay Kaleo');
-    expect(text).toContain('<workflow-definition>');
-    expect(text).toContain('<task>');
-    expect(text).toContain('<state>');
-    expect(text).toContain('<target>');
-    expect(text).toContain('<metadata>');
-    // The load-bearing fact: the label IS the Caller's button text.
-    expect(text).toContain('layar petugas');
-    // The former shape's vocabulary is gone.
-    expect(text).not.toContain('actionLabel');
-    expect(text).not.toContain('stateMachine');
+    expect(text).toContain('tidak bisa diubah di sini');
+    expect(text).toContain('Diagram');
+    // The former Kaleo/XML vocabulary is gone.
+    expect(text).not.toContain('Kaleo');
+    expect(text).not.toContain('XML');
   });
+
   it('renders one connector chip per transition with from, arrow, to, and label', () => {
-    render(
-      <StateMachineSource
-        sourceText="{}"
-        onSourceChange={() => {}}
-        error={null}
-        connectors={DEFAULT_CONNECTORS}
-      />,
-    );
+    render(<StateMachineSource stateMachine={formWith()} />);
     const list = screen.getByTestId('sm-source-connectors');
     expect(list).toBeInTheDocument();
     // A connector chip per transition.
@@ -93,14 +152,7 @@ describe('StateMachineSource (XML Source view)', () => {
     // between from and to (AT reads "WAITING ke CALLING") and the "aksi:" word
     // sits before the label (AT reads "aksi: Panggil Berikutnya") — so the full
     // announcement is "WAITING ke CALLING aksi: Panggil Berikutnya".
-    render(
-      <StateMachineSource
-        sourceText="{}"
-        onSourceChange={() => {}}
-        error={null}
-        connectors={DEFAULT_CONNECTORS}
-      />,
-    );
+    render(<StateMachineSource stateMachine={formWith()} />);
     const first = screen.getAllByTestId('sm-source-connector')[0];
     const srOnlySpans = first.querySelectorAll('.sr-only');
     expect(srOnlySpans).toHaveLength(2);
@@ -109,14 +161,7 @@ describe('StateMachineSource (XML Source view)', () => {
   });
 
   it('labels the connector list with a from→to description for AT', () => {
-    render(
-      <StateMachineSource
-        sourceText="{}"
-        onSourceChange={() => {}}
-        error={null}
-        connectors={DEFAULT_CONNECTORS}
-      />,
-    );
+    render(<StateMachineSource stateMachine={formWith()} />);
     expect(screen.getByTestId('sm-source-connectors')).toHaveAttribute(
       'aria-label',
       'Daftar konektor transisi (dari titik asal ke titik tujuan)',
@@ -124,81 +169,19 @@ describe('StateMachineSource (XML Source view)', () => {
   });
 
   it('renders an empty list when there are no connectors (still mounted, no chips)', () => {
-    render(
-      <StateMachineSource
-        sourceText="{}"
-        onSourceChange={() => {}}
-        error={null}
-        connectors={[]}
-      />,
-    );
+    render(<StateMachineSource stateMachine={formWith([])} />);
     expect(screen.getByTestId('sm-source-connectors')).toBeInTheDocument();
     expect(screen.queryAllByTestId('sm-source-connector')).toHaveLength(0);
   });
 
-  it('forwards textarea edits via onSourceChange (controlled, no parsing here)', () => {
-    const onChange = vi.fn();
-    render(
-      <StateMachineSource
-        sourceText='{"states":["A"]}'
-        onSourceChange={onChange}
-        error={null}
-        connectors={DEFAULT_CONNECTORS}
-      />,
-    );
-    const textarea = screen.getByTestId('sm-source') as HTMLTextAreaElement;
-    fireEvent.change(textarea, { target: { value: '{"states":["A","B"]}' } });
-    expect(onChange).toHaveBeenCalledWith('{"states":["A","B"]}');
-  });
-
-  it('renders the inline error region and marks the textarea invalid when error is set', () => {
-    render(
-      <StateMachineSource
-        sourceText='<not-xml'
-        onSourceChange={() => {}}
-        error="XML tidak valid: kesalahan parse"
-        connectors={DEFAULT_CONNECTORS}
-      />,
-    );
-    const errorRegion = screen.getByTestId('sm-source-error');
-    expect(errorRegion).toBeInTheDocument();
-    expect(errorRegion).toHaveAttribute('role', 'alert');
-    const textarea = screen.getByTestId('sm-source') as HTMLTextAreaElement;
-    expect(textarea).toHaveAttribute('aria-invalid', 'true');
-    // The connector legend stays at the last-valid graph (does NOT clear) —
-    // the error region explains the divergence, the legend is not re-parsed.
-    expect(screen.getAllByTestId('sm-source-connector')).toHaveLength(DEFAULT_CONNECTORS.length);
-  });
-
-  it('does not mark the textarea invalid when error is null', () => {
-    render(
-      <StateMachineSource
-        sourceText='{"states":["A"]}'
-        onSourceChange={() => {}}
-        error={null}
-        connectors={DEFAULT_CONNECTORS}
-      />,
-    );
-    expect(screen.queryByTestId('sm-source-error')).not.toBeInTheDocument();
-    const textarea = screen.getByTestId('sm-source') as HTMLTextAreaElement;
-    expect(textarea).toHaveAttribute('aria-invalid', 'false');
-  });
-
   it('shows the connection sides in the connector legend for a non-default-routed edge', () => {
     // Manager feedback: the source didn't say which point connects to which.
-    // The legend now appends `sourceSide→targetSide` when the edge uses a
+    // The legend appends `sourceSide→targetSide` when the edge uses a
     // non-default connection point, so the routing is visible alongside the
     // from→to direction.
     const connectors: Transition[] = [
       { from: 'SKIPPED', to: 'CALLING', actionLabel: 'Panggil Ulang', requeuePolicy: { kind: 'KEEP' }, sourceSide: 'bottom', targetSide: 'top' },    ];
-    render(
-      <StateMachineSource
-        sourceText="{}"
-        onSourceChange={() => {}}
-        error={null}
-        connectors={connectors}
-      />,
-    );
+    render(<StateMachineSource stateMachine={formWith(connectors)} />);
     const sides = screen.getByTestId('sm-source-connector-sides');
     expect(sides).toHaveTextContent('bottom→top');
   });
@@ -206,14 +189,7 @@ describe('StateMachineSource (XML Source view)', () => {
   it('hides the connection sides segment for a default-routed edge', () => {
     // A default edge (right→left) omits the sides segment — the legend stays
     // concise and the default routing is not noise.
-    render(
-      <StateMachineSource
-        sourceText="{}"
-        onSourceChange={() => {}}
-        error={null}
-        connectors={DEFAULT_CONNECTORS}
-      />,
-    );
+    render(<StateMachineSource stateMachine={formWith()} />);
     expect(screen.queryAllByTestId('sm-source-connector-sides')).toHaveLength(0);
   });
 });
