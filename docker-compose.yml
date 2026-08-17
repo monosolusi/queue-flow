@@ -56,6 +56,46 @@ services:
       retries: 12
       start_period: 10s
 
+  # --- Text-to-speech -----------------------------------------------------
+  # Indonesian announcement audio for the TV board (Piper TTS, Python/FastAPI).
+  # The TV asks for one MP3 per called ticket and plays it; the grammar, the
+  # voice and the bell all live here, so the model can be swapped without
+  # touching the display service.
+  #
+  # The Piper voice is baked into the image during build, so nothing is fetched
+  # at runtime (NFR-REL-01) and `docker compose up -d --build` remains the only
+  # bring-up step (NFR-MNT-02).
+  tts-service:
+    build:
+      context: ./services/tts-service
+    restart: always # NFR-REL-03
+    environment:
+      # Read `ttsConfiguration` from core-api. The dependency points this way on
+      # purpose: no admin->tts push endpoint, so no new authenticated surface,
+      # and core-api stays unaware this service exists.
+      QMS_CORE_API_URL: http://core-api-service:3000
+      QMS_TTS_LOG_LEVEL: info
+    expose:
+      - "8000"
+    # Not published directly — the gateway proxies /tts here.
+    volumes:
+      # Synthesized clips survive restarts, so the first announcement of the
+      # morning is not waiting on a cold synthesis (NFR-REL-02/03).
+      - ttscache:/var/cache/qms-tts
+    healthcheck:
+      # /tts/health is liveness only — no model, no cache, answers pre-wizard.
+      # python:*-slim ships neither wget nor curl (unlike node:20-alpine), so
+      # the core-api `wget -qO-` idiom does not port here.
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request;urllib.request.urlopen('http://localhost:8000/tts/health').read()
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 20s # loading a 63 MB ONNX voice is slower than a Nest boot
+
   # --- Frontends (static PWAs served by per-service nginx) ---------------
   kiosk-service:
     build:
@@ -102,6 +142,13 @@ services:
         condition: service_started
       admin-service:
         condition: service_started
+      # service_started, NOT service_healthy: if the voice failed to load, a
+      # never-green probe here would stop the gateway from ever starting and
+      # `docker compose up -d` would hang — turning a mute TV into a dead stack
+      # (NFR-MNT-02). The board degrades to silence instead, which is what the
+      # four frontends' service_started already assumes for themselves.
+      tts-service:
+        condition: service_started
     ports:
       - "80:80"
     volumes:
@@ -109,3 +156,4 @@ services:
 
 volumes:
   pgdata:
+  ttscache:

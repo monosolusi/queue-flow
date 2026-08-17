@@ -1,5 +1,6 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -17,7 +18,7 @@ import type {
 import { DEFAULT_TV_GRID_LAYOUT } from '../api/types';
 import type { ITvApi } from '../api/tv-api';
 import { type AudioProvider } from '../audio/audio-provider';
-import { buildCallFragments } from '../audio/audio-provider';
+import { announcementUrl, isAudioUnlockable } from '../audio/audio-provider';
 import { applyBrandColor, applyThemeMode } from '../lib/theme';
 import { QueueSocket, type ConnectionStatus, type QueueSocketOptions } from '../realtime/queue-socket';
 
@@ -68,7 +69,7 @@ export interface TvState {
    * populated, without a second board fetch (the first board fetch races the
    * config fetch and resolves with the empty initial map → fallback names;
    * BOOT_LOADED re-derives with the populated map). Defensive fallback to
-   * `Counter {id}` when a counter appears in the active slice but was absent
+   * `Loket {id}` when a counter appears in the active slice but was absent
    * from the boot config (e.g. a counter added after boot). */
   readonly counterNameById: ReadonlyMap<number, string>;
   /** The raw active slice from the last `BOARD_LOADED`, stashed so BOOT_LOADED
@@ -76,6 +77,13 @@ export interface TvState {
    * Internal — not consumed by the page. */
   readonly lastActive: readonly TvTicketDto[];
   readonly connection: ConnectionStatus;
+  /**
+   * True while the browser is refusing to play announcement audio until it sees a
+   * user gesture. Lives here rather than in `App` for the same reason
+   * `connection` does: it is client-transport state the board must project, and
+   * the store already owns the audio provider's lifecycle.
+   */
+  readonly audioBlocked: boolean;
   readonly loadStatus: 'loading' | 'loaded' | 'error';
   readonly loadError: string | null;
   readonly storeName: string;
@@ -98,6 +106,7 @@ export type TvAction =
       active: readonly TvTicketDto[];
     }
   | { type: 'CONNECTION'; status: ConnectionStatus }
+  | { type: 'AUDIO_BLOCKED'; blocked: boolean }
   | { type: 'EVENT'; event: QueueLifecycleWireEvent };
 
 const HISTORY_LIMIT = 5;
@@ -115,6 +124,7 @@ const initialState: TvState = {
   counterNameById: new Map<number, string>(),
   lastActive: [],
   connection: 'closed',
+  audioBlocked: false,
   loadStatus: 'loading',
   loadError: null,
   storeName: '',
@@ -139,7 +149,7 @@ function toWaitingTicket(t: TvTicketDto): WaitingTicket {
  * board instead of disappearing). The `active` slice is grouped by
  * `counterId` keeping the LAST (most-recently-touched, since `active` is
  * ordered by `updatedAt` asc), then every counter id is sorted ascending for
- * stable display. Falls back to `Counter {id}` when a counter has no
+ * stable display. Falls back to `Loket {id}` when a counter has no
  * boot-config name (defensive against a counter added after boot).
  */
 function toCountersServing(
@@ -161,7 +171,7 @@ function toCountersServing(
   return [...ids]
     .map((counterId) => {
       const t = activeByCounter.get(counterId);
-      const counterName = counterNameById.get(counterId) ?? `Counter ${counterId}`;
+      const counterName = counterNameById.get(counterId) ?? `Loket ${counterId}`;
       if (t) {
         return {
           counterId,
@@ -242,6 +252,13 @@ function tvReducer(state: TvState, action: TvAction): TvState {
     }
     case 'CONNECTION':
       return { ...state, connection: action.status };
+    case 'AUDIO_BLOCKED':
+      // Identity-stable on a no-op: the provider emits its current state on
+      // subscribe, and a fresh object there would re-render the whole board for
+      // nothing.
+      return state.audioBlocked === action.blocked
+        ? state
+        : { ...state, audioBlocked: action.blocked };
     case 'EVENT':
       return projectEvent(state, action.event);
     default:
@@ -336,6 +353,13 @@ function projectEvent(state: TvState, e: QueueLifecycleWireEvent): TvState {
 
 export interface TvStoreValue {
   readonly state: TvState;
+  /**
+   * Ask the audio provider to lift the browser's autoplay block. MUST be called
+   * from inside a user-gesture handler — that gesture is what grants permission.
+   * Fire-and-forget: a failed unlock leaves `state.audioBlocked` true and the
+   * prompt on screen, which is the correct outcome.
+   */
+  readonly unlockAudio: () => void;
 }
 
 const TvStoreContext = createContext<TvStoreValue | null>(null);
@@ -452,7 +476,7 @@ export function TvStoreProvider({ api, audio, children, socketOptions }: TvStore
           // the reducer can re-derive countersServing once BOOT_LOADED
           // dispatches (mirrors how getCategories feeds the waiting panel's
           // category name join). A counter appearing in the active slice but
-          // absent from this map falls back to `Counter {id}`.
+          // absent from this map falls back to `Loket {id}`.
           const counterNameById = new Map<number, string>();
           for (const r of configRes.value.routingRules) {
             counterNameById.set(r.counterId, r.counterName);
@@ -497,8 +521,35 @@ export function TvStoreProvider({ api, audio, children, socketOptions }: TvStore
     };
   }, []);
 
-  // Realtime subscription (owned by the provider). On each TICKET_CALLED, drive
-  // the audio sequencer with the announcement fragments (FR-TV-02). After every
+  // Subscribe to the provider's autoplay-blocked state and project it into the
+  // store so the board can prompt for the unlock gesture. Its own effect, NOT
+  // folded into the socket effect below — that one is deliberately created once
+  // with [] deps, while this must re-subscribe if the provider instance changes
+  // (tests inject a different fake per render).
+  useEffect(() => {
+    if (!isAudioUnlockable(audio)) return;
+    return audio.onBlockedChange((blocked) => dispatch({ type: 'AUDIO_BLOCKED', blocked }));
+  }, [audio]);
+
+  // Probe once on mount so the prompt appears BEFORE the first ticket is called.
+  // Waiting for a real announcement to be refused would silently lose that first
+  // announcement — the one a visitor is actually waiting for.
+  useEffect(() => {
+    if (!isAudioUnlockable(audio)) return;
+    void audio.unlock();
+  }, [audio]);
+
+  const unlockAudio = useCallback(() => {
+    const provider = audioRef.current;
+    if (!isAudioUnlockable(provider)) return;
+    // Fire-and-forget, matching the announcement path: `unlock()` never rejects,
+    // and if the probe is still refused the provider re-reports blocked and the
+    // prompt simply stays up.
+    void provider.unlock();
+  }, []);
+
+  // Realtime subscription (owned by the provider). On each TICKET_CALLED, play
+  // the announcement clip from tts-service (FR-TV-02). After every
   // lifecycle event, debounce-refetch the TV board state so the server stays
   // the single source of truth (the board does not project waiting from
   // events). The realtime event projection (`projectEvent`) still drives
@@ -525,10 +576,11 @@ export function TvStoreProvider({ api, audio, children, socketOptions }: TvStore
           dispatch({ type: 'EVENT', event });
           if (event.type === 'TICKET_CALLED') {
             const p = event.payload as Extract<QueueLifecycleWireEvent['payload'], { ticketNumber: string; counterId: number }>;
-            // Fire-and-forget; the audio provider serializes announcements and
-            // never rejects (errors skip a fragment). Don't let a bad
-            // announcement crash the board.
-            void audioRef.current.playSequence(buildCallFragments(p.ticketNumber, p.counterId));
+            // Fire-and-forget; the provider serializes announcements and never
+            // rejects (an unfetchable clip is skipped). Don't let a bad
+            // announcement crash the board. The URL is all the TV knows about the
+            // announcement — tts-service owns the words, the voice and the bell.
+            void audioRef.current.playAnnouncement(announcementUrl(p.ticketNumber, p.counterId));
           }
           if (event.type === 'SYSTEM_RESET') {
             // A reset starts a fresh day; drop any queued announcements for
@@ -575,7 +627,7 @@ export function TvStoreProvider({ api, audio, children, socketOptions }: TvStore
     };
   }, []);
 
-  const value = useMemo<TvStoreValue>(() => ({ state }), [state]);
+  const value = useMemo<TvStoreValue>(() => ({ state, unlockAudio }), [state, unlockAudio]);
   return <TvStoreContext.Provider value={value}>{children}</TvStoreContext.Provider>;
 }
 

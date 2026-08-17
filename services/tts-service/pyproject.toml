@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+# `testpaths` keeps a bare `pytest` from wandering into .venv/ or models/.
+testpaths = ["tests"]
+# Import the package from the service root without an editable install, matching
+# how `uvicorn app.main:api` resolves it.
+pythonpath = ["."]
+addopts = "-q"

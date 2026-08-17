@@ -5,7 +5,7 @@ import React from 'react';
 import { TvStoreProvider } from './tv-store';
 import { TvBoardPage } from '../pages/TvBoardPage';
 import type { ITvApi } from '../api/tv-api';
-import type { AudioProvider } from '../audio/audio-provider';
+import type { AudioProvider, AudioUnlockable } from '../audio/audio-provider';
 import type { QueueLifecycleWireEvent, TvTicketDto, TvGridLayout } from '../api/types';
 import { DEFAULT_TV_GRID_LAYOUT } from '../api/types';
 
@@ -63,19 +63,55 @@ function makeApi(
   };
 }
 
-function makeAudio(): AudioProvider & { sequences: string[][] } {
-  const sequences: string[][] = [];
+/**
+ * Announcement-recording fake. Deliberately implements only `AudioProvider` and
+ * NOT `AudioUnlockable` — that is what keeps this fake (used at 30-plus call
+ * sites) from having to grow an `unlock()` the announcement path never calls, and
+ * it exercises the `isAudioUnlockable` false branch in the store.
+ */
+function makeAudio(): AudioProvider & { announcements: string[] } {
+  const announcements: string[] = [];
   return {
-    sequences,
-    playSequence: vi.fn((fragments: readonly string[]) => {
-      sequences.push([...fragments]);
+    announcements,
+    playAnnouncement: vi.fn((url: string) => {
+      announcements.push(url);
       return Promise.resolve();
     }),
     stop: vi.fn(),
   };
 }
 
-function renderBoard(api: ITvApi, audio: ReturnType<typeof makeAudio>) {
+/** Unlockable variant, for the autoplay-block projection tests. */
+function makeUnlockableAudio(): AudioProvider &
+  AudioUnlockable & { announcements: string[]; setBlocked: (blocked: boolean) => void } {
+  const announcements: string[] = [];
+  const listeners = new Set<(blocked: boolean) => void>();
+  let blocked = false;
+  return {
+    announcements,
+    playAnnouncement: vi.fn((url: string) => {
+      announcements.push(url);
+      return Promise.resolve();
+    }),
+    stop: vi.fn(),
+    onBlockedChange: (listener) => {
+      listeners.add(listener);
+      listener(blocked);
+      return () => listeners.delete(listener);
+    },
+    unlock: vi.fn(() => {
+      blocked = false;
+      for (const listener of [...listeners]) listener(false);
+      return Promise.resolve();
+    }),
+    setBlocked: (next: boolean) => {
+      blocked = next;
+      for (const listener of [...listeners]) listener(next);
+    },
+  };
+}
+
+function renderBoard(api: ITvApi, audio: AudioProvider) {
   FakeWebSocket.instances = [];
   return render(
     <MemoryRouter>
@@ -137,21 +173,15 @@ describe('TvStoreProvider realtime projection + audio (FR-TV-01/02)', () => {
       ws.onopen?.(new Event('open'));
     });
 
-    // A call arrives → now-serving shows the number + counter, and the audio
-    // sequencer is driven with the announcement fragments (FR-TV-02).
+    // A call arrives → now-serving shows the number + counter, and one
+    // announcement clip is requested from tts-service (FR-TV-02). The TV asks for
+    // audio by ticket + counter; the Indonesian wording, voice and bell all live
+    // in tts-service, so there is nothing about grammar to assert here.
     fire(ws, calledEvent('t1', 'A-005', 2));
     expect(await screen.findByText('A-005')).toBeInTheDocument();
-    expect(screen.getByText('Counter 2')).toBeInTheDocument();
-    expect(audio.sequences).toHaveLength(1);
-    expect(audio.sequences[0]).toEqual([
-      'bell',
-      'nomor-antrian',
-      'A',
-      '0',
-      '0',
-      '5',
-      'silakan-ke-counter',
-      '2',
+    expect(within(screen.getByTestId('now-serving')).getByText('Loket 2')).toBeInTheDocument();
+    expect(audio.announcements).toEqual([
+      '/tts/announcement?ticketNumber=A-005&counterId=2',
     ]);
   });
 
@@ -310,7 +340,7 @@ describe('TvStoreProvider realtime projection + audio (FR-TV-01/02)', () => {
 
     fire(ws, calledEvent('t1', 'A-005', 2));
     await screen.findByText('A-005');
-    expect(audio.sequences).toHaveLength(1); // announced on the first call
+    expect(audio.announcements).toHaveLength(1); // announced on the first call
 
     fire(ws, statusEvent('t1', 'CALLING', 'SKIPPED'));
     expect(await screen.findByText('Menunggu panggilan berikutnya…')).toBeInTheDocument();
@@ -321,7 +351,7 @@ describe('TvStoreProvider realtime projection + audio (FR-TV-01/02)', () => {
     fire(ws, statusEvent('t1', 'SKIPPED', 'CALLING'));
     fire(ws, calledEvent('t1', 'A-005', 2));
     expect(await screen.findByText('A-005')).toBeInTheDocument();
-    expect(audio.sequences).toHaveLength(2); // re-announced on recall
+    expect(audio.announcements).toHaveLength(2); // re-announced on recall
   });
 
   it('re-numbers the now-serving ticket on TICKET_TRANSFERRED', async () => {
@@ -371,7 +401,7 @@ describe('TvBoardPage idle/active switching (FR-TV-01)', () => {
     // A call arrives → the now-serving board shows the ticket number + counter.
     fire(ws, calledEvent('t1', 'A-005', 2));
     expect(await screen.findByText('A-005')).toBeInTheDocument();
-    expect(screen.getByText('Counter 2')).toBeInTheDocument();
+    expect(within(screen.getByTestId('now-serving')).getByText('Loket 2')).toBeInTheDocument();
     expect(screen.getByText('Riwayat Panggilan')).toBeInTheDocument();
     expect(screen.queryByText('Menunggu panggilan berikutnya…')).not.toBeInTheDocument();
 
@@ -416,7 +446,7 @@ describe('TV board state refetch (server owns the read model)', () => {
     // The now-serving hero shows the restored ticket + counter. The ticket
     // number also appears in the counters-serving panel, so use findAllByText.
     expect((await screen.findAllByText('A-005')).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('Counter 2')).toBeInTheDocument();
+    expect(within(screen.getByTestId('now-serving')).getByText('Loket 2')).toBeInTheDocument();
     // The active board is visible; nowServing is non-null, so NowServingCard
     // does NOT render its empty-state text.
     expect(screen.queryByText('Menunggu panggilan berikutnya…')).not.toBeInTheDocument();
@@ -447,7 +477,7 @@ describe('TV board state refetch (server owns the read model)', () => {
     // The newer call (B-007 at counter 2) wins as nowServing. The ticket
     // number also appears in the counters-serving panel, so use findAllByText.
     expect((await screen.findAllByText('B-007')).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('Counter 2')).toBeInTheDocument();
+    expect(within(screen.getByTestId('now-serving')).getByText('Loket 2')).toBeInTheDocument();
   });
 
   it('BOARD_LOADED dedupes history against the restored nowServing', async () => {
@@ -507,7 +537,7 @@ describe('TV board state refetch (server owns the read model)', () => {
 
     // A-005 is now nowServing (restored from the server's active slice). The
     // now-serving card shows the ticket + counter.
-    expect(screen.getByText('Counter 2')).toBeInTheDocument();
+    expect(within(screen.getByTestId('now-serving')).getByText('Loket 2')).toBeInTheDocument();
     expect(screen.queryByText('Menunggu panggilan berikutnya…')).not.toBeInTheDocument();
     // A-005 must NOT appear in history (deduped against the restored
     // nowServing). The CallHistory section is the only place history renders.
@@ -667,7 +697,7 @@ describe('TvStoreProvider counters-serving projection + panel layout', () => {
     // ascending → counter 1 first). Each row shows the counter name + ticket.
     // Scope to the Sedang Melayani section — ticket numbers also appear in the
     // now-serving card (nowServing = the last active = B-010).
-    const section = (await screen.findByRole('group', { name: 'Counter Sedang Melayani' }));
+    const section = (await screen.findByRole('group', { name: 'Loket Sedang Melayani' }));
     expect(within(section).getByText('Loket 1')).toBeInTheDocument();
     expect(within(section).getByText('B-010')).toBeInTheDocument();
     expect(within(section).getByText('Loket 2')).toBeInTheDocument();
@@ -684,14 +714,14 @@ describe('TvStoreProvider counters-serving projection + panel layout', () => {
     const audio = makeAudio();
     renderBoard(api, audio);
 
-    const section = (await screen.findByRole('group', { name: 'Counter Sedang Melayani' }));
+    const section = (await screen.findByRole('group', { name: 'Loket Sedang Melayani' }));
     // Only one row for counter 1; the newer ticket (A-002) wins.
     expect(within(section).getByText('Loket 1')).toBeInTheDocument();
     expect(within(section).getByText('A-002')).toBeInTheDocument();
     expect(within(section).queryByText('A-001')).not.toBeInTheDocument();
   });
 
-  it('falls back to `Counter {id}` when the counter has no boot-config name', async () => {
+  it('falls back to `Loket {id}` when the counter has no boot-config name', async () => {
     // A counter appears in the active slice but was NOT in the boot routingRules
     // (e.g. a counter added after boot). The name falls back defensively.
     const active = [
@@ -716,10 +746,10 @@ describe('TvStoreProvider counters-serving projection + panel layout', () => {
     const audio = makeAudio();
     renderBoard(api, audio);
 
-    // "Counter 9" appears in BOTH the now-serving card (shows `Counter {id}`)
+    // "Loket 9" appears in BOTH the now-serving card (shows `Loket {id}`)
     // and the counters-serving panel (fallback name). Scope to the section.
-    const section = (await screen.findByRole('group', { name: 'Counter Sedang Melayani' }));
-    expect(within(section).getByText('Counter 9')).toBeInTheDocument();
+    const section = (await screen.findByRole('group', { name: 'Loket Sedang Melayani' }));
+    expect(within(section).getByText('Loket 9')).toBeInTheDocument();
     expect(within(section).getByText('A-005')).toBeInTheDocument();
   });
 
@@ -728,7 +758,7 @@ describe('TvStoreProvider counters-serving projection + panel layout', () => {
     const audio = makeAudio();
     renderBoard(api, audio);
 
-    const section = (await screen.findByRole('group', { name: 'Counter Sedang Melayani' }));
+    const section = (await screen.findByRole('group', { name: 'Loket Sedang Melayani' }));
     // The panel is NOT empty — both configured counters render, idle (em dash).
     expect(within(section).getByText('Loket 1')).toBeInTheDocument();
     expect(within(section).getByText('Loket 2')).toBeInTheDocument();
@@ -744,7 +774,7 @@ describe('TvStoreProvider counters-serving projection + panel layout', () => {
     const api = makeApi('', [], active);
     const audio = makeAudio();
     renderBoard(api, audio);
-    const section = (await screen.findByRole('group', { name: 'Counter Sedang Melayani' }));
+    const section = (await screen.findByRole('group', { name: 'Loket Sedang Melayani' }));
     expect(within(section).getByText('Loket 2')).toBeInTheDocument();
     const ws = FakeWebSocket.instances[0];
 
@@ -835,14 +865,14 @@ describe('TvStoreProvider counters-serving projection + panel layout', () => {
     renderBoard(api, audio);
 
     // nowServing absent → no nowServing widget wrapper, no "Menunggu" idle
-    // copy, no "PERGI KE COUNTER" eyebrow (the widget is truly absent — no
+    // copy, no "SILAKAN KE LOKET" eyebrow (the widget is truly absent — no
     // structural placeholder is needed in the grid model). A-005 may still
     // appear in the counters-serving widget, which is expected and not
     // asserted here.
     await screen.findByText('Sedang Melayani');
     expect(screen.queryByTestId('tv-board__widget--nowServing')).not.toBeInTheDocument();
     expect(screen.queryByText('Menunggu panggilan berikutnya…')).not.toBeInTheDocument();
-    expect(screen.queryByText('PERGI KE COUNTER')).not.toBeInTheDocument();
+    expect(screen.queryByText('SILAKAN KE LOKET')).not.toBeInTheDocument();
   });
 
   it('renders widgets at custom x/y grid positions (grid-column/grid-row spans)', async () => {
@@ -923,5 +953,90 @@ describe('TvStoreProvider counters-serving projection + panel layout', () => {
     expect(document.querySelector('[data-testid^="tv-board__widget--"]')).toBeNull();
     // No marquee renders (runningText is a widget; absent from the empty array).
     expect(screen.queryByRole('marquee')).not.toBeInTheDocument();
+  });
+});
+
+describe('TvStoreProvider audio-unlock projection (browser autoplay policy)', () => {
+  it('does not prompt while audio is allowed', async () => {
+    const audio = makeUnlockableAudio();
+    renderBoard(makeApi(), audio);
+    await screen.findByText('Apotek Sehat');
+
+    expect(screen.queryByTestId('audio-unlock')).not.toBeInTheDocument();
+  });
+
+  it('probes on mount so the prompt can appear before the first ticket is called', async () => {
+    // Waiting for a real announcement to be refused would silently lose that
+    // first announcement — the one a visitor is actually waiting for.
+    const audio = makeUnlockableAudio();
+    renderBoard(makeApi(), audio);
+    await screen.findByText('Apotek Sehat');
+
+    expect(audio.unlock).toHaveBeenCalled();
+  });
+
+  it('prompts once the provider reports the browser blocked playback', async () => {
+    const audio = makeUnlockableAudio();
+    renderBoard(makeApi(), audio);
+    await screen.findByText('Apotek Sehat');
+
+    act(() => audio.setBlocked(true));
+
+    expect(await screen.findByTestId('audio-unlock')).toHaveAccessibleName(
+      /Ketuk untuk mengaktifkan suara/,
+    );
+  });
+
+  it('tapping the prompt unlocks the provider and dismisses it', async () => {
+    const audio = makeUnlockableAudio();
+    renderBoard(makeApi(), audio);
+    await screen.findByText('Apotek Sehat');
+    act(() => audio.setBlocked(true));
+    const button = await screen.findByTestId('audio-unlock');
+    (audio.unlock as ReturnType<typeof vi.fn>).mockClear();
+
+    act(() => button.click());
+
+    expect(audio.unlock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('audio-unlock')).not.toBeInTheDocument();
+  });
+
+  it('keeps the prompt up when the unlock attempt is still refused', async () => {
+    // A failed unlock must leave the prompt on screen — silently dismissing it
+    // would leave a mute board with nothing explaining why.
+    const audio = makeUnlockableAudio();
+    audio.unlock = vi.fn(() => Promise.resolve()); // reports nothing; stays blocked
+    renderBoard(makeApi(), audio);
+    await screen.findByText('Apotek Sehat');
+    act(() => audio.setBlocked(true));
+    const button = await screen.findByTestId('audio-unlock');
+
+    act(() => button.click());
+
+    expect(screen.getByTestId('audio-unlock')).toBeInTheDocument();
+  });
+
+  it('never prompts when the injected provider cannot report a block', async () => {
+    // Guards the isAudioUnlockable false branch — and proves the 30-plus existing
+    // makeAudio() call sites need no change (ISP).
+    const audio = makeAudio();
+    renderBoard(makeApi(), audio);
+    await screen.findByText('Apotek Sehat');
+
+    expect(screen.queryByTestId('audio-unlock')).not.toBeInTheDocument();
+  });
+
+  it('keeps the board in the accessibility tree while prompting', async () => {
+    // The overlay is deliberately NOT aria-modal: hiding the board would take
+    // NowServingCard's role="status" aria-live="assertive" away from a screen
+    // reader, which is the one thing a queue board must never lose.
+    const audio = makeUnlockableAudio();
+    renderBoard(makeApi(), audio);
+    await screen.findByText('Apotek Sehat');
+    act(() => audio.setBlocked(true));
+    const overlay = await screen.findByTestId('audio-unlock');
+
+    expect(overlay).not.toHaveAttribute('aria-modal');
+    expect(screen.getByText('Apotek Sehat')).toBeInTheDocument();
   });
 });

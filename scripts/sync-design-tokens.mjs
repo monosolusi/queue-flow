@@ -24,7 +24,7 @@ const interactionsSrc = resolve(srcDir, 'interactions.css');
 // service -> which generated files it receives.
 const targets = [
   { service: 'kiosk-service',        interactions: true },
-  { service: 'tv-display-service',   interactions: false },
+  { service: 'tv-display-service',   interactions: true },
   { service: 'caller-service',       interactions: true },
   { service: 'admin-service',        interactions: true },
 ];

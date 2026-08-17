@@ -31,6 +31,7 @@ const PORT = 80;
 const PRD_SERVICES = [
   'gateway',
   'core-api-service',
+  'tts-service',
   'kiosk-service',
   'tv-display-service',
   'caller-service',
@@ -203,6 +204,14 @@ async function tier2() {
   await waitFor('/api/health', { wantStatus: 200, wantBody: '"status":"ok"' });
 
   await assertRoute('GET /api/health', '/api/health', { status: 200, body: '"status":"ok"' });
+  // Announcement audio. Asserted BEFORE the wizard runs, which is the point: /tts/
+  // is deliberately exempt from the first-run guard (a 302 to wizard HTML would be
+  // an undecodable response for an <audio> consumer), so a 200 here pre-setup
+  // proves the exemption is wired. A 302 means /tts/ picked up the guard.
+  await assertRoute('GET /tts/health (pre-setup, guard-exempt)', '/tts/health', {
+    status: 200,
+    body: '"status":"ok"',
+  });
   await assertRoute('GET / (clean browser)', '/', { status: 301, redirect: '/admin/' });
   await assertRoute('GET /wizard', '/wizard', { status: 301, redirect: '/admin/wizard' });
   await assertRoute('GET /admin/', '/admin/', { status: 200, body: '/admin/manifest.webmanifest' });

@@ -27,7 +27,7 @@ describe('CountersServing (structural)', () => {
 
   it('carries role="group" + aria-label on the section', () => {
     render(<CountersServing countersServing={serving} />);
-    expect(screen.getByRole('group', { name: 'Counter Sedang Melayani' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Loket Sedang Melayani' })).toBeInTheDocument();
   });
 
   it('empty: title still a level-3 heading + empty hint', () => {

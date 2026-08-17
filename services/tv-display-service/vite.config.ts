@@ -8,10 +8,11 @@ import { VitePWA } from 'vite-plugin-pwa';
 // port 3000, so the app uses relative `/api` and `/ws` URLs in both
 // environments (NFR-REL-01 — no remote calls). Like admin-service, the TV is
 // scaffolded with the correct sub-path base from the start: Vite
-// `base: '/tv/'` makes the built assets reference `/tv/assets/...` and the
-// vendored audio fragments resolve to `/tv/audio/*.mp3` (via `import.meta.env.
-// BASE_URL`), and the PWA `start_url`/`scope` are `/tv/` so an installed PWA
-// launches at the TV route. The BrowserRouter `basename` in main.tsx matches.
+// `base: '/tv/'` makes the built assets reference `/tv/assets/...`, and the PWA
+// `start_url`/`scope` are `/tv/` so an installed PWA launches at the TV route.
+// The BrowserRouter `basename` in main.tsx matches. Announcement audio is NOT a
+// bundled asset — it is fetched from tts-service at `/tts/announcement`, which is
+// origin-relative and so unaffected by `base`.
 export default defineConfig({
   base: '/tv/',
   plugins: [
@@ -33,11 +34,15 @@ export default defineConfig({
         enabled: false,
       },
       workbox: {
-        // Precache the built bundle + the vendored audio MP3s so the TV boots
-        // and announces fully offline (NFR-REL-01). The standby/promosi panel
-        // was removed (FR-TV-03) — no image/video media assets are precached.
+        // Precache the built bundle so the board still renders if it reloads
+        // while core-api is restarting. Announcement audio is deliberately NOT
+        // precached: the clip URL space is unbounded (every ticket number x
+        // counter), and tts-service runs on the same local PC as core-api — if it
+        // is unreachable the board has no data to announce either. Everything
+        // precached here is local; nothing is fetched from the internet
+        // (NFR-REL-01).
         navigateFallback: '/tv/index.html',
-        globPatterns: ['**/*.{js,css,html,mp3,webmanifest}'],
+        globPatterns: ['**/*.{js,css,html,webmanifest}'],
       },
     }),
   ],
@@ -46,6 +51,11 @@ export default defineConfig({
     proxy: {
       '/api': { target: 'http://localhost:3000', changeOrigin: true },
       '/ws': { target: 'ws://localhost:3000', ws: true },
+      // Announcement audio from tts-service. No `rewrite`: FastAPI mounts its
+      // routes under /tts itself, exactly as the gateway's `location /tts/`
+      // proxy_passes without a trailing slash — so the same URL works in dev and
+      // in production.
+      '/tts': { target: 'http://localhost:8000', changeOrigin: true },
     },
   },
   test: {

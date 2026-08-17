@@ -1,11 +1,13 @@
 /* Design tokens vendored from shared/design-tokens/tokens.css (single source
-   of truth). Do not edit _tokens.css directly; edit the canonical file and
-   re-run `node scripts/sync-design-tokens.mjs`.
-   The a11y/interaction baseline (_interactions.css) is intentionally NOT
-   imported here — the TV board is display-only (no interactive elements), so
-   AC2/AC3/AC4 are vacuously satisfied. If a control is ever added, add the
-   interactions import then. */
+   of truth). Do not edit _tokens.css / _interactions.css directly; edit the
+   canonical file and re-run `node scripts/sync-design-tokens.mjs`.
+   The a11y/interaction baseline IS imported: the board is display-only in normal
+   operation, but the audio-unlock overlay (a real <button>) is a control, and the
+   previous version of this comment said to add the import "if a control is ever
+   added". That condition is now met, so AC2/AC3/AC4 are satisfied for real
+   instead of vacuously. */
 @import './styles/_tokens.css';
+@import './styles/_interactions.css';
 
 :root {
   --radius: 18px; /* per-service override; tokens.css owns the rest */
@@ -511,4 +513,50 @@ body,
   .waiting-queue__count {
     font-size: clamp(1.25rem, 2.5cqh, 2rem);
   }
+}
+
+/* --- Audio unlock overlay ------------------------------------------------
+   Shown only while the browser is refusing to play announcement audio (Chrome
+   requires a user gesture first, and a wall-mounted board never gets one on its
+   own). Mounted conditionally rather than toggled with a `--hidden` modifier,
+   and with no opacity transition — the CSS spec asserts this stylesheet contains
+   neither, and `position: fixed` rather than `absolute` for the same reason.
+
+   The whole viewport is the button so any tap anywhere counts as the gesture.
+   Focus styling comes from the shared _interactions.css baseline (imported at
+   the top of this file for exactly this control), so no ring is redefined here. */
+.tv-audio-unlock {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.25rem;
+  width: 100%;
+  border: 0;
+  padding: 2rem;
+  /* Opaque, not a scrim: the board underneath is unreadable-but-visible noise
+     that would compete with the one instruction that matters. */
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+.tv-audio-unlock__icon {
+  font-size: clamp(3rem, 8vh, 6rem);
+  line-height: 1;
+}
+.tv-audio-unlock__label {
+  font-size: clamp(1.75rem, 5vh, 3.5rem);
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+.tv-audio-unlock__hint {
+  max-width: 32ch;
+  color: var(--text-muted);
+  font-size: clamp(1rem, 2.2vh, 1.5rem);
+  font-weight: 500;
 }

@@ -4,9 +4,9 @@
  * `src/styles/_interactions.css` (generated; do not edit the copy — edit THIS
  * file and re-run sync).
  *
- * Consumed by kiosk / caller / admin. tv-display is display-only (no
- * interactive elements today) and imports tokens.css only; AC2/AC3/AC4 are
- * vacuously satisfied for tv (documented in tv's styles.css).
+ * Consumed by all 4 services. tv-display joined them when the audio-unlock
+ * overlay added its first real control (a <button>); before that it imported
+ * tokens.css only and satisfied AC2/AC3/AC4 vacuously.
  *
  * All selectors here are baseline, not mandate: focus-visible uses :where()
  * (zero specificity) so a service override always wins; .btn and .pressable

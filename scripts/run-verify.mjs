@@ -4,13 +4,36 @@
 // order and fails fast on the first non-zero exit. No workspaces — each
 // `npm run` is scoped to its service directory.
 import { execSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 
 const root = new URL('..', import.meta.url).pathname;
-const services = ['core-api', 'admin-service', 'tv-display-service', 'caller-service', 'kiosk-service'];
 
 function run(label, cwd, command) {
   process.stdout.write(`\n▶ ${label}: ${command}\n`);
   execSync(command, { cwd: `${root}/services/${cwd}`, stdio: 'inherit', env: process.env });
+}
+
+// tts-service is Python, so it has no `npm run` entry point and `run()` above
+// (which assumes npm) cannot reach it. Its virtualenv is a per-service install,
+// exactly like every other service's node_modules — see CLAUDE.md.
+function runPythonTests(label, cwd) {
+  const serviceDir = `${root}/services/${cwd}`;
+  const python = `${serviceDir}/.venv/bin/python`;
+  if (!existsSync(python)) {
+    throw new Error(
+      `${cwd} has no virtualenv at .venv — set it up once with:\n` +
+        `    cd services/${cwd}\n` +
+        `    python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt\n` +
+        `  (the suite skips its ffmpeg/Piper-dependent tests when those are absent,\n` +
+        `   so no model download is needed just to run the gate)`,
+    );
+  }
+  process.stdout.write(`\n▶ ${label}: .venv/bin/python -m pytest\n`);
+  execSync(`${JSON.stringify(python)} -m pytest`, {
+    cwd: serviceDir,
+    stdio: 'inherit',
+    env: process.env,
+  });
 }
 
 let failed = false;
@@ -26,6 +49,10 @@ try {
   });
   // core-api: arch:check + jest + build (the architecture gate, NFR-MNT-01).
   run('core-api (arch + unit + build)', 'core-api', 'npm run verify');
+  // tts-service: pytest. Runs before the frontends because the TV board's
+  // announcement audio comes from here — a broken script generator is more
+  // fundamental than a broken render.
+  runPythonTests('tts-service (pytest)', 'tts-service');
   // frontends: vitest + vite build.
   for (const svc of ['admin-service', 'tv-display-service', 'caller-service', 'kiosk-service']) {
     run(`${svc} (vitest + build)`, svc, 'npm test && npm run build');
