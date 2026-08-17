@@ -184,7 +184,7 @@ export const TERMINAL_ARROW_MARKER: FlowEdgeMarker = {
  *  `sourceHandle`/`targetHandle` reference the connection-point ids on the
  *  source/target nodes (see {@link HANDLE_IDS}). They are CANVAS-ONLY — never
  *  serialized to the wire {@link Transition} (`flowToGraph` drops them) — and
- *  record which side each edge was dragged from/to so the bezier routes through
+ *  record which side each edge was dragged from/to so the router leaves/enters
  *  the manager's chosen side, not an ambiguous default. `selected` mirrors
  *  `Edge.selected` — set by the parent's click-to-select handler so the
  *  `.selected` class applies and `onSelectionChange` fires. */
@@ -217,7 +217,7 @@ export interface FlowEdge {
  * handle, the START-handle-TYPE arrow-reversal can never fire — the arrow
  * always points where the manager dropped (drag direction). The edge's
  * `sourceHandle`/`targetHandle` reference these side ids; React Flow derives
- * the bezier's exit/entry direction from the handle's `Position`, so a
+ * the route's exit/entry direction from the handle's `Position`, so a
  * vertical edge (top/bottom handles) renders vertically with NO edge-component
  * change (`TransitionEdge` already forwards `sourcePosition`/`targetPosition`).
  *
@@ -338,6 +338,13 @@ export function handleToSide(handle: string | undefined): EdgeSide | undefined {
  * {@link flowToGraph} captures the canvas handles + positions back into the
  * form, closing the loop. The handles are the typeless side ids (one per side);
  * `sideToHandle` maps the form side to the handle id.
+ *
+ * **A SELF-LOOP's default target is the CORNER pair, not the L→R one** (see
+ * {@link DEFAULT_SELF_LOOP_TARGET_HANDLE}): `right → top`, matching what a
+ * dragged self-loop gets from {@link SELF_LOOP_TARGET_SIDE}, so a loop the
+ * manager adds from the panel and one they draw by hand are the same shape.
+ * `flowToGraph` then captures `right`/`top` as explicit sides on the next save —
+ * intended, not a leak: the routing layout is supposed to record what is drawn.
  */
 export function formToFlow(
   value: StateMachineForm,
@@ -350,18 +357,22 @@ export function formToFlow(
     position: value.positions[name] ?? positions[name] ?? auto[name] ?? { x: 0, y: 0 },
     data: { name, description: descriptionFor(value, name) },
   }));
-  const edges: FlowEdge[] = value.transitions.map((t, i) => ({
-    id: `${t.from}->${t.to}#${i}`,
-    source: t.from,
-    target: t.to,
-    type: 'transition',
-    data: { actionLabel: t.actionLabel, requeuePolicy: t.requeuePolicy },
+  const edges: FlowEdge[] = value.transitions.map((t, i) => {
     // Seed from the form sides (the source of truth); a transition with no
-    // sides (absent) gets the canonical L→R default.
-    sourceHandle: t.sourceSide !== undefined ? sideToHandle(t.sourceSide) : DEFAULT_SOURCE_HANDLE,
-    targetHandle: t.targetSide !== undefined ? sideToHandle(t.targetSide) : DEFAULT_TARGET_HANDLE,
-    markerEnd: EDGE_ARROW_MARKER,
-  }));
+    // sides (absent) falls back to the default routing for its SHAPE — the
+    // canonical L→R for an ordinary edge, the corner pair for a self-loop.
+    const fallback = defaultHandlesFor(t.from, t.to);
+    return {
+      id: `${t.from}->${t.to}#${i}`,
+      source: t.from,
+      target: t.to,
+      type: 'transition',
+      data: { actionLabel: t.actionLabel, requeuePolicy: t.requeuePolicy },
+      sourceHandle: t.sourceSide !== undefined ? sideToHandle(t.sourceSide) : fallback.sourceHandle,
+      targetHandle: t.targetSide !== undefined ? sideToHandle(t.targetSide) : fallback.targetHandle,
+      markerEnd: EDGE_ARROW_MARKER,
+    };
+  });
   return { nodes, edges };
 }
 
@@ -874,10 +885,10 @@ function duplicateSelfLoopMessage(from: string): string {
 /**
  * The next side, clockwise, used as the TARGET side of a programmatically
  * created self-loop whose SOURCE side is the side the manager dragged from.
- * Two DISTINCT adjacent sides (never the same one) so the loop has two real
- * endpoints and reads as an arc over the nearest corner of the card — see
- * {@link getSelfLoopPath}, whose adjacent-sides branch arcs around exactly that
- * corner.
+ * Two DISTINCT ADJACENT sides (never the same one, never the opposite one) so
+ * the loop brackets the nearest corner of the card — see {@link
+ * getSelfLoopPath}, whose adjacent-sides branch is the only one that clears the
+ * card BY CONSTRUCTION, with no guess at a card extent it cannot see.
  */
 const SELF_LOOP_TARGET_SIDE: Record<EdgeSide, EdgeSide> = {
   right: 'top',
@@ -885,6 +896,74 @@ const SELF_LOOP_TARGET_SIDE: Record<EdgeSide, EdgeSide> = {
   left: 'bottom',
   bottom: 'right',
 };
+
+/**
+ * The target handle {@link formToFlow} seeds for a SELF-LOOP that declares no
+ * sides — the corner partner of {@link DEFAULT_SOURCE_HANDLE}, i.e. `top`.
+ *
+ * The canonical L→R default ({@link DEFAULT_TARGET_HANDLE}) is wrong for a loop
+ * on ONE card: `right → left` is an OPPOSITE pair, so the path has to cross the
+ * card's vertical extent — which {@link getSelfLoopPath} cannot measure, only
+ * guess at ({@link SELF_LOOP_SPAN}). The corner pair needs no guess. It also
+ * makes a panel-added loop ("+ Tambah transisi") identical to a hand-drawn one,
+ * which goes through {@link SELF_LOOP_TARGET_SIDE} — one shape, one source of
+ * truth for what "the corner partner" means.
+ *
+ * Declared HERE, next to that map, rather than beside `DEFAULT_TARGET_HANDLE`:
+ * a `const` initialized from `SELF_LOOP_TARGET_SIDE` must come after it (TDZ).
+ * `formToFlow` reads it from a function body, so module order is safe.
+ */
+const DEFAULT_SELF_LOOP_TARGET_HANDLE = sideToHandle(SELF_LOOP_TARGET_SIDE[DEFAULT_SOURCE_SIDE]);
+
+/**
+ * The routing handles a transition gets when NOBODY chose its sides — the one
+ * place that knows a self-loop's default differs from every other edge's.
+ *
+ * Every creation path funnels through here ({@link formToFlow}'s re-seed, the
+ * panel's "+ Tambah transisi", `onConnect`'s fallback), because a self-loop can
+ * be born at any of them and all three used to hand it the canonical L→R pair —
+ * see {@link DEFAULT_SELF_LOOP_TARGET_HANDLE} for why that pair is the wrong one
+ * for a loop.
+ */
+export function defaultHandlesFor(
+  from: string,
+  to: string,
+): { sourceHandle: string; targetHandle: string } {
+  return {
+    sourceHandle: DEFAULT_SOURCE_HANDLE,
+    targetHandle: from === to ? DEFAULT_SELF_LOOP_TARGET_HANDLE : DEFAULT_TARGET_HANDLE,
+  };
+}
+
+/**
+ * The routing handles an edge keeps when the properties panel re-points one of
+ * its endpoints — {@link defaultHandlesFor} for the NEW pair if the edge is
+ * still on the default routing, otherwise the sides it already has.
+ *
+ * The distinction is the point: a manager who dragged this edge out of a
+ * particular side must keep it (re-pointing "Ke" is not "forget my routing"),
+ * but an edge that never left the default should not be stranded on the DEFAULT
+ * OF ITS OLD SHAPE — re-pointing an ordinary edge onto its own source makes a
+ * self-loop, and that loop should look like every other loop, not like a
+ * left-to-right edge bent back on itself.
+ */
+export function handlesAfterReroute(
+  edge: { source: string; target: string; sourceHandle?: string; targetHandle?: string },
+  from: string,
+  to: string,
+): { sourceHandle: string; targetHandle: string } {
+  const current = defaultHandlesFor(edge.source, edge.target);
+  // Normalize FIRST, compare second: an edge with no handles at all is on the
+  // default routing by definition, and treating it as customized would strand it
+  // on the default of the shape it is LEAVING — for an ordinary edge re-pointed
+  // onto its own source, exactly the `right → left` loop this rule exists to
+  // prevent. (No creation path omits handles today; the contract should not
+  // depend on that staying true.)
+  const sourceHandle = edge.sourceHandle ?? current.sourceHandle;
+  const targetHandle = edge.targetHandle ?? current.targetHandle;
+  const onDefaults = sourceHandle === current.sourceHandle && targetHandle === current.targetHandle;
+  return onDefaults ? defaultHandlesFor(from, to) : { sourceHandle, targetHandle };
+}
 
 /**
  * The minimal structural slice of React Flow's `FinalConnectionState` that the
@@ -982,16 +1061,39 @@ export function decideConnectEnd(
 }
 
 /**
- * How far each self-loop control point is pushed from its endpoint, in flow
- * units (px at zoom 1). Used for BOTH the outward (normal) and the sideways
- * (lateral) offset, so the loop's apex lands `0.75 * R` (120px) past the
- * handle it leaves from — comfortably outside a card that is `min-width: 10rem`
- * (160px) wide and ~50px tall, on every one of the 16 handle pairs (the
- * tightest, `top`↔`bottom`, still clears the card edge by 40px). Sized
- * generously on purpose: the manager's report was "self-loop garisnya overlap
- * dan jelek sekali, seharusnya lebih panjang lagi".
+ * How far a self-loop swings past its handle on the axis it must cross, WHEN THE
+ * CALLER SUPPLIES NO CARD SIZE — the fallback for {@link getSelfLoopPoints}'s
+ * optional `nodeWidth`/`nodeHeight`, in flow units (px at zoom 1).
+ *
+ * An ADJACENT pair (the default routing — {@link DEFAULT_SELF_LOOP_TARGET_HANDLE})
+ * never needs any of this: each long run sits exactly `offset` outside one face,
+ * so it clears the card by construction at any size. An OPPOSITE pair (and the
+ * defensive same-side one) has to cross the extent BETWEEN the two faces —
+ * `right → left` crosses the card's HEIGHT, `top → bottom` its WIDTH — which two
+ * side midpoints cannot reveal. `TransitionEdge` therefore TELLS this function
+ * the measured card size and the loop hugs it at `offset` like everything else.
+ *
+ * These two numbers are the DEFENSIVE path, not a startup path: React Flow does
+ * not mount an edge until its nodes are measured (`isNodeInitialized` gates
+ * `getEdgePosition`, and `FlowNode` declares no `width`/`initialWidth`), so a
+ * production self-loop is always drawn with a real size. They exist because the
+ * size is an OPTIONAL input — an absent or zero one must not collapse the
+ * crossing run onto the card, and `2 * offset` would not clear even the minimum
+ * card's width.
+ *
+ * They are NOT equally safe, and the difference is worth knowing:
+ *  - `y = 60` is bounded by construction. `.state-node__title` and
+ *    `.state-node__desc` are both `white-space: nowrap`, so a card is always two
+ *    text lines (~50px) however long the text is.
+ *  - `x = 120` is a guess. `.state-node` has `min-width: 10rem` and NO
+ *    `max-width`, so a long description widens the card without limit; past
+ *    ~240px a `top ↔ bottom` fallback loop would cut through it. That is exactly
+ *    why the measured size is the primary path and this is only the fallback.
+ * Both also sit inside `autoLayout`'s gutters (70px vertical from
+ * `Y_SPACING = 120`, 80px horizontal from `X_SPACING = 240`), so a fallback loop
+ * does not reach the neighbouring rank.
  */
-export const SELF_LOOP_RADIUS = 160;
+export const SELF_LOOP_SPAN = { x: 120, y: 60 } as const;
 
 /** The outward unit normal implied by a handle side, in SVG coordinates (y
  *  grows DOWNWARD, so `top` points to negative y). Keyed by the bare side
@@ -1006,35 +1108,230 @@ const SIDE_NORMALS: Record<string, { x: number; y: number }> = {
   left: { x: -1, y: 0 },
 };
 
+/** A point in flow coordinates. Structural, so React Flow's `XYPosition` (or any
+ *  `{x, y}`) is assignable with no framework import. */
+interface Point {
+  x: number;
+  y: number;
+}
+
 /**
- * The SVG path + label anchor for a SELF-LOOP edge (`source === target`), in
- * the same `[path, labelX, labelY]` tuple prefix React Flow's path builders
- * return, so the edge component can swap one for the other.
+ * Turns an ORTHOGONAL waypoint polyline into an SVG path with rounded corners —
+ * `M`/`L`/`Q` only, the same command vocabulary `getSmoothStepPath` emits, so a
+ * self-loop is indistinguishable in kind from every other edge on the canvas.
+ *
+ * Each corner's fillet is `min(|ab| / 2, |bc| / 2, radius)`, the identical clamp
+ * `getBend` applies in `@xyflow/system` — a short leg can never have its corner
+ * overrun it. A collinear triple or a zero-length leg degrades to a plain `L`
+ * (again, exactly what `getBend` does), which is also the NaN guard: `Math.sign`
+ * of a zero delta is 0, so a degenerate point can only ever emit itself.
+ *
+ * The axis-aligned precondition is enforced by tests, NOT by a runtime throw: a
+ * throw inside an edge component blanks the whole canvas, and a diagonal leg
+ * would merely render as a diagonal — visible, not fatal.
+ *
+ * Exported for its own unit tests, and for that reason only: the fillet clamp,
+ * the collinear-triple case and the degenerate inputs are all unreachable
+ * through {@link getSelfLoopPath} (whose waypoints are never collinear and whose
+ * legs are never shorter than `offset`), so they can only be pinned here. It has
+ * no other caller — a new one would be taking on the axis-aligned precondition
+ * above, which nothing enforces at runtime.
+ */
+export function roundedOrthogonalPath(points: readonly Point[], radius: number): string {
+  if (points.length === 0) return '';
+  const first = points[0];
+  let d = `M ${first.x},${first.y}`;
+  if (points.length === 1) return d;
+  for (let i = 1; i < points.length - 1; i += 1) {
+    const a = points[i - 1];
+    const b = points[i];
+    const c = points[i + 1];
+    const collinear = (a.x === b.x && b.x === c.x) || (a.y === b.y && b.y === c.y);
+    const r = Math.min(
+      Math.hypot(b.x - a.x, b.y - a.y) / 2,
+      Math.hypot(c.x - b.x, c.y - b.y) / 2,
+      radius,
+    );
+    if (collinear || r <= 0) {
+      d += ` L ${b.x},${b.y}`;
+      continue;
+    }
+    const inX = b.x - Math.sign(b.x - a.x) * r;
+    const inY = b.y - Math.sign(b.y - a.y) * r;
+    const outX = b.x + Math.sign(c.x - b.x) * r;
+    const outY = b.y + Math.sign(c.y - b.y) * r;
+    d += ` L ${inX},${inY} Q ${b.x},${b.y} ${outX},${outY}`;
+  }
+  const last = points[points.length - 1];
+  return `${d} L ${last.x},${last.y}`;
+}
+
+/**
+ * The point half a polyline's LENGTH along it — the label anchor for a
+ * self-loop. Measured on the un-rounded waypoints (the fillets pull the drawn
+ * stroke inward by at most `0.29 * borderRadius`, and only at a corner), so the
+ * anchor is always on, or within ~2px of, the line the manager sees.
+ *
+ * Arc-length rather than "the apex" or "the middle waypoint": it is the one rule
+ * that works for a 5-point bracket and a 6-point loop alike, and it can never
+ * land on the card — for every shape {@link getSelfLoopPoints} builds, half the
+ * length is longer than the leaving stub, so the anchor falls on a long run that
+ * is `offset` clear of a face.
+ */
+function polylineMidpoint(points: readonly Point[]): [number, number] {
+  const lengths: number[] = [];
+  let total = 0;
+  for (let i = 1; i < points.length; i += 1) {
+    const len = Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+    lengths.push(len);
+    total += len;
+  }
+  const first = points[0];
+  if (total === 0) return [first.x, first.y];
+  const half = total / 2;
+  let walked = 0;
+  for (let i = 1; i < points.length; i += 1) {
+    const len = lengths[i - 1];
+    if (len > 0 && walked + len >= half) {
+      const k = (half - walked) / len;
+      const a = points[i - 1];
+      const b = points[i];
+      return [a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k];
+    }
+    walked += len;
+  }
+  const last = points[points.length - 1];
+  return [last.x, last.y];
+}
+
+/**
+ * The ORTHOGONAL waypoints of a SELF-LOOP edge (`source === target`) — every
+ * segment axis-aligned, leaving perpendicular to the source face and entering
+ * perpendicular to the target face, exactly like every other edge since the
+ * canvas went stepped.
  *
  * Every stock React Flow router is degenerate for a self-loop, because the two
  * endpoints are less than a card apart: `getBezierPath` drew a short backwards
  * curve THROUGH the node card (edges render beneath nodes) and parked the label
- * chip on top of it — the manager's "overlap dan jelek sekali" report — and
- * `getSmoothStepPath` (the router every OTHER edge uses now) collapses the same
- * way, since its gapped points fall inside the card. Hence a hand-rolled arc,
- * and hence the self-loop being the one CURVED shape on an otherwise orthogonal
- * canvas.
+ * chip on top of it, and `getSmoothStepPath` collapses the same way, since its
+ * gapped points fall inside the card. So the waypoints are hand-rolled — but the
+ * SHAPE is the canvas's, not an exception to it (the manager's "self-loop masih
+ * pakai bezier" report on the otherwise-orthogonal canvas of PR #115).
  *
- * Instead each control point is pushed OUT along its endpoint's outward normal
- * by {@link SELF_LOOP_RADIUS} and SIDEWAYS along a lateral unit vector by the
- * same amount. The lateral pair is what decides where the loop swings, and it
- * must be chosen RELATIVE to the other endpoint, not per-endpoint:
- *  - ADJACENT sides (normals perpendicular, e.g. `top` → `right`): each
- *    endpoint's lateral is the OTHER endpoint's normal, so both control points
- *    push toward the corner between the two sides and the loop arcs around it.
- *  - SAME side (`right` → `right`): laterals are ±the normal's perpendicular —
- *    opposite signs, so the loop opens into a symmetric round loop off that side.
- *  - OPPOSITE sides (`right` → `left`, the seeded default routing): both
- *    laterals are the SAME perpendicular, so the loop swings clear over one
- *    side of the card instead of S-curving back through it.
+ * The function is told two handle points, two side names and the `offset` — NOT
+ * the card's rect. Three cases, and only one of them is a guess:
+ *  - ADJACENT sides (perpendicular normals, e.g. `right → top` — the DEFAULT for
+ *    every self-loop, seeded and dragged alike): stub `offset` out of each
+ *    endpoint and join them at the OUTER corner `K` (the source stub's
+ *    coordinate on the source axis, the target stub's on the target axis). Clear
+ *    of the card BY CONSTRUCTION at any card size: the `A → K` run sits exactly
+ *    `offset` outside the source face, `K → B` exactly `offset` outside the
+ *    target face, and the two stubs are perpendicular to their own face. Picking
+ *    the INNER corner instead would run straight through the card.
+ *  - OPPOSITE sides (`right → left`): the loop must cross the extent BETWEEN the
+ *    two faces, which the two handle points do not reveal — so it crosses at
+ *    `half the card + offset` past the handle when the caller supplies the
+ *    measured `nodeWidth`/`nodeHeight` (hugging the card exactly like the corner
+ *    bracket), and at {@link SELF_LOOP_SPAN} when it does not. Both excursion
+ *    legs reach one shared line, which keeps the crossing run axis-aligned even
+ *    when the two handle points are not level. The direction is
+ *    the source normal rotated a quarter turn, so it is FIXED by the side pair
+ *    (`right → left` swings up, `left → right` down): nothing about the
+ *    neighbours is knowable here, so a "pick the emptier side" rule would be a
+ *    lie, and a data-dependent one would make the loop flip as the graph mutates.
+ *    Swapping the two sides mirrors the loop — that is the manager's lever.
+ *  - SAME side (`right → right`): DEFENSIVE only. React Flow resolves both
+ *    endpoints to the ONE handle element on that side, so `source === target` as
+ *    a point, and an orthogonal path that leaves along `+ns` and returns along
+ *    `+ns` to that same point must have its first and last segments collinear.
+ *    This shape makes the doubled stroke the minimum possible — exactly `offset`
+ *    — and no orthogonal shape avoids it (the alternatives are a curve, or moving
+ *    an endpoint, which is not ours to move). Unreachable from the UI:
+ *    `decideConnectEnd` always picks {@link SELF_LOOP_TARGET_SIDE}, `formToFlow`
+ *    seeds the corner pair, and there is no edge-reconnect handler — it takes a
+ *    hand-edited routing-layout payload to get here.
  *
- * The label anchor is the cubic's midpoint `(P0 + 3C1 + 3C2 + P3) / 8` (t=0.5),
- * i.e. the apex of the loop — never on the card.
+ * An unknown/legacy position string falls back to the `right`/`left` normals, so
+ * it degrades to the opposite-sides loop rather than to NaN coordinates (a NaN in
+ * a `d` attribute drops the whole path from the canvas).
+ *
+ * Exported so the tests can assert the geometry that actually matters — no
+ * segment touching the card rect, every segment axis-aligned, perpendicular
+ * exit/entry — against waypoints instead of a regex over a path string. This
+ * mirrors `@xyflow/system`'s own `getPoints` + `getBend` split.
+ */
+export function getSelfLoopPoints(params: {
+  sourceX: number;
+  sourceY: number;
+  sourcePosition: string;
+  targetX: number;
+  targetY: number;
+  targetPosition: string;
+  offset: number;
+  /** The measured card size, when the caller has it (React Flow's
+   *  `useInternalNode(id).measured`). Consulted ONLY by the branches that cross
+   *  the card — the corner bracket never needs it — and each axis falls back to
+   *  {@link SELF_LOOP_SPAN} independently when absent or not yet measured. */
+  nodeWidth?: number;
+  nodeHeight?: number;
+}): Point[] {
+  const { sourceX, sourceY, targetX, targetY, offset } = params;
+  const ns = SIDE_NORMALS[params.sourcePosition] ?? SIDE_NORMALS.right;
+  const nt = SIDE_NORMALS[params.targetPosition] ?? SIDE_NORMALS.left;
+  const source = { x: sourceX, y: sourceY };
+  const target = { x: targetX, y: targetY };
+  // The straight run every edge on this canvas gets out of its handle before it
+  // may turn — `getSmoothStepPath`'s `offset`, same number, same meaning.
+  const a = { x: sourceX + ns.x * offset, y: sourceY + ns.y * offset };
+  const b = { x: targetX + nt.x * offset, y: targetY + nt.y * offset };
+  // 0 = adjacent (perpendicular), 1 = same side, -1 = opposite sides.
+  const dot = ns.x * nt.x + ns.y * nt.y;
+  if (dot === 0) {
+    // `ns` and `nt` are perpendicular unit axes, so the outer corner is just
+    // "A's coordinate on the source axis, B's on the target axis".
+    const corner = { x: ns.x !== 0 ? a.x : b.x, y: ns.y !== 0 ? a.y : b.y };
+    return [source, a, corner, b, target];
+  }
+  // `ns` rotated a quarter turn (screen coords) — the only direction with a
+  // sideways component when the two normals are parallel.
+  const lateral = { x: ns.y, y: -ns.x };
+  // How far past the handle the excursion has to sit. A handle is its face's
+  // MIDPOINT — that is a property of {@link HANDLE_IDS} (exactly one typeless
+  // handle per side, centred by React Flow's own base stylesheet), and this
+  // formula depends on it: half the card plus the usual `offset` then puts the
+  // run exactly `offset` beyond the far face for an opposite pair — the corner
+  // bracket's clearance, reached without guessing. (The same-side branch crosses
+  // nothing; there the span only sets how far the lobe swings out past a
+  // PERPENDICULAR face.) `SELF_LOOP_SPAN` is the no-size-supplied fallback.
+  const crossed = lateral.x !== 0 ? params.nodeWidth : params.nodeHeight;
+  const span =
+    typeof crossed === 'number' && Number.isFinite(crossed) && crossed > 0
+      ? crossed / 2 + offset
+      : lateral.x !== 0
+        ? SELF_LOOP_SPAN.x
+        : SELF_LOOP_SPAN.y;
+  const proj = (q: Point): number => q.x * lateral.x + q.y * lateral.y;
+  const line = Math.max(proj(a), proj(b)) + span;
+  const push = (q: Point): Point => ({
+    x: q.x + lateral.x * (line - proj(q)),
+    y: q.y + lateral.y * (line - proj(q)),
+  });
+  if (dot < 0) return [source, a, push(a), push(b), b, target];
+  const returnLane = { x: b.x + ns.x * offset, y: b.y + ns.y * offset };
+  return [source, a, push(a), push(returnLane), returnLane, target];
+}
+
+/**
+ * The SVG path + label anchor for a SELF-LOOP edge, in the same
+ * `[path, labelX, labelY]` tuple prefix React Flow's path builders return, so
+ * the edge component can swap one for the other.
+ *
+ * `borderRadius` and `offset` are REQUIRED and carry no defaults on purpose:
+ * `TransitionEdge` spreads the SAME `STEP_PATH_OPTIONS` object into this call
+ * and into `getSmoothStepPath`, so the self-loop's corner rounding and handle
+ * clearance can never drift from the rest of the canvas. Geometry in:
+ * {@link getSelfLoopPoints}; rounding in {@link roundedOrthogonalPath}; label in
+ * `polylineMidpoint`.
  */
 export function getSelfLoopPath(params: {
   sourceX: number;
@@ -1043,33 +1340,12 @@ export function getSelfLoopPath(params: {
   targetX: number;
   targetY: number;
   targetPosition: string;
+  borderRadius: number;
+  offset: number;
+  nodeWidth?: number;
+  nodeHeight?: number;
 }): [path: string, labelX: number, labelY: number] {
-  const { sourceX, sourceY, targetX, targetY } = params;
-  const ns = SIDE_NORMALS[params.sourcePosition] ?? SIDE_NORMALS.right;
-  const nt = SIDE_NORMALS[params.targetPosition] ?? SIDE_NORMALS.left;
-  // 0 = adjacent (perpendicular), 1 = same side, -1 = opposite sides.
-  const dot = ns.x * nt.x + ns.y * nt.y;
-  let ls: { x: number; y: number };
-  let lt: { x: number; y: number };
-  if (dot === 0) {
-    ls = nt;
-    lt = ns;
-  } else {
-    // `ns` rotated a quarter turn (screen coords): the only direction with a
-    // sideways component when the two normals are parallel.
-    const p = { x: ns.y, y: -ns.x };
-    ls = p;
-    lt = dot > 0 ? { x: -p.x, y: -p.y } : p;
-  }
-  const r = SELF_LOOP_RADIUS;
-  const c1x = sourceX + ns.x * r + ls.x * r;
-  const c1y = sourceY + ns.y * r + ls.y * r;
-  const c2x = targetX + nt.x * r + lt.x * r;
-  const c2y = targetY + nt.y * r + lt.y * r;
-  const path = `M ${sourceX},${sourceY} C ${c1x},${c1y} ${c2x},${c2y} ${targetX},${targetY}`;
-  return [
-    path,
-    (sourceX + 3 * c1x + 3 * c2x + targetX) / 8,
-    (sourceY + 3 * c1y + 3 * c2y + targetY) / 8,
-  ];
+  const points = getSelfLoopPoints(params);
+  const [labelX, labelY] = polylineMidpoint(points);
+  return [roundedOrthogonalPath(points, params.borderRadius), labelX, labelY];
 }

@@ -83,8 +83,8 @@ import {
   isTerminalNodeId,
   nextStateName,
   withDescriptions,
-  DEFAULT_SOURCE_HANDLE,
-  DEFAULT_TARGET_HANDLE,
+  defaultHandlesFor,
+  handlesAfterReroute,
   EDGE_ARROW_MARKER,
   END_NODE_ID,
   START_NODE_ID,
@@ -480,6 +480,7 @@ export function StateMachineWorkflow({
       // internals change) never seeds a duplicate edge. Centralized in
       // `isDuplicateTransition` so all three reject sites stay identical.
       if (isDuplicateTransition(edges, from, to)) return;
+      const fallbackHandles = defaultHandlesFor(from, to);
       const newEdge: FlowEdge = {
         id: mintEdgeId(),
         source: from,
@@ -487,11 +488,12 @@ export function StateMachineWorkflow({
         type: 'transition',
         data: { actionLabel: '', requeuePolicy: DEFAULT_REQUEUE_POLICY },
         // Carry the exact handles the manager dragged (which side → which
-        // side) so the bezier routes through them — vertical when a top/bottom
-        // handle was used. React Flow supplies `sourceHandle`/`targetHandle` on
-        // the connection; fall back to the canonical L→R default if absent.
-        sourceHandle: connection.sourceHandle ?? DEFAULT_SOURCE_HANDLE,
-        targetHandle: connection.targetHandle ?? DEFAULT_TARGET_HANDLE,
+        // side) so the route leaves/enters through them — vertical when a
+        // top/bottom handle was used. React Flow supplies
+        // `sourceHandle`/`targetHandle` on the connection; fall back to the
+        // default routing for this edge's shape if absent.
+        sourceHandle: connection.sourceHandle ?? fallbackHandles.sourceHandle,
+        targetHandle: connection.targetHandle ?? fallbackHandles.targetHandle,
         // Closed arrow at the target end so the edge reads "from → to"
         // (manager feedback: no arrow = confusing direction).
         markerEnd: EDGE_ARROW_MARKER,
@@ -741,11 +743,16 @@ export function StateMachineWorkflow({
           toast.show(`Transisi dari ${from} ke ${to} sudah ada.`, { variant: 'info', durationMs: 6000 });
           return;
         }
-        // Keep `sourceHandle`/`targetHandle`/`markerEnd` as-is — `commit` →
-        // `flowToGraph` rebuilds transitions and `withDescriptions` refreshes
-        // node descriptions (a re-routed edge changes the source/target
-        // states' outgoing/incoming counts).
-        const nextEdges = edges.map((e) => (e.id === edgeId ? { ...e, source: from, target: to } : e));
+        // Keep `markerEnd` as-is, and the handles too UNLESS the edge is still
+        // on its default routing — see {@link handlesAfterReroute}: re-pointing
+        // an ordinary edge onto its own source makes a self-loop, which has a
+        // different default (the corner pair). A manager-dragged routing is
+        // never touched. `commit` → `flowToGraph` rebuilds transitions and
+        // `withDescriptions` refreshes node descriptions (a re-routed edge
+        // changes the source/target states' outgoing/incoming counts).
+        const nextEdges = edges.map((e) =>
+          e.id === edgeId ? { ...e, source: from, target: to, ...handlesAfterReroute(e, from, to) } : e,
+        );
         commit(nodes, nextEdges);
       },
       // Add a new OUTGOING transition from the given source state (the inline
@@ -770,8 +777,10 @@ export function StateMachineWorkflow({
           target,
           type: 'transition',
           data: { actionLabel: '', requeuePolicy: DEFAULT_REQUEUE_POLICY },
-          sourceHandle: DEFAULT_SOURCE_HANDLE,
-          targetHandle: DEFAULT_TARGET_HANDLE,
+          // The first non-duplicate candidate can be the source itself (a
+          // self-loop — "Panggil Ulang" on CALLING is exactly that), so the
+          // routing comes from the shared default rather than the L→R pair.
+          ...defaultHandlesFor(source, target),
           markerEnd: EDGE_ARROW_MARKER,
         };
         commit(nodes, [...edges, newEdge]);

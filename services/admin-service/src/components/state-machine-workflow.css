@@ -14,8 +14,9 @@
      CSS-hidden until the node is hovered or selected — 40 visible dots for the
      5-state default graph was too loud.
    - The state node is an SVG card (icon + title + description); the transition
-     edge is a clean bezier + a small read-only label chip. Editing lives in
-     the right-side properties panel, not on the canvas. */
+     edge is an orthogonal (stepped, round-cornered) line + a small read-only
+     label chip — self-loops included. Editing lives in the right-side
+     properties panel, not on the canvas. */
 
 .sm-workflow-layout {
   display: flex;

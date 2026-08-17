@@ -5,8 +5,62 @@ import userEvent from '@testing-library/user-event';
 import { StateMachineWorkflow } from './StateMachineWorkflow';
 import { type StateMachineForm, type Transition, defaultStateMachineForm, validateCustomStateMachine } from '../lib/state-machine';
 import { DEFAULT_STATE_MACHINE } from '../api/types';
-import { SELF_LOOP_RADIUS } from '../lib/state-machine-flow';
+import { SELF_LOOP_SPAN } from '../lib/state-machine-flow';
 import { EDGE_CORNER_RADIUS, EDGE_HANDLE_OFFSET } from './StateMachineWorkflowNodes';
+import { Position, getBezierPath } from '@xyflow/react';
+
+/**
+ * Is this `d` an ORTHOGONAL round-cornered path — the shape every edge on this
+ * canvas is supposed to have since PR #115 (and, since the self-loop joined
+ * them, with no exception left)?
+ *
+ * A positive predicate rather than "contains no `C`": once nothing on the canvas
+ * emits a cubic, a negative guard passes for free and stops discriminating. This
+ * one fails on a bezier (letter set) AND on a diagonal `L` (axis rule), and the
+ * test that uses it feeds a real `getBezierPath` output through as a canary so
+ * the discrimination itself is proven live.
+ *
+ * Accepts both `x,y` and `x y` argument separators — `getSmoothStepPath` emits
+ * `M${x} ${y}` while this repo's own builder emits `M ${x},${y}`.
+ * Lives here, not in the lib test: this is the only place a path STRING is all
+ * there is: the lib test asserts the same properties on the waypoints
+ * themselves, which is strictly sharper than parsing them back out.
+ */
+function isOrthogonalPath(d: string): boolean {
+  const commands = [...d.matchAll(/([A-Za-z])\s*([-\d.,\s]*)/g)].map((m) => ({
+    letter: m[1],
+    args: m[2].trim().split(/[\s,]+/).filter(Boolean).map(Number),
+  }));
+  if (commands.length === 0) return false;
+  if (commands.some((c) => !'MLQ'.includes(c.letter) || c.args.some((n) => !Number.isFinite(n)))) {
+    return false;
+  }
+  let cursor: [number, number] | null = null;
+  for (const { letter, args } of commands) {
+    if (letter === 'M' && args.length === 2) {
+      cursor = [args[0], args[1]];
+      continue;
+    }
+    if (cursor === null) return false;
+    if (letter === 'L' && args.length === 2) {
+      // A straight leg must keep one axis fixed.
+      if (args[0] !== cursor[0] && args[1] !== cursor[1]) return false;
+      cursor = [args[0], args[1]];
+      continue;
+    }
+    if (letter === 'Q' && args.length === 4) {
+      // The fillet's control point IS the corner: it shares one axis with the
+      // leg arriving and the other with the leg leaving.
+      const [cx, cy, ex, ey] = args;
+      if (cx !== cursor[0] && cy !== cursor[1]) return false;
+      if (cx !== ex && cy !== ey) return false;
+      cursor = [ex, ey];
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
 
 function renderWorkflow(
   value = defaultStateMachineForm(),
@@ -1154,14 +1208,14 @@ describe('StateMachineWorkflow (Start/End terminal markers)', () => {
     expect(screen.getByTestId('sm-node-start')).toBeInTheDocument();
   });
 
-  it('draws a self-loop as a long arc clear of the card, not a stock path through it', () => {
-    // Manager feedback: "self-loop garisnya overlap dan jelek sekali, seharusnya
-    // lebih panjang lagi." Every stock React Flow router is degenerate when both
-    // endpoints sit on the same card — the old bezier drew a short backwards
-    // curve running through/behind the node (edges render beneath nodes) with
-    // the label chip on top of it, and the step router now used for every other
-    // edge collapses the same way. `TransitionEdge` branches to
-    // `getSelfLoopPath` for `source === target`.
+  it('draws a self-loop as an orthogonal bracket clear of the card, not a curve through it', () => {
+    // Two manager reports, one shape. First: "self-loop garisnya overlap dan
+    // jelek sekali" — every stock React Flow router is degenerate when both
+    // endpoints sit on one card (the old bezier curved backwards through/behind
+    // the node, chip on top of it; the step router collapses the same way).
+    // Then, once every other edge went orthogonal in PR #115: the self-loop was
+    // the one line still curved. So `TransitionEdge` branches to
+    // `getSelfLoopPath` — a hand-rolled builder, but the canvas's own shape.
     renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
     selectStateNode('WAITING');
     fireEvent.click(screen.getByTestId('panel-goto-transitions'));
@@ -1171,13 +1225,62 @@ describe('StateMachineWorkflow (Start/End terminal markers)', () => {
       .getByTestId('rf__edge-sm-edge-0')
       .querySelector('path.react-flow__edge-path')!
       .getAttribute('d')!;
-    // `M sx,sy C c1x,c1y c2x,c2y tx,ty` — pull every y out of the path. The
-    // endpoints share a y (both handles sit at the card's vertical middle for
-    // the seeded right→left routing); both control points must sit a full
-    // SELF_LOOP_RADIUS above them, so the loop swings up and over the card.
-    const ys = [...d.matchAll(/-?[\d.]+,(-?[\d.]+)/g)].map((m) => Number(m[1]));
-    expect(ys).toHaveLength(4);
-    expect(Math.min(...ys)).toBeLessThanOrEqual(ys[0] - SELF_LOOP_RADIUS);
+    // Geometry IS assertable here, unlike for an ordinary edge whose shape
+    // depends on how far apart two cards are: a loop's waypoints are its own
+    // handle points plus CONSTANTS, so the bracket keeps its size and sign
+    // whatever React Flow measures — hence the assertions below are all
+    // relative to the two endpoints the path itself carries.
+    expect(isOrthogonalPath(d)).toBe(true);
+    // Three corners: out the right face, up past the top face, back down into
+    // it — the seeded corner pair. Four would mean it fell back to the
+    // opposite-side loop that has to cross the card's unknown height.
+    expect(d.match(/Q/g)).toHaveLength(3);
+    const coords = [...d.matchAll(/(-?[\d.]+),(-?[\d.]+)/g)].map((m) => ({
+      x: Number(m[1]),
+      y: Number(m[2]),
+    }));
+    const source = coords[0];
+    const target = coords[coords.length - 1];
+    // The loop reaches exactly `offset` past the face it leaves and `offset`
+    // past the face it enters — the same clearance every other edge keeps, and
+    // never a distance guessed from a card size nobody measured.
+    expect(Math.max(...coords.map((p) => p.x))).toBe(source.x + EDGE_HANDLE_OFFSET);
+    expect(Math.min(...coords.map((p) => p.y))).toBe(target.y - EDGE_HANDLE_OFFSET);
+  });
+
+  it('hands the self-loop the card size on the RIGHT axis (a crossing loop hugs the card)', () => {
+    // The corner bracket never reads the card's size, so the test above cannot
+    // tell whether `TransitionEdge` wires `nodeWidth`/`nodeHeight` through
+    // correctly — or at all. A `top → bottom` loop can: it crosses the card's
+    // WIDTH, so its outermost run sits at `half the width + offset` past the
+    // handle. Swap the two axes and it lands at `half the HEIGHT + offset` —
+    // 58px on a 200x60 card, i.e. INSIDE it; drop them and it falls back to
+    // `SELF_LOOP_SPAN.x`. Both mutants fail this assertion.
+    const form = defaultStateMachineForm();
+    renderWorkflow({
+      ...form,
+      mode: 'custom' as const,
+      transitions: [
+        ...form.transitions,
+        { from: 'WAITING', to: 'WAITING', actionLabel: 'Ulang', requeuePolicy: { kind: 'KEEP' } as const, sourceSide: 'top' as const, targetSide: 'bottom' as const },
+      ],
+    });
+
+    // The measured size comes from the jsdom polyfill in `src/test/setup.ts`
+    // (React Flow will not mount an edge before its node is measured), so read
+    // it off the DOM rather than restating the number here.
+    const card = screen.getByTestId('sm-node-card-WAITING').closest('.react-flow__node') as HTMLElement;
+    const d = document
+      .querySelector('[data-testid^="rf__edge-WAITING->WAITING"] path.react-flow__edge-path')!
+      .getAttribute('d')!;
+    const coords = [...d.matchAll(/(-?[\d.]+),(-?[\d.]+)/g)].map((m) => ({
+      x: Number(m[1]),
+      y: Number(m[2]),
+    }));
+    expect(isOrthogonalPath(d)).toBe(true);
+    expect(Math.min(...coords.map((p) => p.x))).toBe(
+      coords[0].x - (card.offsetWidth / 2 + EDGE_HANDLE_OFFSET),
+    );
   });
 
   it('keeps the step-routing corner inside its straight run', () => {
@@ -1185,11 +1288,16 @@ describe('StateMachineWorkflow (Start/End terminal markers)', () => {
     // before it may turn; `EDGE_CORNER_RADIUS` is how much of that run the corner
     // rounds away. A radius wider than the run would leave no straight stub at
     // all, so the edge would stop reading as leaving the card perpendicular —
-    // the whole point of switching off the bezier router.
+    // the whole point of switching off the bezier router. It holds for the
+    // self-loop too, which is handed the same two numbers and whose SHORTEST leg
+    // is exactly one such stub.
     expect(EDGE_CORNER_RADIUS).toBeLessThan(EDGE_HANDLE_OFFSET);
+    // The same has to hold for the no-size-supplied fallback the crossing
+    // branches use, whose shortest excursion leg is `SELF_LOOP_SPAN.y`.
+    expect(EDGE_CORNER_RADIUS * 2).toBeLessThanOrEqual(SELF_LOOP_SPAN.y);
   });
 
-  it('routes an ordinary transition orthogonally, not as a bezier', () => {
+  it('routes EVERY edge on the canvas orthogonally, not as a bezier', () => {
     // Manager feedback: "coba perhatikan garisnya... itu jelek". `getBezierPath`
     // derives each control point's offset from the endpoint delta ALONG THAT
     // HANDLE'S OWN AXIS only, ignoring the perpendicular span — so the reported
@@ -1198,24 +1306,37 @@ describe('StateMachineWorkflow (Start/End terminal markers)', () => {
     // diagonal grazing both card tops. `TransitionEdge` routes via
     // `getSmoothStepPath` instead.
     //
-    // The guard is on the PATH COMMAND SET, not on coordinates, and that is
-    // deliberate: jsdom measures every node as zero-sized, so React Flow hands
-    // the edge degenerate handle geometry and any coordinate assertion here
-    // would be meaningless. Command shape survives that. `getSmoothStepPath`
-    // emits only `M`/`L`/`Q` (`getBend` in `@xyflow/system` returns a plain `L`
-    // for a collinear point and an `L`+`Q` pair for a rounded corner);
-    // `getBezierPath` and `getSelfLoopPath` both emit a cubic `C`. So "no `C`"
-    // is exactly "not a bezier", whatever the coordinates.
-    renderWorkflow(defaultStateMachineForm());
-    const d = screen
-      .getByTestId('rf__edge-WAITING->CALLING#0')
-      .querySelector('path.react-flow__edge-path')!
-      .getAttribute('d')!;
-    expect(d).not.toMatch(/C/);
-    expect(d).toMatch(/^M/);
-    // The same canvas still carries the curved self-loop exception, so this is a
-    // real discrimination rather than a vacuous "no C anywhere" assertion — see
-    // the self-loop test above, whose path must keep its `C`.
+    // The guard is on the PATH SHAPE, not on coordinates, and that is
+    // deliberate: jsdom lays out nothing, so React Flow's handle geometry here
+    // comes from its own measurement fallback — stable enough to render, but not
+    // the numbers a browser would produce, which makes a pixel assertion
+    // meaningless. Shape survives that. It is a POSITIVE predicate,
+    // also deliberately: the old guard was "the `d` contains no `C`", which was
+    // discriminating only while the curved self-loop was still on the canvas to
+    // fail it. With no curve left anywhere, that assertion would pass for free.
+    // `isOrthogonalPath` rejects a bezier on its letter set AND a diagonal leg
+    // on its axis rule, and the canary below proves it is live.
+    expect(
+      isOrthogonalPath(
+        getBezierPath({
+          sourceX: 0,
+          sourceY: 0,
+          sourcePosition: Position.Right,
+          targetX: 240,
+          targetY: 90,
+          targetPosition: Position.Left,
+        })[0],
+      ),
+    ).toBe(false);
+
+    renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const, startSources: ['WAITING'], endSources: ['COMPLETED'] });
+    const paths = [...document.querySelectorAll('path.react-flow__edge-path')];
+    // Transitions AND the dashed Start/End terminal edges — every edge kind.
+    expect(paths.length).toBeGreaterThanOrEqual(DEFAULT_STATE_MACHINE.transitions.length + 2);
+    const curved = paths
+      .map((p) => p.getAttribute('d') ?? '')
+      .filter((d) => !isOrthogonalPath(d));
+    expect(curved).toEqual([]);
   });
 
   it('the End marker renders with ZERO endSources so it can be dragged into', () => {

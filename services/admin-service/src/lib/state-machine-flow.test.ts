@@ -6,8 +6,12 @@ import {
   decideConnectEnd,
   deriveTerminalMarkers,
   getSelfLoopPath,
+  getSelfLoopPoints,
+  defaultHandlesFor,
+  handlesAfterReroute,
+  roundedOrthogonalPath,
   hasEndSource,
-  SELF_LOOP_RADIUS,
+  SELF_LOOP_SPAN,
   isTerminalNodeId,
   handleToSide,
   nextStateName,
@@ -169,6 +173,72 @@ describe('formToFlow', () => {
     const { edges } = formToFlow(form, {});
     expect(edges[0].sourceHandle).toBe(HANDLE_IDS.bottom);
     expect(edges[0].targetHandle).toBe(DEFAULT_TARGET_HANDLE);
+  });
+
+  it('seeds a SELF-LOOP with no sides onto the CORNER pair, not the L→R one', () => {
+    // A loop on one card is the one edge the L→R default is wrong for: `right →
+    // left` is an OPPOSITE pair, so the route has to cross the card's height —
+    // an extent `getSelfLoopPath` is never told and can only guess at. The
+    // corner pair (`right → top`) clears the card by construction, and it is
+    // what a HAND-DRAWN loop already gets (`decideConnectEnd` →
+    // `SELF_LOOP_TARGET_SIDE`), so a loop added from the panel and one drawn by
+    // dragging are the same shape.
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['A', 'B'],
+      transitions: [
+        { from: 'A', to: 'A', actionLabel: 'ulang', requeuePolicy: { kind: 'KEEP' } },
+        { from: 'A', to: 'B', actionLabel: 'go', requeuePolicy: { kind: 'KEEP' } },
+      ],
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+    const { edges } = formToFlow(form, {});
+    const loop = edges.find((e) => e.source === 'A' && e.target === 'A')!;
+    expect(loop.sourceHandle).toBe(HANDLE_IDS.right);
+    expect(loop.targetHandle).toBe(HANDLE_IDS.top);
+    // Only the loop is special-cased — an ordinary edge keeps the L→R default.
+    const plain = edges.find((e) => e.source === 'A' && e.target === 'B')!;
+    expect(plain.sourceHandle).toBe(DEFAULT_SOURCE_HANDLE);
+    expect(plain.targetHandle).toBe(DEFAULT_TARGET_HANDLE);
+  });
+
+  it('re-seeds the routing when a panel reroute turns an edge into a self-loop', () => {
+    // The panel's "Ke" select can point an edge at its own source. Nothing else
+    // in that edge changes, so without this it would keep the L→R default it was
+    // BORN with and render as the opposite-sides loop while every other loop on
+    // the canvas is a corner bracket.
+    expect(handlesAfterReroute({ source: 'A', target: 'B', ...defaultHandlesFor('A', 'B') }, 'A', 'A')).toEqual(
+      defaultHandlesFor('A', 'A'),
+    );
+    // ...and back out again.
+    expect(handlesAfterReroute({ source: 'A', target: 'A', ...defaultHandlesFor('A', 'A') }, 'A', 'B')).toEqual(
+      defaultHandlesFor('A', 'B'),
+    );
+  });
+
+  it('never overwrites manager-chosen sides on a reroute', () => {
+    // Re-pointing "Ke" is not "forget my routing": an edge the manager dragged
+    // out of the bottom keeps leaving from the bottom.
+    const dragged = { source: 'A', target: 'B', sourceHandle: HANDLE_IDS.bottom, targetHandle: HANDLE_IDS.top };
+    expect(handlesAfterReroute(dragged, 'A', 'A')).toEqual({
+      sourceHandle: HANDLE_IDS.bottom,
+      targetHandle: HANDLE_IDS.top,
+    });
+  });
+
+  it('lets an explicit side win over the self-loop corner default', () => {
+    // The seeded corner is a RENDER default, not a rule: a loop whose sides the
+    // manager actually chose (dragged, then captured by `flowToGraph` into the
+    // routing layout) still redraws exactly where they put it.
+    const form: StateMachineForm = {
+      mode: 'custom',
+      states: ['A'],
+      transitions: [
+        { from: 'A', to: 'A', actionLabel: 'ulang', requeuePolicy: { kind: 'KEEP' }, sourceSide: 'bottom', targetSide: 'left' },
+      ],
+      positions: {}, nodeActions: {}, descriptions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,    };
+    const { edges } = formToFlow(form, {});
+    expect(edges[0].sourceHandle).toBe(HANDLE_IDS.bottom);
+    expect(edges[0].targetHandle).toBe(HANDLE_IDS.left);
   });
 
   it('exposes four typeless handle ids — one per side', () => {
@@ -1588,116 +1658,346 @@ describe('rejectionMessageForConnection (End-marker duplicate message)', () => {
   });
 });
 
-describe('getSelfLoopPath (self-loop edge geometry)', () => {
-  // A state-node card at (0,0)-(160,50): `min-width: 10rem` (160px) wide and
-  // ~50px tall (icon + title + description rows plus 0.55rem padding). The four
-  // handle anchor points are the side midpoints React Flow resolves for the
-  // typeless per-side handles.
-  const CARD = { left: 0, top: 0, right: 160, bottom: 50 };
-  const HANDLE_POINT: Record<string, { x: number; y: number }> = {
-    top: { x: 80, y: 0 },
-    right: { x: 160, y: 25 },
-    bottom: { x: 80, y: 50 },
-    left: { x: 0, y: 25 },
-  };
-  const SIDES = ['top', 'right', 'bottom', 'left'] as const;
-
-  function loopFor(sourcePosition: string, targetPosition: string) {
-    const s = HANDLE_POINT[sourcePosition];
-    const t = HANDLE_POINT[targetPosition];
-    return getSelfLoopPath({
-      sourceX: s.x,
-      sourceY: s.y,
-      sourcePosition,
-      targetX: t.x,
-      targetY: t.y,
-      targetPosition,
-    });
-  }
-
-  it('draws ONE cubic from the source point to the target point', () => {
-    const [path] = loopFor('right', 'top');
-    // `M sx,sy C c1x,c1y c2x,c2y tx,ty` — the same single-cubic shape
-    // `getBezierPath` returns, so `BaseEdge` renders it unchanged.
-    expect(path).toMatch(/^M 160,25 C -?[\d.]+,-?[\d.]+ -?[\d.]+,-?[\d.]+ 80,0$/);
+describe('roundedOrthogonalPath (waypoints → M/L/Q)', () => {
+  it('rounds a corner with a quadratic whose control point IS the corner', () => {
+    const d = roundedOrthogonalPath([{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }], 8);
+    expect(d).toBe('M 0,0 L 92,0 Q 100,0 100,8 L 100,100');
   });
 
-  it('puts the label OFF the node card for every handle pair (16 combinations)', () => {
-    // The whole point of BUG B: `getBezierPath` parked the chip on top of the
-    // card. Every pair must land the label outside the card rect — including
-    // the seeded default `right`→`left` (opposite sides) and the same-side
-    // pairs, which are the degenerate cases for a naive rotate-the-normal
-    // tangent. The worst pair (top↔bottom, whose loop swings sideways past the
-    // card's 80px half-width) still clears by 40px.
+  it('clamps the fillet to half the shorter adjacent leg', () => {
+    // The same clamp `getBend` applies in `@xyflow/system`: a radius wider than
+    // the leg would overrun it and the line would stop reading as a right angle
+    // at all. 10px legs with a 40px radius → 5px fillets, not 40.
+    const d = roundedOrthogonalPath([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }], 40);
+    expect(d).toBe('M 0,0 L 5,0 Q 10,0 10,5 L 10,10');
+  });
+
+  it('emits a plain L for a collinear triple (no phantom corner)', () => {
+    const d = roundedOrthogonalPath([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 20, y: 0 }], 8);
+    expect(d).toBe('M 0,0 L 10,0 L 20,0');
+    expect(d).not.toContain('Q');
+  });
+
+  it('survives degenerate input without emitting NaN', () => {
+    // A NaN anywhere in a `d` attribute drops the WHOLE path from the canvas,
+    // so every degenerate case has to degrade to a drawable line instead.
+    expect(roundedOrthogonalPath([], 8)).toBe('');
+    expect(roundedOrthogonalPath([{ x: 3, y: 4 }], 8)).toBe('M 3,4');
+    expect(roundedOrthogonalPath([{ x: 0, y: 0 }, { x: 9, y: 0 }], 8)).toBe('M 0,0 L 9,0');
+    const duplicated = roundedOrthogonalPath(
+      [{ x: 0, y: 0 }, { x: 0, y: 0 }, { x: 10, y: 0 }],
+      8,
+    );
+    expect(duplicated).not.toContain('NaN');
+    expect(duplicated).not.toContain('Q');
+  });
+});
+
+describe('getSelfLoopPath (self-loop edge geometry)', () => {
+  const SIDES = ['top', 'right', 'bottom', 'left'] as const;
+  const NORMAL: Record<string, { x: number; y: number }> = {
+    top: { x: 0, y: -1 },
+    right: { x: 1, y: 0 },
+    bottom: { x: 0, y: 1 },
+    left: { x: -1, y: 0 },
+  };
+  // The router's two options, mirroring `STEP_PATH_OPTIONS` in
+  // `StateMachineWorkflowNodes.tsx`. Restated here rather than imported: this
+  // lib test must not pull `@xyflow/react` in through a component module.
+  const OFFSET = 28;
+  const RADIUS = 8;
+
+  /**
+   * A state-node card at (0,0)-(width,height), with the four handle anchor
+   * points React Flow resolves for the typeless per-side handles (each side's
+   * midpoint).
+   *
+   * The size is a PARAMETER, not a constant, because it is the thing the loop
+   * geometry has to survive: `.state-node` is `min-width: 10rem` (160px) with no
+   * `max-width`, so a long description widens it without limit, and the
+   * card-clearance properties below are meaningless if they are only ever
+   * checked at the narrowest card. `measured` mirrors what `TransitionEdge`
+   * passes down — set it false to exercise the pre-measurement fallback.
+   */
+  function cardFixture(width: number, height: number, measured = true) {
+    const rect = { left: 0, top: 0, right: width, bottom: height };
+    const handle: Record<string, { x: number; y: number }> = {
+      top: { x: width / 2, y: 0 },
+      right: { x: width, y: height / 2 },
+      bottom: { x: width / 2, y: height },
+      left: { x: 0, y: height / 2 },
+    };
+    const size = measured ? { nodeWidth: width, nodeHeight: height } : {};
+    const ends = (sourcePosition: string, targetPosition: string) => ({
+      sourceX: handle[sourcePosition].x,
+      sourceY: handle[sourcePosition].y,
+      sourcePosition,
+      targetX: handle[targetPosition].x,
+      targetY: handle[targetPosition].y,
+      targetPosition,
+    });
+    return {
+      rect,
+      handle,
+      label: `${width}x${height}${measured ? '' : ' (unmeasured)'}`,
+      points: (sourcePosition: string, targetPosition: string) =>
+        getSelfLoopPoints({ ...ends(sourcePosition, targetPosition), offset: OFFSET, ...size }),
+      loop: (sourcePosition: string, targetPosition: string) =>
+        getSelfLoopPath({
+          ...ends(sourcePosition, targetPosition),
+          borderRadius: RADIUS,
+          offset: OFFSET,
+          ...size,
+        }),
+    };
+  }
+
+  // The narrowest possible card, a card widened by an ordinary one-line
+  // description (~32 characters — this is the size at which a fixed span guess
+  // would start cutting through the card), and the unmeasured fallback at the
+  // size that guess was chosen for.
+  const CARDS = [cardFixture(160, 50), cardFixture(340, 60), cardFixture(160, 50, false)];
+  const DEFAULT_CARD = CARDS[0];
+  const CARD = DEFAULT_CARD.rect;
+  const pointsFor = DEFAULT_CARD.points;
+  const loopFor = DEFAULT_CARD.loop;
+
+  it('draws an orthogonal M/L/Q path from the source point to the target point', () => {
+    // The shape the whole change is about: the same command vocabulary
+    // `getSmoothStepPath` emits for every other edge — never a cubic `C`.
+    const [path] = loopFor('right', 'top');
+    expect(path.match(/[A-Za-z]/g)).toEqual(['M', 'L', 'Q', 'L', 'Q', 'L', 'Q', 'L']);
+    expect(path.startsWith('M 160,25')).toBe(true);
+    expect(path.endsWith('L 80,0')).toBe(true);
+  });
+
+  it('keeps EVERY segment axis-aligned, for all 16 handle pairs and every card size', () => {
+    const diagonal: string[] = [];
+    for (const card of CARDS) {
+      for (const sourceSide of SIDES) {
+        for (const targetSide of SIDES) {
+          const points = card.points(sourceSide, targetSide);
+          for (let i = 1; i < points.length; i += 1) {
+            const a = points[i - 1];
+            const b = points[i];
+            if (a.x !== b.x && a.y !== b.y) {
+              diagonal.push(`${card.label} ${sourceSide}->${targetSide} #${i}`);
+            }
+          }
+        }
+      }
+    }
+    expect(diagonal).toEqual([]);
+  });
+
+  it('leaves and enters PERPENDICULAR to the card, for all 16 handle pairs', () => {
+    // Every other edge on this canvas runs `offset` straight out of its handle
+    // before it may turn; a self-loop that slid along the card face instead
+    // would read as a different kind of line. The ENTRY run is asserted by
+    // direction and a floor rather than an exact length: the defensive same-side
+    // branch has to come back in along a DOUBLE stub (see its own test), and
+    // that is the one legitimate deviation.
+    for (const card of CARDS) {
+      for (const sourceSide of SIDES) {
+        for (const targetSide of SIDES) {
+          const points = card.points(sourceSide, targetSide);
+          const [start, afterStart] = points;
+          const end = points[points.length - 1];
+          const beforeEnd = points[points.length - 2];
+          const ns = NORMAL[sourceSide];
+          const nt = NORMAL[targetSide];
+          expect(afterStart.x - start.x).toBeCloseTo(ns.x * OFFSET);
+          expect(afterStart.y - start.y).toBeCloseTo(ns.y * OFFSET);
+          const entry = Math.hypot(end.x - beforeEnd.x, end.y - beforeEnd.y);
+          expect(entry).toBeGreaterThanOrEqual(OFFSET);
+          expect(end.x - beforeEnd.x).toBeCloseTo(-nt.x * entry);
+          expect(end.y - beforeEnd.y).toBeCloseTo(-nt.y * entry);
+        }
+      }
+    }
+  });
+
+  it('never runs a segment across the node card — every pair, narrow card AND wide', () => {
+    // The manager's original report was "self-loop garisnya overlap dan jelek
+    // sekali": the old bezier curved back THROUGH the card (edges render
+    // beneath nodes). Checking only the 160px minimum would prove nothing about
+    // the crossing branches, whose whole difficulty is a card extent that grows
+    // with the description text — hence the 340px fixture, which a fixed-span
+    // guess fails. Strict inequalities, so the two endpoints are allowed to sit
+    // ON the card boundary — that is where the handles are.
+    const crossing: string[] = [];
+    for (const card of CARDS) {
+      for (const sourceSide of SIDES) {
+        for (const targetSide of SIDES) {
+          const points = card.points(sourceSide, targetSide);
+          for (let i = 1; i < points.length; i += 1) {
+            const a = points[i - 1];
+            const b = points[i];
+            const overlaps =
+              Math.min(a.x, b.x) < card.rect.right &&
+              Math.max(a.x, b.x) > card.rect.left &&
+              Math.min(a.y, b.y) < card.rect.bottom &&
+              Math.max(a.y, b.y) > card.rect.top;
+            if (overlaps) crossing.push(`${card.label} ${sourceSide}->${targetSide} #${i}`);
+          }
+        }
+      }
+    }
+    expect(crossing).toEqual([]);
+  });
+
+  it('puts the label OFF the node card for every handle pair and card size', () => {
+    // The chip used to be parked on top of the card. Every pair must land the
+    // anchor outside the card rect — and the tightest of them is exactly the
+    // `offset` clearance the loop keeps everywhere else, not a looser accident.
     const onTheCard: string[] = [];
     let worstClearance = Infinity;
-    for (const sourceSide of SIDES) {
-      for (const targetSide of SIDES) {
-        const [, labelX, labelY] = loopFor(sourceSide, targetSide);
-        const clearance = Math.max(
-          CARD.left - labelX,
-          labelX - CARD.right,
-          CARD.top - labelY,
-          labelY - CARD.bottom,
-        );
-        if (clearance <= 0) onTheCard.push(`${sourceSide}->${targetSide} (${labelX},${labelY})`);
-        worstClearance = Math.min(worstClearance, clearance);
+    for (const card of CARDS) {
+      for (const sourceSide of SIDES) {
+        for (const targetSide of SIDES) {
+          const [, labelX, labelY] = card.loop(sourceSide, targetSide);
+          const clearance = Math.max(
+            card.rect.left - labelX,
+            labelX - card.rect.right,
+            card.rect.top - labelY,
+            labelY - card.rect.bottom,
+          );
+          if (clearance <= 0) {
+            onTheCard.push(`${card.label} ${sourceSide}->${targetSide} (${labelX},${labelY})`);
+          }
+          worstClearance = Math.min(worstClearance, clearance);
+        }
       }
     }
     expect(onTheCard).toEqual([]);
-    expect(worstClearance).toBeGreaterThanOrEqual(40);
+    expect(worstClearance).toBeGreaterThanOrEqual(OFFSET);
   });
 
-  it('arcs an ADJACENT pair around the corner between the two sides', () => {
-    // `right`→`top` (the pair the canvas self-loop fallback creates from a
-    // right-handle drag): the loop must sweep the TOP-RIGHT corner — label
-    // right of the card AND above it.
+  it('brackets an ADJACENT pair around the corner between the two sides', () => {
+    // `right`→`top` is the DEFAULT self-loop routing (seeded by `formToFlow`
+    // and created by the canvas fallback alike): out the right face, up past
+    // the top face, back down into it — the top-right corner, at exactly
+    // `offset` clearance on BOTH axes, whatever the card's size.
+    expect(pointsFor('right', 'top')).toEqual([
+      { x: 160, y: 25 },
+      { x: 188, y: 25 },
+      { x: 188, y: -28 },
+      { x: 80, y: -28 },
+      { x: 80, y: 0 },
+    ]);
     const [, labelX, labelY] = loopFor('right', 'top');
     expect(labelX).toBeGreaterThan(CARD.right);
-    expect(labelY).toBeLessThan(CARD.top);
+    expect(labelY).toBe(CARD.top - OFFSET);
   });
 
-  it('swings the DEFAULT right→left pair up and over the card (not back through it)', () => {
-    // The seeded routing for an edge with no manager-chosen sides is
-    // `right`→`left` — opposite sides, where a naively rotated tangent
-    // S-curves straight through the card. The loop must clear it vertically.
+  it('swings an OPPOSITE pair over the card at the SAME offset clearance', () => {
+    // `right`→`left` has to cross the card's HEIGHT — an extent two side
+    // midpoints cannot reveal. Given the measured card, the crossing run sits
+    // `offset` past the top face, exactly like the corner bracket, rather than a
+    // guessed distance. Both excursion legs reach one shared line so the
+    // crossing run stays axis-aligned.
+    expect(pointsFor('right', 'left')).toEqual([
+      { x: 160, y: 25 },
+      { x: 188, y: 25 },
+      { x: 188, y: -28 },
+      { x: -28, y: -28 },
+      { x: -28, y: 25 },
+      { x: 0, y: 25 },
+    ]);
     const [, labelX, labelY] = loopFor('right', 'left');
-    expect(labelY).toBeLessThan(CARD.top);
-    // Symmetric swing: the apex sits over the middle of the card.
+    expect(labelY).toBe(CARD.top - OFFSET);
+    // Symmetric swing: the anchor sits over the middle of the card.
     expect(labelX).toBe(80);
+    // Same rule on the other axis: `top`→`bottom` crosses the WIDTH, so the run
+    // sits `offset` past the left face of whatever card it is given.
+    const wide = cardFixture(340, 60);
+    expect(Math.min(...wide.points('top', 'bottom').map((p) => p.x))).toBe(
+      wide.rect.left - OFFSET,
+    );
   });
 
-  it('opens a SAME-side pair into a round loop off that side', () => {
-    const [, labelX, labelY] = loopFor('right', 'right');
-    expect(labelX).toBeGreaterThan(CARD.right);
-    // Symmetric about the handle, so the apex stays at the handle's height.
-    expect(labelY).toBe(25);
+  it('falls back to SELF_LOOP_SPAN, per crossed axis, when given no card size', () => {
+    // The size is an OPTIONAL input (React Flow never mounts an edge before its
+    // nodes are measured, so production always supplies it), and an absent or
+    // zero one must not collapse the crossing run onto the card. What matters
+    // for the fallback is that it exceeds half the card on the axis it crosses,
+    // and that each constant is used on the axis it was sized for.
+    const unmeasured = cardFixture(160, 50, false);
+    expect(SELF_LOOP_SPAN.y).toBeGreaterThan((unmeasured.rect.bottom - unmeasured.rect.top) / 2);
+    expect(SELF_LOOP_SPAN.x).toBeGreaterThan((unmeasured.rect.right - unmeasured.rect.left) / 2);
+    const acrossHeight = unmeasured.points('right', 'left');
+    expect(Math.min(...acrossHeight.map((p) => p.y))).toBe(
+      unmeasured.handle.right.y - SELF_LOOP_SPAN.y,
+    );
+    const acrossWidth = unmeasured.points('top', 'bottom');
+    expect(Math.min(...acrossWidth.map((p) => p.x))).toBe(
+      unmeasured.handle.top.x - SELF_LOOP_SPAN.x,
+    );
+    // A zero size is NOT taken at face value — that would collapse the crossing
+    // onto the card instead of clearing it. (Same fixture, so this can only fail
+    // for the reason it is testing.)
+    const zeroSized = cardFixture(160, 50);
+    expect(
+      getSelfLoopPoints({
+        sourceX: zeroSized.handle.right.x,
+        sourceY: zeroSized.handle.right.y,
+        sourcePosition: 'right',
+        targetX: zeroSized.handle.left.x,
+        targetY: zeroSized.handle.left.y,
+        targetPosition: 'left',
+        offset: OFFSET,
+        nodeWidth: 0,
+        nodeHeight: 0,
+      }),
+    ).toEqual(acrossHeight);
   });
 
-  it('sizes the loop by SELF_LOOP_RADIUS (a full card-width clear of the card)', () => {
-    // The manager asked for a LONGER loop ("seharusnya lebih panjang lagi").
-    // The radius is the single knob: both control points sit R out along the
-    // normal, so the cubic's apex ((P0 + 3C1 + 3C2 + P3) / 8 with P0 = P3) is
-    // 0.75 * R out from the handle — 120px for a 160px-wide card.
-    expect(SELF_LOOP_RADIUS).toBeGreaterThanOrEqual(160);
-    const [, labelX] = loopFor('right', 'right');
-    expect(labelX).toBe(HANDLE_POINT.right.x + 0.75 * SELF_LOOP_RADIUS);
+  it('hangs a SAME-side pair off that face, doubling only the handle stub', () => {
+    // Defensive branch only — no UI path produces it (`decideConnectEnd` picks
+    // an adjacent side, `formToFlow` seeds the corner pair), so it takes a
+    // hand-edited routing layout to reach. React Flow resolves both endpoints
+    // to the ONE handle on that side, so leaving and returning along the same
+    // normal MUST double a stretch of line; this shape holds that to exactly
+    // `offset` and keeps every other segment clear of the card.
+    expect(pointsFor('right', 'right')).toEqual([
+      { x: 160, y: 25 },
+      { x: 188, y: 25 },
+      { x: 188, y: -28 },
+      { x: 216, y: -28 },
+      { x: 216, y: 25 },
+      { x: 160, y: 25 },
+    ]);
   });
 
   it('falls back to right/left normals for an unknown handle position', () => {
     // Defensive: a corrupt/legacy handle id must never produce NaN coordinates
-    // (a NaN in the `d` attribute drops the whole path from the canvas).
-    const [path, labelX, labelY] = getSelfLoopPath({
+    // (a NaN in the `d` attribute drops the whole path from the canvas). It
+    // degrades to exactly the opposite-sides loop for the same two points.
+    const bogus = getSelfLoopPath({
       sourceX: 10,
       sourceY: 20,
       sourcePosition: 'bogus',
       targetX: 10,
       targetY: 20,
       targetPosition: 'bogus',
+      borderRadius: RADIUS,
+      offset: OFFSET,
     });
-    expect(path).not.toContain('NaN');
-    expect(Number.isFinite(labelX)).toBe(true);
-    expect(Number.isFinite(labelY)).toBe(true);
+    expect(bogus[0]).not.toContain('NaN');
+    expect(Number.isFinite(bogus[1])).toBe(true);
+    expect(Number.isFinite(bogus[2])).toBe(true);
+    expect(bogus).toEqual(
+      getSelfLoopPath({
+        sourceX: 10,
+        sourceY: 20,
+        sourcePosition: 'right',
+        targetX: 10,
+        targetY: 20,
+        targetPosition: 'left',
+        borderRadius: RADIUS,
+        offset: OFFSET,
+      }),
+    );
   });
 });
 
