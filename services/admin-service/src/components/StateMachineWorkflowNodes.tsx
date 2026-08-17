@@ -13,9 +13,12 @@
  * the left, the state name (uppercase, bold) top-right, a short description
  * (muted) bottom-right. No inline `<input>` and no "Hapus" button on the node;
  * those moved to the right-side properties panel (see
- * {@link StateMachineWorkflowProperties}). The transition edge is a clean
- * bezier + a small READ-ONLY label chip showing the action label; editing the
- * label also lives in the panel. The node renders one TYPELESS `<Handle>` per
+ * {@link StateMachineWorkflowProperties}). The transition edge is an ORTHOGONAL
+ * (stepped, round-cornered) line + a small READ-ONLY label chip showing the
+ * action label; editing the label also lives in the panel. Self-loops included —
+ * they route through the lib's own orthogonal builder, since every stock React
+ * Flow router degenerates when both endpoints sit on one card.
+ * The node renders one TYPELESS `<Handle>` per
  * side (4 per node — ids match {@link HANDLE_IDS} exactly so the handle-id
  * regression test passes); the handles are CSS-hidden until the node is
  * hovered or selected (the canvas was too loud — 40 visible dots for the
@@ -28,6 +31,7 @@ import {
   Handle,
   Position,
   getSmoothStepPath,
+  useInternalNode,
   type EdgeProps,
   type NodeProps,
 } from '@xyflow/react';
@@ -70,14 +74,16 @@ export const EDGE_CORNER_RADIUS = 8;
 export const EDGE_HANDLE_OFFSET = 28;
 
 /**
- * The orthogonal-routing options shared by {@link TransitionEdge} and
- * {@link TerminalEdge}, so the two edge kinds can never drift into different
- * geometries.
+ * The orthogonal-routing options shared by {@link TransitionEdge},
+ * {@link TerminalEdge} AND the self-loop builder, so no edge kind can drift into
+ * a different geometry — the same object is spread into every router call.
  *
  * These live here rather than in the framework-free `state-machine-flow` lib on
- * purpose: unlike `SELF_LOOP_RADIUS` (which the lib's own `getSelfLoopPath`
- * consumes), their entire meaning is "arguments to a React Flow router", and
- * this module is the only caller.
+ * purpose: their entire meaning is "arguments to a router", and this module is
+ * the only caller of every router. `getSelfLoopPath` is TOLD them, as required
+ * parameters — the same way it is told the card's measured size (see
+ * {@link TransitionEdge}). The lib keeps only the fallback for a size it is not
+ * given (`SELF_LOOP_SPAN`).
  */
 const STEP_PATH_OPTIONS = {
   borderRadius: EDGE_CORNER_RADIUS,
@@ -323,18 +329,31 @@ export function StateNode({ data }: NodeProps): JSX.Element {
  * always leaves and enters perpendicular to the card and the label lands on a
  * straight run clear of both.
  *
- * A SELF-LOOP (`source === target`, e.g. "SERVING → SERVING") takes a different
- * path: every stock router is degenerate when both endpoints sit on the same
- * card (bezier drew a short backwards curve through/behind the node with the
- * chip on top of it — the manager's "self-loop garisnya overlap dan jelek
- * sekali" feedback — and the stepped router collapses the same way), so the loop
- * geometry comes from the pure {@link getSelfLoopPath}, which arcs it a full
- * card-width clear of the node and puts the label on the loop's apex. It is
- * therefore the one curved shape on an otherwise orthogonal canvas. Same tuple
- * prefix, so nothing else in this component changes.
+ * A SELF-LOOP (`source === target`, e.g. "SERVING → SERVING") needs a different
+ * BUILDER but gets the SAME shape: every stock router is degenerate when both
+ * endpoints sit on one card (bezier drew a short backwards curve through/behind
+ * the node with the chip on top of it — the manager's "self-loop garisnya
+ * overlap dan jelek sekali" feedback — and the stepped router collapses the same
+ * way, since its gapped points fall inside the card). So the waypoints come from
+ * the pure {@link getSelfLoopPath}, which brackets the nearest CORNER of the
+ * card at the same `offset` clearance and rounds its turns with the same
+ * `borderRadius` — orthogonal, like everything else on this canvas (the
+ * manager's follow-up: the self-loop was the one line still curved). Both
+ * branches are handed the SAME options object, and both return the same tuple
+ * prefix, so nothing else in this component changes; the loop branch is handed
+ * the card's measured size on top (see below).
  */
 export function TransitionEdge(props: EdgeProps): JSX.Element {
   const edgeData = props.data as FlowEdgeData;
+  // A self-loop is the one route that has to know how BIG its card is: both its
+  // endpoints are on that card, so an opposite-sides loop crosses an extent the
+  // two handle points cannot reveal (`.state-node` has no `max-width`, so a long
+  // description widens it without limit). React Flow measures every node, so the
+  // lib is TOLD the size rather than guessing it. Called unconditionally — hooks
+  // rules — which costs a non-loop edge a re-render when its source node is
+  // selected or moved; an edge already re-renders on a move, and this canvas
+  // holds a handful of nodes.
+  const sourceNode = useInternalNode(props.source);
   const pathParams = {
     sourceX: props.sourceX,
     sourceY: props.sourceY,
@@ -342,11 +361,16 @@ export function TransitionEdge(props: EdgeProps): JSX.Element {
     targetX: props.targetX,
     targetY: props.targetY,
     targetPosition: props.targetPosition,
+    ...STEP_PATH_OPTIONS,
   };
   const [edgePath, labelX, labelY] =
     props.source === props.target
-      ? getSelfLoopPath(pathParams)
-      : getSmoothStepPath({ ...pathParams, ...STEP_PATH_OPTIONS });
+      ? getSelfLoopPath({
+          ...pathParams,
+          nodeWidth: sourceNode?.measured?.width,
+          nodeHeight: sourceNode?.measured?.height,
+        })
+      : getSmoothStepPath(pathParams);
   const label = edgeData.actionLabel;
   return (
     <>
