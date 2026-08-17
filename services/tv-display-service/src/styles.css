@@ -35,10 +35,26 @@ body,
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 1rem;
 }
+/* The store name is a flex item sharing the header row with the connection
+   badge. A long name used to fill the row edge-to-edge ("mempet kanan kiri")
+   and wrap without limit. `min-width: 0` lets it shrink below its intrinsic
+   content width (flex items default to min-width: auto), `flex: 1 1 auto` lets
+   it take the available space while the badge keeps its size, and the 2-line
+   clamp caps the height so a long name never pushes the grid down — the
+   overflow is ellipsised. The header `gap` above gives the right-side
+   breathing room the name was missing against the badge. */
 .tv-board__storename {
   margin: 0;
   font-size: 2rem;
+  min-width: 0;
+  flex: 1 1 auto;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
 }
 .tv-board__main {
   flex: 1;
@@ -381,6 +397,7 @@ body,
   gap: 0.5rem;
   font-size: 1.1rem;
   color: var(--text-muted);
+  flex-shrink: 0;
 }
 .connection-status__dot {
   width: 0.9rem;

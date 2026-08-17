@@ -204,6 +204,28 @@ describe('styles.css AC guards', () => {
     expect(fill).toContain('min-height: 0');
   });
 
+  it('tv-board__storename caps at 2 lines + shrinks in the header row (manager feedback: "mempet kanan kiri")', () => {
+    // A long store name used to fill the header row edge-to-edge and wrap
+    // without limit, pushing the connection badge and the grid down. It is a
+    // flex item sharing the row with the badge, so it needs min-width: 0 to
+    // shrink below its intrinsic content width and a 2-line clamp to cap its
+    // height (overflow ellipsised). The header gap gives the right-side
+    // breathing room the name was missing against the badge.
+    const header = rule('.tv-board__header');
+    expect(header).toContain('gap: 1rem');
+    const name = rule('.tv-board__storename');
+    expect(name).toContain('min-width: 0');
+    expect(name).toContain('flex: 1 1 auto');
+    expect(name).toContain('-webkit-line-clamp: 2');
+    expect(name).toContain('line-clamp: 2');
+    expect(name).toContain('-webkit-box-orient: vertical');
+    expect(name).toContain('overflow: hidden');
+    // The badge is the other flex item in the header row — it must keep its
+    // size while the name absorbs the slack (flex-shrink: 0 encodes the
+    // "badge keeps its size" half of the contract the comment states).
+    expect(rule('.connection-status')).toContain('flex-shrink: 0');
+  });
+
   it('AC6: the active board is the single always-visible layer (no standby/crossfade)', () => {
     // The standby/promosi panel was removed (it flickered on the crossfade);
     // the active board is now a plain flex column filling the main area — no
