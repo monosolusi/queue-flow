@@ -6,6 +6,7 @@ import { StateMachineWorkflow } from './StateMachineWorkflow';
 import { type StateMachineForm, type Transition, defaultStateMachineForm, validateCustomStateMachine } from '../lib/state-machine';
 import { DEFAULT_STATE_MACHINE } from '../api/types';
 import { SELF_LOOP_RADIUS } from '../lib/state-machine-flow';
+import { EDGE_CORNER_RADIUS, EDGE_HANDLE_OFFSET } from './StateMachineWorkflowNodes';
 
 function renderWorkflow(
   value = defaultStateMachineForm(),
@@ -1153,12 +1154,14 @@ describe('StateMachineWorkflow (Start/End terminal markers)', () => {
     expect(screen.getByTestId('sm-node-start')).toBeInTheDocument();
   });
 
-  it('draws a self-loop as a long arc clear of the card, not a bezier through it', () => {
+  it('draws a self-loop as a long arc clear of the card, not a stock path through it', () => {
     // Manager feedback: "self-loop garisnya overlap dan jelek sekali, seharusnya
-    // lebih panjang lagi." `getBezierPath` is degenerate when both endpoints sit
-    // on the same card — a short backwards curve running through/behind the node
-    // (edges render beneath nodes) with the label chip on top of it.
-    // `TransitionEdge` branches to `getSelfLoopPath` for `source === target`.
+    // lebih panjang lagi." Every stock React Flow router is degenerate when both
+    // endpoints sit on the same card — the old bezier drew a short backwards
+    // curve running through/behind the node (edges render beneath nodes) with
+    // the label chip on top of it, and the step router now used for every other
+    // edge collapses the same way. `TransitionEdge` branches to
+    // `getSelfLoopPath` for `source === target`.
     renderWorkflow({ ...defaultStateMachineForm(), mode: 'custom' as const });
     selectStateNode('WAITING');
     fireEvent.click(screen.getByTestId('panel-goto-transitions'));
@@ -1175,6 +1178,44 @@ describe('StateMachineWorkflow (Start/End terminal markers)', () => {
     const ys = [...d.matchAll(/-?[\d.]+,(-?[\d.]+)/g)].map((m) => Number(m[1]));
     expect(ys).toHaveLength(4);
     expect(Math.min(...ys)).toBeLessThanOrEqual(ys[0] - SELF_LOOP_RADIUS);
+  });
+
+  it('keeps the step-routing corner inside its straight run', () => {
+    // `EDGE_HANDLE_OFFSET` is how far an edge runs straight out of its handle
+    // before it may turn; `EDGE_CORNER_RADIUS` is how much of that run the corner
+    // rounds away. A radius wider than the run would leave no straight stub at
+    // all, so the edge would stop reading as leaving the card perpendicular —
+    // the whole point of switching off the bezier router.
+    expect(EDGE_CORNER_RADIUS).toBeLessThan(EDGE_HANDLE_OFFSET);
+  });
+
+  it('routes an ordinary transition orthogonally, not as a bezier', () => {
+    // Manager feedback: "coba perhatikan garisnya... itu jelek". `getBezierPath`
+    // derives each control point's offset from the endpoint delta ALONG THAT
+    // HANDLE'S OWN AXIS only, ignoring the perpendicular span — so the reported
+    // same-side pair (a `CALLING.top → WAITING.top` re-queue edge on a customized
+    // store, ~350px apart horizontally but ~12px vertically) collapsed to a flat
+    // diagonal grazing both card tops. `TransitionEdge` routes via
+    // `getSmoothStepPath` instead.
+    //
+    // The guard is on the PATH COMMAND SET, not on coordinates, and that is
+    // deliberate: jsdom measures every node as zero-sized, so React Flow hands
+    // the edge degenerate handle geometry and any coordinate assertion here
+    // would be meaningless. Command shape survives that. `getSmoothStepPath`
+    // emits only `M`/`L`/`Q` (`getBend` in `@xyflow/system` returns a plain `L`
+    // for a collinear point and an `L`+`Q` pair for a rounded corner);
+    // `getBezierPath` and `getSelfLoopPath` both emit a cubic `C`. So "no `C`"
+    // is exactly "not a bezier", whatever the coordinates.
+    renderWorkflow(defaultStateMachineForm());
+    const d = screen
+      .getByTestId('rf__edge-WAITING->CALLING#0')
+      .querySelector('path.react-flow__edge-path')!
+      .getAttribute('d')!;
+    expect(d).not.toMatch(/C/);
+    expect(d).toMatch(/^M/);
+    // The same canvas still carries the curved self-loop exception, so this is a
+    // real discrimination rather than a vacuous "no C anywhere" assertion — see
+    // the self-loop test above, whose path must keep its `C`.
   });
 
   it('the End marker renders with ZERO endSources so it can be dragged into', () => {

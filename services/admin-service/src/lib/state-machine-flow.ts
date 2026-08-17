@@ -106,20 +106,79 @@ export interface FlowEdgeData {
  * `'arrowclosed'` is assignable to React Flow's `EdgeMarker.type`
  * (`MarkerType | `${MarkerType}``) via the template-literal form, so this stays
  * framework-free — NO `@xyflow/react` import (the lib must remain pure + unit-
- * testable in isolation, like every other type here). `color` is intentionally
- * OMITTED: React Flow then uses `defaultMarkerColor = '#b1b1b7'`, the SAME gray
- * as the default light-mode edge stroke, so the arrow matches the edge in both
- * QMS themes (light default / dark opt-in — `colorMode` is light-pinned). Like
+ * testable in isolation, like every other type here). Like
  * `sourceHandle`/`targetHandle`, `markerEnd` is CANVAS-ONLY: `flowToGraph`
  * drops it (never reaches the wire {@link Transition}).
+ *
+ * **`color` carries a CSS custom property, on purpose.** React Flow's stylesheet
+ * does theme the arrowhead (`.react-flow__arrowhead polyline` reads
+ * `--xy-edge-stroke`), but that path is unreachable here: `createMarkerIds`
+ * substitutes `defaultMarkerColor` — the hardcoded `#b1b1b7` — for any marker
+ * that declares no color, and React Flow renders the result as `<polyline
+ * style={{ stroke: color, fill: color }}>`, an INLINE style no rule can beat
+ * without `!important`. So omitting `color` pins the arrow to a theme-blind
+ * literal, and naming a `var()` is the only way to token-drive it. It also buys
+ * the thing the stylesheet hook cannot: a SECOND, differently-colored arrowhead
+ * for the muted terminal edges (see {@link TERMINAL_ARROW_MARKER}). The token is
+ * declared on `.sm-canvas` in `state-machine-workflow.css`, which is an ancestor
+ * of the `<svg class="react-flow__marker">` React Flow renders inside the canvas,
+ * so the custom property inherits down to the polyline.
+ *
+ * The `var()` argument carries NO SPACE after the comma. `getMarkerId` builds the
+ * marker's DOM `id` by joining its `key=value` pairs, and that id is referenced
+ * as `url('#…')` — an `id` may not contain ASCII whitespace, and the URL parser
+ * percent-encodes a space in a fragment, leaving resolution up to the engine.
+ *
+ * The `currentColor` FALLBACK is not decoration. If the token ever fails to
+ * reach the polyline — renamed away, or the marker `<svg>` reparented out of
+ * `.sm-canvas` by a React Flow upgrade — the `stroke` declaration would be
+ * invalid at computed-value time and fall back to the SVG initial `stroke:
+ * none`, i.e. the arrowheads would VANISH rather than turn some wrong color.
+ * "Garis tidak ada panah, jadi membingungkan" is a complaint this designer has
+ * already had once; degrading to the inherited text color instead keeps the
+ * direction readable. `styles.test.ts` still pins the token half of the pair.
+ *
+ * **`width`/`height` are 11, not 16, and that is load-bearing.** React Flow
+ * renders the `<marker>` with `markerUnits="strokeWidth"`, so the arrowhead
+ * SCALES WITH THE PATH'S STROKE WIDTH — which the canvas sets via
+ * `--xy-edge-stroke-width: 1.5` on `.sm-canvas` (`state-machine-workflow.css`).
+ * Against that, `11 × 1.5 ≈ 16.5` reproduces the arrowhead size the old `16 × 1`
+ * produced; keeping 16 would render a ~24px arrowhead. Change either half of
+ * that pair and the other has to move with it.
  */
 export interface FlowEdgeMarker {
   type: 'arrowclosed';
   width?: number;
   height?: number;
+  /** Token-driven arrow color — a `var(--…)` reference resolved from the
+   *  `.sm-canvas` custom properties (see the note above on why this cannot be a
+   *  stylesheet rule). Never a hex literal: that is what made the default
+   *  `#b1b1b7` arrow theme-blind. */
+  color?: string;
 }
 
-export const EDGE_ARROW_MARKER: FlowEdgeMarker = { type: 'arrowclosed', width: 16, height: 16 };
+export const EDGE_ARROW_MARKER: FlowEdgeMarker = {
+  type: 'arrowclosed',
+  width: 11,
+  height: 11,
+  color: 'var(--sm-edge-stroke,currentColor)',
+};
+
+/**
+ * The arrowhead for a canvas-only TERMINAL edge (Start→source / endSource→End).
+ * Spread from {@link EDGE_ARROW_MARKER} so "identical geometry, different color"
+ * is structural rather than a pair of copied literals that can drift. The color
+ * is keyed to the terminal edge's own muted token, so the arrow stays as
+ * recessive as the dashed line it tips; sharing one marker config would tip a
+ * deliberately muted dashed line with a full-strength transition arrowhead, and
+ * there is no CSS route in (the markers live in a shared `<defs>`, not inside
+ * `.terminal-edge`). React Flow de-dupes `<marker>` defs by config, so two
+ * configs simply produce two defs.
+ */
+export const TERMINAL_ARROW_MARKER: FlowEdgeMarker = {
+  ...EDGE_ARROW_MARKER,
+  color: 'var(--sm-terminal-edge-stroke,currentColor)',
+};
 
 /** A React Flow edge, structurally compatible with `@xyflow/react`'s `Edge`.
  *  `sourceHandle`/`targetHandle` reference the connection-point ids on the
@@ -374,8 +433,8 @@ const TERMINAL_SPACING = 240;
  * {@link flowToGraph} so they never reach the form/wire), an empty
  * `actionLabel` (no Caller button — they are visual markers, not real
  * transitions), and the canonical L→R handle routing (`right` → `left`) + the
- * {@link EDGE_ARROW_MARKER} so the arrow reads the same as a real transition
- * edge.
+ * {@link TERMINAL_ARROW_MARKER} so the arrow reads the same SHAPE as a real
+ * transition edge while staying as muted as the dashed line it tips.
  *
  * `startSources` and `endSources` are REQUIRED parameters with no default:
  * there is exactly one production call site ({@link formToFlowWithMarkers}),
@@ -467,7 +526,7 @@ export function deriveTerminalMarkers(
       data: { actionLabel: '', requeuePolicy: DEFAULT_REQUEUE_POLICY },
       sourceHandle: HANDLE_IDS.right,
       targetHandle: HANDLE_IDS.left,
-      markerEnd: EDGE_ARROW_MARKER,
+      markerEnd: TERMINAL_ARROW_MARKER,
     });
   }
   // The End marker node is UNCONDITIONAL for a non-empty graph (the
@@ -492,7 +551,7 @@ export function deriveTerminalMarkers(
       data: { actionLabel: '', requeuePolicy: DEFAULT_REQUEUE_POLICY },
       sourceHandle: HANDLE_IDS.right,
       targetHandle: HANDLE_IDS.left,
-      markerEnd: EDGE_ARROW_MARKER,
+      markerEnd: TERMINAL_ARROW_MARKER,
     });
   }
   return { nodes, edges };
@@ -950,13 +1009,17 @@ const SIDE_NORMALS: Record<string, { x: number; y: number }> = {
 
 /**
  * The SVG path + label anchor for a SELF-LOOP edge (`source === target`), in
- * the same `[path, labelX, labelY]` tuple shape React Flow's `getBezierPath`
- * returns, so the edge component can swap one for the other.
+ * the same `[path, labelX, labelY]` tuple prefix React Flow's path builders
+ * return, so the edge component can swap one for the other.
  *
- * `getBezierPath` is degenerate for a self-loop: the two endpoints are less
- * than a card apart, so it draws a short backwards curve THROUGH the node card
- * (edges render beneath nodes) and parks the label chip on top of the card —
- * the manager's "overlap dan jelek sekali" report.
+ * Every stock React Flow router is degenerate for a self-loop, because the two
+ * endpoints are less than a card apart: `getBezierPath` drew a short backwards
+ * curve THROUGH the node card (edges render beneath nodes) and parked the label
+ * chip on top of it — the manager's "overlap dan jelek sekali" report — and
+ * `getSmoothStepPath` (the router every OTHER edge uses now) collapses the same
+ * way, since its gapped points fall inside the card. Hence a hand-rolled arc,
+ * and hence the self-loop being the one CURVED shape on an otherwise orthogonal
+ * canvas.
  *
  * Instead each control point is pushed OUT along its endpoint's outward normal
  * by {@link SELF_LOOP_RADIUS} and SIDEWAYS along a lateral unit vector by the

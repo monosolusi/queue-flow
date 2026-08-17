@@ -49,6 +49,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Background,
+  ConnectionLineType,
   ConnectionMode,
   Controls,
   ReactFlow,
@@ -1092,6 +1093,19 @@ function FlowCanvas({
           nodesConnectable={isCustom}
           elementsSelectable={isCustom}
           connectionMode={ConnectionMode.Loose}
+          // Preview the SHAPE the manager is about to get. Both edge components
+          // route via `getSmoothStepPath`, while React Flow's live connection
+          // line defaults to `ConnectionLineType.Bezier` — leaving it alone would
+          // drag a curve and commit a step. Same family, not pixel-identical:
+          // React Flow calls `getSmoothStepPath(pathParams)` with no options, so
+          // the preview uses the library defaults (radius 5 / offset 20) rather
+          // than `STEP_PATH_OPTIONS` (8 / 28), and the corners tighten slightly
+          // on commit. Matching exactly would mean a custom
+          // `connectionLineComponent`, which is not worth a whole component for a
+          // transient drag. Like `ConnectionMode`, this is an ENUM, not a literal
+          // union, so the member must be referenced (a bare `'smoothstep'` string
+          // does not typecheck).
+          connectionLineType={ConnectionLineType.SmoothStep}
           fitView
           deleteKeyCode={null}
           // TYPELESS handles + Loose connection mode (manager feedback: "Buat

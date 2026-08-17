@@ -27,7 +27,7 @@ import {
   EdgeLabelRenderer,
   Handle,
   Position,
-  getBezierPath,
+  getSmoothStepPath,
   type EdgeProps,
   type NodeProps,
 } from '@xyflow/react';
@@ -36,7 +36,53 @@ import {
   type NodeActionDto,
   type RequeuePolicyDto,
 } from '../api/types';
-import { HANDLE_IDS, getSelfLoopPath, type FlowEdgeData, type FlowNodeData } from '../lib/state-machine-flow';
+import {
+  HANDLE_IDS,
+  getSelfLoopPath,
+  type FlowEdgeData,
+  type FlowNodeData,
+} from '../lib/state-machine-flow';
+
+/**
+ * Corner rounding for a transition/terminal edge, in flow units (px at zoom 1) —
+ * `getSmoothStepPath`'s `borderRadius`.
+ *
+ * Deliberately a touch larger than the diagram's filled chrome (`.state-node` is
+ * 5px, `.sm-canvas` 6px): a 1.5px stroke turning through a 5px arc still reads
+ * as a hard corner, while 8px reads as an intentional soft bend and stays inside
+ * the same small-radius language. React Flow clamps the actual bend to half the
+ * shorter adjacent segment (`getBend`), so this is a ceiling — a short segment
+ * can never have its corner overrun it.
+ */
+export const EDGE_CORNER_RADIUS = 8;
+
+/**
+ * How far an edge runs straight out of its handle before it may turn, in flow
+ * units — `getSmoothStepPath`'s `offset`.
+ *
+ * This doubles as the clearance an edge keeps from the card it routes around:
+ * for a SAME-SIDE pair (the `CALLING.top → WAITING.top` edge that prompted this
+ * change), the crossing run sits exactly `offset` clear of both cards. 28px
+ * reads as deliberate clearance rather than a line grazing the border, and is
+ * comfortably above {@link EDGE_CORNER_RADIUS} so a corner never eats the whole
+ * stub.
+ */
+export const EDGE_HANDLE_OFFSET = 28;
+
+/**
+ * The orthogonal-routing options shared by {@link TransitionEdge} and
+ * {@link TerminalEdge}, so the two edge kinds can never drift into different
+ * geometries.
+ *
+ * These live here rather than in the framework-free `state-machine-flow` lib on
+ * purpose: unlike `SELF_LOOP_RADIUS` (which the lib's own `getSelfLoopPath`
+ * consumes), their entire meaning is "arguments to a React Flow router", and
+ * this module is the only caller.
+ */
+const STEP_PATH_OPTIONS = {
+  borderRadius: EDGE_CORNER_RADIUS,
+  offset: EDGE_HANDLE_OFFSET,
+} as const;
 
 /**
  * Handlers the parent provides via context. Behavior-only — no `form` data
@@ -256,18 +302,36 @@ export function StateNode({ data }: NodeProps): JSX.Element {
 }
 
 /**
- * A transition edge: a clean bezier path with a small READ-ONLY label chip
- * showing the action label (the Caller UI button text). Editing the label
- * happens in the properties panel, not on the canvas — the chip is presentational
- * only. In default mode the chip is still shown (read-only board).
+ * A transition edge: an ORTHOGONAL (stepped, round-cornered) path with a small
+ * READ-ONLY label chip showing the action label (the Caller UI button text).
+ * Editing the label happens in the properties panel, not on the canvas — the
+ * chip is presentational only. In default mode the chip is still shown
+ * (read-only board).
+ *
+ * **Why stepped and not bezier.** `getBezierPath` derives each control point's
+ * offset from the endpoint delta ALONG THAT HANDLE'S OWN AXIS only
+ * (`calculateControlOffset` in `@xyflow/system`), so it ignores the
+ * perpendicular span entirely. A same-side pair spanning a long perpendicular
+ * distance collapses to a flat, asymmetric diagonal that grazes both card tops
+ * and enters the target SIDEWAYS instead of from above. The reported case (a
+ * customized store, not the PRD default graph, which declares no
+ * `CALLING → WAITING` edge and no sides) was a `CALLING.top → WAITING.top`
+ * re-queue edge ~350px apart horizontally but ~12px vertically: bowed 21.6px at
+ * one end and 6px at the other. Level the two cards and it degenerates further,
+ * to a line lying exactly along their tops.
+ * `getSmoothStepPath` routes the same pair as up → across → down, so an edge
+ * always leaves and enters perpendicular to the card and the label lands on a
+ * straight run clear of both.
  *
  * A SELF-LOOP (`source === target`, e.g. "SERVING → SERVING") takes a different
- * path: `getBezierPath` is degenerate when both endpoints sit on the same card
- * (a short backwards curve running through/behind the node, with the label chip
- * on top of it — the manager's "self-loop garisnya overlap dan jelek sekali"
- * feedback), so the loop geometry comes from the pure {@link getSelfLoopPath},
- * which arcs it a full card-width clear of the node and puts the label on the
- * loop's apex. Same tuple shape, so nothing else in this component changes.
+ * path: every stock router is degenerate when both endpoints sit on the same
+ * card (bezier drew a short backwards curve through/behind the node with the
+ * chip on top of it — the manager's "self-loop garisnya overlap dan jelek
+ * sekali" feedback — and the stepped router collapses the same way), so the loop
+ * geometry comes from the pure {@link getSelfLoopPath}, which arcs it a full
+ * card-width clear of the node and puts the label on the loop's apex. It is
+ * therefore the one curved shape on an otherwise orthogonal canvas. Same tuple
+ * prefix, so nothing else in this component changes.
  */
 export function TransitionEdge(props: EdgeProps): JSX.Element {
   const edgeData = props.data as FlowEdgeData;
@@ -280,7 +344,9 @@ export function TransitionEdge(props: EdgeProps): JSX.Element {
     targetPosition: props.targetPosition,
   };
   const [edgePath, labelX, labelY] =
-    props.source === props.target ? getSelfLoopPath(pathParams) : getBezierPath(pathParams);
+    props.source === props.target
+      ? getSelfLoopPath(pathParams)
+      : getSmoothStepPath({ ...pathParams, ...STEP_PATH_OPTIONS });
   const label = edgeData.actionLabel;
   return (
     <>
@@ -406,9 +472,11 @@ export function EndNode({ }: NodeProps): JSX.Element {
 }
 
 /**
- * A canvas-only terminal edge (Start→source / endSource→End): a clean bezier via
- * {@link getBezierPath} + {@link BaseEdge} (forwarding the `markerEnd` so the
- * arrow reads), wrapped in a `<g className="terminal-edge">` so the CSS can
+ * A canvas-only terminal edge (Start→source / endSource→End): the same
+ * orthogonal routing {@link TransitionEdge} uses (via the shared
+ * {@link STEP_PATH_OPTIONS}, so the two edge kinds cannot drift into different
+ * geometries) + {@link BaseEdge} (forwarding the `markerEnd` so the arrow
+ * reads), wrapped in a `<g className="terminal-edge">` so the CSS can
  * style it as a dashed muted line — visually distinct from a solid transition
  * edge (the markers are visual affordances, not real transitions). NO label
  * chip: terminal edges carry an empty `actionLabel` (no Caller button), so
@@ -416,13 +484,14 @@ export function EndNode({ }: NodeProps): JSX.Element {
  * the terminal edge reads cleaner as a bare dashed arrow.
  */
 export function TerminalEdge(props: EdgeProps): JSX.Element {
-  const [edgePath] = getBezierPath({
+  const [edgePath] = getSmoothStepPath({
     sourceX: props.sourceX,
     sourceY: props.sourceY,
     sourcePosition: props.sourcePosition,
     targetX: props.targetX,
     targetY: props.targetY,
     targetPosition: props.targetPosition,
+    ...STEP_PATH_OPTIONS,
   });
   return (
     <g className="terminal-edge">
