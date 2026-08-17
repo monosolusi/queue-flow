@@ -12,7 +12,7 @@
  * to print trigger (NFR-PERF-03); the page fires print immediately after the
  * ticket is issued.
  */
-import { composeReceipt } from './escpos-commands';
+import { composeReceipt, wrapStoreName, columnCount } from './escpos-commands';
 
 /** The data printed on the physical ticket. `storeName` is optional (the kiosk
  * may not have fetched the store config when it prints). `waitingAhead` is the
@@ -238,9 +238,15 @@ export class UsbSerialPrintProvider implements IPrintProvider {
 }
 
 function renderTicketHtml(payload: PrintPayload, paperWidth: PaperWidth): string {
-  const store = payload.storeName
-    ? `<h2 class="store">${escapeHtml(payload.storeName)}</h2>`
-    : '';
+  // Pre-split the store name with the SAME pure helper the thermal paths use
+  // (`wrapStoreName`), at the SAME column budget (half the paper columns — the
+  // header renders double-size). The HTML body is monospace, so char-length is
+  // a valid width measure and this is the single source of truth for the
+  // header wrap across all 3 print paths (thermal/network/browser). `escapeHtml`
+  // only escapes `&<>"'` — `\n` is preserved and rendered via `white-space:pre-line`.
+  const headerCols = Math.floor(columnCount(paperWidth) / 2);
+  const storeNameLines = payload.storeName ? wrapStoreName(payload.storeName, headerCols) : '';
+  const store = storeNameLines ? `<h2 class="store">${escapeHtml(storeNameLines)}</h2>` : '';
   const when = new Date(payload.issuedAt).toLocaleString();
   // FR-KSK-03 "Jumlah Antrian Di Belakang": at issuance the visitor is the
   // newest waiting ticket, so position == total == waitingAhead + 1.
@@ -255,6 +261,12 @@ function renderTicketHtml(payload: PrintPayload, paperWidth: PaperWidth): string
     `@page{size:${paperWidth}mm auto;margin:2mm}` +
     `body{font-family:monospace;text-align:center;width:${paperWidth}mm;padding:1rem}` +
     'h1{font-size:2.5rem;margin:.2rem;letter-spacing:.05em}.muted{color:#555}' +
+    // `.store` renders the pre-split header from `wrapStoreName` (`\n` → line
+    // breaks via `white-space:pre-line`). The `overflow:hidden` + `max-height`
+    // is a safety net capping at 2 visual lines with NO ellipsis — consistent
+    // with the no-marker hard-break in `wrapStoreName`. font-size 1.05rem fits
+    // cols/2=16 monospace chars in 58mm and cols/2=24 in 80mm with margin.
+    '.store{white-space:pre-line;font-size:1.05rem;line-height:1.25;max-height:2.5em;overflow:hidden;margin:.2rem 0 .4rem}' +
     '</style>' +
     '</head><body>' +
     store +
