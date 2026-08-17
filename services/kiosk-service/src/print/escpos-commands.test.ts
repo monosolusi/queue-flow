@@ -6,6 +6,7 @@ import {
   NORMAL,
   columnCount,
   wrapLine,
+  wrapStoreName,
 } from './escpos-commands';
 import type { PrintPayload } from './print-provider';
 
@@ -152,16 +153,58 @@ describe('escpos-commands — paper width / wrapping', () => {
     expect(wrapLine('0123456789ABCDE', 4)).toBe('0123\n4567\n89AB\nCDE\n');
   });
 
-  it('wraps the store name to half the columns at double size (58mm)', () => {
-    const longStore = 'Toko Antrian Jaya Makmur Sejahtera';
+  it('splits a long store name into a balanced 2-line header (58mm)', () => {
+    // 24 chars; wrapStoreName balances at the word boundary after word 2 →
+    // 'Toko Antrian' (12) / 'Jaya Makmur' (11), both ≤ 16 cols at double size.
+    const store = 'Toko Antrian Jaya Makmur';
     const buf = composeReceipt(
-      { ticketNumber: 'A-001', categoryName: 'CS', storeName: longStore, issuedAt: 0, waitingAhead: 0 },
+      { ticketNumber: 'A-001', categoryName: 'CS', storeName: store, issuedAt: 0, waitingAhead: 0 },
       58,
       'none',
     );
-    // At double width on 58mm (32 cols), the header wraps at 16 cols. The first
-    // 16 chars must appear; the 17th char starts a new line.
     const encoder = new TextEncoder();
-    expect(contains(buf, encoder.encode(longStore.slice(0, 16)))).toBe(true);
+    expect(contains(buf, encoder.encode('Toko Antrian\nJaya Makmur'))).toBe(true);
+  });
+
+  it('hard-breaks an overlong store name to 2 lines with no marker (58mm)', () => {
+    // 34 chars > 2*16=32 → no 2-line word break fits; hard-break to 2 cols-lines.
+    // slice(0,16)='Toko Antrian Jay', slice(16,32)='a Makmur Sejahte', tail 'ra' dropped.
+    const store = 'Toko Antrian Jaya Makmur Sejahtera';
+    const buf = composeReceipt(
+      { ticketNumber: 'A-001', categoryName: 'CS', storeName: store, issuedAt: 0, waitingAhead: 0 },
+      58,
+      'none',
+    );
+    const encoder = new TextEncoder();
+    expect(contains(buf, encoder.encode('Toko Antrian Jay\na Makmur Sejahte'))).toBe(true);
+    // The full word 'Sejahtera' (9 chars) no longer appears intact — the tail
+    // was dropped silently (no ellipsis / no 3rd line).
+    expect(contains(buf, encoder.encode('Sejahtera'))).toBe(false);
+  });
+});
+
+describe('escpos-commands — wrapStoreName (header wrapper)', () => {
+  it('wrapStoreName: fits in cols → single line + trailing newline', () => {
+    expect(wrapStoreName('Toko', 16)).toBe('Toko\n');
+  });
+
+  it('wrapStoreName: empty → just a newline', () => {
+    expect(wrapStoreName('', 16)).toBe('\n');
+  });
+
+  it('wrapStoreName: balanced 2-line split at word boundary', () => {
+    expect(wrapStoreName('Toko Antrian Jaya Makmur', 16)).toBe('Toko Antrian\nJaya Makmur\n');
+  });
+
+  it('wrapStoreName: overlong → hard-break 2 cols-lines, no marker', () => {
+    // 34 chars > 2*16; slice(0,16)='Toko Antrian Jay', slice(16,32)='a Makmur Sejahte'.
+    expect(wrapStoreName('Toko Antrian Jaya Makmur Sejahtera', 16)).toBe(
+      'Toko Antrian Jay\na Makmur Sejahte\n',
+    );
+  });
+
+  it('wrapStoreName: single word longer than cols → hard-break 2 lines', () => {
+    // 20 chars, 1 word → overflow path: slice(0,16)='Supercalifragili', slice(16,32)='stic'.
+    expect(wrapStoreName('Supercalifragilistic', 16)).toBe('Supercalifragili\nstic\n');
   });
 });

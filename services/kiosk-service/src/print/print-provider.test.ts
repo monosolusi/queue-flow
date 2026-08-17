@@ -141,6 +141,34 @@ describe('BrowserPrintProvider (FR-KSK-02/03)', () => {
     const provider = new BrowserPrintProvider({ createIframe });
     await expect(provider.print(payload)).resolves.toBeUndefined();
   });
+
+  it('pre-splits a long store name into balanced 2-line HTML (shares wrapStoreName)', async () => {
+    // The browser path uses the SAME `wrapStoreName` helper as the thermal paths
+    // (single source of truth for the header wrap). A 24-char name on 58mm
+    // (cols/2=16) balances to 'Toko Antrian' / 'Jaya Makmur'; the `\n` between
+    // them is preserved by `escapeHtml` and rendered via `white-space:pre-line`.
+    const { iframe, state } = makeFakeIframe();
+    const createIframe = vi.fn(() => iframe);
+    vi.spyOn(document.body, 'appendChild').mockImplementation(() => iframe);
+
+    const provider = new BrowserPrintProvider({ paperWidth: 58, createIframe });
+    await provider.print({
+      ticketNumber: 'A-001',
+      categoryName: 'CS',
+      storeName: 'Toko Antrian Jaya Makmur',
+      issuedAt: 0,
+      waitingAhead: 0,
+    });
+
+    // The balanced split lands with a literal `\n` between the two lines —
+    // proving `wrapStoreName` (not the old unsplit `escapeHtml(storeName)`
+    // path) produced the header. The unsplit form must be ABSENT.
+    expect(state.written).toContain('Toko Antrian\nJaya Makmur');
+    expect(state.written).not.toContain('Toko Antrian Jaya Makmur');
+    // Static CSS guards: the `.store` rule honors `\n` and caps at 2 visual lines.
+    expect(state.written).toContain('white-space:pre-line');
+    expect(state.written).toContain('overflow:hidden');
+  });
 });
 
 describe('NetworkEscPosPrintProvider (FR-KSK-02, network ESC/POS)', () => {

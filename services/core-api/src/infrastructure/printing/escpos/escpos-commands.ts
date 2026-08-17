@@ -67,6 +67,44 @@ function wrapLine(line: string, cols: number): string {
   return chunks.join('\n') + '\n';
 }
 
+/**
+ * Wraps the store-name header to at most 2 lines for the double-size header line
+ * (FR-printer-config). Unlike {@link wrapLine} (a raw char chunk used for body
+ * lines), this balances the name across 2 lines at WORD boundaries so each line
+ * stays as short as possible — keeping the centered header clear of the paper
+ * edges ("mepet kertas" on a long store name). If no 2-line word break fits both
+ * lines within `cols` (the name is longer than 2*cols, or a single word exceeds
+ * `cols`), it hard-breaks to exactly 2 `cols`-sized lines with NO marker — the
+ * tail is dropped silently (max 2 lines is the hard contract; mid-word cuts are
+ * accepted over a 3rd line). Internal whitespace runs are collapsed to a single
+ * space (header normalization). Returns the lines joined with `\n` and a trailing
+ * `\n`, mirroring {@link wrapLine}'s shape.
+ */
+function wrapStoreName(name: string, cols: number): string {
+  const trimmed = name.trim();
+  if (trimmed.length === 0) return '\n';
+  if (trimmed.length <= cols) return trimmed + '\n';
+  const words = trimmed.split(/\s+/);
+  if (words.length >= 2) {
+    let best: { l1: string; l2: string; score: number } | null = null;
+    for (let i = 0; i < words.length - 1; i++) {
+      const l1 = words.slice(0, i + 1).join(' ');
+      const l2 = words.slice(i + 1).join(' ');
+      if (l1.length <= cols && l2.length <= cols) {
+        const score = Math.max(l1.length, l2.length);
+        if (best === null || score < best.score) {
+          best = { l1, l2, score };
+        }
+      }
+    }
+    if (best !== null) {
+      return best.l1 + '\n' + best.l2 + '\n';
+    }
+  }
+  // Overflow: hard-break to 2 cols-lines, no marker (max 2 lines honored).
+  return trimmed.slice(0, cols) + '\n' + trimmed.slice(cols, 2 * cols) + '\n';
+}
+
 /** Encodes `text` as UTF-8. */
 function text(s: string): Buffer {
   return Buffer.from(s, 'utf8');
@@ -98,7 +136,7 @@ export function composeReceipt(
 
   if (payload.storeName) {
     parts.push(setPrintMode(DOUBLE_SIZE));
-    parts.push(text(wrapLine(payload.storeName, Math.floor(cols / 2))));
+    parts.push(text(wrapStoreName(payload.storeName, Math.floor(cols / 2))));
     parts.push(setPrintMode(NORMAL));
   }
 
@@ -122,4 +160,4 @@ export function composeReceipt(
 
 // Exports for unit tests (the byte constants are assertable proof the right
 // commands were emitted).
-export { INIT, DOUBLE_SIZE, NORMAL, columnCount, wrapLine };
+export { INIT, DOUBLE_SIZE, NORMAL, columnCount, wrapLine, wrapStoreName };
