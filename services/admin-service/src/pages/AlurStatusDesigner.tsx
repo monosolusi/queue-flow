@@ -7,14 +7,15 @@
  * Manager feedback: the inline diagram on `/admin/config` was too small and hard
  * to see (`.sm-canvas` was `60vh / min 360px` crammed inside a config card). This
  * page gives the canvas the full `<main>` width + a tall height, and adds a
- * A **Diagram / Source toggle**: a visual editor
- * (React Flow) and an editable XML source view of the same state-machine graph,
- * serialized as a Liferay Kaleo `<workflow-definition>` (one `<task>`/`<state>`
- * per status, transitions nested under their source status, everything Kaleo has
- * no slot for in `<metadata>` CDATA JSON — see `state-machine-xml.ts`). The wire
- * format to core-api stays JSON (via the existing `toStateMachineDto` +
- * `toNodePositionsDto`); the XML source view is just a different VIEW over the
- * same `StateMachineForm`, never a second source of truth and never persisted.
+ * a **Diagram / Sumber toggle**: a visual editor (React Flow) and a
+ * **read-only** JSON view of the same state-machine graph. The
+ * `StateMachineForm` is the one source of truth (its graph is persisted as the
+ * `state_machine` JSONB and served to the Caller via `GET /api/queue/actions`);
+ * the Sumber view is a VIEW over that form — text to read and copy, never a
+ * second editing path. Editing lives entirely on the canvas, which can already
+ * express every facet the flow holds, so there is no parse step, no error
+ * state, and no two-way synchronization here. (The projected text is the form,
+ * not the wire payload — see {@link StateMachineSource} for the exact shape.)
  *
  * **Shared draft.** The page reads the config draft from {@link useConfigDraft}
  * — the SAME draft the `/admin/config` panel edits. The {@link ConfigDraftProvider}
@@ -25,18 +26,13 @@
  * provider's — identical to the panel's — and, like every other `/config/*`
  * section, the designer STAYS on the page after a successful save (no
  * `navigate()`): the provider re-seeds the draft via the post-save re-GET, and
- * the source-view sync effect below re-serializes on that external change.
+ * the Sumber view — derived, not mirrored — follows that re-seed for free.
  *
- * **Source-view round-trip guard.** `sourceText` is a local mirror of the draft's
- * state machine, kept in sync by a single effect keyed on the draft's graph
- * signature. A `lastEmittedSig` ref marks changes WE drove (a valid source edit
- * lifts to the draft and stamps the ref before `setState`), so the effect skips
- * our own edits (no re-serialize → the manager's typing/cursor is never
- * clobbered) and only re-serializes on an EXTERNAL draft change (a diagram edit
- * while in Diagram view, or a post-save re-seed). Invalid source text never
- * reaches the draft — `xmlToForm` returns `{ ok: false, error }` and we set the
- * error WITHOUT `setState`-ing, so the diagram (and the shared draft) stays at
- * the last valid graph and the manager keeps typing toward a valid one.
+ * **No round-trip.** The Sumber view derives its text from the draft it is
+ * handed (it takes the form itself, not a pre-serialized string), so nothing is
+ * kept in sync here: no mirror state, no `lastEmittedSig` guard, no way for the
+ * two views to disagree. That whole machinery existed only because the pane
+ * used to be editable; a read-only projection needs none of it.
  */
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -45,8 +41,6 @@ import { StateMachineSource } from '../components/StateMachineSource';
 import { StateMachineWorkflow } from '../components/StateMachineWorkflow';
 import { useConfigDraft } from './admin-config/config-draft-context';
 import { computeFormValidity } from './admin-config/validity';
-import { graphSignature } from '../lib/state-machine';
-import { formToXml, xmlToForm } from '../lib/state-machine-xml';
 
 export function AlurStatusDesigner(): JSX.Element {
   const { state, setState, save, submitting, retry } = useConfigDraft();
@@ -104,36 +98,6 @@ export function AlurStatusDesigner(): JSX.Element {
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [fullscreen, submitting]);
-  // The source-view mirror of the draft's state machine. Kept in sync with the
-  // draft by the effect below; the textarea is controlled over this, NOT over
-  // `formToXml(draft)` directly (so the manager's in-progress, possibly-invalid
-  // typing is preserved between keystrokes — a live `formToXml` would reformat
-  // and jump the cursor on every render).
-  const [sourceText, setSourceText] = useState('');
-  const [sourceError, setSourceError] = useState<string | null>(null);
-  // Signature of the draft change WE last drove from the source view. The sync
-  // effect compares the incoming draft signature against this; a match means the
-  // change is ours → skip the re-serialize (preserve the manager's text). A
-  // mismatch means an external change (diagram edit / re-seed) → re-serialize.
-  const lastEmittedSig = useRef<string>('');
-
-  // Keep `sourceText` in sync with the draft's state machine on EXTERNAL changes
-  // only. Runs on every `state` change (the draft is the only dep that matters):
-  //   - initial load (draft → ready): lastEmittedSig is '' ≠ sig → serialize.
-  //   - diagram edit (Diagram view): draft changes, we did NOT emit → serialize.
-  //   - valid source edit (Source view): we stamped lastEmittedSig before
-  //     setState → sig matches → skip (preserve the manager's text + cursor).
-  //   - invalid source edit: no setState → `state` unchanged → effect no-ops.
-  useEffect(() => {
-    if (state.status !== 'ready') return;
-    const sig = graphSignature(state.form.stateMachine);
-    if (sig !== lastEmittedSig.current) {
-      lastEmittedSig.current = sig;
-      setSourceText(formToXml(state.form.stateMachine));
-      setSourceError(null);
-    }
-  }, [state]);
-
   if (state.status === 'loading') {
     return <div className="alur-status-designer alur-status-designer--loading">Memuat konfigurasi…</div>;
   }
@@ -153,61 +117,13 @@ export function AlurStatusDesigner(): JSX.Element {
   const { form } = state;
   const { smErrors, wholeFormValid } = computeFormValidity(form);
 
-  /** Lift a valid source edit to the shared draft; record an invalid one as an error. */
-  function handleSourceChange(next: string): void {
-    setSourceText(next);
-    const result = xmlToForm(next);
-    if (result.ok) {
-      // Stamp the ref BEFORE setState so the sync effect treats this as our own
-      // change and skips the re-serialize (preserves `next` verbatim — no
-      // reformat/cursor jump). Mode is forced to 'custom' by `xmlToForm`.
-      lastEmittedSig.current = graphSignature(result.form);
-      // `xmlToForm` returns a COMPLETE form — nodeActions come from the Kaleo
-      // `<actions>` block and terminalNodes/endSources from the root
-      // `<metadata>`, so there is no merge-back against the previous draft (the
-      // source carries every node facet — manager feedback: "XML harus memuat
-      // semua informasi node").
-      setState({
-        status: 'ready',
-        form: { ...form, stateMachine: result.form },
-      });
-      setSourceError(null);
-    } else {
-      // Do NOT setState — the draft + diagram stay at the last valid graph. The
-      // manager keeps typing; the error shows in the source gutter.
-      setSourceError(result.error);
-    }
-  }
-
-  /** Switch to Source view: re-evaluate the current source text so an abandoned
-   *  invalid draft resurfaces its error (the sync effect only re-serializes on a
-   *  draft change, so an invalid `sourceText` left from a prior visit is intact
-   *  but its error was cleared on the Diagram switch). */
-  function switchToSource(): void {
-    const result = xmlToForm(sourceText);
-    setSourceError(result.ok ? null : result.error);
-    setView('source');
-  }
-
-  /** Switch to Diagram view. The draft already reflects every VALID source edit
-   *  (live-parsed on change); an invalid source edit never reached the draft, so
-   *  the diagram shows the last valid graph. Clear `sourceError` so the save
-   *  button (gated on `sourceError === null` in Source view) is not stuck when
-   *  the manager leaves an invalid source behind — Diagram-view save gating is
-   *  `wholeFormValid` only. `sourceText` is preserved for a return to Source. */
-  function switchToDiagram(): void {
-    setSourceError(null);
-    setView('diagram');
-  }
-
-  // Save is the provider's full PUT. Disabled while submitting, when the WHOLE
-  // form is invalid (a profile/category error on /config blocks the full save),
-  // or when the source view holds an invalid parse (Source view only —
-  // `sourceError` is cleared on every Diagram switch).
-  const saveDisabled = submitting || !wholeFormValid || sourceError !== null;
+  // Save is the provider's full PUT. Disabled while submitting, or when the
+  // WHOLE form is invalid (a profile/category error on /config blocks the full
+  // save). The Sumber view never contributes a blocking error.
+  const saveDisabled = submitting || !wholeFormValid;
   // When the state-machine section is valid but some OTHER section is not, tell
   // the manager where the blocking error is (they can fix it back on /config).
-  const otherSectionInvalid = !wholeFormValid && smErrors.length === 0 && sourceError === null;
+  const otherSectionInvalid = !wholeFormValid && smErrors.length === 0;
 
   const saveButton = (
     <button
@@ -290,7 +206,7 @@ export function AlurStatusDesigner(): JSX.Element {
           type="button"
           className="sm-view-toggle__btn"
           aria-pressed={view === 'diagram'}
-          onClick={switchToDiagram}
+          onClick={() => setView('diagram')}
           data-testid="sm-view-diagram"
         >
           Diagram
@@ -299,7 +215,7 @@ export function AlurStatusDesigner(): JSX.Element {
           type="button"
           className="sm-view-toggle__btn"
           aria-pressed={view === 'source'}
-          onClick={switchToSource}
+          onClick={() => setView('source')}
           data-testid="sm-view-source"
         >
           Sumber
@@ -323,12 +239,7 @@ export function AlurStatusDesigner(): JSX.Element {
           errors={smErrors}
         />
       ) : (
-        <StateMachineSource
-          sourceText={sourceText}
-          onSourceChange={handleSourceChange}
-          error={sourceError}
-          connectors={form.stateMachine.transitions}
-        />
+        <StateMachineSource stateMachine={form.stateMachine} />
       )}
     </div>
   );

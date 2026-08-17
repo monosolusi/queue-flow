@@ -170,35 +170,42 @@ describe('AlurStatusDesigner (dedicated /config/alur-status page)', () => {
     expect(screen.queryByTestId('sm-source')).not.toBeInTheDocument();
   });
 
-  it('toggles to the Source view showing the graph as a Kaleo workflow-definition', async () => {
+  it('toggles to the Sumber view showing the graph as read-only JSON', async () => {
     const { api } = makeApi();
     renderDesignerRoute(api);
     await screen.findByTestId('sm-mode');
 
     await userEvent.click(screen.getByTestId('sm-view-source'));
     expect(screen.getByTestId('sm-view-source')).toHaveAttribute('aria-pressed', 'true');
-    // The source textarea mounts with the default graph serialized as a Liferay
-    // Kaleo <workflow-definition>: one <task>/<state> per status, transitions
-    // nested under their source status.
+    // The Sumber textarea mounts with the draft's state machine serialized as
+    // pretty-printed JSON. It is the editable FORM (minus the client-only
+    // `mode`), a superset of the persisted `state_machine` object: the graph is
+    // saved inside `state_machine`, while positions/nodeActions/terminalNodes/
+    // endSources travel as sibling top-level wire fields.
     const source = screen.getByTestId('sm-source') as HTMLTextAreaElement;
-    expect(source.value).toContain('<workflow-definition xmlns="urn:liferay.com:liferay-workflow_7.4.0"');
-    expect(source.value).toContain('<task>');
-    expect(source.value).toContain('<name>WAITING</name>');
-    expect(source.value).toContain('<target>CALLING</target>');
-    // The first transition's action label — the Caller's button text — rides a
-    // <label>, the load-bearing value in the Kaleo shape.
-    expect(source.value).toContain('<label language-id="id_ID">Panggil Berikutnya</label>');
-    // The diagram canvas is unmounted in Source view.
+    const parsed = JSON.parse(source.value);
+    expect(parsed.states).toEqual(DEFAULT_STATE_MACHINE.states);
+    // The client-only `mode` preset is stripped — the manager never sees an
+    // internal enum, and the text never implies the flow carries a field the
+    // wire drops (`toStateMachineDto`).
+    expect(parsed.mode).toBeUndefined();
+    expect(parsed.transitions[0]).toMatchObject({
+      from: 'WAITING',
+      to: 'CALLING',
+      actionLabel: 'Panggil Berikutnya',
+    });
+    // It is a projection, not an editing surface.
+    expect(source).toHaveAttribute('readonly');
+    // The diagram canvas is unmounted in Sumber view.
     expect(screen.queryByTestId('sm-canvas')).not.toBeInTheDocument();
   });
 
-  it('shows a connector legend (from → to · actionLabel) in the Source view', async () => {
+  it('shows a connector legend (from → to · actionLabel) in the Sumber view', async () => {
     // Manager feedback: the raw source did not explain which point connects to
-    // which (ruwet). In the Kaleo shape the source status is the CONTAINING
-    // element and the destination is <target>, so a connector's direction is
-    // spread across two nesting levels. The Source view renders a read-only
-    // connector legend derived from the last-valid draft — one chip per
-    // transition, `from → to · actionLabel` — so the direction stays visible.
+    // which (ruwet) — nested JSON spreads a connector's direction across two
+    // levels. The Sumber view renders a read-only connector legend derived from
+    // the draft — one chip per transition, `from → to · actionLabel` — so the
+    // direction stays visible.
     const { api } = makeApi();
     renderDesignerRoute(api);
     await screen.findByTestId('sm-mode');
@@ -219,80 +226,93 @@ describe('AlurStatusDesigner (dedicated /config/alur-status page)', () => {
     expect(recallChip).toBeDefined();
   });
 
-  it('keeps the connector legend at the last-valid graph while the source holds invalid XML', async () => {
-    // The legend mirrors the draft (last-valid), NOT the live textarea — so a
-    // broken parse does NOT blank the indicator; the error region explains the
-    // divergence instead. Mirrors the Diagram view's last-valid behavior.
+  it('the Sumber view is a projection: a diagram edit shows up in the JSON', async () => {
+    // THE single-source-of-truth property. The text is DERIVED from the draft on
+    // render (no mirror state, no sync effect), so the two views cannot diverge:
+    // edit a label on the canvas, switch to Sumber, and the JSON already says so.
     const { api } = makeApi();
     renderDesignerRoute(api);
     await screen.findByTestId('sm-mode');
-    await userEvent.click(screen.getByTestId('sm-view-source'));
+    await userEvent.click(screen.getByLabelText(/Susun alur status sendiri/));
+    fireEvent.click(screen.getByTestId('rf__edge-WAITING->CALLING#0'));
+    fireEvent.change(screen.getByTestId('panel-action-label'), { target: { value: 'Panggil Cepat' } });
 
-    fireEvent.change(screen.getByTestId('sm-source'), { target: { value: '<not-xml' } });
-    expect(await screen.findByTestId('sm-source-error')).toBeInTheDocument();
-    // The legend still shows the last-valid default graph's connectors.
-    const chips = screen.getAllByTestId('sm-source-connector');
-    expect(chips).toHaveLength(5);
-    expect(chips[0]).toHaveTextContent('Panggil Berikutnya');
+    await userEvent.click(screen.getByTestId('sm-view-source'));
+    const parsed = JSON.parse((screen.getByTestId('sm-source') as HTMLTextAreaElement).value);
+    expect(parsed.transitions[0].actionLabel).toBe('Panggil Cepat');
   });
 
-  it('a valid source edit lifts into the shared draft (round-trips into the diagram)', async () => {
+  it('the Sumber view cannot edit the flow (no second editing path, save unaffected)', async () => {
+    // Regression guard for the rule this view exists under: the canvas is the
+    // ONLY editing surface. A change event on the read-only textarea moves
+    // nothing — not the text, not the draft, not the save payload — and the
+    // Sumber view never gates the save (there is no parse that could fail).
     const { api, save } = makeApi();
     renderDesignerRoute(api);
     await screen.findByTestId('sm-mode');
     await userEvent.click(screen.getByTestId('sm-view-source'));
-    const source = screen.getByTestId('sm-source') as HTMLTextAreaElement;
+    const before = (screen.getByTestId('sm-source') as HTMLTextAreaElement).value;
 
-    // Edit the first action label via the XML source, then save.
-    fireEvent.change(source, { target: { value: source.value.replace('Panggil Berikutnya', 'Panggil Cepat') } });
-    // No parse error — the save button is enabled.
+    // `userEvent.type` is the real keyboard path — it honours `readOnly` and
+    // fires no input events, so this fails if the attribute is ever dropped (a
+    // `fireEvent.change` would pass either way; it assigns the value directly).
+    await userEvent.type(screen.getByTestId('sm-source'), 'x');
+    expect((screen.getByTestId('sm-source') as HTMLTextAreaElement).value).toBe(before);
     expect(screen.queryByTestId('sm-source-error')).not.toBeInTheDocument();
     expect(screen.getByTestId('admin-save')).not.toBeDisabled();
 
     await userEvent.click(screen.getByTestId('admin-save'));
     await screen.findByText('Konfigurasi tersimpan.');
     const payload = save.mock.calls[0][0] as SaveSystemConfigurationPayload;
-    expect(payload.stateMachine.transitions[0].actionLabel).toBe('Panggil Cepat');
-    // The client-only `mode` preset is stripped on the wire (source edits force
-    // custom mode, but it never reaches core-api).
+    expect(payload.stateMachine.states).toEqual(DEFAULT_STATE_MACHINE.states);
+    // The client-only `mode` preset is still stripped on the wire.
     expect((payload.stateMachine as unknown as Record<string, unknown>).mode).toBeUndefined();
   });
 
-  it('a valid source edit does not re-serialize over the manager’s text (no re-seed loop)', async () => {
-    // The Kaleo shape nests each transition under its SOURCE status, so parsing
-    // REGROUPS `transitions` (the default graph's SKIPPED→CALLING and
-    // SERVING→COMPLETED swap places). That changes `graphSignature`, which is
-    // what the sync effect keys on — so the round-trip guard has to still hold:
-    // `handleSourceChange` stamps `lastEmittedSig` from the SAME parsed form it
-    // hands to `setState`, so the effect sees its own change and skips. If it
-    // did not, the effect would re-serialize on every keystroke, reformat the
-    // textarea under the manager's cursor, and re-seed the canvas in a loop.
+  it('follows an EXTERNAL draft change while sitting in the Sumber view (post-save re-seed)', async () => {
+    // The property the deleted machinery used to manage by hand. The old mirror
+    // state + `lastEmittedSig` guard existed to decide when an incoming draft
+    // change should overwrite the textarea; a derived projection just tracks it.
+    // The case that mattered is an EXTERNAL change landing while the manager is
+    // IN the Sumber view — the provider's post-save re-GET re-seeds the draft.
+    // Here the re-GET returns a flow whose label differs from what was saved, so
+    // the assertion can only pass if the text re-rendered from the new draft.
+    const reseeded: SystemConfigurationDto = {
+      ...configuredStore(),
+      stateMachine: {
+        states: ['WAITING', 'CALLING'],
+        transitions: [{ from: 'WAITING', to: 'CALLING', actionLabel: 'Dipanggil Server' }],
+        descriptions: {},
+      },
+    };
     const { api } = makeApi();
     renderDesignerRoute(api);
     await screen.findByTestId('sm-mode');
     await userEvent.click(screen.getByTestId('sm-view-source'));
-    const source = screen.getByTestId('sm-source') as HTMLTextAreaElement;
+    expect((screen.getByTestId('sm-source') as HTMLTextAreaElement).value).toContain(
+      'Panggil Berikutnya',
+    );
 
-    const typed = source.value.replace('Panggil Berikutnya', 'Panggil Cepat');
-    fireEvent.change(source, { target: { value: typed } });
+    // The post-save re-GET returns the re-seeded flow.
+    (api.getSystemConfig as ReturnType<typeof vi.fn>).mockImplementation(() =>
+      Promise.resolve(reseeded),
+    );
+    await userEvent.click(screen.getByTestId('admin-save'));
+    await screen.findByText('Konfigurasi tersimpan.');
 
-    // The textarea holds EXACTLY what was typed — byte for byte, not a
-    // re-serialization of the regrouped form.
-    expect((screen.getByTestId('sm-source') as HTMLTextAreaElement).value).toBe(typed);
-    expect(screen.queryByTestId('sm-source-error')).not.toBeInTheDocument();
-
-    // A second edit still lands on the manager's own text (the guard holds
-    // across successive edits, not just the first).
-    const typedAgain = typed.replace('Selesai Layan', 'Tutup Layanan');
-    fireEvent.change(screen.getByTestId('sm-source'), { target: { value: typedAgain } });
-    expect((screen.getByTestId('sm-source') as HTMLTextAreaElement).value).toBe(typedAgain);
+    // Still in the Sumber view, and the text tracked the external change.
+    expect(screen.getByTestId('sm-view-source')).toHaveAttribute('aria-pressed', 'true');
+    const parsed = JSON.parse((screen.getByTestId('sm-source') as HTMLTextAreaElement).value);
+    expect(parsed.transitions[0].actionLabel).toBe('Dipanggil Server');
+    expect(parsed.states).toEqual(['WAITING', 'CALLING']);
+    // The connector legend is derived from the same form, so it moved too.
+    expect(screen.getAllByTestId('sm-source-connector')).toHaveLength(1);
   });
 
-  it('re-entering the Source view without typing does not re-parse or re-serialize', async () => {
-    // The sync effect runs on `state` change only, so a bare Diagram↔Sumber
-    // toggle must leave the text untouched — parsing never re-fires on its own
-    // output.
-    const { api } = makeApi();
+  it('toggling Diagram↔Sumber leaves the flow untouched', async () => {
+    // A bare view switch is now a plain `setView` — no parse, no serialize, no
+    // draft write. The JSON is identical across a round-trip through Diagram.
+    const { api, save } = makeApi();
     renderDesignerRoute(api);
     await screen.findByTestId('sm-mode');
     await userEvent.click(screen.getByTestId('sm-view-source'));
@@ -301,27 +321,7 @@ describe('AlurStatusDesigner (dedicated /config/alur-status page)', () => {
     await userEvent.click(screen.getByTestId('sm-view-diagram'));
     await userEvent.click(screen.getByTestId('sm-view-source'));
     expect((screen.getByTestId('sm-source') as HTMLTextAreaElement).value).toBe(before);
-    expect(screen.queryByTestId('sm-source-error')).not.toBeInTheDocument();
-  });
-
-  it('invalid XML shows an error, blocks save, and keeps the draft at the last valid graph', async () => {
-    const { api, save } = makeApi();
-    renderDesignerRoute(api);
-    await screen.findByTestId('sm-mode');
-    await userEvent.click(screen.getByTestId('sm-view-source'));
-
-    fireEvent.change(screen.getByTestId('sm-source'), { target: { value: '<not-xml' } });
-    expect(await screen.findByTestId('sm-source-error')).toBeInTheDocument();
-    // Save is disabled while the source holds an invalid parse.
-    expect(screen.getByTestId('admin-save')).toBeDisabled();
-    await userEvent.click(screen.getByTestId('admin-save'));
     expect(save).not.toHaveBeenCalled();
-
-    // The diagram (draft) stays at the last valid graph — switch back to
-    // Diagram view and the workflow still shows the standard flow.
-    await userEvent.click(screen.getByTestId('sm-view-diagram'));
-    expect(screen.queryByTestId('sm-source-error')).not.toBeInTheDocument();
-    expect(screen.getByTestId('sm-mode')).toBeInTheDocument();
   });
 
   it('stays on the designer after a successful save (matches other config sections)', async () => {

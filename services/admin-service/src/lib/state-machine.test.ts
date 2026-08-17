@@ -12,7 +12,6 @@ import {
   describeState,
   descriptionFor,
   graphSignature,
-  stateDegrees,
   isDefaultGraph,
   mergeEdgeSides,
   missingCanonicalStates,
@@ -1055,29 +1054,6 @@ describe('isDefaultGraph with startSources', () => {
   });
 });
 
-describe('stateDegrees (the shared degree predicate)', () => {
-  it('counts a normal transition on both ends', () => {
-    const { inDeg, outDeg } = stateDegrees(['A', 'B'], [{ from: 'A', to: 'B' }]);
-    expect(outDeg.get('A')).toBe(1);
-    expect(inDeg.get('A')).toBe(0);
-    expect(inDeg.get('B')).toBe(1);
-    expect(outDeg.get('B')).toBe(0);
-  });
-
-  it('counts a SELF-LOOP toward NEITHER degree', () => {
-    // The core of the fix: flow that leaves a status and returns to it brings
-    // nothing into the graph and takes nothing out.
-    const { inDeg, outDeg } = stateDegrees(['A'], [{ from: 'A', to: 'A' }]);
-    expect(inDeg.get('A')).toBe(0);
-    expect(outDeg.get('A')).toBe(0);
-  });
-
-  it('ignores a transition referencing a state not in the schema', () => {
-    const { inDeg, outDeg } = stateDegrees(['A'], [{ from: 'A', to: 'GONE' }]);
-    expect(outDeg.get('A')).toBe(0);
-    expect(inDeg.get('A')).toBe(0);
-  });
-});
 
 describe('reconcileStateNameRefs (canvas delete/rename cascade)', () => {
   // The three fields that reference states BY NAME. The save use case

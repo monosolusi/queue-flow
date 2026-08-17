@@ -830,8 +830,8 @@ describe('Alur Status Tiket designer — warning relocation + dedicated full-pag
     expect(overlay).toContain('background: var(--surface)');
     expect(overlay).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
     // The overlay is viewport-height, so on a short viewport (or in the Sumber
-    // view, where the textarea + parse-error line stack below the connector
-    // legend) its content can exceed 100vh. It must scroll, never clip: there is
+    // view, where the textarea stacks below the connector legend) its content
+    // can exceed 100vh. It must scroll, never clip: there is
     // no page behind a `position: fixed` overlay to scroll instead, so clipped
     // content is unreachable.
     expect(overlay).toContain('overflow-y: auto');
@@ -886,7 +886,7 @@ describe('Alur Status Tiket designer — warning relocation + dedicated full-pag
     // on the designer root AND on the fullscreen overlay meant content taller
     // than the locked viewport was hard-clipped with NO escape hatch — no page
     // scroll, no internal scroll, unreachable (worst in the Sumber view, where
-    // the textarea bottom and the parse-error line both disappeared).
+    // the textarea bottom disappeared).
     // Filling the viewport is the optimization; reachability is the invariant.
     const designerLocked = atRuleBlock(DESIGNER_LOCK_MEDIA).match(
       /\.alur-status-designer\s*\{([^}]*)\}/,
@@ -980,23 +980,44 @@ describe('Alur Status Tiket designer — warning relocation + dedicated full-pag
     expect(active).toContain('color: var(--accent-contrast)');
   });
 
-  it('the JSON source textarea is a monospace input over the token surface (no hardcoded color)', () => {
-    // The Source view is an editable JSON textarea (view switch).
+  it('the JSON source textarea is a monospace pane over the token surface (no hardcoded color)', () => {
+    // The Sumber view is a read-only JSON textarea (view switch).
     // Monospace keeps the JSON column-aligned; token border/surface so it reads
-    // as an input under both themes. No hardcoded color literal — dark mode
-    // flips it for free.
+    // under both themes. No hardcoded color literal — dark mode flips it for
+    // free.
     const source = wfRule('.sm-source');
     expect(source).toContain('font-family: ui-monospace');
     expect(source).toContain('background: var(--surface)');
     expect(source).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
   });
 
-  it('the source error region uses the danger-on-surface text token (a validation error, not a caution)', () => {
-    // An invalid JSON parse / validation failure blocks the save — it reads as
-    // an error, so it uses `--danger-on-surface` (text-on-surface semantic),
-    // distinct from the `--warn` caution the section warning uses.
-    const err = wfRule('.sm-source-error');
-    expect(err).toContain('color: var(--danger-on-surface)');
+  it('the read-only variant recedes visually but never opts out of focus (copy is the point)', () => {
+    // The Sumber pane is a projection, not a field: a recessed surface + muted
+    // text so it does not invite typing. It must NOT be styled as unreachable —
+    // the textarea stays `readOnly` (not `disabled`) precisely so the manager
+    // can focus it and copy the whole flow, so the focus ring rule has to keep
+    // applying to it.
+    const readonly = wfRule('.sm-source--readonly');
+    expect(readonly).toContain('background: var(--surface-2)');
+    expect(readonly).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    // The text keeps the base `--text` token. `--text-muted` over `--surface-2`
+    // computes to 4.34:1 (light) / 4.04:1 (dark) — under WCAG AA 4.5:1 for this
+    // 0.875rem monospace, and this pane's ONLY content is text the manager came
+    // here to read. The recessed surface alone says "not a field".
+    expect(readonly).not.toMatch(/(^|[;{\s])color:/);
+    // No `pointer-events: none` / `user-select: none` — either would defeat the
+    // select-and-copy affordance that justifies this view.
+    expect(readonly).not.toMatch(/pointer-events:\s*none/);
+    expect(readonly).not.toMatch(/user-select:\s*none/);
+    // The focus ring still applies to it (readOnly stays in the tab order).
+    expect(wfRule('.sm-source:focus-visible')).toContain('outline: 2px solid var(--accent)');
+  });
+
+  it('carries no styling for a source error region (the read-only view cannot fail)', () => {
+    // Nothing in the Sumber view parses, so there is no error to render. A
+    // leftover `.sm-source-error` rule would be dead CSS advertising a state the
+    // component can no longer enter.
+    expect(wfCss).not.toContain('.sm-source-error');
   });
 
   it('renders a connector legend (from → to) so the source shows which point connects to which', () => {

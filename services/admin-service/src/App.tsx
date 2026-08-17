@@ -53,7 +53,7 @@ import { ConfigDraftProvider } from './pages/admin-config/config-draft-context';
  *                 `/config/operasi-manual` → Operasi Manual.
  *                 `/config/alur-status` → the full-page Alur Status Tiket
  *                                         diagram designer (large canvas +
- *                                         XML source view). The provider stays
+ *                                         read-only JSON source view). The provider stays
  *                 mounted across all `/config/*` URLs, so the draft + a
  *                 cross-section edit ride ONE full-payload save and navigation
  *                 loses no edits.

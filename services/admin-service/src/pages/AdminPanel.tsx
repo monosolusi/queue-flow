@@ -49,7 +49,8 @@ function describedBy(
  * {@link WizardGuard}), so the store-name editing that used to live only in the
  * wizard now lives here too (no functionality lost). The state-machine EDITOR
  * is a dedicated full-page designer at `/config/alur-status` (large canvas +
- * XML source view — the inline diagram was too small per manager feedback); it
+ * read-only JSON source view — the inline diagram was too small per manager
+ * feedback); it
  * is NOT an `AdminPanel` section — it is a sibling route under the same
  * `ConfigDraftProvider`, editing the SAME draft (see below), so the two ride
  * one save.

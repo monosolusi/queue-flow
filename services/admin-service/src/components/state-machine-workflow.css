@@ -708,10 +708,11 @@
   color: var(--accent-contrast);
 }
 
-/* --- JSON Source view (StateMachineSource) -----------------------------------
-   A controlled textarea carrying the serialized `{ states, transitions }` graph.
+/* --- JSON Sumber view (StateMachineSource) -----------------------------------
+   A READ-ONLY textarea carrying the serialized `{ states, transitions }` graph.
    Monospace so the JSON stays column-aligned; token border/surface so it reads
-   as an input, and a distinct error region in the danger tint. */
+   as a panel of text. Editing lives on the canvas — the read-only variant below
+   dims the surface so the pane never invites typing. */
 .sm-source-wrap {
   display: flex;
   flex-direction: column;
@@ -727,10 +728,6 @@
   margin: 0;
   color: var(--text-muted);
   font-size: 0.85rem;
-}
-.sm-source__hint code {
-  color: var(--accent-on-surface);
-  font-size: 0.8rem;
 }
 
 /* --- Connector legend (the "indikator konektor" from → to) ------------------
@@ -816,9 +813,9 @@
    taller than the space the lock can give it: it is `flex: 1 1 auto`, so it
    still GROWS to fill whatever height is left below the hint + connector legend,
    but the base `min-height: 24rem` (384px) plus ~340px of page chrome above it
-   overflowed a typical laptop viewport — pushing the textarea's bottom AND the
-   `.sm-source-error` line out of reach (the most visibly broken case of the
-   clipped layout). Declared as a second block of the lock's breakpoint, next to
+   overflowed a typical laptop viewport — pushing the textarea's bottom out of
+   reach (the most visibly broken case of the clipped layout). Declared as a
+   second block of the lock's breakpoint, next to
    the section it adjusts (the repeated-breakpoint convention used across these
    stylesheets) rather than folded into the layout block above. */
 @media (min-width: 901px) {
@@ -830,8 +827,19 @@
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
-.sm-source-error {
-  margin: 0;
-  color: var(--danger-on-surface);
-  font-size: 0.875rem;
+/* The read-only variant: a recessed surface so the pane reads as a rendered
+   projection of the flow, not a field awaiting input. It stays focusable
+   (`readOnly`, never `disabled`) so the text is keyboard/AT reachable and
+   select-all + copy works — the reason this view exists.
+
+   The RECESSED SURFACE alone carries "not a field"; the text keeps the full
+   `--text` token. Dimming it to `--text-muted` (the obvious move) puts the
+   pane's ONLY content at 4.34:1 in light / 4.04:1 in dark against
+   `--surface-2` — under WCAG AA 4.5:1 for 0.875rem text. `--text-muted` is
+   calibrated against `--bg`/`--surface` (see `_tokens.css`), and it is fine
+   for the bold badge/glyph decorations that use it over `--surface-2`; a whole
+   serialized flow the manager is here to READ is not that. */
+.sm-source--readonly {
+  background: var(--surface-2);
+  cursor: default;
 }

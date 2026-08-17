@@ -1,98 +1,82 @@
 /**
- * The XML "Source" view of the Alur Status Tiket graph — an editable XML
- * source pane alongside the visual {@link StateMachineWorkflow} diagram
- * (a designer-style visual/source toggle).
+ * The JSON "Sumber" view of the Alur Status Tiket graph — a **read-only** text
+ * projection of the same {@link StateMachineForm} the
+ * {@link StateMachineWorkflow} diagram edits.
  *
- * Purely presentational: it renders a controlled `<textarea>` carrying the
- * serialized graph (a Liferay Kaleo `<workflow-definition>` document — one
- * `<task>`/`<state>` per status with its transitions nested inside, see
- * `state-machine-xml.ts`) plus an inline error region. **All
- * parsing/validation lives in the designer page** — this component never calls
- * `DOMParser` or `xmlToForm`. Keeping the textarea dumb means a half-typed
- * document can never crash it: the designer live-parses on every `onChange`,
- * lifts a valid graph to the shared draft, and on a parse failure sets `error`
- * (shown here) WITHOUT `setState`-ing a broken form, so the diagram view is
- * never clobbered by invalid source. The textarea stays editable and the
- * manager keeps typing toward a valid graph.
+ * **Read-only on purpose.** The flow has exactly ONE source of truth: the
+ * `StateMachineForm` (whose graph is persisted as the `state_machine` JSONB in
+ * core-api and served to the Caller via `GET /api/queue/actions`). This pane is
+ * a VIEW over it, never a second editing path — the canvas can already express
+ * everything the flow holds (states, transitions, `actionLabel`,
+ * `requeuePolicy`, node actions, descriptions, Start/End + `endSources`), so a
+ * parallel text editor would only add a second way to say the same thing plus
+ * the two-way synchronization it drags along. It exists so the manager can
+ * *see* and *copy* the whole flow as text; to change it, use the Diagram view.
  *
- * SRP split vs. the designer: the designer owns the view-toggle state machine
- * (Diagram↔Source), the round-trip lifecycle (re-serialize on Diagram→Source,
- * validate on Source→Diagram), and the draft lift; this component owns only the
- * textarea affordance + its a11y wiring. Mirrors the `StateMachineWorkflow`
- * split (visual editor is presentational over the same `StateMachineForm`).
+ * **What the text is, exactly.** The editable form, minus the client-only
+ * `mode` preset (an internal `'default' | 'custom'` marker that never reaches
+ * core-api — see `toStateMachineDto` — and would read as noise to a manager).
+ * It is therefore a SUPERSET of the persisted `state_machine` object: the graph
+ * (`states`/`transitions`/`descriptions`) is saved inside `state_machine`,
+ * while `positions`, `nodeActions`, `terminalNodes` and `endSources` travel as
+ * sibling top-level wire fields (`nodePositions`, `nodeActions`, …). Showing
+ * the whole form is deliberate — this view is for reading the flow the manager
+ * is composing, not for previewing a wire payload.
  *
- * **Connector legend (`connectors`).** Manager feedback: the raw source did
- * not explain which point connects to which (`tidak dijelaskan ini konek pada
- * titik yang mana ke titik yang mana, jadinya ruwet`). In the Kaleo shape the
- * source status is the CONTAINING element and the destination is `<target>`, so
- * a connector's direction is spread across two nesting levels and still not
- * readable at a glance. So this view renders a read-only legend of
- * the connectors — one chip per transition, `from → to · actionLabel` —
- * between the hint and the textarea. The legend is a VIEW over the SAME
- * last-valid draft the diagram shows (passed in as `connectors`); it never
- * parses `sourceText` itself, so a broken textarea can never show a broken
- * graph here — while the manager types invalid XML the legend stays at the
- * last-valid connectors and the inline `error` region explains the divergence.
- * The arrow glyph carries the direction the XML attributes encode; `.sr-only`
- * bridge words keep that direction + the label AT-readable (a screen reader
- * announces "WAITING ke CALLING aksi: Panggil Berikutnya", not "rightwards
- * arrow" run together with the label).
+ * **One prop, no divergence.** The component takes the form itself and derives
+ * BOTH the text and the connector legend from it. Handing it a pre-serialized
+ * string alongside a separate transition list would re-create, one layer down,
+ * exactly the two-representations-out-of-sync hazard this view was rebuilt to
+ * remove.
+ *
+ * Purely presentational: a `readOnly` `<textarea>` over the derived text.
+ * Because nothing here parses, there is no error state to surface, no save
+ * gating, and no cursor/reformat hazard — the text simply tracks the draft.
+ *
+ * **Connector legend.** Manager feedback: the raw source did not explain which
+ * point connects to which (`tidak dijelaskan ini konek pada titik yang mana ke
+ * titik yang mana, jadinya ruwet`). Nested JSON spreads a connector's direction
+ * across two levels, so this view renders a legend of the connectors — one chip
+ * per transition, `from → to · actionLabel` — between the hint and the
+ * textarea. The arrow glyph carries the direction; `.sr-only` bridge words keep
+ * that direction + the label AT-readable (a screen reader announces "WAITING ke
+ * CALLING aksi: Panggil Berikutnya", not "rightwards arrow" run together with
+ * the label).
  */
-import { isDefaultSides, type Transition } from '../lib/state-machine';
+import { isDefaultSides, type StateMachineForm } from '../lib/state-machine';
 import './state-machine-workflow.css';
 
 export function StateMachineSource({
-  sourceText,
-  onSourceChange,
-  error,
-  connectors,
+  stateMachine,
 }: {
-  /** The current XML source text (controlled). */
-  sourceText: string;
-  /** Fired on every keystroke with the raw textarea value — the designer parses it. */
-  onSourceChange: (next: string) => void;
-  /** A single manager-facing (Indonesian) error string, or `null` when valid. */
-  error: string | null;
-  /**
-   * The last-valid graph's transitions, rendered as a read-only connector
-   * legend (`from → to · actionLabel`). Mirrors the draft the diagram view
-   * shows; stays at the last-valid graph while the textarea holds an invalid
-   * parse (the `error` region explains the divergence). Owned by the designer
-   * — this component never derives it from `sourceText`.
-   */
-  connectors: readonly Transition[];
+  /** The form being edited — the single input both projections derive from. */
+  stateMachine: StateMachineForm;
 }): JSX.Element {
+  // Strip the client-only preset; everything else is the manager's flow.
+  const { mode: _mode, ...graph } = stateMachine;
+  const sourceText = JSON.stringify(graph, null, 2);
+  const connectors = stateMachine.transitions;
+
   return (
     <div className="sm-source-wrap">
       <label htmlFor="sm-source" className="sm-source__label">
-        Sumber XML alur status
+        Sumber JSON alur status (baca saja)
       </label>
-      <p className="sm-source__hint">
-        Format mengikuti <strong>Liferay Kaleo</strong> (
-        <code>&lt;workflow-definition&gt;</code>). Tiap status jadi satu blok:{' '}
-        <code>&lt;task&gt;</code> bila masih punya transisi keluar,{' '}
-        <code>&lt;state&gt;</code> bila status akhir — nama statusnya ada di{' '}
-        <code>&lt;name&gt;</code>. Tiap transisi adalah{' '}
-        <strong>konektor (panah)</strong> yang ditulis <em>di dalam</em> status
-        asalnya: <code>&lt;target&gt;</code> menyebut status tujuan, dan{' '}
-        <code>&lt;label&gt;</code> adalah teks tombolnya di layar petugas.
-        Hal-hal yang tidak punya tempat di Kaleo — posisi di kanvas (
-        <code>xy</code>), keterangan status, titik sambungan (
-        <code>sourceSide</code>/<code>targetSide</code>:{' '}
-        <code>"top"</code>|<code>"right"</code>|<code>"bottom"</code>|
-        <code>"left"</code>, default <code>right</code>→<code>left</code>) —
-        disimpan sebagai JSON di dalam <code>&lt;metadata&gt;</code>. Mengubah
-        sumber ini menyusun alur kustom sendiri.
+      <p className="sm-source__hint" id="sm-source-hint">
+        Ini tampilan teks dari alur yang sedang Anda susun — berguna untuk
+        memeriksa atau menyalin seluruh alur sekaligus. Isinya{' '}
+        <strong>tidak bisa diubah di sini</strong>: untuk menambah status,
+        menarik konektor, atau mengganti teks tombol, gunakan tampilan{' '}
+        <strong>Diagram</strong>.
       </p>
 
       {/* Connector legend — the "indikator konektor" (from → to) the manager
           asked for. A read-only map of which point connects to which, derived
-          from the last-valid draft (passed as `connectors`), NOT re-parsed from
-          the textarea. The arrow is decorative (aria-hidden); the `.sr-only`
-          "ke" word keeps the direction AT-readable. When an edge uses a
-          non-default connection point, the sides are appended
-          (`· sourceSide→targetSide`) so the legend shows which point connects
-          to which — the manager's "ruwet" feedback. */}
+          from the same form the textarea serializes. The arrow is decorative
+          (aria-hidden); the `.sr-only` "ke" word keeps the direction
+          AT-readable. When an edge uses a non-default connection point, the
+          sides are appended (`· sourceSide→targetSide`) so the legend shows
+          which point connects to which — the manager's "ruwet" feedback. */}
       <ul
         className="sm-source-connectors"
         data-testid="sm-source-connectors"
@@ -128,27 +112,23 @@ export function StateMachineSource({
         })}
       </ul>
 
+      {/* A `readOnly` textarea rather than a `<pre>`: it keeps the `htmlFor`
+          label association, stays focusable/selectable for a select-all + copy,
+          and scrolls a long flow internally. `readOnly` (not `disabled`) so the
+          text is still reachable by keyboard and AT. `aria-describedby` points
+          at the hint so a screen-reader user who tabs in hears WHERE the edit
+          affordance is — sighted users read that from the hint above. */}
       <textarea
         id="sm-source"
-        className="sm-source"
+        className="sm-source sm-source--readonly"
         data-testid="sm-source"
-        // `aria-invalid` mirrors the visual editor's error-gating story: AT users
-        // hear the field is in an error state, and `aria-describedby` wires the
-        // inline error region as the explanation (mirrors the wizard's
-        // describedBy form-error wiring, QUE-41).
-        aria-invalid={error !== null}
-        aria-describedby={error !== null ? 'sm-source-error' : undefined}
+        readOnly
+        aria-describedby="sm-source-hint"
         spellCheck={false}
         autoComplete="off"
         autoCapitalize="off"
         value={sourceText}
-        onChange={(e) => onSourceChange(e.target.value)}
       />
-      {error !== null && (
-        <p className="sm-source-error" id="sm-source-error" role="alert" data-testid="sm-source-error">
-          {error}
-        </p>
-      )}
     </div>
   );
 }
