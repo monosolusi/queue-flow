@@ -618,11 +618,11 @@ export function TvStoreProvider({ api, audio, children, socketOptions }: TvStore
       sock.close();
       if (debounceTimer) clearTimeout(debounceTimer);
       clearInterval(interval);
-      // Drop queued announcements and stop advancing fragments so a mid-
-      // announcement unmount drains the queue. The in-flight fragment is
-      // intentionally allowed to finish (the AudioProvider contract — see
-      // sequencer-audio-provider.stop()), so this is best-effort silence, not
-      // an abrupt cut.
+      // Drop queued announcements and silence whatever is playing, so a mid-
+      // announcement unmount does not leave the board talking. `stop()` settles
+      // the in-flight clip's promise as well as pausing it, which is what lets
+      // the queue decorator's single-flight loop exit rather than wait for a
+      // clip nobody is listening to.
       audioRef.current.stop();
     };
   }, []);

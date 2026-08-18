@@ -10,7 +10,7 @@ import { TvBoardPage } from './pages/TvBoardPage';
 
 /**
  * The TV board is a single full-screen route. The {@link TvStoreProvider} owns
- * the realtime socket + the audio sequencer; {@link TvBoardPage} just projects
+ * the realtime socket + announcement playback; {@link TvBoardPage} just projects
  * the store. `api` and `audio` are optional props so tests can inject fakes
  * (ISP: the TV consumes only `ITvApi` + `AudioProvider`).
  */

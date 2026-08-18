@@ -38,9 +38,19 @@ function isThenable(value: unknown): value is Promise<void> {
 export class RemoteAnnouncementAudioProvider implements AudioProvider, AudioUnlockable {
   private readonly audioCtor: AudioCtor;
   private readonly probeUrl: string;
-  private current: AudioLike | null = null;
-  /** Settles the in-flight clip's promise; also the "is one in flight" flag. */
-  private settleCurrent: (() => void) | null = null;
+  /**
+   * Every clip currently in flight, mapped to the callback that settles its
+   * promise.
+   *
+   * A Map rather than a single `current` slot because two clips can legitimately
+   * overlap: `unlock()` bypasses the FIFO queue on purpose (it must run inside
+   * the user's gesture), so an overlay tap can land while an announcement that
+   * started before the block is still audible. With one slot the probe evicted
+   * the announcement, and a later `stop()` then paused the *probe* and left the
+   * announcement playing — a `SYSTEM_RESET` that did not actually silence the
+   * board.
+   */
+  private readonly live = new Map<AudioLike, () => void>();
   private blocked = false;
   private readonly listeners = new Set<(blocked: boolean) => void>();
 
@@ -54,12 +64,15 @@ export class RemoteAnnouncementAudioProvider implements AudioProvider, AudioUnlo
   }
 
   /**
-   * Abandon the clip that is playing: silence it and settle its promise at once.
+   * Abandon every clip in flight: silence them and settle their promises at once.
    *
    * Settling immediately is the load-bearing part. `SYSTEM_RESET` calls this, and
    * the queue decorator is `await`ing the in-flight clip inside a single-flight
    * loop — leaving that promise pending until a clip nobody is listening to
    * happens to end would hold the loop open and delay every later announcement.
+   *
+   * *Every* clip, not just the newest: silencing is the whole point, so it must
+   * not depend on which one happens to be in a slot.
    *
    * There is deliberately no sticky "stopped" state. An earlier version set a
    * flag here and cleared it at the top of `playAnnouncement`, which made the
@@ -67,14 +80,14 @@ export class RemoteAnnouncementAudioProvider implements AudioProvider, AudioUnlo
    * mute the board permanently after one daily reset.
    */
   stop(): void {
-    const element = this.current;
-    const settle = this.settleCurrent;
-    this.current = null;
-    this.settleCurrent = null;
-    // `pause` is optional on AudioLike, so older fakes stay valid; a real element
-    // has it, which is what makes this true silence rather than a promise trick.
-    element?.pause?.();
-    settle?.();
+    // Copy first: each `settle` removes its own entry from the map.
+    for (const [element, settle] of [...this.live]) {
+      // `pause` is optional on AudioLike, so older fakes stay valid; a real
+      // element has it, which is what makes this true silence rather than a
+      // promise trick.
+      element.pause?.();
+      settle();
+    }
   }
 
   onBlockedChange(listener: (blocked: boolean) => void): () => void {
@@ -102,7 +115,6 @@ export class RemoteAnnouncementAudioProvider implements AudioProvider, AudioUnlo
   private play(url: string): Promise<void> {
     return new Promise<void>((resolve) => {
       const audio = new this.audioCtor(url);
-      this.current = audio;
       let settled = false;
       const done = () => {
         if (settled) return;
@@ -112,11 +124,10 @@ export class RemoteAnnouncementAudioProvider implements AudioProvider, AudioUnlo
         // the wrong promise.
         audio.removeEventListener('ended', done);
         audio.removeEventListener('error', done);
-        if (this.current === audio) this.current = null;
-        if (this.settleCurrent === done) this.settleCurrent = null;
+        this.live.delete(audio);
         resolve();
       };
-      this.settleCurrent = done;
+      this.live.set(audio, done);
       audio.addEventListener('ended', done);
       audio.addEventListener('error', done); // skip an unfetchable clip
 

@@ -18,6 +18,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..domain.ports import AudioFinishingError
+
 # Speech target. -16 LUFS is the usual spoken-word integrated loudness.
 SPEECH_LUFS = -16.0
 # The bell is an attention cue, not content. A pure tone reads as louder than
@@ -40,8 +42,14 @@ _TRIM = (
 )
 
 
-class AudioProcessingError(RuntimeError):
-    """ffmpeg failed or is missing."""
+class AudioProcessingError(AudioFinishingError):
+    """ffmpeg failed or is missing.
+
+    Subclasses the domain-declared `AudioFinishingError` so the layers that catch a
+    finishing failure -- the use case and the HTTP adapter -- never have to import
+    this module. Naming ffmpeg is this class's job; reacting to a failed clip is
+    not.
+    """
 
 
 @dataclass(frozen=True)

@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from app.application.synthesize_announcement import SynthesizeAnnouncementUseCase
+from app.application.synthesize_announcement import (
+    SynthesizeAnnouncementUseCase,
+    UnknownTtsEngineError,
+)
 from app.domain.announcement import AnnouncementRequest
-from app.domain.tts_engine import TtsSettings
+from app.domain.tts_engine import TtsSettings, Voice
 
 from .fakes import (
     FakeCache,
@@ -77,7 +80,7 @@ def test_a_different_ticket_is_a_cache_miss() -> None:
 
 def test_the_etag_is_stable_for_the_same_announcement() -> None:
     use_case, _ = build()
-    assert use_case.execute(request()).etag == use_case.execute(request()).etag
+    assert use_case.execute(request()).cache_key == use_case.execute(request()).cache_key
 
 
 def test_changing_the_voice_changes_the_cache_key() -> None:
@@ -94,7 +97,7 @@ def test_changing_the_voice_changes_the_cache_key() -> None:
     provider.config = FakeConfig(settings=TtsSettings(voice_id="other-voice"))
     second = use_case.execute(request())
 
-    assert second.etag != first.etag
+    assert second.cache_key != first.cache_key
     assert len(engine.calls) == 2
     assert engine.calls[1][1].voice_id == "other-voice"
 
@@ -140,8 +143,22 @@ def test_selects_the_engine_named_by_config() -> None:
 
 def test_rejects_an_engine_id_that_is_not_configured() -> None:
     use_case, _ = build(provider=FakeConfigProvider(FakeConfig(engine="nope")))
-    with pytest.raises(KeyError, match="nope"):
+    with pytest.raises(UnknownTtsEngineError, match="nope"):
         use_case.execute(request())
+
+
+def test_an_unconfigured_engine_is_not_signalled_with_a_bare_KeyError() -> None:
+    """The adapter maps this to 503 "fix your config".
+
+    If a builtin `KeyError` carried that meaning, any unrelated KeyError raised
+    deeper down -- e.g. a changed ffmpeg JSON key -- would reach the operator as a
+    configuration problem instead of the server fault it is.
+    """
+    use_case, _ = build(provider=FakeConfigProvider(FakeConfig(engine="nope")))
+    with pytest.raises(UnknownTtsEngineError) as caught:
+        use_case.execute(request())
+
+    assert not isinstance(caught.value, KeyError)
 
 
 def test_preview_synthesizes_arbitrary_text_for_the_admin_test_button() -> None:
@@ -159,8 +176,14 @@ def test_lists_every_engines_voices_for_the_admin_dropdown() -> None:
         config_provider=FakeConfigProvider(),
     )
     voices = use_case.available_voices()
-    assert {v["engine"] for v in voices} == {"piper", "prerecorded"}
-    assert all(v["id"] and v["label"] and v["language"] for v in voices)
+    assert {entry.engine for entry in voices} == {"piper", "prerecorded"}
+    assert all(
+        entry.voice.id and entry.voice.label and entry.voice.language
+        for entry in voices
+    )
+    # Domain objects, not pre-flattened JSON: serializing is the adapter's job, so a
+    # change to the wire shape must not reach back into this layer.
+    assert all(isinstance(entry.voice, Voice) for entry in voices)
 
 
 def test_a_failing_engine_does_not_poison_the_cache() -> None:

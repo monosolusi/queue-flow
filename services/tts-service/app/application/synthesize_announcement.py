@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from ..domain.announcement import AnnouncementRequest, build_script
 from ..domain.ports import AudioCachePort, AudioFinisher, TtsConfigProvider
-from ..domain.tts_engine import TtsEngine
+from ..domain.tts_engine import TtsEngine, Voice
 
 logger = logging.getLogger(__name__)
 
@@ -26,14 +26,39 @@ PIPELINE_VERSION = 1
 _KEY_SEPARATOR = "\x1f"
 
 
+class UnknownTtsEngineError(RuntimeError):
+    """The configured engine id matches none of the engines that were wired up.
+
+    Its own type rather than a bare `KeyError`: the adapter maps this to 503 "fix
+    your config", and a builtin would let an unrelated `KeyError` escaping from
+    anywhere below be reported to the operator as a configuration problem.
+    """
+
+
 @dataclass(frozen=True)
 class Announcement:
-    """Finished audio plus what the HTTP layer needs for caching headers."""
+    """Finished audio plus the identity of the inputs that produced it."""
 
     mp3: bytes
-    etag: str
+    #: Digest of every input that can change the audio. The HTTP layer happens to
+    #: serve it as an `ETag`, but this layer does not know that -- naming it `etag`
+    #: would put an HTTP header in a use-case DTO.
+    cache_key: str
     text: str
     cached: bool
+
+
+@dataclass(frozen=True)
+class EngineVoice:
+    """A voice together with the engine that offers it.
+
+    The pairing is the use case's contribution; how it reaches a dropdown is the
+    adapter's. Returning pre-flattened JSON dicts from here would mean a wire-shape
+    change forced an edit to this layer.
+    """
+
+    engine: str
+    voice: Voice
 
 
 class SynthesizeAnnouncementUseCase:
@@ -60,15 +85,10 @@ class SynthesizeAnnouncementUseCase:
         """Synthesize arbitrary text for the admin panel's "Tes Suara" button."""
         return self._render(text)
 
-    def available_voices(self) -> list[dict[str, str]]:
-        """Every engine's voices, flattened for the admin dropdown."""
+    def available_voices(self) -> list[EngineVoice]:
+        """Every engine's voices, paired with the engine that offers them."""
         return [
-            {
-                "engine": engine_id,
-                "id": voice.id,
-                "label": voice.label,
-                "language": voice.language,
-            }
+            EngineVoice(engine=engine_id, voice=voice)
             for engine_id, engine in self._engines.items()
             for voice in engine.voices()
         ]
@@ -79,13 +99,13 @@ class SynthesizeAnnouncementUseCase:
 
         cached = self._cache.get(key)
         if cached is not None:
-            return Announcement(mp3=cached, etag=key, text=text, cached=True)
+            return Announcement(mp3=cached, cache_key=key, text=text, cached=True)
 
         engine = self._engine_for(config.engine)
-        speech_wav = engine.synthesize(text, config.settings)  # type: ignore[arg-type]
+        speech_wav = engine.synthesize(text, config.settings)
         mp3 = self._finish(speech_wav)
         self._cache.put(key, mp3)
-        return Announcement(mp3=mp3, etag=key, text=text, cached=False)
+        return Announcement(mp3=mp3, cache_key=key, text=text, cached=False)
 
     @staticmethod
     def _cache_key(config_parts: tuple[object, ...], text: str) -> str:
@@ -119,7 +139,7 @@ class SynthesizeAnnouncementUseCase:
         engine = self._engines.get(engine_id)
         if engine is None:
             known = ", ".join(sorted(self._engines)) or "none"
-            raise KeyError(
+            raise UnknownTtsEngineError(
                 f"unknown TTS engine {engine_id!r}; configured engines: {known}"
             )
         return engine

@@ -225,6 +225,30 @@ describe('RemoteAnnouncementAudioProvider', () => {
     await expect(played).resolves.toBeUndefined();
   });
 
+  it('stop() silences an announcement that an unlock probe overlapped', async () => {
+    // unlock() deliberately bypasses the FIFO queue — it has to run inside the
+    // user's gesture — so a tap can land while a clip that started before the
+    // block is still audible. With one `current` slot the probe evicted the
+    // announcement and stop() then paused the PROBE, leaving the board talking
+    // through a SYSTEM_RESET.
+    const provider = build();
+    const announcement = provider.playAnnouncement('/tts/announcement?x=1');
+    await flushMicrotasks();
+    const clip = FakeAudio.last!;
+
+    void provider.unlock(); // overlay tap mid-announcement
+    await flushMicrotasks();
+    const probe = FakeAudio.last!;
+    expect(probe).not.toBe(clip);
+
+    provider.stop();
+
+    expect(clip.pauseCalls).toBe(1);
+    expect(probe.pauseCalls).toBe(1);
+    // And the announcement's promise settles, so the queue loop is not held open.
+    await expect(announcement).resolves.toBeUndefined();
+  });
+
   it('a late ended from a stopped clip does not settle a newer one', async () => {
     const provider = build();
     void provider.playAnnouncement('/tts/announcement?x=1');

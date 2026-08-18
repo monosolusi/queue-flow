@@ -43,7 +43,13 @@ class AnnouncementRequest:
 
 @dataclass(frozen=True)
 class AnnouncementScript:
-    """The final Indonesian sentence, plus the cache identity of its inputs."""
+    """The final Indonesian sentence, ready to hand to any `TtsEngine`.
+
+    A type rather than a bare `str` so the thing that crossed the language boundary
+    is named. Cache identity is deliberately NOT here: what identifies a clip also
+    depends on the engine, voice and delivery knobs, which is application policy
+    (`SynthesizeAnnouncementUseCase._cache_key`), not a property of the sentence.
+    """
 
     text: str
 

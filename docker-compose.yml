@@ -82,6 +82,13 @@ services:
       # Synthesized clips survive restarts, so the first announcement of the
       # morning is not waiting on a cold synthesis (NFR-REL-02/03).
       - ttscache:/var/cache/qms-tts
+      # Human word recordings backing `PrerecordedTtsEngine`, the second
+      # `TtsEngine` impl. Bind-mounted rather than baked into the image: they are
+      # store-supplied content, and without this mount the directory the engine
+      # scans simply would not exist in the container -- it would report zero
+      # voices and could never be selected, making the swappable-engine claim true
+      # only of the test suite.
+      - ./services/tts-service/recordings:/app/recordings:ro
     healthcheck:
       # /tts/health is liveness only — no model, no cache, answers pre-wizard.
       # python:*-slim ships neither wget nor curl (unlike node:20-alpine), so

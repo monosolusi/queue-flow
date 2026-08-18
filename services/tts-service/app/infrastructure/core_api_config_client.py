@@ -125,8 +125,8 @@ class CoreApiConfigClient:
         try:
             settings = TtsSettings(
                 voice_id=voice or DEFAULT_VOICE,
-                speed=_positive_float(raw.get("speed"), 1.0),
-                volume=_positive_float(raw.get("volume"), 1.0),
+                speed=_numeric_or(raw.get("speed"), 1.0),
+                volume=_numeric_or(raw.get("volume"), 1.0),
             )
         except ValueError as exc:
             # Out-of-range knobs are a misconfiguration, not a reason to go mute.
@@ -145,7 +145,14 @@ def _clean_str(value: object) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
-def _positive_float(value: object, default: float) -> float:
+def _numeric_or(value: object, default: float) -> float:
+    """Coerce a JSON number, falling back when the field is absent or not numeric.
+
+    Deliberately does NOT range-check: `TtsSettings.__post_init__` owns the valid
+    ranges for speed and volume, and duplicating them here would mean two places to
+    change and a silent clamp instead of a loud rejection. `bool` is excluded first
+    because it is an `int` in Python, and `True` is not a speed.
+    """
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return default
     return float(value)

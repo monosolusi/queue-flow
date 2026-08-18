@@ -12,6 +12,17 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from .tts_engine import TtsSettings
+
+
+class AudioFinishingError(RuntimeError):
+    """Finishing the clip failed (bell, loudness or encode).
+
+    Declared beside the port rather than in infrastructure so the layers that catch
+    it -- the use case and the HTTP adapter -- can name the failure without
+    importing ffmpeg. The concrete implementation raises a subclass.
+    """
+
 
 class AudioCachePort(Protocol):
     """Byte store for finished announcement clips, addressed by an opaque key.
@@ -36,7 +47,9 @@ class AudioFinisher(Protocol):
     depend on ffmpeg, and it lets the use case be tested without ffmpeg installed.
     """
 
-    def __call__(self, speech_wav: bytes) -> bytes: ...
+    def __call__(self, speech_wav: bytes) -> bytes:
+        """Raises `AudioFinishingError` (or a subclass) when the chain fails."""
+        ...
 
 
 class TtsConfigProvider(Protocol):
@@ -46,7 +59,13 @@ class TtsConfigProvider(Protocol):
 
 
 class TtsConfigLike(Protocol):
-    """The slice of resolved config the application layer reads."""
+    """The slice of resolved config the application layer reads.
+
+    `settings` is typed as the domain `TtsSettings` rather than `object`: it is
+    already a pure domain type, so naming it costs no outward dependency and it is
+    what stops an infrastructure config carrying the wrong shape from satisfying
+    this Protocol and failing later, inside the engine.
+    """
 
     @property
     def engine(self) -> str: ...
@@ -55,4 +74,4 @@ class TtsConfigLike(Protocol):
     def cache_parts(self) -> tuple[object, ...]: ...
 
     @property
-    def settings(self) -> object: ...
+    def settings(self) -> TtsSettings: ...

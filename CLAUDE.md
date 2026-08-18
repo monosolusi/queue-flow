@@ -148,7 +148,9 @@ categories, routings) lives in PRD §7 — read it before touching config code.
   hardcoded literal; the first-run wizard path (no principal yet) uses a
   `'system'` sentinel.
 - **Clean architecture layering (NFR-MNT-01).** Domain has no framework/ORM/IO
-  imports — enforced by static analysis (acceptance criterion).
+  imports — enforced by static analysis (acceptance criterion) in **both**
+  languages: dep-cruiser for core-api, `tests/test_architecture.py` for
+  tts-service. A new layered service without such a gate does not satisfy this.
 - **Single-host readiness (NFR-MNT-02).** Whole stack comes up with one command,
   `docker compose up -d`. Any new service must be in `docker-compose.yml` (with
   `restart: always`) and routed by the `gateway`; no separate bring-up step.
@@ -178,11 +180,19 @@ recovery passes with no duplicate/lost ticket numbers.
 - **tts-service:** Python 3.13 + FastAPI + Piper (`id_ID-news_tts-medium`).
   Clean Architecture mirroring core-api (`domain` pure — Indonesian number
   morphology + the announcement script; `application`; `infrastructure`;
-  `interface_adapters`). Two `TtsEngine` impls ship together — `PiperTtsEngine`
-  and `PrerecordedTtsEngine` (human word recordings from a mounted folder) — so
-  swappability is demonstrated, not just claimed. ffmpeg does the bell, two-pass
-  `loudnorm`, silence trim and MP3 encode; clips are cached by a digest of
-  engine+voice+knobs+text in a named volume. Base image MUST stay Debian slim:
+  `interface_adapters`), enforced by `tests/test_architecture.py` — an `ast` walk
+  that is this service's dep-cruiser (allowlist of pure stdlib per layer + ring
+  order; `app/main.py` is the exempt composition root). Two `TtsEngine` impls ship
+  together — `PiperTtsEngine` and `PrerecordedTtsEngine` (human word recordings
+  from a folder **bind-mounted in `docker-compose.yml`**, without which the
+  directory does not exist in the image and the second engine reports zero voices)
+  — so swappability is demonstrated, not just claimed. ffmpeg does the bell,
+  two-pass `loudnorm`, silence trim and MP3 encode; clips are cached by a digest of
+  engine+voice+knobs+text in a named volume, **bounded** because
+  `/tts/preview?text=` is unauthenticated free-form text — eviction is FIFO by
+  write time, *not* LRU: refreshing mtime on a hit would put a write on the read
+  path, and the cost (a preview flood evicts the hot set) is one re-synthesis, not
+  corruption. Base image MUST stay Debian slim:
   `onnxruntime` publishes no musllinux wheel, so Alpine would try to compile ONNX
   Runtime from source. The voice is downloaded during `docker build` (build-time
   internet is already required by every service's `npm ci`) — runtime stays

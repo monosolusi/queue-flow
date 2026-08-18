@@ -18,10 +18,11 @@ from fastapi import APIRouter, Header, HTTPException, Query, Response
 from ..application.synthesize_announcement import (
     Announcement,
     SynthesizeAnnouncementUseCase,
+    UnknownTtsEngineError,
 )
 from ..domain.announcement import AnnouncementRequest, InvalidAnnouncementError
+from ..domain.ports import AudioFinishingError
 from ..domain.tts_engine import TtsEngineError, VoiceNotAvailableError
-from ..infrastructure.audio_post_processor import AudioProcessingError
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +54,22 @@ def build_router(
 
     @router.get("/voices")
     def voices() -> dict[str, object]:
-        """Selectable voices across every configured engine, for the admin panel."""
-        return {"voices": use_case.available_voices()}
+        """Selectable voices across every configured engine, for the admin panel.
+
+        Flattening to the wire shape happens HERE, not in the use case: the JSON a
+        dropdown wants is a presentation decision.
+        """
+        return {
+            "voices": [
+                {
+                    "engine": entry.engine,
+                    "id": entry.voice.id,
+                    "label": entry.voice.label,
+                    "language": entry.voice.language,
+                }
+                for entry in use_case.available_voices()
+            ]
+        }
 
     @router.get("/announcement")
     def announcement(
@@ -86,7 +101,7 @@ def build_router(
         """
         try:
             payload = probe_builder()
-        except AudioProcessingError as exc:  # pragma: no cover - env failure
+        except AudioFinishingError as exc:  # pragma: no cover - env failure
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         return Response(
             content=payload,
@@ -117,16 +132,20 @@ def _synthesize(action) -> Announcement:
         # file a bug.
         logger.error("configured voice unavailable: %s", exc)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except (TtsEngineError, AudioProcessingError) as exc:
-        logger.exception("announcement synthesis failed")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    except KeyError as exc:
+    except UnknownTtsEngineError as exc:
+        # 503 for the same reason as a missing voice: config is wrong, not the code.
+        # Caught before the generic 500 branch, and a dedicated type rather than a
+        # bare `KeyError` so an unrelated KeyError from deeper down is reported as
+        # the server fault it is instead of sending the operator to the config page.
         logger.error("unknown engine configured: %s", exc)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except (TtsEngineError, AudioFinishingError) as exc:
+        logger.exception("announcement synthesis failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 def _audio_response(result: Announcement, if_none_match: str | None) -> Response:
-    etag = f'"{result.etag}"'
+    etag = f'"{result.cache_key}"'
     if if_none_match and etag in {tag.strip() for tag in if_none_match.split(",")}:
         return Response(status_code=304, headers={"ETag": etag})
     return Response(
