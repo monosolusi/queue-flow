@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { WsAdapter } from '@nestjs/platform-ws';
 import request from 'supertest';
 import { AppModule } from '../../src/app.module';
+import { REQUIRED_CONFIG_FIELDS } from '../../src/interface-adapters/rest/system-config.controller';
 import { type ICategoryRepository, CATEGORY_REPOSITORY } from '../../src/domain/queue';
 import {
   type ICounterRoutingRuleRepository,
@@ -20,7 +21,7 @@ import {
 } from '../../src/infrastructure/persistence/in-memory';
 import { projectStateMachine, type WizardCategoryDto } from '../../src/application/store-config';
 import { StateMachine } from '../../src/domain/store-config';
-import { authHeader, bootstrapAuthedAdmin } from '../acceptance/_helpers';
+import { authHeader, bootstrapAuthedAdmin, prdWizardPayload } from '../acceptance/_helpers';
 
 /**
  * The PRD §7 reference wizard payload — 2 categories, 2 counters, the default
@@ -71,6 +72,7 @@ function wizardPayload() {
     endSources: [],
     startSources: [],
     printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
+    ttsConfiguration: { speed: 1, volume: 1, pauseMs: 0 },
   };
 }
 
@@ -778,5 +780,111 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
     const res = await request(app.getHttpServer()).get('/api/system/config');
     expect(res.status).toBe(200);
     expect(res.body.startSources).toEqual([]);
+  });
+
+  // ---------------------------------------------------------------------------
+  // ttsConfiguration. This field has a consumer in ANOTHER SERVICE: tts-service
+  // polls `GET /api/system/config` and parses a top-level `ttsConfiguration`
+  // object with the keys `speed`, `volume` and `pauseMs`
+  // (app/infrastructure/core_api_config_client.py). Its parser defaults every
+  // absent or unrecognised key rather than failing, so a wire-name typo here
+  // would be INVISIBLE — the board would simply keep announcing at the old pace
+  // and nothing would log an error. The round-trip test below is what pins the
+  // names; the printer precedent has no equivalent and would not have caught it.
+  // ---------------------------------------------------------------------------
+
+  it('PUT with a missing ttsConfiguration field is 400, not 500 (boundary presence guard)', async () => {
+    const { ttsConfiguration: _omit, ...bad } = wizardPayload();
+    const res = await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad);
+    expect(res.status).toBe(400);
+    const cfg = await request(app.getHttpServer()).get('/api/system/config');
+    expect(cfg.body.isInitialSetupCompleted).toBe(false);
+  });
+
+  it('PUT with a malformed ttsConfiguration is 400 (boundary shape + nested guards)', async () => {
+    // Present but a string → top-level shape guard (object).
+    const bad1 = wizardPayload() as unknown as Record<string, unknown>;
+    bad1.ttsConfiguration = 'fast';
+    expect(
+      (await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad1)).status,
+    ).toBe(400);
+
+    // Present but an array → top-level shape guard (object, not array).
+    const bad2 = wizardPayload() as unknown as Record<string, unknown>;
+    bad2.ttsConfiguration = [1, 1, 0];
+    expect(
+      (await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad2)).status,
+    ).toBe(400);
+
+    // A non-number `speed` → nested-shape guard. Without it, `'fast' >= 0.5` is
+    // silently false in the VO and the operator is told the value is out of
+    // range rather than the wrong type.
+    const bad3 = wizardPayload() as unknown as Record<string, unknown>;
+    bad3.ttsConfiguration = { speed: 'fast', volume: 1, pauseMs: 0 };
+    expect(
+      (await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad3)).status,
+    ).toBe(400);
+
+    // None of the rejected payloads silently completed setup.
+    const cfg = await request(app.getHttpServer()).get('/api/system/config');
+    expect(cfg.body.isInitialSetupCompleted).toBe(false);
+  });
+
+  it('PUT with an out-of-range speed is 400 (INVALID_VALUE_OBJECT, no write burned)', async () => {
+    // 3.0 is inside tts-service's own [0.25, 4.0] but outside what core-api
+    // offers, so this also pins that the narrower range is enforced here.
+    const bad = wizardPayload() as unknown as Record<string, unknown>;
+    bad.ttsConfiguration = { speed: 3.0, volume: 1, pauseMs: 0 };
+    const res = await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(bad);
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_VALUE_OBJECT');
+    const cfg = await request(app.getHttpServer()).get('/api/system/config');
+    expect(cfg.body.isInitialSetupCompleted).toBe(false);
+  });
+
+  it('PUT saves ttsConfiguration and a re-GET returns it under the keys tts-service parses (round-trip)', async () => {
+    const tts = { speed: 0.9, volume: 1.2, pauseMs: 400 };
+    const payload = wizardPayload() as unknown as Record<string, unknown>;
+    payload.ttsConfiguration = tts;
+    const res = await request(app.getHttpServer()).put('/api/system/config').set(authHeader(token)).send(payload);
+    expect(res.status).toBe(200);
+    expect(res.body.ttsConfiguration).toEqual(tts);
+
+    const cfg = await request(app.getHttpServer()).get('/api/system/config');
+    expect(cfg.body.ttsConfiguration).toEqual(tts);
+    // Spelled out rather than left to toEqual: these three key names ARE the
+    // cross-service contract, and a rename would otherwise only fail a test
+    // whose fixture was renamed alongside it.
+    expect(Object.keys(cfg.body.ttsConfiguration).sort()).toEqual(['pauseMs', 'speed', 'volume']);
+  });
+
+  // `REQUIRED_CONFIG_FIELDS` grows as the config graph does, and three separate
+  // payloads have to grow with it: this suite's `wizardPayload()`,
+  // `prdWizardPayload()` in test/acceptance/_helpers.ts, and the inlined copy in
+  // scripts/verify-topology.mjs. Only the first two run under `npm run verify`
+  // — the .mjs one is Docker-gated, which is how it drifted to 7 of 15 fields
+  // without anyone noticing.
+  //
+  // `prdWizardPayload` is the one that matters here. This suite's own payload is
+  // already guarded: it gets PUT with an `expect(200)` a few tests up, so a
+  // missing field fails there first. The acceptance fixture is the true twin of
+  // the .mjs copy, and asserting membership rather than eyeballing it means
+  // adding a required field fails at the layer that actually runs.
+  it.each([
+    ['prdWizardPayload (test/acceptance/_helpers.ts)', prdWizardPayload],
+    ['wizardPayload (this suite)', wizardPayload],
+  ])('%s carries every required config field (payload parity gate)', (_label, build) => {
+    const payload = build() as unknown as Record<string, unknown>;
+    for (const field of REQUIRED_CONFIG_FIELDS) {
+      expect(Object.keys(payload)).toContain(field);
+    }
+  });
+
+  it('a clean store prefills ttsConfiguration with the default delivery', async () => {
+    // tts-service polls this endpoint before the wizard has ever run, so the
+    // pre-setup answer has to be a usable configuration.
+    const res = await request(app.getHttpServer()).get('/api/system/config');
+    expect(res.status).toBe(200);
+    expect(res.body.ttsConfiguration).toEqual({ speed: 1, volume: 1, pauseMs: 0 });
   });
 });

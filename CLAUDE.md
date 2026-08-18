@@ -76,17 +76,19 @@ plays or synthesizes sound and has no `domain/notification` context — a
 server-side audio *model* would be over-abstraction. What core-api owns is the
 *configuration*: `tts-service` reads the announcement settings from the public
 `GET /api/system/config`, so the dependency points tts-service → core-api and
-never back. A `TtsConfiguration` VO in the Store Config context — mirroring
-`PrinterConfiguration`, with an admin page — is the planned follow-up; until it
-lands the config client falls back to a working Piper default, and it also has
-to, because a store configured by an older wizard will never carry the field.)
+never back. That configuration is the `TtsConfiguration` VO in the Store Config
+context — `{speed, volume, pauseMs}`, mirroring `PrinterConfiguration`, edited on
+admin `/tts-config`. The config client still defaults every field, and has to:
+a store configured by an older wizard carries none of them. `engine`/`voice` are
+deliberately absent from the VO — tts-service defaults both, and adding them
+later needs no migration (JSONB sub-keys, the `baudRate`-after-0013 precedent).)
 
 - **Queue** — `QueueTicket` aggregate (`TicketId` UUID, `ticketNumber` e.g.
   "A-001", `categoryId`, `currentStatus`, `counterId`, timestamps). Events:
   `TicketCreatedEvent`, `TicketStatusChangedEvent`, `DailyQueueResetEvent`.
 - **Store Config** — `SystemConfiguration` aggregate
   (`isInitialSetupCompleted`, `storeName`; VOs `StateSchema`,
-  `StateTransitionRule`, `DailyResetPolicy`) + `CounterRoutingRule` aggregate
+  `StateTransitionRule`, `DailyResetPolicy`, `TtsConfiguration`) + `CounterRoutingRule` aggregate
   (`counterId`, `assignedCategoryIds`, `priorityPolicy` ∈ {`FIFO_GLOBAL`,
   `CATEGORY_PRIORITY`}).
 - **Reporting** — `DailyQueueReport`, `CounterPerformance`.

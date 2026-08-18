@@ -70,6 +70,7 @@ describe('System-config scheduler re-arm + cron enforcement (integration — QUE
       endSources: [],
       startSources: [],
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
+      ttsConfiguration: { speed: 1, volume: 1, pauseMs: 0 },
     };
   }
 

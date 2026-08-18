@@ -13,6 +13,7 @@ import { TerminalNodes, type TerminalNodesDto } from '../../domain/store-config'
 import { EndSources, type EndSourcesDto } from '../../domain/store-config';
 import { StartSources, type StartSourcesDto } from '../../domain/store-config';
 import { PrinterConfiguration, type PrinterConfigurationDto } from '../../domain/store-config';
+import { TtsConfiguration, type TtsConfigurationDto } from '../../domain/store-config';
 import type { PriorityPolicy, RequeuePolicy } from '../../domain/shared';
 
 /**
@@ -116,6 +117,11 @@ export interface SystemConfigurationDto {
    *  dialog, or a network ESC/POS printer proxied through core-api over raw
    *  TCP). */
   readonly printerConfiguration: PrinterConfigurationDto;
+  /** Announcement delivery (how fast the TV board reads a called ticket and
+   *  how much silence separates the parts of the sentence). Read by
+   *  `tts-service`, which polls this endpoint — the field names are that
+   *  service's parse contract, not a free choice. */
+  readonly ttsConfiguration: TtsConfigurationDto;
 }
 
 /** Projects the domain `StateMachine` into the flat {@link StateMachineDto}. */
@@ -220,6 +226,11 @@ export class GetSystemConfigurationUseCase {
         // (the kiosk keeps using Chrome's print dialog), so a clean store
         // prefills the admin printer section with the existing chrome behavior.
         printerConfiguration: PrinterConfiguration.DEFAULT.toDto(),
+        // Default announcement delivery — speed 1.0, no added pauses, i.e. the
+        // audio the board produced before this field existed. `tts-service`
+        // reads this endpoint before the wizard has ever run, so the clean-store
+        // branch has to answer with a usable configuration, not a placeholder.
+        ttsConfiguration: TtsConfiguration.DEFAULT.toDto(),
       };
     }
 
@@ -244,6 +255,7 @@ export class GetSystemConfigurationUseCase {
       endSources: system.endSources.toDto(),
       startSources: system.startSources.toDto(),
       printerConfiguration: system.printerConfiguration.toDto(),
+      ttsConfiguration: system.ttsConfiguration.toDto(),
       categories: allCategories
         .slice()
         .sort((a, b) => a.code.localeCompare(b.code))

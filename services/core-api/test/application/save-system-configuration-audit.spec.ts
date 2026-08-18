@@ -87,6 +87,7 @@ describe('SaveSystemConfigurationUseCase — daily-reset policy audit + re-arm (
       endSources: [],
       startSources: [],
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
+      ttsConfiguration: { speed: 1, volume: 1, pauseMs: 0 },
       actor: 'admin',
       ...overrides,
     };

@@ -155,6 +155,8 @@ export function ConfigDraftProvider({
           // the required `printerConfiguration` wire field is never dropped
           // (mirrors `tvPanelLayout`).
           printerConfiguration: form.printerConfiguration,
+          // Same passthrough for the announcement delivery (`/tts-config` owns it).
+          ttsConfiguration: form.ttsConfiguration,
           dailyReset: {
             mode: form.dailyReset.mode,
             cronExpression:

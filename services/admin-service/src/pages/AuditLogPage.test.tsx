@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { AuditLogPage } from './AuditLogPage';
 import type { IAdminApi } from '../api/admin-api';
 import type { AuditLogEntryDto, SystemConfigurationDto } from '../api/types';
-import { DEFAULT_STATE_MACHINE, DEFAULT_BRAND_COLOR, DEFAULT_PRINTER_CONFIGURATION, DEFAULT_SERVICE_THEMES, DEFAULT_TV_GRID_LAYOUT } from '../api/types';
+import { DEFAULT_STATE_MACHINE, DEFAULT_BRAND_COLOR, DEFAULT_PRINTER_CONFIGURATION, DEFAULT_TTS_CONFIGURATION, DEFAULT_SERVICE_THEMES, DEFAULT_TV_GRID_LAYOUT } from '../api/types';
 // The same helper the page uses, so the date-filter test is TZ-independent (the
 // runner's local TZ determines the civil date). It used to be a fourth private
 // copy of the `YYYY-MM-DD` logic; `lib/date` is now its single owner.
@@ -36,6 +36,7 @@ function configuredStore(): SystemConfigurationDto {
     edgeRoutingLayout: {},
     nodePositions: {}, nodeActions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
     printerConfiguration: { ...DEFAULT_PRINTER_CONFIGURATION },
+    ttsConfiguration: { ...DEFAULT_TTS_CONFIGURATION },
   };
 }
 

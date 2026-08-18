@@ -38,6 +38,7 @@ import {
   StateTransitionRule,
   SystemConfiguration,
 } from '../../src/domain/store-config';
+import { TtsConfiguration } from '../../src/domain/store-config';
 import { Identifier } from '../../src/domain/shared';
 import { PriorityPolicy } from '../../src/domain/shared/priority-policy';
 import {
@@ -344,6 +345,7 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
         endSources: EndSources.DEFAULT,
         startSources: StartSources.DEFAULT,
         printerConfiguration: PrinterConfiguration.DEFAULT,
+        ttsConfiguration: TtsConfiguration.DEFAULT,
       }),
     );
 
@@ -500,6 +502,7 @@ describe('Queue command REST surface (integration — QUE-2)', () => {
           endSources: EndSources.DEFAULT,
           startSources: StartSources.DEFAULT,
           printerConfiguration: PrinterConfiguration.DEFAULT,
+          ttsConfiguration: TtsConfiguration.DEFAULT,
         }),
       );
     }

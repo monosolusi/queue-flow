@@ -6,6 +6,7 @@ import pytest
 
 from app.domain.announcement import (
     AnnouncementRequest,
+    AnnouncementScript,
     InvalidAnnouncementError,
     build_script,
 )
@@ -82,3 +83,71 @@ def test_rejects_an_empty_ticket_number() -> None:
 def test_rejects_a_non_integer_counter_id() -> None:
     with pytest.raises(InvalidAnnouncementError):
         AnnouncementRequest(ticket_number="A-001", counter_id="2")  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# Segments: where a configured pause is allowed to land. Splitting is a domain
+# decision (it depends on Indonesian phrasing); how long the silence is, and how
+# it is rendered, is not decided here.
+# ---------------------------------------------------------------------------
+
+
+def segments_for(ticket_number: str, counter_id: int) -> tuple[str, ...]:
+    return build_script(
+        AnnouncementRequest(ticket_number=ticket_number, counter_id=counter_id)
+    ).segments
+
+
+def test_segments_put_a_seam_in_front_of_each_number() -> None:
+    """"nomor antrian" then "a lima" then "silakan ke loket" then "dua" -- the two
+    seams a listener needs are before the ticket id and before the counter."""
+    assert segments_for("A-005", 2) == (
+        "nomor antrian",
+        "a lima",
+        "silakan ke loket",
+        "dua",
+    )
+
+
+def test_the_ticket_id_is_never_split_across_segments() -> None:
+    """A seam between "a" and "lima" would put a pause inside the very number the
+    pause exists to make catchable."""
+    assert "a lima" in segments_for("A-005", 2)
+    assert "a" not in segments_for("A-005", 2)
+
+
+def test_a_multi_letter_category_stays_whole_too() -> None:
+    assert segments_for("CS-004", 7) == (
+        "nomor antrian",
+        "ce es empat",
+        "silakan ke loket",
+        "tujuh",
+    )
+
+
+def test_a_ticket_with_no_sequence_still_segments_into_four() -> None:
+    """Segment count is not derived from the presence of a number, so the
+    degenerate ticket number does not produce a shorter list the joiner would
+    then have to special-case."""
+    assert segments_for("A", 3) == ("nomor antrian", "a", "silakan ke loket", "tiga")
+
+
+def test_joining_the_segments_yields_the_same_words_as_the_sentence() -> None:
+    """The two granularities must be one announcement. Punctuation aside, a word
+    present in one and missing from the other is a drift bug."""
+    script = build_script(AnnouncementRequest(ticket_number="A-123", counter_id=12))
+    assert " ".join(script.segments).split() == script.text.replace(",", "").split()
+
+
+def test_a_script_whose_segments_do_not_spell_out_the_sentence_is_rejected() -> None:
+    """`build_script` cannot produce a mismatch, but the type is public and the
+    application layer constructs one directly for free-form preview text."""
+    with pytest.raises(InvalidAnnouncementError):
+        AnnouncementScript(text="nomor antrian a satu", segments=("nomor antrian",))
+
+
+def test_free_form_single_segment_text_keeps_its_own_punctuation() -> None:
+    """Punctuation is normalised on BOTH sides — stripping only `text` would
+    reject the one-segment script a preview builds from arbitrary words."""
+    script = AnnouncementScript(text="halo, ini tes", segments=("halo, ini tes",))
+    assert script.segments == ("halo, ini tes",)

@@ -62,6 +62,7 @@ function configRow(stateMachine: Record<string, unknown>): Record<string, unknow
     terminal_nodes: null,
     end_sources: null,
     printer_configuration: null,
+    tts_configuration: null,
   };
 }
 

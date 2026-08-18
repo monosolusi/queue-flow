@@ -10,6 +10,7 @@ import {
   SystemConfiguration,
   PrinterConfiguration,
 } from '../../src/domain/store-config';
+import { TtsConfiguration } from '../../src/domain/store-config';
 import { Identifier } from '../../src/domain/shared';
 
 /**
@@ -82,6 +83,7 @@ describe('Print-proxy REST surface (integration — FR-printer-config)', () => {
       endSources: d.endSources,
       startSources: d.startSources,
       printerConfiguration: printer,
+      ttsConfiguration: TtsConfiguration.DEFAULT,
     });
     void config.save(cfg);
   }

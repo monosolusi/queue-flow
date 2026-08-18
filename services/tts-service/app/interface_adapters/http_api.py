@@ -20,9 +20,21 @@ from ..application.synthesize_announcement import (
     SynthesizeAnnouncementUseCase,
     UnknownTtsEngineError,
 )
-from ..domain.announcement import AnnouncementRequest, InvalidAnnouncementError
+from ..domain.announcement import (
+    MAX_PAUSE_MS,
+    MIN_PAUSE_MS,
+    AnnouncementRequest,
+    InvalidAnnouncementError,
+)
 from ..domain.ports import AudioFinishingError
-from ..domain.tts_engine import TtsEngineError, VoiceNotAvailableError
+from ..domain.tts_engine import (
+    MAX_SPEED,
+    MAX_VOLUME,
+    MIN_SPEED,
+    MIN_VOLUME,
+    TtsEngineError,
+    VoiceNotAvailableError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -84,11 +96,33 @@ def build_router(
 
     @router.get("/preview")
     def preview(
-        text: str = Query(..., min_length=1, max_length=200),
+        text: str | None = Query(default=None, min_length=1, max_length=200),
+        speed: float | None = Query(default=None, ge=MIN_SPEED, le=MAX_SPEED),
+        volume: float | None = Query(default=None, ge=MIN_VOLUME, le=MAX_VOLUME),
+        pauseMs: int | None = Query(default=None, ge=MIN_PAUSE_MS, le=MAX_PAUSE_MS),  # noqa: N803
         if_none_match: str | None = Header(default=None, alias="if-none-match"),
     ) -> Response:
-        """Admin "Tes Suara": hear the current voice without calling a real ticket."""
-        result = _synthesize(lambda: use_case.preview(text))
+        """Admin "Tes Suara": hear the announcement without calling a real ticket.
+
+        `text` is optional. Omitted, the domain builds a sample announcement, so
+        the admin panel never has to know how a queue call is worded in
+        Indonesian -- that knowledge lives in this service and nowhere else.
+
+        `speed`/`volume`/`pauseMs` audition UNSAVED values so a manager can hear a
+        setting before committing to it. They stay bounded by FastAPI at the
+        engine's own limits (the admin panel offers a narrower range still), and
+        the digest already folds delivery knobs in, so an auditioned clip cannot
+        be served in place of a real announcement.
+
+        The use case quantizes the multipliers, which is what keeps this
+        unauthenticated route from flooding the bounded clip cache -- see
+        `SynthesizeAnnouncementUseCase.preview`.
+        """
+        result = _synthesize(
+            lambda: use_case.preview(
+                text, speed=speed, volume=volume, pause_ms=pauseMs
+            )
+        )
         return _audio_response(result, if_none_match)
 
     @router.get("/probe")

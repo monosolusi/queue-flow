@@ -352,6 +352,27 @@ export interface PrinterConfigurationDto {
   readonly baudRate: number;
 }
 
+/**
+ * How the TV board's announcements are delivered — how fast a called ticket is
+ * read out and how much silence separates the parts of the sentence.
+ *
+ * Consumed by `tts-service`, which polls `GET /api/system/config` directly; the
+ * admin panel only writes it. The `/tts-config` page edits it, every other
+ * full-save site passes it through unchanged.
+ *
+ * The engine and the voice are deliberately NOT here: `tts-service` defaults
+ * both, and no admin surface selects them today.
+ */
+export interface TtsConfigurationDto {
+  /** Speaking rate multiplier; 1.0 is the voice's recorded pace. */
+  readonly speed: number;
+  /** Volume multiplier; 1.0 is unchanged, 0 is silent. */
+  readonly volume: number;
+  /** Silence at each pause point inside the sentence, milliseconds. 0 reads the
+   *  announcement as one continuous utterance. */
+  readonly pauseMs: number;
+}
+
 export interface DailyResetPolicyDto {
   readonly mode: DailyResetMode;
   readonly cronExpression: string | null;
@@ -436,6 +457,12 @@ export interface SystemConfigurationDto {
    *  change). `toForm` keeps a defensive `coercePrinterConfiguration` coercion
    *  (belt-and-suspenders, same as `serviceThemes` / `tvPanelLayout`). */
   readonly printerConfiguration: PrinterConfigurationDto;
+  /** Announcement delivery for the TV board. Always present — the backend
+   *  defaults to {@link DEFAULT_TTS_CONFIGURATION} so a store that never opens
+   *  `/tts-config` keeps the delivery it already had. `toForm` keeps a
+   *  defensive `coerceTtsConfiguration` coercion (belt-and-suspenders, same as
+   *  `printerConfiguration`). */
+  readonly ttsConfiguration: TtsConfigurationDto;
 }
 
 /**
@@ -508,6 +535,10 @@ export interface SaveSystemConfigurationPayload {
    *  truth for the printer mode + settings); the dedicated `/printer-config`
    *  page edits it, every other full-save site passes it through unchanged. */
   readonly printerConfiguration: PrinterConfigurationDto;
+  /** Announcement delivery — REQUIRED on the PUT. Omitting it from a full save
+   *  would reset a manager's speed/pause to the default, which is why it is
+   *  required rather than optional: every save site must carry it. */
+  readonly ttsConfiguration: TtsConfigurationDto;
 }
 
 /** Result of `PUT /api/system/config`. */
@@ -545,6 +576,9 @@ export interface SaveSystemConfigurationResult {
    *  The save path ignores the result body and re-GETs, so this is not
    *  load-bearing; kept for contract completeness (mirrors `nodePositions`). */
   readonly printerConfiguration: PrinterConfigurationDto;
+  /** Always echoed by the backend. Not load-bearing (the save path re-GETs);
+   *  kept for contract completeness. */
+  readonly ttsConfiguration: TtsConfigurationDto;
 }
 
 /**
@@ -656,6 +690,7 @@ export const REQUIRED_CONFIG_FIELDS: readonly (keyof SaveSystemConfigurationPayl
   'endSources',
   'startSources',
   'printerConfiguration',
+  'ttsConfiguration',
 ];
 
 /**
@@ -673,6 +708,18 @@ export const DEFAULT_PRINTER_CONFIGURATION: PrinterConfigurationDto = {
   port: 9100,
   cutMode: 'partial',
   baudRate: 9600,
+};
+
+/**
+ * The default announcement delivery — the voice's own pace, unchanged volume,
+ * and no added pause. Matches the backend `TtsConfiguration.DEFAULT` and
+ * `tts-service`'s own fallback, so a store that never opens `/tts-config` hears
+ * exactly what it heard before the page existed (zero behavior change).
+ */
+export const DEFAULT_TTS_CONFIGURATION: TtsConfigurationDto = {
+  speed: 1,
+  volume: 1,
+  pauseMs: 0,
 };
 
 /**

@@ -137,6 +137,7 @@ export function prdWizardPayload() {
     // behavior change (the kiosk keeps using Chrome's print dialog). The
     // standard wizard payload keeps the existing chrome behavior.
     printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
+    ttsConfiguration: { speed: 1, volume: 1, pauseMs: 0 },
     // QUE-43: `actor` is no longer a wire field — the server derives the audit
     // actor from the authenticated principal (or the 'system' sentinel on the
     // pre-setup wizard path). The wizard client stopped sending it; this fixture

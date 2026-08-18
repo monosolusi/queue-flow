@@ -20,4 +20,5 @@ export * from './value-objects/service-themes';
 export * from './value-objects/state-schema';
 export * from './value-objects/state-descriptions';
 export * from './value-objects/state-transition-rule';
+export * from './value-objects/tts-configuration';
 export * from './value-objects/tv-panel-layout';

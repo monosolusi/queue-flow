@@ -27,8 +27,14 @@ interface HttpRequestWithPrincipal {
  * — it is the authenticated admin's username (QUE-43), threaded from the guard
  * (or the `'system'` sentinel on the pre-setup wizard path). `brandColor` is
  * required on the wire (QUE-36 made it part of the config graph).
+ *
+ * @internal Exported ONLY for the payload parity gate in
+ * `test/interface-adapters/system-config-wizard.integration.spec.ts`, which
+ * checks the wizard fixtures against it. Do not import from `src/` — this is
+ * transport policy, and a use case or value object reaching for it would be
+ * pulling the wire contract inward.
  */
-const REQUIRED_CONFIG_FIELDS: ReadonlyArray<keyof SaveSystemConfigurationCommand> = [
+export const REQUIRED_CONFIG_FIELDS: ReadonlyArray<keyof SaveSystemConfigurationCommand> = [
   'storeName',
   'stateMachine',
   'dailyReset',
@@ -44,6 +50,7 @@ const REQUIRED_CONFIG_FIELDS: ReadonlyArray<keyof SaveSystemConfigurationCommand
   'endSources',
   'startSources',
   'printerConfiguration',
+  'ttsConfiguration',
 ];
 
 /**
@@ -76,6 +83,7 @@ const CONFIG_FIELD_SHAPES: ReadonlyArray<{
   { field: 'endSources', kind: 'array' },
   { field: 'startSources', kind: 'array' },
   { field: 'printerConfiguration', kind: 'object' },
+  { field: 'ttsConfiguration', kind: 'object' },
 ];
 
 /** True when `value` does not match the expected `kind` (object = plain object, not array). */
@@ -409,6 +417,27 @@ function configNestedShapeErrors(body: Partial<SaveSystemConfigurationCommand>):
       errs.push('printerConfiguration.baudRate must be a number');
     }
   }
+  // ttsConfiguration: same division of labour as printerConfiguration above.
+  // Every field is numeric, so the crash class here is a present-but-non-number
+  // value reaching the VO's range comparisons — where `'fast' >= 0.5` is
+  // silently `false` and would surface as the range message rather than the
+  // type error it actually is. Range bounds and the integer rule for `pauseMs`
+  // stay in the VO. Unknown extra properties are ignored.
+  const tts = body.ttsConfiguration;
+  if (tts != null && typeof tts === 'object' && !Array.isArray(tts)) {
+    // `TtsConfigurationDto` carries no index signature, so cast through
+    // `unknown` to a plain record for the per-field typeof crash guards.
+    const e = tts as unknown as Record<string, unknown>;
+    if (e.speed != null && typeof e.speed !== 'number') {
+      errs.push('ttsConfiguration.speed must be a number');
+    }
+    if (e.volume != null && typeof e.volume !== 'number') {
+      errs.push('ttsConfiguration.volume must be a number');
+    }
+    if (e.pauseMs != null && typeof e.pauseMs !== 'number') {
+      errs.push('ttsConfiguration.pauseMs must be a number');
+    }
+  }
   return errs;
 }
 
@@ -503,6 +532,7 @@ export class SystemConfigController {
       endSources: body.endSources!,
       startSources: body.startSources!,
       printerConfiguration: body.printerConfiguration!,
+      ttsConfiguration: body.ttsConfiguration!,
       actor: principal?.username ?? 'system',
     };
     return this.saveConfig.execute(command);

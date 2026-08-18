@@ -6,6 +6,7 @@ import json
 
 import pytest
 
+from app.domain.announcement import PauseDuration
 from app.infrastructure.core_api_config_client import (
     DEFAULT_ENGINE,
     DEFAULT_VOICE,
@@ -183,3 +184,89 @@ def test_malformed_json_is_treated_as_unreachable(
         lambda url, timeout=None: Garbage(),  # noqa: ARG005
     )
     assert CoreApiConfigClient("http://core-api:3000").resolve().engine == DEFAULT_ENGINE
+
+
+# ---------------------------------------------------------------------------
+# pauseMs. Unlike speed/volume there is no `TtsSettings` downstream to own the
+# range, so this parser is the only place a bad pause can be caught -- and it
+# must catch it by falling back, never by raising, because a misconfigured pause
+# must not be able to silence the board.
+# ---------------------------------------------------------------------------
+
+
+def test_reads_the_pause_from_the_config_document() -> None:
+    config = parse({"ttsConfiguration": {"voice": "v", "pauseMs": 400}})
+    assert config.pause.milliseconds == 400
+
+
+def test_defaults_the_pause_to_zero_when_absent() -> None:
+    """A store configured by an older wizard carries no pauseMs at all, and zero
+    is the delivery it already has -- so an upgrade changes nothing audible."""
+    assert parse({"ttsConfiguration": {"voice": "v"}}).pause.milliseconds == 0
+    assert parse({}).pause.milliseconds == 0
+
+
+@pytest.mark.parametrize("value", ["400", [], {}, True, False, 250.5])
+def test_a_non_integer_pause_falls_back(value: object) -> None:
+    """`True` is an `int` in Python and would otherwise become a 1 ms pause."""
+    config = parse({"ttsConfiguration": {"voice": "v", "pauseMs": value}})
+    assert config.pause.milliseconds == 0
+
+
+def test_an_explicit_null_pause_is_absent_not_invalid(caplog) -> None:
+    """An absent (or null) pause is the NORMAL case, not corruption.
+
+    A store configured by an older wizard carries no `pauseMs` at all, and this
+    parse runs on every config refresh — so treating it as a misconfiguration
+    would log a warning once per TTL for ever and send an operator hunting a
+    problem that is not there. Deliberately separate from the invalid-value
+    parametrize above, which is exactly where it used to hide.
+    """
+    with caplog.at_level("WARNING"):
+        assert parse({"ttsConfiguration": {"voice": "v", "pauseMs": None}}).pause.milliseconds == 0
+        assert parse({"ttsConfiguration": {"voice": "v"}}).pause.milliseconds == 0
+    assert caplog.records == []
+
+
+def test_an_out_of_range_pause_does_warn(caplog) -> None:
+    """The counterpart: a value that IS wrong must still be discoverable."""
+    with caplog.at_level("WARNING"):
+        parse({"ttsConfiguration": {"voice": "v", "pauseMs": 99_999}})
+    assert any("pauseMs" in r.message for r in caplog.records)
+
+
+@pytest.mark.parametrize("value", [-1, -400, 2001, 10_000])
+def test_an_out_of_range_pause_falls_back(value: int) -> None:
+    config = parse({"ttsConfiguration": {"voice": "v", "pauseMs": value}})
+    assert config.pause.milliseconds == 0
+
+
+def test_an_integral_float_pause_is_accepted() -> None:
+    """`400.0` is unambiguously 400 ms; rejecting it would silently restore the
+    old delivery for a value that is not actually wrong."""
+    assert parse({"ttsConfiguration": {"voice": "v", "pauseMs": 400.0}}).pause.milliseconds == 400
+
+
+def test_a_bad_pause_does_not_discard_the_other_knobs() -> None:
+    """Speed and volume share a fallback (TtsSettings validates them as a set),
+    but the pause is read independently -- a bad pause must not cost the manager
+    their speed setting too."""
+    config = parse(
+        {"ttsConfiguration": {"voice": "bu-sari", "speed": 1.4, "pauseMs": -5}}
+    )
+    assert config.pause.milliseconds == 0
+    assert config.settings.speed == 1.4
+    assert config.settings.voice_id == "bu-sari"
+
+
+def test_the_parsed_pause_is_a_domain_value_with_the_range_enforced() -> None:
+    """The range belongs to `PauseDuration`, not to this parser -- so a value that
+    got through here is one every downstream caller can trust without re-checking.
+
+    (That a changed pause yields a different clip is asserted where the digest is
+    actually built: `test_changing_only_the_pause_produces_a_different_clip`.)"""
+    parsed = parse({"ttsConfiguration": {"voice": "v", "pauseMs": 400}}).pause
+    assert isinstance(parsed, PauseDuration)
+    assert parsed.milliseconds == 400
+    with pytest.raises(ValueError):
+        PauseDuration(-1)

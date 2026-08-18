@@ -34,6 +34,7 @@ import {
   DailyResetMode,
   SystemConfiguration,
 } from '../../src/domain/store-config';
+import { TtsConfiguration } from '../../src/domain/store-config';
 import {
   type IAuditLogRepository,
   AUDIT_LOG_REPOSITORY,
@@ -199,6 +200,7 @@ describe('System daily-reset REST surface (integration — QUE-2)', () => {
         endSources: EndSources.DEFAULT,
         startSources: StartSources.DEFAULT,
         printerConfiguration: PrinterConfiguration.DEFAULT,
+        ttsConfiguration: TtsConfiguration.DEFAULT,
       }),
     );
 

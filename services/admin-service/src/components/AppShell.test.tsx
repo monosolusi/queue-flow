@@ -92,6 +92,7 @@ describe('AppShell', () => {
     expect(screen.getByRole('link', { name: 'Reset Harian' })).toHaveAttribute('href', '/config/reset-harian');
     expect(screen.getByRole('link', { name: 'Operasi Manual' })).toHaveAttribute('href', '/config/operasi-manual');
     expect(screen.getByRole('link', { name: 'Konfigurasi Printer' })).toHaveAttribute('href', '/printer-config');
+    expect(screen.getByRole('link', { name: 'Suara Pengumuman' })).toHaveAttribute('href', '/tts-config');
     // Big-group headings render as non-heading labels.
     expect(screen.getByText('Operasional')).toBeInTheDocument();
     expect(screen.getByText('Konfigurasi Sistem')).toBeInTheDocument();

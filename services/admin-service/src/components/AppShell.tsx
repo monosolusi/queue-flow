@@ -29,6 +29,7 @@ function pageTitleFor(pathname: string): string {
   if (pathname.startsWith('/config')) return 'Konfigurasi Operasional';
   if (pathname.startsWith('/tv-layout')) return 'Tampilan TV';
   if (pathname.startsWith('/printer-config')) return 'Konfigurasi Printer';
+  if (pathname.startsWith('/tts-config')) return 'Suara Pengumuman';
   if (pathname.startsWith('/analytics')) return 'Analitik & Laporan';
   if (pathname.startsWith('/users')) return 'Pengguna';
   if (pathname.startsWith('/audit')) return 'Log Audit';

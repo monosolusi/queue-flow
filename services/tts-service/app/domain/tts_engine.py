@@ -35,6 +35,15 @@ class Voice:
     language: str
 
 
+#: Engine-neutral multiplier bounds. Exported so the HTTP edge can bound a query
+#: parameter with the SAME numbers `__post_init__` enforces, instead of restating
+#: them as literals in a route signature.
+MIN_SPEED = 0.25
+MAX_SPEED = 4.0
+MIN_VOLUME = 0.0
+MAX_VOLUME = 2.0
+
+
 @dataclass(frozen=True)
 class TtsSettings:
     """Per-request delivery knobs, mirroring `TtsConfiguration` in core-api.
@@ -51,10 +60,14 @@ class TtsSettings:
     volume: float = 1.0
 
     def __post_init__(self) -> None:
-        if not 0.25 <= self.speed <= 4.0:
-            raise ValueError(f"speed must be within [0.25, 4.0], got {self.speed}")
-        if not 0.0 <= self.volume <= 2.0:
-            raise ValueError(f"volume must be within [0.0, 2.0], got {self.volume}")
+        if not MIN_SPEED <= self.speed <= MAX_SPEED:
+            raise ValueError(
+                f"speed must be within [{MIN_SPEED}, {MAX_SPEED}], got {self.speed}"
+            )
+        if not MIN_VOLUME <= self.volume <= MAX_VOLUME:
+            raise ValueError(
+                f"volume must be within [{MIN_VOLUME}, {MAX_VOLUME}], got {self.volume}"
+            )
 
 
 class TtsEngine(ABC):

@@ -19,6 +19,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
+from ..domain.announcement import DEFAULT_PAUSE_MS, InvalidAnnouncementError, PauseDuration
 from ..domain.tts_engine import TtsSettings
 
 logger = logging.getLogger(__name__)
@@ -27,21 +28,20 @@ DEFAULT_ENGINE = "piper"
 DEFAULT_VOICE = "id_ID-news_tts-medium"
 
 
+#: What the service uses when core-api says nothing about the pause: one
+#: continuous utterance, the delivery this service had before the setting
+#: existed. The RANGE is not restated here -- `PauseDuration` owns it, the same
+#: way `TtsSettings` owns the speed and volume ranges.
+DEFAULT_PAUSE = PauseDuration(DEFAULT_PAUSE_MS)
+
+
 @dataclass(frozen=True)
 class TtsConfig:
     """Resolved announcement settings."""
 
     engine: str
     settings: TtsSettings
-
-    @property
-    def cache_parts(self) -> tuple[object, ...]:
-        return (
-            self.engine,
-            self.settings.voice_id,
-            self.settings.speed,
-            self.settings.volume,
-        )
+    pause: PauseDuration = DEFAULT_PAUSE
 
 
 #: What the service uses before core-api has a `ttsConfiguration` at all. Landing
@@ -50,6 +50,7 @@ class TtsConfig:
 FALLBACK = TtsConfig(
     engine=DEFAULT_ENGINE,
     settings=TtsSettings(voice_id=DEFAULT_VOICE, speed=1.0, volume=1.0),
+    pause=DEFAULT_PAUSE,
 )
 
 
@@ -132,7 +133,11 @@ class CoreApiConfigClient:
             # Out-of-range knobs are a misconfiguration, not a reason to go mute.
             logger.warning("invalid ttsConfiguration knobs (%s); using defaults", exc)
             settings = FALLBACK.settings
-        return TtsConfig(engine=engine or DEFAULT_ENGINE, settings=settings)
+        return TtsConfig(
+            engine=engine or DEFAULT_ENGINE,
+            settings=settings,
+            pause=_pause_or(raw.get("pauseMs"), DEFAULT_PAUSE),
+        )
 
 
 def _clean_str(value: object) -> str:
@@ -143,6 +148,35 @@ def _clean_str(value: object) -> str:
     broken service rather than a typo in the config.
     """
     return value.strip() if isinstance(value, str) else ""
+
+
+def _pause_or(value: object, default: PauseDuration) -> PauseDuration:
+    """Coerce the pause to a `PauseDuration`, falling back rather than raising.
+
+    Range ownership stays with `PauseDuration`; this only decides what an
+    unusable value means here, and the answer is the same as for an absent one:
+    the default. A misconfigured pause must never be able to silence the board.
+
+    An integral `float` is accepted: core-api's value object enforces an integer,
+    but `400.0` in a hand-edited config is unambiguously 400 ms, and rejecting it
+    would silently restore the old delivery for a value that is not actually
+    wrong. A fractional one is left to `PauseDuration` to reject -- that is a
+    client bug, not a preference.
+    """
+    # Absent is the NORMAL case, not corruption: a store configured by an older
+    # wizard carries no `pauseMs` at all, and this runs on every config refresh.
+    # Routing it through the failure branch would log a misconfiguration warning
+    # once per TTL, for ever, and send an operator hunting a problem that is not
+    # there.
+    if value is None:
+        return default
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    try:
+        return PauseDuration(value)  # type: ignore[arg-type]
+    except InvalidAnnouncementError as exc:
+        logger.warning("invalid ttsConfiguration.pauseMs (%s); using default", exc)
+        return default
 
 
 def _numeric_or(value: object, default: float) -> float:

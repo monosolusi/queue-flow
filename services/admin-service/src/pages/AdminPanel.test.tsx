@@ -12,6 +12,7 @@ import {
   DEFAULT_STATE_MACHINE,
   DEFAULT_BRAND_COLOR,
   DEFAULT_PRINTER_CONFIGURATION,
+  DEFAULT_TTS_CONFIGURATION,
   DEFAULT_SERVICE_THEMES,
   DEFAULT_TV_GRID_LAYOUT,
   type CleanupTransactionLogResultDto,
@@ -66,6 +67,7 @@ function configuredStore(): SystemConfigurationDto {
     edgeRoutingLayout: {},
     nodePositions: {}, nodeActions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
     printerConfiguration: { ...DEFAULT_PRINTER_CONFIGURATION },
+    ttsConfiguration: { ...DEFAULT_TTS_CONFIGURATION },
   };
 }
 
@@ -90,7 +92,7 @@ function makeApi(
   const save = vi.fn(
     saveImpl ??
       ((payload: SaveSystemConfigurationPayload) =>
-        Promise.resolve({ isInitialSetupCompleted: true, storeName: payload.storeName, brandColor: payload.brandColor, serviceThemes: payload.serviceThemes, tvPanelLayout: payload.tvPanelLayout, edgeRoutingLayout: {}, nodePositions: {}, nodeActions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const, printerConfiguration: payload.printerConfiguration })),
+        Promise.resolve({ isInitialSetupCompleted: true, storeName: payload.storeName, brandColor: payload.brandColor, serviceThemes: payload.serviceThemes, tvPanelLayout: payload.tvPanelLayout, edgeRoutingLayout: {}, nodePositions: {}, nodeActions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const, printerConfiguration: payload.printerConfiguration, ttsConfiguration: payload.ttsConfiguration })),
   );
   // The panel reloads the config after a successful save; default to returning
   // the same config (with ids preserved) so the post-save repopulate succeeds.
@@ -991,7 +993,7 @@ describe('AdminPanel shared-config coherence', () => {
           tvPanelLayout: payload.tvPanelLayout,
           edgeRoutingLayout: {},
           nodePositions: {}, nodeActions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
-          printerConfiguration: payload.printerConfiguration,
+          printerConfiguration: payload.printerConfiguration, ttsConfiguration: payload.ttsConfiguration,
         });
       },
     );

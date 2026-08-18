@@ -142,6 +142,8 @@ export function PrinterConfigPage({ api }: { api: IAdminApi }) {
           tvPanelLayout: form.tvPanelLayout,
           // The one field this page edits.
           printerConfiguration: draft,
+          // Announcement delivery — payload-only passthrough (`/tts-config` owns it).
+          ttsConfiguration: form.ttsConfiguration,
           dailyReset: {
             mode: form.dailyReset.mode,
             cronExpression:

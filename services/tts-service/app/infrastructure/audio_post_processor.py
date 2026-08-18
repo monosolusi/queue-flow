@@ -165,18 +165,90 @@ def _finish(source: Path, destination: Path, *, target_lufs: float, pad_seconds:
     )
 
 
-def build_announcement_mp3(speech_wav: bytes) -> bytes:
+def _trim_and_pad(source: Path, destination: Path, *, pad_seconds: float) -> None:
+    """Strip a segment's own leading/trailing silence, then append an exact gap.
+
+    Deliberately does NOT loudness-normalise. Normalising each segment on its own
+    would drag every one of them to the same integrated loudness, which for a
+    0.4-second segment like "dua" means being pulled up next to a two-second one
+    -- the announcement comes out flat and machine-like. Loudness is measured
+    once, over the joined speech, by `_finish`.
+
+    Trimming first is what makes the gap exact: whatever silence the synthesizer
+    chose to emit around the words is removed, so the pause is the configured
+    length rather than the configured length plus an arbitrary remainder.
+    """
+    filters = _TRIM
+    if pad_seconds > 0:
+        filters += f",apad=pad_dur={pad_seconds}"
+    _run(
+        [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-i", str(source), "-af", filters,
+            "-ac", "1", "-ar", str(SAMPLE_RATE),
+            str(destination),
+        ]
+    )
+
+
+def _join_speech(segments: list[bytes], gap_ms: int, work: Path) -> Path:
+    """Concatenate speech segments with `gap_ms` of silence between them.
+
+    A single segment is written straight through with no ffmpeg pass at all, so
+    the default (unpaused) delivery reaches `_finish` exactly as it always did --
+    the no-pause path is not merely equivalent to the old one, it is the old one.
+    """
+    if not segments:
+        # The port promises a clip; an empty concat listing would instead surface
+        # as an opaque ffmpeg failure several steps later.
+        raise AudioProcessingError("cannot build an announcement from zero speech segments")
+    if len(segments) == 1:
+        raw = work / "speech-raw.wav"
+        raw.write_bytes(segments[0])
+        return raw
+
+    gap_seconds = gap_ms / 1000
+    parts: list[Path] = []
+    for index, segment in enumerate(segments):
+        raw = work / f"segment-{index}-raw.wav"
+        raw.write_bytes(segment)
+        trimmed = work / f"segment-{index}.wav"
+        # The gap goes AFTER each segment except the last; a trailing gap there
+        # would just be swallowed by `_finish`'s own trim and then re-added as
+        # its tail pad, so asking for it would be asking for nothing.
+        last = index == len(segments) - 1
+        _trim_and_pad(raw, trimmed, pad_seconds=0 if last else gap_seconds)
+        parts.append(trimmed)
+
+    listing = work / "speech-concat.txt"
+    listing.write_text("".join(f"file '{part}'\n" for part in parts), encoding="utf-8")
+    joined = work / "speech-raw.wav"
+    _run(
+        [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-f", "concat", "-safe", "0", "-i", str(listing),
+            "-ac", "1", "-ar", str(SAMPLE_RATE),
+            str(joined),
+        ]
+    )
+    return joined
+
+
+def build_announcement_mp3(speech_segments: list[bytes], gap_ms: int) -> bytes:
     """Bell + normalised speech, encoded as a single mono MP3.
 
     Returns one file because the TV plays one file: the browser's autoplay gate is
     per-`play()` call, so a two-request announcement would double the chance of a
     blocked start and would need client-side sequencing -- exactly the complexity
-    this service was created to absorb.
+    this service was created to absorb. That reasoning is also why `gap_ms` is
+    handled here rather than by the TV playing several clips in a row.
+
+    Segments arrive already split by the domain (it knows where a pause belongs
+    in the sentence); this function only renders the silence and joins them.
     """
     with tempfile.TemporaryDirectory(prefix="qms-tts-") as tmp:
         work = Path(tmp)
-        raw_speech = work / "speech-raw.wav"
-        raw_speech.write_bytes(speech_wav)
+        raw_speech = _join_speech(speech_segments, gap_ms, work)
 
         bell_raw = work / "bell-raw.wav"
         synthesize_bell(bell_raw)

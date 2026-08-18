@@ -151,6 +151,8 @@ export function TvLayoutPage({ api }: { api: IAdminApi }) {
           // the required `printerConfiguration` wire field is never dropped
           // (mirrors the other passthrough fields this page does not edit).
           printerConfiguration: form.printerConfiguration,
+          // Same passthrough for the announcement delivery (`/tts-config` owns it).
+          ttsConfiguration: form.ttsConfiguration,
           dailyReset: {
             mode: form.dailyReset.mode,
             cronExpression:

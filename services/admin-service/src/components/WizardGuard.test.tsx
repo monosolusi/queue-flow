@@ -5,7 +5,8 @@ import { WizardGuard } from './WizardGuard';
 import { SystemConfigProvider } from '../config/system-config-context';
 import type { ISystemConfigApi } from '../api/admin-api';
 import type { SystemConfigurationDto } from '../api/types';
-import { DEFAULT_PRINTER_CONFIGURATION, DEFAULT_SERVICE_THEMES, DEFAULT_TV_GRID_LAYOUT } from '../api/types';
+import { DEFAULT_PRINTER_CONFIGURATION,
+  DEFAULT_TTS_CONFIGURATION, DEFAULT_SERVICE_THEMES, DEFAULT_TV_GRID_LAYOUT } from '../api/types';
 
 function cleanStore(): SystemConfigurationDto {
   return {
@@ -21,6 +22,7 @@ function cleanStore(): SystemConfigurationDto {
     edgeRoutingLayout: {},
     nodePositions: {}, nodeActions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
     printerConfiguration: { ...DEFAULT_PRINTER_CONFIGURATION },
+    ttsConfiguration: { ...DEFAULT_TTS_CONFIGURATION },
   };
 }
 
