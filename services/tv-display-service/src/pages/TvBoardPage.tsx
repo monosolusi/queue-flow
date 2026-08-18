@@ -5,6 +5,7 @@ import { WaitingQueue } from '../components/WaitingQueue';
 import { CountersServing } from '../components/CountersServing';
 import { ConnectionStatusBadge } from '../components/ConnectionStatus';
 import { RunningText } from '../components/RunningText';
+import { AudioUnlockOverlay } from '../components/AudioUnlockOverlay';
 import type { TvComponentType } from '../api/types';
 
 /**
@@ -23,7 +24,7 @@ import type { TvComponentType } from '../api/types';
  * on its own).
  */
 export function TvBoardPage() {
-  const { state } = useTvStore();
+  const { state, unlockAudio } = useTvStore();
   const layout = state.panelLayout;
 
   return (
@@ -58,6 +59,11 @@ export function TvBoardPage() {
           )}
         </div>
       </main>
+
+      {/* Conditionally mounted, never toggled by a `--hidden` modifier: the CSS
+          spec asserts the stylesheet contains no such modifier (and no opacity
+          transition), so mounting is the only way to show/hide here. */}
+      {state.audioBlocked && <AudioUnlockOverlay onUnlock={unlockAudio} />}
     </div>
   );
 }

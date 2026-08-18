@@ -17,7 +17,7 @@ export function CallHistory({ history }: { history: readonly NowServing[] }) {
         {history.map((h) => (
           <li key={h.ticketId} className="call-history__item">
             <span className="call-history__number">{h.ticketNumber}</span>
-            <span className="call-history__counter">Counter {h.counterId}</span>
+            <span className="call-history__counter">Loket {h.counterId}</span>
           </li>
         ))}
       </ol>

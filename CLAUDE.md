@@ -27,6 +27,8 @@ Per-service scripts run from that service's directory.
 | Acceptance runner (builds first) | `npm run acceptance` (root) |
 | Topology smoke test (Docker) | `npm run compose:verify` (root) |
 | Frontend dev/build/test | `npm run dev` / `npm run build` / `npm test` (in `services/<svc>`) — vitest |
+| tts-service tests | `.venv/bin/python -m pytest` (in `services/tts-service`) |
+| tts-service dev server | `.venv/bin/uvicorn app.main:api --port 8000` (in `services/tts-service`) |
 | Compose up/down | `npm run compose:up` / `npm run compose:down` (root) |
 
 `QMS_PERSISTENCE=postgres` activates Postgres bindings (default `in-memory`).
@@ -43,7 +45,8 @@ fronted by an NGINX reverse proxy (`gateway`, ports 80/443).
 | `gateway` | NGINX Alpine | 80,443 | `http://antrian.local/` | Reverse proxy, static assets, SSL, first-run routing |
 | `core-api-service` | NestJS/Express | 3000 | `/api/*`, `/ws` | Business logic, state machine, routing, WS, DB |
 | `kiosk-service` | React PWA | 3001 | `/kiosk` | Visitor touchscreen ticket UI + thermal printing |
-| `tv-display-service` | React | 3002 | `/tv` | TV queue board + offline audio synthesizer |
+| `tv-display-service` | React | 3002 | `/tv` | TV queue board + announcement playback |
+| `tts-service` | Python/FastAPI | 8000 | `/tts/*` | Offline Indonesian announcement synthesis (Piper TTS) |
 | `caller-service` | React PWA | 3003 | `/caller` | Counter staff panel, dynamic action buttons |
 | `admin-service` | React | 3004 | `/admin`, `/wizard` | Manager control panel, wizard, analytics, master data |
 | `db-service` | PostgreSQL 15 / SQLite | 5432 | internal | Queue transactions, system config, audit trail |
@@ -55,10 +58,12 @@ Domain (entities, VOs, aggregates, events, ports). **NFR-MNT-01:** Domain has
 tls|child_process`). High-level modules depend on abstractions, never concrete
 infrastructure (DIP).
 
-**SOLID:** SRP — each UI service owns one concern (tv renders+audio only; kiosk
-owns printing only). OCP — `AudioProvider` (tv) is an interface; add providers
-without touching the TV store; `QueuedAudioProvider` decorates any
-`AudioProvider` to serialize whole announcements FIFO (FR-TV-02). LSP —
+**SOLID:** SRP — each UI service owns one concern (tv renders + *plays* audio;
+`tts-service` decides what is said and how it sounds; kiosk owns printing only).
+OCP — `TtsEngine` (tts-service) is the port that makes the model swappable
+(Piper today, human recordings alongside it), and `AudioProvider` (tv) is an
+interface for *playback*; `QueuedAudioProvider` decorates any `AudioProvider` to
+serialize whole announcements FIFO (FR-TV-02). LSP —
 `IQueueRepository` impls (Postgres + in-memory) must be interchangeable. ISP —
 `caller-service` consumes only `ICallerApi`; never leak admin/reporting DTOs.
 DIP — use cases & domain depend on interfaces, not the ORM/DB directly.
@@ -66,9 +71,15 @@ DIP — use cases & domain depend on interfaces, not the ORM/DB directly.
 ## Domain model (DDD bounded contexts)
 
 Four bounded contexts: **Queue**, **Store Config**, **Reporting**, **Identity**.
-(Notification is a pure `tv-display-service` client concern — no core-api domain
-model; the backend never plays sound, so no `domain/notification` context — a
-server-side audio model would be over-abstraction.)
+(Announcement audio lives in `tts-service`, not core-api: core-api still never
+plays or synthesizes sound and has no `domain/notification` context — a
+server-side audio *model* would be over-abstraction. What core-api owns is the
+*configuration*: `tts-service` reads the announcement settings from the public
+`GET /api/system/config`, so the dependency points tts-service → core-api and
+never back. A `TtsConfiguration` VO in the Store Config context — mirroring
+`PrinterConfiguration`, with an admin page — is the planned follow-up; until it
+lands the config client falls back to a working Piper default, and it also has
+to, because a store configured by an older wizard will never carry the field.)
 
 - **Queue** — `QueueTicket` aggregate (`TicketId` UUID, `ticketNumber` e.g.
   "A-001", `categoryId`, `currentStatus`, `counterId`, timestamps). Events:
@@ -137,7 +148,9 @@ categories, routings) lives in PRD §7 — read it before touching config code.
   hardcoded literal; the first-run wizard path (no principal yet) uses a
   `'system'` sentinel.
 - **Clean architecture layering (NFR-MNT-01).** Domain has no framework/ORM/IO
-  imports — enforced by static analysis (acceptance criterion).
+  imports — enforced by static analysis (acceptance criterion) in **both**
+  languages: dep-cruiser for core-api, `tests/test_architecture.py` for
+  tts-service. A new layered service without such a gate does not satisfy this.
 - **Single-host readiness (NFR-MNT-02).** Whole stack comes up with one command,
   `docker compose up -d`. Any new service must be in `docker-compose.yml` (with
   `restart: always`) and routed by the `gateway`; no separate bring-up step.
@@ -164,9 +177,34 @@ recovery passes with no duplicate/lost ticket numbers.
   `/kiosk`, `tv` `/tv`, `admin` `/admin`+`/wizard`). Each PWA's
   `base`/`start_url`/`scope` align to its `/svc/` prefix. Shared design-token
   system + a11y/interaction baseline via generated vendored copies (QUE-37).
+- **tts-service:** Python 3.13 + FastAPI + Piper (`id_ID-news_tts-medium`).
+  Clean Architecture mirroring core-api (`domain` pure — Indonesian number
+  morphology + the announcement script; `application`; `infrastructure`;
+  `interface_adapters`), enforced by `tests/test_architecture.py` — an `ast` walk
+  that is this service's dep-cruiser (allowlist of pure stdlib per layer + ring
+  order; `app/main.py` is the exempt composition root). Two `TtsEngine` impls ship
+  together — `PiperTtsEngine` and `PrerecordedTtsEngine` (human word recordings
+  from a folder **bind-mounted in `docker-compose.yml`**, without which the
+  directory does not exist in the image and the second engine reports zero voices)
+  — so swappability is demonstrated, not just claimed. ffmpeg does the bell,
+  two-pass `loudnorm`, silence trim and MP3 encode; clips are cached by a digest of
+  engine+voice+knobs+text in a named volume, **bounded** because
+  `/tts/preview?text=` is unauthenticated free-form text — eviction is FIFO by
+  write time, *not* LRU: refreshing mtime on a hit would put a write on the read
+  path, and the cost (a preview flood evicts the hot set) is one re-synthesis, not
+  corruption. Base image MUST stay Debian slim:
+  `onnxruntime` publishes no musllinux wheel, so Alpine would try to compile ONNX
+  Runtime from source. The voice is downloaded during `docker build` (build-time
+  internet is already required by every service's `npm ci`) — runtime stays
+  offline per NFR-REL-01.
 - **Deployment:** `docker-compose.yml` + per-service Dockerfiles + nginx
   `gateway` with first-run `auth_request` guard. `gateway` `depends_on
-  core-api-service` with `condition: service_healthy`.
+  core-api-service` with `condition: service_healthy`, and `tts-service` with
+  `condition: service_started` — **not** `service_healthy`, or a voice that fails
+  to load would stop the gateway from ever starting and hang
+  `docker compose up -d` (NFR-MNT-02). `/tts/` is exempt from the first-run
+  guard like `/api/`: a 302 to wizard HTML is undecodable for an `<audio>`
+  consumer.
 - **Acceptance:** DoD-1..5 specs in `services/core-api/test/acceptance/`, run via
   `npm run test:acceptance`. DoD-4 power-cut recovery/durability gate on
   `QMS_ACCEPTANCE_DB_URL`.
@@ -180,6 +218,12 @@ Monorepo; each service owns its `package.json` + install, `node_modules`
 gitignored. **A fresh worktree needs a per-service `npm install`** for every
 service the root `npm run verify` gate touches (`core-api`, `admin-service`,
 `tv-display-service`, `caller-service`, `kiosk-service`) before the gate runs.
+`tts-service` is Python, so its equivalent is a one-time
+`python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt`; the
+gate invokes `.venv/bin/python -m pytest` directly and fails with those exact
+commands if the venv is missing. Its ffmpeg/Piper-dependent specs **skip**
+(never fail) when ffmpeg or the 63 MB voice is absent, so the gate is green on a
+fresh clone without any model download.
 
 `core-api` layout: `src/domain` (pure entities/VOs/aggregates/events/ports),
 `src/application` (use cases), `src/infrastructure` (repo impls — in-memory
@@ -282,8 +326,16 @@ in that area). Each area's load-bearing essence:
   (0,4,0) and relies on source order; the `.connectable` gate on hover/selected
   exists to exclude read-only/default mode (no `connectable`), not to win a tie.
   → memory `frontend-conventions-gotchas`
-- **TV board** — `QueuedAudioProvider` decorator over `SequencerAudioProvider`
-  (drain single-flight guard is load-bearing, FIFO not interrupt); history
+- **TV board** — `QueuedAudioProvider` decorator over
+  `RemoteAnnouncementAudioProvider` (drain single-flight guard is load-bearing,
+  FIFO not interrupt; the inner MUST always settle its promise — an unsettled one
+  wedges the loop with `running = true` and mutes the board until reload, which is
+  exactly what a refused autoplay `play()` used to do since `NotAllowedError`
+  fires neither `ended` nor `error`); one announcement = one clip URL from
+  `tts-service`, so the TV holds no Indonesian grammar and no audio assets;
+  `AudioUnlockable` is a **separate capability interface** + `isAudioUnlockable`
+  guard, not part of `AudioProvider` (ISP — the store's `makeAudio()` fake is used
+  30-plus times and never unlocks); history
   retains on `COMPLETED` only (never `SKIPPED`/`WAITING`); idle = empty
   `NowServingCard` (standby promo overlay removed); disclaimer marquee distinct
   from removed promo. → memory `frontend-conventions-gotchas`

@@ -1,0 +1,5 @@
+# Test-only dependencies. Kept out of requirements.txt so the image does not ship
+# a test runner (mirrors core-api's `npm ci --omit=dev` runtime stage).
+-r requirements.txt
+pytest==8.3.4
+httpx==0.28.1

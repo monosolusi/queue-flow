@@ -16,7 +16,7 @@
  * (width:100%, height:100%) — the wrapper provides the cell.
  */
 const DEFAULT_TEXT =
-  'Nomor antrian tidak selalu berurutan — harap perhatikan panggilan nomor Anda dan counter yang dituju.';
+  'Nomor antrian tidak selalu berurutan — harap perhatikan panggilan nomor Anda dan loket yang dituju.';
 
 export function RunningText({ text = DEFAULT_TEXT }: { text?: string } = {}) {
   return (

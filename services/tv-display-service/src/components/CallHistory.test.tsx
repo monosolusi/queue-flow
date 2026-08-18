@@ -20,7 +20,7 @@ describe('CallHistory (AC9 h3, structural)', () => {
     const items = within(list).getAllByRole('listitem');
     expect(items).toHaveLength(2);
     expect(items[0]).toHaveTextContent('A-005');
-    expect(items[0]).toHaveTextContent('Counter 2');
+    expect(items[0]).toHaveTextContent('Loket 2');
     expect(items[1]).toHaveTextContent('B-001');
   });
 

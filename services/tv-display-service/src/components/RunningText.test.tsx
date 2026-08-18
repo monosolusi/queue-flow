@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { RunningText } from './RunningText';
 
 const DEFAULT_TEXT =
-  'Nomor antrian tidak selalu berurutan — harap perhatikan panggilan nomor Anda dan counter yang dituju.';
+  'Nomor antrian tidak selalu berurutan — harap perhatikan panggilan nomor Anda dan loket yang dituju.';
 
 describe('RunningText disclaimer marquee', () => {
   afterEach(cleanup);

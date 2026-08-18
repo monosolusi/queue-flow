@@ -1,32 +1,86 @@
 /**
  * AudioProvider — the OCP extension point for the TV announcement engine
- * (FR-TV-02). The TV board depends on this interface; concrete providers (MP3
- * fragment sequencer now, offline TTS later) plug in without the board
- * changing — mirroring the domain `AudioProvider` OCP note in CLAUDE.md. Tests
- * inject a fake provider so no real audio plays in jsdom.
+ * (FR-TV-02). The board depends on this interface; concrete providers plug in
+ * without the board changing. Tests inject a fake so no real audio plays in
+ * jsdom.
+ *
+ * The unit is a whole **announcement**, addressed by URL, not a list of word
+ * fragments. `tts-service` composes the Indonesian sentence, synthesizes it and
+ * prepends the bell, returning one clip; the TV's only jobs are to play it and
+ * to keep announcements from overlapping. That split is deliberate — Indonesian
+ * number grammar used to live here, inside a rendering service, which meant the
+ * announcement could only ever be a concatenation of pre-recorded words.
  */
 export interface AudioProvider {
   /**
-   * Play a sequence of audio fragment ids one after another with no overlap.
-   * Resolves once the whole sequence has finished (or been skipped on error).
+   * Play one announcement clip to completion.
+   *
+   * Resolves when the clip has finished, has been skipped because it could not
+   * be loaded or played, or has been dropped by a `stop()`. **Never rejects**,
+   * and never leaves its promise unsettled: the store fires this and forgets it,
+   * and a decorator awaits it in a single-flight loop, so an unsettled promise
+   * would wedge every later announcement rather than losing just this one.
    */
-  playSequence(fragments: readonly string[]): Promise<void>;
+  playAnnouncement(url: string): Promise<void>;
   /**
-   * Signal any in-flight playback to stop. The current fragment may finish
-   * before playback halts (the concrete sequencer stops after the in-flight
-   * fragment rather than cutting it mid-tone); queued announcements are
-   * dropped. Callers must not rely on immediate silence.
+   * Abandon in-flight playback and drop anything queued behind it.
+   *
+   * The in-flight clip's `playAnnouncement` promise settles immediately rather
+   * than waiting for audio nobody is listening to — otherwise a decorator
+   * awaiting it would stay busy long after the board moved on.
    */
   stop(): void;
 }
 
 /**
- * The minimal surface the sequencer needs from an HTML5 `Audio` element, so a
- * test fake can stand in without a real media pipeline (jsdom has none).
+ * Optional capability: a provider whose playback the browser may refuse until a
+ * user gesture (Chrome's autoplay policy). Deliberately **not** part of
+ * `AudioProvider` — the announcement path only ever needs
+ * `playAnnouncement`/`stop`, and forcing every fake to grow an `unlock()` it
+ * never calls is exactly the coupling ISP warns about (`makeAudio()` in the
+ * store's spec is used at 30-plus call sites).
+ *
+ * Discover it with {@link isAudioUnlockable} rather than assuming.
+ */
+export interface AudioUnlockable {
+  /**
+   * Subscribe to blocked-state changes. Emits the current value immediately so a
+   * subscriber never has to guess the initial state. Returns an unsubscribe fn.
+   */
+  onBlockedChange(listener: (blocked: boolean) => void): () => void;
+  /**
+   * Probe whether playback is permitted, and — when called from inside a user
+   * gesture handler — consume that gesture to lift the block.
+   *
+   * Never rejects; a failed unlock simply leaves the blocked state set, which is
+   * the correct UX (the prompt stays on screen).
+   */
+  unlock(): Promise<void>;
+}
+
+/** Narrow an `AudioProvider` to one that can report/lift an autoplay block. */
+export function isAudioUnlockable(
+  provider: AudioProvider,
+): provider is AudioProvider & AudioUnlockable {
+  const candidate = provider as Partial<AudioUnlockable>;
+  return (
+    typeof candidate.onBlockedChange === 'function' && typeof candidate.unlock === 'function'
+  );
+}
+
+/**
+ * The minimal surface a provider needs from an HTML5 `Audio` element, so a test
+ * fake can stand in without a real media pipeline (jsdom has none).
  */
 export interface AudioLike {
   readonly src: string;
   play(): Promise<void> | void;
+  /**
+   * Optional so a minimal fake stays valid. A real `Audio` element has it, and
+   * `stop()` calls it when present — which is what makes stopping produce actual
+   * silence rather than merely settling a promise.
+   */
+  pause?(): void;
   addEventListener(event: 'ended' | 'error', handler: () => void): void;
   removeEventListener(event: 'ended' | 'error', handler: () => void): void;
 }
@@ -35,35 +89,21 @@ export interface AudioLike {
 export type AudioCtor = new (src: string) => AudioLike;
 
 /**
- * Builds the ordered fragment-id list for a "panggilan antrian" announcement
- * (FR-TV-02). The ticket number carries the category letter as its prefix
- * (e.g. `A-005` → category `A`, digits `0`,`0`,`5`), so no category lookup is
- * needed — the wire `TICKET_CALLED` payload only carries `ticketNumber` +
- * `counterId`. The ticket digits AND the counter id are each announced
- * digit-by-digit, so every fragment maps to an existing vendored
- * `/tv/audio/<digit>.mp3` — no multi-digit asset is required (NFR-REL-01: all
- * audio assets local). A counter id ≥ 10 therefore reuses `1.mp3`/`0.mp3`
- * rather than silently dropping (which a single `'10'` fragment would do, since
- * no `10.mp3` exists).
+ * Builds the URL of the announcement clip for a called ticket.
  *
- * @pre `counterId` is a positive integer (≥ 1). The backend guarantees this —
- * `buildRoutingRules` rejects non-integer/duplicate counter ids and the
- * wizard clamps the counter count to ≥ 1 — so the wire payload never carries 0
- * or a negative/fractional id. This function does not re-validate; a malformed
- * direct-WS frame would produce fragments with no matching asset that the
- * sequencer silently error-skips (the board degrades rather than crashes, per
- * the fire-and-forget contract in `tv-store`).
- *
- * Example: `buildCallFragments('A-005', 2)` →
- * `['bell','nomor-antrian','A','0','0','5','silakan-ke-counter','2']`.
- * Example: `buildCallFragments('B-013', 10)` →
- * `['bell','nomor-antrian','B','0','1','3','silakan-ke-counter','1','0']`.
+ * Origin-relative on purpose: the same path resolves through the Vite dev
+ * proxy (`/tts` → localhost:8000) and through the `gateway` (`location /tts/`),
+ * so dev and production never diverge. The query is the whole cache identity —
+ * `tts-service` returns a stable `ETag` for it, so the browser revalidates a
+ * repeat "Panggil Ulang" instead of re-downloading.
  */
-export function buildCallFragments(ticketNumber: string, counterId: number): string[] {
-  const dash = ticketNumber.indexOf('-');
-  const letter = dash === -1 ? ticketNumber : ticketNumber.slice(0, dash);
-  const numPart = dash === -1 ? '' : ticketNumber.slice(dash + 1);
-  const digits = numPart.split('');
-  const counterDigits = String(counterId).split('');
-  return ['bell', 'nomor-antrian', letter, ...digits, 'silakan-ke-counter', ...counterDigits];
+export function announcementUrl(ticketNumber: string, counterId: number): string {
+  const params = new URLSearchParams({
+    ticketNumber,
+    counterId: String(counterId),
+  });
+  return `/tts/announcement?${params.toString()}`;
 }
+
+/** URL of the silent clip used to probe and unlock browser autoplay. */
+export const AUDIO_PROBE_URL = '/tts/probe';

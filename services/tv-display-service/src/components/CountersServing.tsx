@@ -21,14 +21,14 @@ export function CountersServing({
 }) {
   if (countersServing.length === 0) {
     return (
-      <section className="counters-serving" role="group" aria-label="Counter Sedang Melayani">
+      <section className="counters-serving" role="group" aria-label="Loket Sedang Melayani">
         <h3 className="counters-serving__title">Sedang Melayani</h3>
         <p className="counters-serving__empty">Tidak ada counter yang sedang melayani.</p>
       </section>
     );
   }
   return (
-    <section className="counters-serving" role="group" aria-label="Counter Sedang Melayani">
+    <section className="counters-serving" role="group" aria-label="Loket Sedang Melayani">
       <h3 className="counters-serving__title">Sedang Melayani</h3>
       <ol className="counters-serving__list">
         {countersServing.map((c) => (

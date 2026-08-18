@@ -1,0 +1,15 @@
+# Local dev virtualenv (the image builds its own at /opt/venv).
+.venv/
+
+# Piper voice models. Downloaded on demand — 63 MB each, and the image fetches
+# them during build, so they are never committed. Get one locally with:
+#   python -m piper.download_voices id_ID-news_tts-medium --data-dir models
+models/
+
+# Synthesized-audio cache. Reproducible from the model, and a Docker named volume
+# holds it in production.
+.cache/
+
+__pycache__/
+*.pyc
+.pytest_cache/

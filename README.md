@@ -26,7 +26,8 @@ comes up with one command — `docker compose up -d`.
 | `gateway` | NGINX Alpine | 80 | `http://antrian.local/` | Reverse proxy, static assets, first-run wizard routing |
 | `core-api-service` | NestJS + TypeScript (Node.js) | 3000 | `/api/*`, `/ws` | Business logic, state machine, dynamic routing engine, WebSocket server, DB persistence |
 | `kiosk-service` | React + Vite PWA | 3001 | `/kiosk` | Visitor touchscreen ticket UI + silent thermal printing |
-| `tv-display-service` | React + HTML5 Audio API | 3002 | `/tv` | TV queue board + offline audio synthesizer |
+| `tv-display-service` | React + HTML5 Audio API | 3002 | `/tv` | TV queue board + announcement playback |
+| `tts-service` | Python + FastAPI + Piper TTS | 8000 | `/tts/*` | Offline Indonesian announcement synthesis (voice, bell, cache) |
 | `caller-service` | React + Vite PWA | 3003 | `/caller` | Counter staff panel, dynamic action buttons from state machine |
 | `admin-service` | React + Vite PWA | 3004 | `/admin`, `/wizard` | Manager control panel, setup wizard, analytics, master data |
 | `db-service` | PostgreSQL 15 (WAL) | 5432 | internal only | Queue transactions, system config, audit trail |
@@ -82,8 +83,9 @@ Three bounded contexts:
 - **Store Config** — `SystemConfiguration` aggregate (state machine,
   daily-reset policy) and `CounterRoutingRule` aggregate (category routing +
   priority policy).
-- **Notification** — handled entirely in `tv-display-service` (the backend
-  never plays sound); audio is a pure client concern.
+- **Notification** — announcement audio is synthesized by `tts-service` (which
+  owns the Indonesian wording, the voice and the bell) and played by
+  `tv-display-service`. `core-api` never plays or synthesizes sound.
 
 [dc]: https://github.com/sverweij/dependency-cruiser
 
@@ -103,7 +105,7 @@ Three bounded contexts:
 docker compose up -d --build
 ```
 
-This builds every service image and starts all seven containers with
+This builds every service image and starts all eight containers with
 `restart: always` (self-healing). The `gateway` waits for `core-api-service`'s
 healthcheck (`GET /api/health`) to pass before it starts serving, so the first
 ~1–2 s Nest bootstrap is covered — no 502s on a cold boot.
@@ -166,12 +168,13 @@ in-memory profile remains the dev/test default for per-service unit tests
 
 ```
 queue-flow/
-├── docker-compose.yml          # single-host deployment (7 services)
+├── docker-compose.yml          # single-host deployment (8 services)
 ├── gateway/nginx.conf          # reverse proxy + first-run guard
 ├── services/
 │   ├── core-api/                # NestJS backend (domain + use cases + REST/WS)
 │   ├── kiosk-service/          # visitor touchscreen PWA
-│   ├── tv-display-service/      # TV queue board + audio sequencer PWA
+│   ├── tv-display-service/      # TV queue board PWA (plays announcement clips)
+│   ├── tts-service/             # Indonesian TTS (Python/FastAPI + Piper)
 │   ├── caller-service/          # counter staff PWA
 │   └── admin-service/          # manager panel + first-run wizard PWA
 └── scripts/                     # verify / acceptance / topology gates

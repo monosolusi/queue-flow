@@ -1,0 +1,11 @@
+# Runtime dependencies for tts-service.
+#
+# Pinned exactly, mirroring the lockfile discipline the Node services get from
+# package-lock.json: an offline on-premise appliance must rebuild to the same
+# bytes months later (NFR-REL-02).
+#
+# piper-tts pulls in onnxruntime and a bundled espeak-ng for phonemization; both
+# are wheels, so no compiler is needed in the image.
+piper-tts==1.7.0
+fastapi==0.115.6
+uvicorn==0.34.0

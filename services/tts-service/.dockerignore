@@ -1,0 +1,16 @@
+.git
+.gitignore
+Dockerfile
+.dockerignore
+*.log
+__pycache__
+*.pyc
+.venv
+.pytest_cache
+.cache
+tests
+requirements-dev.txt
+# The image downloads the voice itself during build, so a developer's local
+# models/ dir must stay out of the build context — otherwise every `docker build`
+# ships 63 MB to the daemon for nothing.
+models
