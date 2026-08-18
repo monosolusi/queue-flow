@@ -17,6 +17,7 @@ import {
   TerminalNodes,
   TvPanelLayout,
 } from '../../src/domain/store-config';
+import { TtsConfiguration } from '../../src/domain/store-config';
 import { Identifier } from '../../src/domain/shared';
 import { Role, USER_REPOSITORY, type IUserRepository } from '../../src/domain/identity';
 import { CreateUserUseCase } from '../../src/application/identity';
@@ -65,6 +66,7 @@ describe('GET /api/queue/actions (integration — caller dynamic actions, FR-CLR
       endSources: EndSources.DEFAULT,
       startSources: StartSources.DEFAULT,
       printerConfiguration: PrinterConfiguration.DEFAULT,
+      ttsConfiguration: TtsConfiguration.DEFAULT,
     });
     await repos(app).systemConfig.save(config);
   }

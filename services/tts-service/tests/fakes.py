@@ -63,9 +63,14 @@ class FakeCache:
         return removed
 
 
-def fake_finisher(speech_wav: bytes) -> bytes:
-    """Stands in for the ffmpeg chain: marks the bytes as bell-prefixed and encoded."""
-    return b"MP3::BELL::" + speech_wav
+def fake_finisher(speech_segments: list[bytes], gap_ms: int = 0) -> bytes:
+    """Stands in for the ffmpeg chain: marks the bytes as bell-prefixed and encoded.
+
+    Renders the gap into the output so a test can tell a paused clip from an
+    unpaused one without ffmpeg, and joins segments with a visible separator so
+    the segmentation itself is assertable.
+    """
+    return b"MP3::BELL::" + f"GAP{gap_ms}::".encode() + b"|".join(speech_segments)
 
 
 @dataclass
@@ -76,10 +81,21 @@ class FakeConfig:
     settings: TtsSettings = field(
         default_factory=lambda: TtsSettings(voice_id="fake-voice")
     )
+    pause_ms: int = 0
 
     @property
     def cache_parts(self) -> tuple[object, ...]:
-        return (self.engine, self.settings.voice_id, self.settings.speed, self.settings.volume)
+        # Duplicates `TtsConfig.cache_parts` on purpose (a test double of a
+        # frozen dataclass), so a knob added there must be added here too -- if
+        # it is not, clips stop being distinguishable by that knob and the tests
+        # that would catch it are the ones using this class.
+        return (
+            self.engine,
+            self.settings.voice_id,
+            self.settings.speed,
+            self.settings.volume,
+            self.pause_ms,
+        )
 
 
 class FakeConfigProvider:

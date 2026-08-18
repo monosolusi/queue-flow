@@ -3,7 +3,8 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { SystemConfigProvider, useSystemConfigContext } from './system-config-context';
 import type { ISystemConfigApi } from '../api/admin-api';
 import type { SystemConfigurationDto } from '../api/types';
-import { DEFAULT_PRINTER_CONFIGURATION, DEFAULT_SERVICE_THEMES, DEFAULT_TV_GRID_LAYOUT } from '../api/types';
+import { DEFAULT_PRINTER_CONFIGURATION,
+  DEFAULT_TTS_CONFIGURATION, DEFAULT_SERVICE_THEMES, DEFAULT_TV_GRID_LAYOUT } from '../api/types';
 
 function storeNamed(storeName: string): SystemConfigurationDto {
   return {
@@ -19,6 +20,7 @@ function storeNamed(storeName: string): SystemConfigurationDto {
     edgeRoutingLayout: {},
     nodePositions: {}, nodeActions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
     printerConfiguration: { ...DEFAULT_PRINTER_CONFIGURATION },
+    ttsConfiguration: { ...DEFAULT_TTS_CONFIGURATION },
   };
 }
 

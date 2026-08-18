@@ -12,6 +12,8 @@ from __future__ import annotations
 import io
 import os
 import shutil
+import subprocess
+import tempfile
 import wave
 from pathlib import Path
 
@@ -87,11 +89,73 @@ def test_announcement_mp3_is_bell_plus_speech_and_longer_than_either(
         # ~0.6 s of low-level tone; silence would be trimmed away entirely.
         handle.writeframes(b"\x00\x08" * int(SAMPLE_RATE * 0.6))
 
-    payload = build_announcement_mp3(speech.read_bytes())
+    payload = build_announcement_mp3([speech.read_bytes()])
 
     assert payload.startswith(MP3_SYNC)
     # Bell (~0.7 s incl. pad) + speech (~0.85 s incl. pad) at 64 kbps mono.
     assert len(payload) > 8_000
+
+
+def mp3_duration_seconds(payload: bytes) -> float:
+    """Decode an MP3 back to WAV with ffmpeg and measure it.
+
+    ffmpeg rather than ffprobe: these tests already gate on ffmpeg, and some
+    distributions package ffprobe separately -- gating on a second binary would
+    turn a skip into a failure on a machine that is set up correctly.
+    """
+    with tempfile.TemporaryDirectory(prefix="qms-tts-test-") as tmp:
+        source = Path(tmp) / "clip.mp3"
+        source.write_bytes(payload)
+        decoded = Path(tmp) / "clip.wav"
+        subprocess.run(
+            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+             "-i", str(source), str(decoded)],
+            check=True,
+        )
+        with wave.open(str(decoded), "rb") as handle:
+            return handle.getnframes() / handle.getframerate()
+
+
+def _tone_wav(seconds: float) -> bytes:
+    """A low-level tone of a known length. Silence would be trimmed away entirely,
+    so a tone is what makes a duration measurable through the pipeline."""
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(SAMPLE_RATE)
+        handle.writeframes(b"\x00\x08" * int(SAMPLE_RATE * seconds))
+    return buffer.getvalue()
+
+
+@needs_ffmpeg
+def test_a_configured_pause_lengthens_the_clip_by_roughly_that_much() -> None:
+    """The whole feature, measured: the same words with a gap must take longer.
+
+    Duration rather than byte length, and a range rather than an exact figure --
+    MP3 frame packing and the loudness pass both move the byte count around, so
+    an equality assertion here would be brittle in a way that says nothing about
+    whether the pause is audible.
+    """
+    segments = [_tone_wav(0.4), _tone_wav(0.4), _tone_wav(0.4)]
+
+    unpaused = mp3_duration_seconds(build_announcement_mp3(segments, 0))
+    paused = mp3_duration_seconds(build_announcement_mp3(segments, 500))
+
+    # Two seams x 500 ms. Tolerance covers the MP3 frame grid and the trim.
+    assert 0.8 < paused - unpaused < 1.2
+
+
+@needs_ffmpeg
+def test_a_single_segment_ignores_the_gap_entirely() -> None:
+    """The no-pause default must not merely resemble the old pipeline -- with one
+    segment there is no seam, so a gap has nowhere to go and must change nothing."""
+    one = [_tone_wav(0.6)]
+
+    without = mp3_duration_seconds(build_announcement_mp3(one, 0))
+    withgap = mp3_duration_seconds(build_announcement_mp3(one, 500))
+
+    assert abs(withgap - without) < 0.1
 
 
 @needs_ffmpeg
@@ -106,7 +170,7 @@ def test_full_pipeline_produces_a_playable_indonesian_announcement() -> None:
         assert rendered.getframerate() == SAMPLE_RATE
         assert rendered.getnframes() > SAMPLE_RATE * 0.5  # at least half a second
 
-    payload = build_announcement_mp3(speech)
+    payload = build_announcement_mp3([speech])
     assert payload.startswith(MP3_SYNC)
     assert 10_000 < len(payload) < 200_000
 

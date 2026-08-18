@@ -132,6 +132,22 @@ function prdWizardPayload() {
       { id: 'countersServing', component: 'countersServing', x: 0, y: 7, w: 12, h: 3 },
       { id: 'runningText', component: 'runningText', x: 0, y: 10, w: 12, h: 1 },
     ],
+    // The client is the source of truth for these canvas/appearance fields, and
+    // all of them are REQUIRED by the controller's presence guard — a payload
+    // missing any one is a 400, not a partial save. They were absent here while
+    // the guard grew (this script's PUT started failing silently in tier 2 as a
+    // result), so keep this list in step with `REQUIRED_CONFIG_FIELDS` in
+    // services/core-api/src/interface-adapters/rest/system-config.controller.ts.
+    edgeRoutingLayout: {},
+    nodePositions: {},
+    nodeActions: {},
+    terminalNodes: { start: 'auto', end: 'auto' },
+    endSources: [],
+    startSources: [],
+    printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
+    // Announcement delivery — speed 1.0, no added pause (what the board did
+    // before the setting existed).
+    ttsConfiguration: { speed: 1, volume: 1, pauseMs: 0 },
     // No `actor` field — the controller ignores body.actor and uses the
     // authenticated principal's username (QUE-43). Mirrors the acceptance
     // helper `prdWizardPayload()` in services/core-api/test/acceptance/_helpers.ts.

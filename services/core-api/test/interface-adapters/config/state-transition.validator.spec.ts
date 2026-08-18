@@ -20,6 +20,7 @@ import {
   StateTransitionRule,
   SystemConfiguration,
 } from '../../../src/domain/store-config';
+import { TtsConfiguration } from '../../../src/domain/store-config';
 import { InMemorySystemConfigurationRepository } from '../../../src/infrastructure/persistence/in-memory';
 import { StateTransitionValidator } from '../../../src/interface-adapters/config/state-transition.validator';
 
@@ -108,6 +109,7 @@ describe('StateTransitionValidator (active-policy resolver — QUE-10 AC#1)', ()
       endSources: EndSources.DEFAULT,
       startSources: StartSources.DEFAULT,
       printerConfiguration: PrinterConfiguration.DEFAULT,
+      ttsConfiguration: TtsConfiguration.DEFAULT,
     });
     await config.save(system);
 

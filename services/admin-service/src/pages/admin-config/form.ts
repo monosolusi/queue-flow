@@ -1,9 +1,10 @@
 import type { SystemConfigurationDto } from '../../api/types';
 import { DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES, DEFAULT_TERMINAL_NODES, DEFAULT_TV_GRID_LAYOUT } from '../../api/types';
-import type { DailyResetMode, PrinterConfigurationDto, PriorityPolicy, ServiceThemesMap, TvGridLayout } from '../../api/types';
+import type { DailyResetMode, PrinterConfigurationDto, PriorityPolicy, ServiceThemesMap, TtsConfigurationDto, TvGridLayout } from '../../api/types';
 import { coerceServiceThemes } from '../../lib/service-themes';
 import { coerceTvGridLayout } from '../../lib/tv-grid-layout';
 import { coercePrinterConfiguration } from '../../lib/printer';
+import { coerceTtsConfiguration } from '../../lib/tts';
 import { BROWSER_TIMEZONE } from '../../lib/timezone';
 import {
   type StateMachineForm,
@@ -66,6 +67,10 @@ export interface AdminForm {
    *  PUT unchanged so the required `printerConfiguration` wire field is always
    *  sent (never dropped). Mirrors the `tvPanelLayout` passthrough pattern. */
   printerConfiguration: PrinterConfigurationDto;
+  /** Announcement delivery — edited only on `/tts-config`; every other save
+   *  site carries it through the PUT unchanged so the required
+   *  `ttsConfiguration` wire field is always present. Payload-only. */
+  ttsConfiguration: TtsConfigurationDto;
   categories: CategoryRow[];
   routingRules: RoutingRow[];
   dailyReset: {
@@ -161,6 +166,7 @@ export function toForm(config: SystemConfigurationDto): AdminForm {
     // (falls back to the chrome default on a corrupt shape — mirrors the
     // backend VO; the dedicated `/printer-config` page edits this field).
     printerConfiguration: coercePrinterConfiguration(config.printerConfiguration),
+    ttsConfiguration: coerceTtsConfiguration(config.ttsConfiguration),
     categories:
       config.categories.length > 0
         ? config.categories.map((c) => ({ id: c.id, rowKey: `cat-${c.id}`, code: c.code, name: c.name }))

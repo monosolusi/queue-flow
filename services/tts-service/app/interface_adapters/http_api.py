@@ -22,7 +22,7 @@ from ..application.synthesize_announcement import (
 )
 from ..domain.announcement import AnnouncementRequest, InvalidAnnouncementError
 from ..domain.ports import AudioFinishingError
-from ..domain.tts_engine import TtsEngineError, VoiceNotAvailableError
+from ..domain.tts_engine import TtsEngineError, TtsSettings, VoiceNotAvailableError
 
 logger = logging.getLogger(__name__)
 
@@ -84,11 +84,28 @@ def build_router(
 
     @router.get("/preview")
     def preview(
-        text: str = Query(..., min_length=1, max_length=200),
+        text: str | None = Query(default=None, min_length=1, max_length=200),
+        speed: float | None = Query(default=None, ge=0.25, le=4.0),
+        volume: float | None = Query(default=None, ge=0.0, le=2.0),
+        pauseMs: int | None = Query(default=None, ge=0, le=2000),  # noqa: N803
         if_none_match: str | None = Header(default=None, alias="if-none-match"),
     ) -> Response:
-        """Admin "Tes Suara": hear the current voice without calling a real ticket."""
-        result = _synthesize(lambda: use_case.preview(text))
+        """Admin "Tes Suara": hear the announcement without calling a real ticket.
+
+        `text` is optional. Omitted, the domain builds a sample announcement, so
+        the admin panel never has to know how a queue call is worded in
+        Indonesian -- that knowledge lives in this service and nowhere else.
+
+        `speed`/`volume`/`pauseMs` audition UNSAVED values so a manager can hear a
+        setting before committing to it. They stay bounded by FastAPI at the
+        engine's own limits (the admin panel offers a narrower range still), and
+        the digest already folds delivery knobs in, so an auditioned clip cannot
+        be served in place of a real announcement.
+        """
+        overrides = _overrides(use_case, speed, volume)
+        result = _synthesize(
+            lambda: use_case.preview(text, overrides=overrides, pause_ms=pauseMs)
+        )
         return _audio_response(result, if_none_match)
 
     @router.get("/probe")
@@ -110,6 +127,27 @@ def build_router(
         )
 
     return router
+
+
+def _overrides(
+    use_case: SynthesizeAnnouncementUseCase, speed: float | None, volume: float | None
+) -> TtsSettings | None:
+    """Build a settings override, or None when nothing was auditioned.
+
+    Returning None rather than a fully-defaulted `TtsSettings` matters: the use
+    case treats None as "use the stored config", which keeps the voice and the
+    un-auditioned knob at whatever the store actually has. Building a settings
+    object here would mean guessing a voice id, and guessing it wrong would make
+    the preview a test of the wrong voice.
+    """
+    if speed is None and volume is None:
+        return None
+    current = use_case.current_settings()
+    return TtsSettings(
+        voice_id=current.voice_id,
+        speed=current.speed if speed is None else speed,
+        volume=current.volume if volume is None else volume,
+    )
 
 
 def _parse(ticket_number: str, counter_id: int) -> AnnouncementRequest:

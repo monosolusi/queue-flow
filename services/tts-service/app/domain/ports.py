@@ -45,9 +45,24 @@ class AudioFinisher(Protocol):
 
     A port, not a direct import, for two reasons: the application layer must not
     depend on ffmpeg, and it lets the use case be tested without ffmpeg installed.
+
+    Takes a LIST of speech parts and the silence to put between them, rather than
+    one blob. Splitting the sentence is the domain's job and choosing the gap is
+    config, but *rendering* silence is an audio operation, so it belongs on the
+    side of this port that already owns the audio tools. The alternative -- a
+    second `AudioJoiner` port -- would have meant two collaborators that can only
+    ever be used together, and the joining is a concat, which this implementation
+    already does to attach the bell.
+
+    A single-element list must produce exactly what the un-segmented pipeline
+    produced, so the no-pause default stays unchanged.
+
+    `list[bytes]` rather than `collections.abc.Sequence[bytes]`: the architecture
+    gate allowlists pure stdlib per layer by module name, and `collections.abc`
+    is not `collections`.
     """
 
-    def __call__(self, speech_wav: bytes) -> bytes:
+    def __call__(self, speech_segments: list[bytes], gap_ms: int) -> bytes:
         """Raises `AudioFinishingError` (or a subclass) when the chain fails."""
         ...
 
@@ -65,6 +80,12 @@ class TtsConfigLike(Protocol):
     already a pure domain type, so naming it costs no outward dependency and it is
     what stops an infrastructure config carrying the wrong shape from satisfying
     this Protocol and failing later, inside the engine.
+
+    `pause_ms` sits BESIDE `settings`, not inside it, for the same reason
+    `engine` does: `TtsSettings` is the set of knobs handed to an engine, and no
+    engine is asked to produce this silence. It is decided when the finished clip
+    is assembled, so putting it in `TtsSettings` would hand every engine a
+    parameter every engine ignores.
     """
 
     @property
@@ -75,3 +96,6 @@ class TtsConfigLike(Protocol):
 
     @property
     def settings(self) -> TtsSettings: ...
+
+    @property
+    def pause_ms(self) -> int: ...

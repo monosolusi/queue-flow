@@ -455,6 +455,40 @@ fieldset {
   font-size: 1rem;
 }
 
+/* Range slider + live read-out, used by `/tts-config` for the speaking-rate and
+ * volume multipliers. A slider rather than a number input because both are
+ * tuned BY EAR: the manager drags, listens, drags again, and never has a
+ * specific figure in mind. The read-out is an `<output>` so the current value
+ * is announced with the control rather than being visual-only.
+ *
+ * `accent-color` is what themes the native track/thumb; restyling the control
+ * from scratch would mean re-implementing focus and keyboard affordances the
+ * platform already gets right. */
+.field__range {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+  height: 2.4rem;
+  cursor: pointer;
+}
+.tts-config-page__slider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.tts-config-page__readout {
+  min-width: 4rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  font-size: 1rem;
+}
+.tts-config-page__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
 /* Brand-color picker + hex text input (QUE-36). The native color picker is
  * inline-flexed with a companion hex text field so the manager can either
  * drag-pick or type a `#rrggbb` code; both stay in sync via shared form state. */

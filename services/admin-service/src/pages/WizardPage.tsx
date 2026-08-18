@@ -9,6 +9,8 @@ import {
   DEFAULT_BRAND_COLOR,
   DEFAULT_PRINTER_CONFIGURATION,
   type PrinterConfigurationDto,
+  DEFAULT_TTS_CONFIGURATION,
+  type TtsConfigurationDto,
   type WizardCategoryDto,
   type WizardRoutingRuleDto,
   type ServiceThemesMap,
@@ -19,6 +21,7 @@ import {
 } from '../api/types';
 import { coerceTvGridLayout, defaultTvGridLayout } from '../lib/tv-grid-layout';
 import { coercePrinterConfiguration } from '../lib/printer';
+import { coerceTtsConfiguration } from '../lib/tts';
 import { useAuthContext } from '../auth/auth-context';
 import { useSystemConfigContext } from '../config/system-config-context';
 import { writeToken } from '../auth/token-store';
@@ -82,6 +85,10 @@ interface WizardForm {
   // through finalize so the required `printerConfiguration` wire field is always
   // sent on the PUT (never dropped). Mirrors the `tvPanelLayout` passthrough.
   printerConfiguration: PrinterConfigurationDto;
+  /** Carried through finalize so the required `ttsConfiguration` wire field is
+   *  always present. The wizard does not edit it — announcement delivery is
+   *  tuned by ear on `/tts-config` after setup. */
+  ttsConfiguration: TtsConfigurationDto;
   categories: WizardCategoryDto[];
   categoriesMode: 'default' | 'custom';
   /** Raw text value of the step-1 "Jumlah counter aktif" input (digits only,
@@ -173,6 +180,7 @@ function emptyForm(): WizardForm {
     // Chrome default — the wizard surfaces no printer UI; this is a passthrough
     // so the required `printerConfiguration` wire field is never dropped.
     printerConfiguration: { ...DEFAULT_PRINTER_CONFIGURATION },
+    ttsConfiguration: { ...DEFAULT_TTS_CONFIGURATION },
     categories: DEFAULT_CATEGORIES.map((c) => ({ ...c })),
     categoriesMode: 'default',
     counterCount: '1',
@@ -416,6 +424,7 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
           // coerce the GET projection defensively (defaults to the chrome default
           // on a clean/degraded store) so the required wire field is sent.
           printerConfiguration: coercePrinterConfiguration(config.printerConfiguration),
+          ttsConfiguration: coerceTtsConfiguration(config.ttsConfiguration),
           categories: loadedCategories,
           // Infer the preset by code+name deep-equal (id-agnostic) so a re-edit
           // of a store that kept the default template stays in default mode and
@@ -651,6 +660,7 @@ export function WizardPage({ api }: { api: IAdminApi & IAuthApi }) {
         // Passthrough — the wizard surfaces no printer UI; carry the prefilled
         // value so the required `printerConfiguration` wire field is sent.
         printerConfiguration: form.printerConfiguration,
+        ttsConfiguration: form.ttsConfiguration,
       });
       if (isFirstRun.current) {
         // Now that setup-admin created the account and the config save completed

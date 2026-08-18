@@ -183,3 +183,62 @@ def test_malformed_json_is_treated_as_unreachable(
         lambda url, timeout=None: Garbage(),  # noqa: ARG005
     )
     assert CoreApiConfigClient("http://core-api:3000").resolve().engine == DEFAULT_ENGINE
+
+
+# ---------------------------------------------------------------------------
+# pauseMs. Unlike speed/volume there is no `TtsSettings` downstream to own the
+# range, so this parser is the only place a bad pause can be caught -- and it
+# must catch it by falling back, never by raising, because a misconfigured pause
+# must not be able to silence the board.
+# ---------------------------------------------------------------------------
+
+
+def test_reads_the_pause_from_the_config_document() -> None:
+    config = parse({"ttsConfiguration": {"voice": "v", "pauseMs": 400}})
+    assert config.pause_ms == 400
+
+
+def test_defaults_the_pause_to_zero_when_absent() -> None:
+    """A store configured by an older wizard carries no pauseMs at all, and zero
+    is the delivery it already has -- so an upgrade changes nothing audible."""
+    assert parse({"ttsConfiguration": {"voice": "v"}}).pause_ms == 0
+    assert parse({}).pause_ms == 0
+
+
+@pytest.mark.parametrize("value", ["400", None, [], {}, True, False, 250.5])
+def test_a_non_integer_pause_falls_back(value: object) -> None:
+    """`True` is an `int` in Python and would otherwise become a 1 ms pause."""
+    config = parse({"ttsConfiguration": {"voice": "v", "pauseMs": value}})
+    assert config.pause_ms == 0
+
+
+@pytest.mark.parametrize("value", [-1, -400, 2001, 10_000])
+def test_an_out_of_range_pause_falls_back(value: int) -> None:
+    config = parse({"ttsConfiguration": {"voice": "v", "pauseMs": value}})
+    assert config.pause_ms == 0
+
+
+def test_an_integral_float_pause_is_accepted() -> None:
+    """`400.0` is unambiguously 400 ms; rejecting it would silently restore the
+    old delivery for a value that is not actually wrong."""
+    assert parse({"ttsConfiguration": {"voice": "v", "pauseMs": 400.0}}).pause_ms == 400
+
+
+def test_a_bad_pause_does_not_discard_the_other_knobs() -> None:
+    """Speed and volume share a fallback (TtsSettings validates them as a set),
+    but the pause is read independently -- a bad pause must not cost the manager
+    their speed setting too."""
+    config = parse(
+        {"ttsConfiguration": {"voice": "bu-sari", "speed": 1.4, "pauseMs": -5}}
+    )
+    assert config.pause_ms == 0
+    assert config.settings.speed == 1.4
+    assert config.settings.voice_id == "bu-sari"
+
+
+def test_the_pause_is_part_of_the_cache_identity() -> None:
+    """A knob missing from `cache_parts` means a manager changes it and the store
+    keeps hearing the old clip, with nothing to explain why."""
+    a = parse({"ttsConfiguration": {"voice": "v", "pauseMs": 0}})
+    b = parse({"ttsConfiguration": {"voice": "v", "pauseMs": 400}})
+    assert a.cache_parts != b.cache_parts

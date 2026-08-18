@@ -27,12 +27,28 @@ DEFAULT_ENGINE = "piper"
 DEFAULT_VOICE = "id_ID-news_tts-medium"
 
 
+#: Silence inserted at each pause point inside the announcement, milliseconds.
+#: `0` means "one continuous utterance" -- the delivery this service had before
+#: the setting existed, and therefore the right value when core-api says nothing.
+DEFAULT_PAUSE_MS = 0
+
+#: Accepted range, mirroring core-api's `TtsConfiguration` value object. Unlike
+#: the speed/volume ranges (which `TtsSettings` owns, so this module must not
+#: duplicate them), nothing downstream validates a pause: it is consumed as a
+#: number of milliseconds by the finisher, where a negative value would produce
+#: a malformed ffmpeg filter and a huge one would produce a clip nobody waits
+#: through. So the bounds live here, at the point of entry.
+MIN_PAUSE_MS = 0
+MAX_PAUSE_MS = 2000
+
+
 @dataclass(frozen=True)
 class TtsConfig:
     """Resolved announcement settings."""
 
     engine: str
     settings: TtsSettings
+    pause_ms: int = DEFAULT_PAUSE_MS
 
     @property
     def cache_parts(self) -> tuple[object, ...]:
@@ -41,6 +57,7 @@ class TtsConfig:
             self.settings.voice_id,
             self.settings.speed,
             self.settings.volume,
+            self.pause_ms,
         )
 
 
@@ -50,6 +67,7 @@ class TtsConfig:
 FALLBACK = TtsConfig(
     engine=DEFAULT_ENGINE,
     settings=TtsSettings(voice_id=DEFAULT_VOICE, speed=1.0, volume=1.0),
+    pause_ms=DEFAULT_PAUSE_MS,
 )
 
 
@@ -132,7 +150,11 @@ class CoreApiConfigClient:
             # Out-of-range knobs are a misconfiguration, not a reason to go mute.
             logger.warning("invalid ttsConfiguration knobs (%s); using defaults", exc)
             settings = FALLBACK.settings
-        return TtsConfig(engine=engine or DEFAULT_ENGINE, settings=settings)
+        return TtsConfig(
+            engine=engine or DEFAULT_ENGINE,
+            settings=settings,
+            pause_ms=_pause_ms_or(raw.get("pauseMs"), DEFAULT_PAUSE_MS),
+        )
 
 
 def _clean_str(value: object) -> str:
@@ -143,6 +165,45 @@ def _clean_str(value: object) -> str:
     broken service rather than a typo in the config.
     """
     return value.strip() if isinstance(value, str) else ""
+
+
+def _pause_ms_or(value: object, default: int) -> int:
+    """Coerce the pause to a whole number of milliseconds inside the valid range.
+
+    Clamps nothing and raises nothing: an out-of-range or non-integer pause falls
+    back to the default, exactly like an absent one. A bad pause must not be able
+    to silence the board, and unlike speed/volume there is no `TtsSettings`
+    downstream to own the range -- so this is the only place it can be checked,
+    which is also why it does the check itself rather than delegating like
+    `_numeric_or`.
+
+    An integral `float` is accepted: core-api's value object enforces an integer,
+    but `400.0` in a hand-edited config is unambiguously 400 ms, and rejecting it
+    would silently restore the old delivery for a value that is not actually
+    wrong. A fractional one is still rejected -- that is a client bug, not a
+    preference.
+
+    `bool` is excluded first because it is an `int` in Python, and `True` is not
+    a duration.
+    """
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, float):
+        if not value.is_integer():
+            return default
+        value = int(value)
+    if not isinstance(value, int):
+        return default
+    if not MIN_PAUSE_MS <= value <= MAX_PAUSE_MS:
+        logger.warning(
+            "ttsConfiguration.pauseMs %s outside [%s, %s]; using %s",
+            value,
+            MIN_PAUSE_MS,
+            MAX_PAUSE_MS,
+            default,
+        )
+        return default
+    return value
 
 
 def _numeric_or(value: object, default: float) -> float:

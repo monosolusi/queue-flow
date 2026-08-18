@@ -8,6 +8,7 @@ import {
   PrinterConfiguration,
   SystemConfiguration,
 } from '../../src/domain/store-config';
+import { TtsConfiguration } from '../../src/domain/store-config';
 import type { ISystemConfigurationRepository } from '../../src/domain/store-config';
 import { Identifier } from '../../src/domain/shared';
 import {
@@ -69,6 +70,7 @@ describe('PrintTicketUseCase', () => {
       endSources: d.endSources,
       startSources: d.startSources,
       printerConfiguration: printer,
+      ttsConfiguration: TtsConfiguration.DEFAULT,
     });
     void repo.save(config);
   }

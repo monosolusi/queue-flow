@@ -14,6 +14,7 @@ import {
   NodePositions,
   PrinterConfiguration,
   StateDescriptions,
+  TtsConfiguration,
 } from '../../src/domain/store-config';
 import type { DomainEvent } from '../../src/domain/shared/domain-event';
 import type { IEventDispatcher } from '../../src/domain/shared/event-dispatcher.port';
@@ -83,6 +84,7 @@ describe('SaveSystemConfigurationUseCase — category id preservation (QUE-24)',
       endSources: [],
       startSources: [],
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
+      ttsConfiguration: { speed: 1, volume: 1, pauseMs: 0 },
       actor: 'admin',
     };
   }
@@ -209,6 +211,7 @@ describe('SaveSystemConfigurationUseCase — brandColor (QUE-36)', () => {
       endSources: [],
       startSources: [],
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
+      ttsConfiguration: { speed: 1, volume: 1, pauseMs: 0 },
       actor: 'admin',
     };
   }
@@ -336,6 +339,7 @@ describe('SaveSystemConfigurationUseCase — SYSTEM_CONFIG_CHANGED broadcast (FR
       endSources: [],
       startSources: [],
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
+      ttsConfiguration: { speed: 1, volume: 1, pauseMs: 0 },
       actor: 'admin',
     };
   }
@@ -452,6 +456,7 @@ describe('SaveSystemConfigurationUseCase — edgeRoutingLayout', () => {
       endSources: [],
       startSources: [],
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
+      ttsConfiguration: { speed: 1, volume: 1, pauseMs: 0 },
       actor: 'admin',
     };
   }
@@ -603,6 +608,7 @@ describe('SaveSystemConfigurationUseCase — nodePositions', () => {
       endSources: [],
       startSources: [],
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
+      ttsConfiguration: { speed: 1, volume: 1, pauseMs: 0 },
       actor: 'admin',
     };
   }
@@ -750,6 +756,7 @@ describe('SaveSystemConfigurationUseCase — endSources', () => {
       endSources,
       startSources: [],
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
+      ttsConfiguration: { speed: 1, volume: 1, pauseMs: 0 },
       actor: 'admin',
     };
   }
@@ -897,6 +904,7 @@ describe('SaveSystemConfigurationUseCase — startSources', () => {
       endSources: [],
       startSources,
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
+      ttsConfiguration: { speed: 1, volume: 1, pauseMs: 0 },
       actor: 'admin',
     };
   }
@@ -990,6 +998,107 @@ describe('SaveSystemConfigurationUseCase — startSources', () => {
 });
 
 /**
+ * Announcement delivery persistence. `ttsConfiguration` is a required field on
+ * the save command; the use case validates it pre-transaction and reconstitutes
+ * it onto the aggregate, exactly like `printerConfiguration`. What makes it
+ * worth its own block is that the value is consumed by ANOTHER SERVICE
+ * (tts-service polls `GET /api/system/config`), so a value that fails to persist
+ * would degrade silently to the old pace rather than error.
+ */
+describe('SaveSystemConfigurationUseCase — ttsConfiguration', () => {
+  function ttsCommand(tts: Record<string, unknown>): SaveSystemConfigurationCommand {
+    return {
+      storeName: 'Toko Suara',
+      stateMachine: projectStateMachine(StateMachine.DEFAULT),
+      dailyReset: {
+        mode: DailyResetMode.MANUAL,
+        cronExpression: null,
+        resetTicketNumberTo: 1,
+        archivePreviousDayData: true,
+      },
+      categories: [{ code: 'A', name: 'Customer Service' }],
+      routingRules: [
+        {
+          counterId: 1,
+          counterName: 'Loket 1',
+          assignedCategoryCodes: ['A'],
+          priorityPolicy: PriorityPolicy.FIFO_GLOBAL,
+        },
+      ],
+      brandColor: '#2563eb',
+      serviceThemes: { kiosk: 'light', tv: 'light', caller: 'light', admin: 'light' },
+      tvPanelLayout: [
+        { id: 'nowServing', component: 'nowServing', x: 0, y: 0, w: 12, h: 4 },
+        { id: 'waitingQueue', component: 'waitingQueue', x: 0, y: 4, w: 6, h: 3 },
+        { id: 'callHistory', component: 'callHistory', x: 6, y: 4, w: 6, h: 3 },
+        { id: 'countersServing', component: 'countersServing', x: 0, y: 7, w: 12, h: 3 },
+        { id: 'runningText', component: 'runningText', x: 0, y: 10, w: 12, h: 1 },
+      ],
+      edgeRoutingLayout: {},
+      nodePositions: {},
+      nodeActions: {},
+      terminalNodes: { start: 'auto', end: 'auto' },
+      endSources: [],
+      startSources: [],
+      printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
+      ttsConfiguration: tts as unknown as SaveSystemConfigurationCommand['ttsConfiguration'],
+      actor: 'admin',
+    };
+  }
+
+  function buildTtsUseCase() {
+    const repos = {
+      config: new InMemorySystemConfigurationRepository(),
+      categories: new InMemoryCategoryRepository(),
+      routingRules: new InMemoryCounterRoutingRuleRepository(),
+    };
+    return {
+      repos,
+      useCase: new SaveSystemConfigurationUseCase(
+        repos.config,
+        repos.categories,
+        repos.routingRules,
+        new NoOpTransactionManager(),
+        null,
+      ),
+    };
+  }
+
+  it('persists a slowed, paused delivery and echoes it in the result', async () => {
+    const { repos, useCase } = buildTtsUseCase();
+    const tts = { speed: 0.9, volume: 1.2, pauseMs: 400 };
+
+    const result = await useCase.execute(ttsCommand(tts));
+
+    expect(result.ttsConfiguration).toEqual(tts);
+    const saved = await repos.config.get();
+    expect(saved!.ttsConfiguration.toDto()).toEqual(tts);
+    expect(saved!.ttsConfiguration.equals(TtsConfiguration.of(tts))).toBe(true);
+  });
+
+  it('defaults a partial delivery object rather than rejecting it', async () => {
+    const { repos, useCase } = buildTtsUseCase();
+
+    await useCase.execute(ttsCommand({ pauseMs: 300 }));
+
+    const saved = await repos.config.get();
+    expect(saved!.ttsConfiguration.toDto()).toEqual({ speed: 1, volume: 1, pauseMs: 300 });
+  });
+
+  it('rejects an out-of-range speed before opening a transaction (no write burned)', async () => {
+    const { repos, useCase } = buildTtsUseCase();
+
+    await expect(useCase.execute(ttsCommand({ speed: 3.0, volume: 1, pauseMs: 0 }))).rejects.toThrow(
+      InvalidValueObjectException,
+    );
+
+    // NFR-REL-02: an illegal config must leave the store untouched, not
+    // half-applied. Setup stays incomplete because nothing was written.
+    expect(await repos.config.get()).toBeNull();
+  });
+});
+
+/**
  * Printer configuration persistence (which printer the kiosk uses — Chrome's
  * default dialog, or a network ESC/POS printer proxied through core-api).
  * `printerConfiguration` is a required field on the save command; the use case
@@ -1041,6 +1150,7 @@ describe('SaveSystemConfigurationUseCase — printerConfiguration', () => {
       endSources: [],
       startSources: [],
       printerConfiguration: printer as unknown as SaveSystemConfigurationCommand['printerConfiguration'],
+      ttsConfiguration: { speed: 1, volume: 1, pauseMs: 0 },
       actor: 'admin',
     };
   }
@@ -1161,6 +1271,7 @@ describe('SaveSystemConfigurationUseCase — nodeActions', () => {
       endSources: [],
       startSources: [],
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
+      ttsConfiguration: { speed: 1, volume: 1, pauseMs: 0 },
       actor: 'admin',
     };
   }
@@ -1338,6 +1449,7 @@ describe('SaveSystemConfigurationUseCase — stateMachine.descriptions', () => {
       endSources: [],
       startSources: [],
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
+      ttsConfiguration: { speed: 1, volume: 1, pauseMs: 0 },
       actor: 'admin',
     };
   }
@@ -1512,6 +1624,7 @@ describe('SaveSystemConfigurationUseCase — terminalNodes', () => {
       endSources: [],
       startSources: [],
       printerConfiguration: { mode: 'chrome', paperWidth: 80, host: '', port: 9100, cutMode: 'partial', baudRate: 9600 },
+      ttsConfiguration: { speed: 1, volume: 1, pauseMs: 0 },
       actor: 'admin',
     };
   }

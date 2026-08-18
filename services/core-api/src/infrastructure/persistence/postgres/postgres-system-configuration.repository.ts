@@ -45,6 +45,10 @@ import {
   PrinterConfiguration,
   type PrinterConfigurationDto,
 } from '../../../domain/store-config/value-objects/printer-configuration';
+import {
+  TtsConfiguration,
+  type TtsConfigurationDto,
+} from '../../../domain/store-config/value-objects/tts-configuration';
 import { StateMachine } from '../../../domain/store-config/state-machine';
 import { StateSchema } from '../../../domain/store-config/value-objects/state-schema';
 import { StateDescriptions } from '../../../domain/store-config/value-objects/state-descriptions';
@@ -90,6 +94,7 @@ interface ConfigRow {
   end_sources: EndSourcesDto | null;
   start_sources: StartSourcesDto | null;
   printer_configuration: PrinterConfigurationDto | null;
+  tts_configuration: TtsConfigurationDto | null;
 }
 
 /**
@@ -116,8 +121,8 @@ export class PostgresSystemConfigurationRepository implements ISystemConfigurati
   async save(config: SystemConfiguration): Promise<void> {
     await withDbClient(this.pool, async (client) => {
       await client.query(
-        `INSERT INTO system_configuration (id, store_name, is_initial_setup_completed, state_machine, daily_reset_policy, brand_color, service_themes, tv_panel_layout, edge_routing_layout, node_positions, node_actions, terminal_nodes, end_sources, start_sources, printer_configuration)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        `INSERT INTO system_configuration (id, store_name, is_initial_setup_completed, state_machine, daily_reset_policy, brand_color, service_themes, tv_panel_layout, edge_routing_layout, node_positions, node_actions, terminal_nodes, end_sources, start_sources, printer_configuration, tts_configuration)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
          ON CONFLICT (id) DO UPDATE SET
            store_name                = EXCLUDED.store_name,
            is_initial_setup_completed = EXCLUDED.is_initial_setup_completed,
@@ -132,7 +137,8 @@ export class PostgresSystemConfigurationRepository implements ISystemConfigurati
            terminal_nodes            = EXCLUDED.terminal_nodes,
            end_sources               = EXCLUDED.end_sources,
            start_sources             = EXCLUDED.start_sources,
-           printer_configuration     = EXCLUDED.printer_configuration`,
+           printer_configuration     = EXCLUDED.printer_configuration,
+           tts_configuration         = EXCLUDED.tts_configuration`,
         [
           config.id.value,
           config.storeName,
@@ -155,6 +161,7 @@ export class PostgresSystemConfigurationRepository implements ISystemConfigurati
           JSON.stringify(config.endSources.toDto()),
           JSON.stringify(config.startSources.toDto()),
           JSON.stringify(config.printerConfiguration.toDto()),
+          JSON.stringify(config.ttsConfiguration.toDto()),
         ],
       );
     });
@@ -287,6 +294,11 @@ function toConfig(row: ConfigRow): SystemConfiguration {
     // undefined here) — both paths reconstitute PrinterConfiguration.DEFAULT.
     // Mirrors the nodePositions fallback.
     printerConfiguration: PrinterConfiguration.of(row.printer_configuration ?? undefined),
+    // Same boot-window fallback for tts_configuration (0019 migration). `of()`
+    // recovers a null/undefined column to speed 1.0 with no added pause — the
+    // delivery the board had before this column existed — and a pre-migration
+    // row's SELECT * simply lacks the column (pg returns undefined here).
+    ttsConfiguration: TtsConfiguration.of(row.tts_configuration ?? undefined),
   });
 }
 

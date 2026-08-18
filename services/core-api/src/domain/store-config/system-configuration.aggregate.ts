@@ -10,6 +10,7 @@ import { NodeActions } from './value-objects/node-actions';
 import { NodePositions } from './value-objects/node-positions';
 import { PrinterConfiguration } from './value-objects/printer-configuration';
 import { TerminalNodes } from './value-objects/terminal-nodes';
+import { TtsConfiguration } from './value-objects/tts-configuration';
 import { ServiceThemes } from './value-objects/service-themes';
 import { TvPanelLayout } from './value-objects/tv-panel-layout';
 import { StateMachine } from './state-machine';
@@ -35,6 +36,7 @@ export class SystemConfiguration extends AggregateRoot {
   private _endSources: EndSources;
   private _startSources: StartSources;
   private _printerConfiguration: PrinterConfiguration;
+  private _ttsConfiguration: TtsConfiguration;
 
   private constructor(
     id: Identifier,
@@ -52,6 +54,7 @@ export class SystemConfiguration extends AggregateRoot {
     endSources: EndSources,
     startSources: StartSources,
     printerConfiguration: PrinterConfiguration,
+    ttsConfiguration: TtsConfiguration,
   ) {
     super(id);
     this._storeName = storeName;
@@ -68,13 +71,15 @@ export class SystemConfiguration extends AggregateRoot {
     this._endSources = endSources;
     this._startSources = startSources;
     this._printerConfiguration = printerConfiguration;
+    this._ttsConfiguration = ttsConfiguration;
   }
 
   /** Creates a fresh, not-yet-configured instance with the default state machine,
    * brand color, service themes, TV panel layout, edge routing layout, node
    * positions, and printer configuration. `brandColor` + `serviceThemes` +
    * `tvPanelLayout` + `edgeRoutingLayout` + `nodePositions` + `nodeActions` +
-   * `terminalNodes` + `endSources` + `startSources` + `printerConfiguration` default so the dev
+   * `terminalNodes` + `endSources` + `startSources` + `printerConfiguration` +
+   * `ttsConfiguration` default so the dev
    * seed and acceptance `seedPrdConfig` (2-arg calls) need no change. */
   public static create(
     id: Identifier,
@@ -89,6 +94,7 @@ export class SystemConfiguration extends AggregateRoot {
     endSources: EndSources = EndSources.DEFAULT,
     startSources: StartSources = StartSources.DEFAULT,
     printerConfiguration: PrinterConfiguration = PrinterConfiguration.DEFAULT,
+    ttsConfiguration: TtsConfiguration = TtsConfiguration.DEFAULT,
   ): SystemConfiguration {
     return new SystemConfiguration(
       id,
@@ -106,6 +112,7 @@ export class SystemConfiguration extends AggregateRoot {
       endSources,
       startSources,
       printerConfiguration,
+      ttsConfiguration,
     );
   }
 
@@ -125,6 +132,7 @@ export class SystemConfiguration extends AggregateRoot {
     endSources: EndSources;
     startSources: StartSources;
     printerConfiguration: PrinterConfiguration;
+    ttsConfiguration: TtsConfiguration;
   }): SystemConfiguration {
     return new SystemConfiguration(
       params.id,
@@ -142,6 +150,7 @@ export class SystemConfiguration extends AggregateRoot {
       params.endSources,
       params.startSources,
       params.printerConfiguration,
+      params.ttsConfiguration,
     );
   }
 
@@ -199,6 +208,10 @@ export class SystemConfiguration extends AggregateRoot {
 
   public get printerConfiguration(): PrinterConfiguration {
     return this._printerConfiguration;
+  }
+
+  public get ttsConfiguration(): TtsConfiguration {
+    return this._ttsConfiguration;
   }
 
   public setStoreName(name: string): void {

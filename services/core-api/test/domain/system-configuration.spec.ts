@@ -17,6 +17,7 @@ import {
   SystemConfiguration,
   TvPanelLayout,
 } from '../../src/domain/store-config';
+import { TtsConfiguration } from '../../src/domain/store-config';
 import { DEFAULT_TIMEZONE } from '../../src/domain/store-config/value-objects/timezone';
 import { TicketStatus } from '../../src/domain/queue';
 
@@ -243,6 +244,35 @@ describe('SystemConfiguration aggregate', () => {
     expect(config.startSources.toDto()).toEqual([]);
   });
 
+  it('defaults ttsConfiguration to the default delivery (zero behavior change — same pace, no added pause)', () => {
+    const config = SystemConfiguration.create(Identifier.generate(), 'Toko Suara');
+    expect(config.ttsConfiguration).toBe(TtsConfiguration.DEFAULT);
+    expect(config.ttsConfiguration.toDto()).toEqual({ speed: 1, volume: 1, pauseMs: 0 });
+  });
+
+  it('reconstitute carries a custom announcement delivery through', () => {
+    const tts = TtsConfiguration.of({ speed: 0.9, volume: 1.2, pauseMs: 400 });
+    const config = SystemConfiguration.reconstitute({
+      id: Identifier.generate(),
+      storeName: 'Toko Suara',
+      isInitialSetupCompleted: true,
+      stateMachine: StateMachine.DEFAULT,
+      dailyResetPolicy: DailyResetPolicy.DEFAULT,
+      brandColor: BrandColor.DEFAULT,
+      serviceThemes: ServiceThemes.DEFAULT,
+      tvPanelLayout: TvPanelLayout.DEFAULT,
+      edgeRoutingLayout: EdgeRoutingLayout.DEFAULT,
+      nodePositions: NodePositions.DEFAULT,
+      nodeActions: NodeActions.DEFAULT,
+      terminalNodes: TerminalNodes.DEFAULT,
+      endSources: EndSources.DEFAULT,
+      startSources: StartSources.DEFAULT,
+      printerConfiguration: PrinterConfiguration.DEFAULT,
+      ttsConfiguration: tts,
+    });
+    expect(config.ttsConfiguration.toDto()).toEqual({ speed: 0.9, volume: 1.2, pauseMs: 400 });
+  });
+
   it('defaults printerConfiguration to the chrome default (zero behavior change — Chrome print dialog)', () => {
     const config = SystemConfiguration.create(Identifier.generate());
     expect(config.printerConfiguration).toBe(PrinterConfiguration.DEFAULT);
@@ -273,6 +303,7 @@ describe('SystemConfiguration aggregate', () => {
       endSources: EndSources.DEFAULT,
       startSources: StartSources.DEFAULT,
       printerConfiguration: PrinterConfiguration.DEFAULT,
+      ttsConfiguration: TtsConfiguration.DEFAULT,
     });
     expect(config.brandColor.value).toBe('#aabbcc');
   });
@@ -294,6 +325,7 @@ describe('SystemConfiguration aggregate', () => {
       endSources: EndSources.DEFAULT,
       startSources: StartSources.DEFAULT,
       printerConfiguration: PrinterConfiguration.DEFAULT,
+      ttsConfiguration: TtsConfiguration.DEFAULT,
     });
     expect(config.serviceThemes.toDto()).toEqual({
       kiosk: 'light',
@@ -323,6 +355,7 @@ describe('SystemConfiguration aggregate', () => {
       endSources: EndSources.DEFAULT,
       startSources: StartSources.DEFAULT,
       printerConfiguration: PrinterConfiguration.DEFAULT,
+      ttsConfiguration: TtsConfiguration.DEFAULT,
     });
     expect(config.tvPanelLayout.toDto()).toEqual([
       { id: 'nowServing', component: 'nowServing', x: 0, y: 0, w: 8, h: 4 },
@@ -349,6 +382,7 @@ describe('SystemConfiguration aggregate', () => {
       endSources: EndSources.DEFAULT,
       startSources: StartSources.DEFAULT,
       printerConfiguration: PrinterConfiguration.DEFAULT,
+      ttsConfiguration: TtsConfiguration.DEFAULT,
     });
     expect(config.edgeRoutingLayout.toDto()).toEqual({
       'SKIPPED->CALLING': { sourceSide: 'bottom', targetSide: 'top' },
@@ -375,6 +409,7 @@ describe('SystemConfiguration aggregate', () => {
       endSources: EndSources.DEFAULT,
       startSources: StartSources.DEFAULT,
       printerConfiguration: PrinterConfiguration.DEFAULT,
+      ttsConfiguration: TtsConfiguration.DEFAULT,
     });
     expect(config.nodePositions.toDto()).toEqual({
       WAITING: { x: 0, y: 0 },
@@ -399,6 +434,7 @@ describe('SystemConfiguration aggregate', () => {
       endSources: EndSources.of(['WAITING', 'COMPLETED']),
       startSources: StartSources.DEFAULT,
       printerConfiguration: PrinterConfiguration.DEFAULT,
+      ttsConfiguration: TtsConfiguration.DEFAULT,
     });
     expect(config.endSources.toDto()).toEqual(['WAITING', 'COMPLETED']);
   });
@@ -420,6 +456,7 @@ describe('SystemConfiguration aggregate', () => {
       endSources: EndSources.DEFAULT,
       startSources: StartSources.of(['WAITING', 'COMPLETED']),
       printerConfiguration: PrinterConfiguration.DEFAULT,
+      ttsConfiguration: TtsConfiguration.DEFAULT,
     });
     expect(config.startSources.toDto()).toEqual(['WAITING', 'COMPLETED']);
   });
@@ -447,6 +484,7 @@ describe('SystemConfiguration aggregate', () => {
         port: 9100,
         cutMode: 'full',
       }),
+      ttsConfiguration: TtsConfiguration.DEFAULT,
     });
     expect(config.printerConfiguration.toDto()).toEqual({
       mode: 'network-escpos',

@@ -19,6 +19,7 @@ import { TerminalNodes, type TerminalNodesDto } from '../../domain/store-config'
 import { EndSources, type EndSourcesDto } from '../../domain/store-config';
 import { StartSources, type StartSourcesDto } from '../../domain/store-config';
 import { PrinterConfiguration, type PrinterConfigurationDto } from '../../domain/store-config';
+import { TtsConfiguration, type TtsConfigurationDto } from '../../domain/store-config';
 import { type IDailyResetSchedulerPort } from '../../domain/store-config';
 import {
   Identifier,
@@ -205,6 +206,13 @@ export interface SaveSystemConfigurationCommand {
    *  no host). Not change-gated (like `nodePositions`/`edgeRoutingLayout`).
    *  Not audited (operational config, not in the NFR-SEC-02 list). */
   readonly printerConfiguration: PrinterConfigurationDto;
+  /** Announcement delivery for the TV board (speaking rate, volume, and the
+   *  silence inserted at each pause point). Required on the wire; the VO
+   *  recovers a null/undefined to the default (speed 1.0, no added pause —
+   *  zero behavior change) and rejects a present-but-invalid value (a
+   *  multiplier outside its range, a non-integer `pauseMs`). Not change-gated,
+   *  not audited (operational config, not in the NFR-SEC-02 list). */
+  readonly ttsConfiguration: TtsConfigurationDto;
   readonly actor: string;
 }
 
@@ -221,6 +229,7 @@ export interface SaveSystemConfigurationResult {
   readonly endSources: EndSourcesDto;
   readonly startSources: StartSourcesDto;
   readonly printerConfiguration: PrinterConfigurationDto;
+  readonly ttsConfiguration: TtsConfigurationDto;
 }
 
 /** Minimal projection used only for audit before/after snapshots. */
@@ -381,6 +390,10 @@ export class SaveSystemConfigurationUseCase {
     // printer config (bad mode/paperWidth/cutMode enum, non-integer port,
     // network-escpos with no host) fails fast.
     const printerConfiguration = PrinterConfiguration.of(command.printerConfiguration);
+    // Announcement delivery — same shape again. Validated pre-tx so an
+    // out-of-range speed/volume or a fractional `pauseMs` fails before a
+    // transaction is opened.
+    const ttsConfiguration = TtsConfiguration.of(command.ttsConfiguration);
     const newCategories = this.buildCategories(command.categories);
     const codeToId = new Map(newCategories.map((c) => [c.code, c.id.value]));
     const newRules = this.buildRoutingRules(command.routingRules, codeToId);
@@ -566,6 +579,7 @@ export class SaveSystemConfigurationUseCase {
         endSources,
         startSources,
         printerConfiguration,
+        ttsConfiguration,
       });
       system.completeInitialSetup(); // idempotent — validates store name, flips the flag
 
@@ -623,6 +637,7 @@ export class SaveSystemConfigurationUseCase {
         endSources: system.endSources.toDto(),
         startSources: system.startSources.toDto(),
         printerConfiguration: system.printerConfiguration.toDto(),
+        ttsConfiguration: system.ttsConfiguration.toDto(),
       };
     });
 

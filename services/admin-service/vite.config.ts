@@ -46,6 +46,11 @@ export default defineConfig({
     proxy: {
       '/api': { target: 'http://localhost:3000', changeOrigin: true },
       '/ws': { target: 'ws://localhost:3000', ws: true },
+      // `/tts-config`'s "Tes Suara" plays a clip straight from tts-service. In
+      // production the gateway already proxies `/tts/`, so this entry only makes
+      // dev match; without it the preview 404s against the Vite server and the
+      // page looks broken on a developer machine only.
+      '/tts': { target: 'http://localhost:8000', changeOrigin: true },
     },
   },
   test: {

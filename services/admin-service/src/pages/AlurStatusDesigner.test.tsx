@@ -12,6 +12,7 @@ import {
   DEFAULT_STATE_MACHINE,
   DEFAULT_BRAND_COLOR,
   DEFAULT_PRINTER_CONFIGURATION,
+  DEFAULT_TTS_CONFIGURATION,
   DEFAULT_SERVICE_THEMES,
   DEFAULT_TV_GRID_LAYOUT,
   type SaveSystemConfigurationPayload,
@@ -69,6 +70,7 @@ function configuredStore(): SystemConfigurationDto {
     edgeRoutingLayout: {},
     nodePositions: {}, nodeActions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
     printerConfiguration: { ...DEFAULT_PRINTER_CONFIGURATION },
+    ttsConfiguration: { ...DEFAULT_TTS_CONFIGURATION },
   };
 }
 
@@ -82,7 +84,7 @@ function makeApi(config: SystemConfigurationDto = configuredStore()) {
       tvPanelLayout: payload.tvPanelLayout,
       edgeRoutingLayout: {},
       nodePositions: {}, nodeActions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
-      printerConfiguration: payload.printerConfiguration,
+      printerConfiguration: payload.printerConfiguration, ttsConfiguration: payload.ttsConfiguration,
     }),
   );
   const getConfig = vi.fn(() => Promise.resolve(config));

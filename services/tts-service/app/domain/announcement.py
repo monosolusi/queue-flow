@@ -49,9 +49,25 @@ class AnnouncementScript:
     is named. Cache identity is deliberately NOT here: what identifies a clip also
     depends on the engine, voice and delivery knobs, which is application policy
     (`SynthesizeAnnouncementUseCase._cache_key`), not a property of the sentence.
+
+    Carries the sentence TWICE, at two granularities, and both are load-bearing:
+
+    - `text` is the whole line. It is what gets synthesized when no pause is
+      configured, and it stays the cache-key input and the `X-Announcement-Text`
+      debug header regardless of pausing -- the announcement is the same
+      announcement however it was cut up.
+    - `segments` is the same words split at the points a pause belongs. Splitting
+      is a DOMAIN decision: it depends on where the numbers fall in Indonesian
+      phrasing, which is exactly the knowledge this module exists to hold. How
+      long the silence is, and how it is produced, is not decided here.
+
+    Deriving one from the other at the seam was rejected: re-joining `segments`
+    would have to re-invent the punctuation, and re-splitting `text` would put a
+    parser downstream of the thing that already knew the answer.
     """
 
     text: str
+    segments: tuple[str, ...]
 
 
 def build_script(request: AnnouncementRequest) -> AnnouncementScript:
@@ -67,6 +83,13 @@ def build_script(request: AnnouncementRequest) -> AnnouncementScript:
     The comma is deliberate -- it is the one piece of punctuation the phonemizer
     turns into the short pause that separates the number from the destination.
     Without it the whole line runs together.
+
+    `segments` splits the same words before each NUMBER, because that is what a
+    listener has to catch: "nomor antrian" / "a lima" / "silakan ke loket" /
+    "dua". A configured pause is inserted at each of those seams. With no pause
+    configured the segments are unused and `text` is spoken as one utterance, so
+    the default delivery is byte-for-byte what it was before segmentation
+    existed.
     """
     code, _, sequence_part = request.ticket_number.partition("-")
 
@@ -77,15 +100,25 @@ def build_script(request: AnnouncementRequest) -> AnnouncementScript:
             "category letters"
         )
 
-    parts = ["nomor antrian", spoken_code]
-
     # A ticket number with no dash (or a non-numeric tail) still announces -- the
     # category alone is better than silence. Callers never construct these, but a
     # hand-crafted WS frame or a future numbering scheme might.
+    ticket_words = spoken_code
     if sequence_part.isdigit():
-        parts.append(number_to_words(int(sequence_part)))
+        ticket_words = f"{spoken_code} {number_to_words(int(sequence_part))}"
 
-    head = " ".join(parts)
+    # Both forms are assembled from the SAME tokens rather than written out
+    # twice: the whole point of carrying `text` and `segments` together is that
+    # they are one sentence at two granularities, and two independent f-strings
+    # would let them drift into two different announcements.
+    lead = "nomor antrian"
+    tail = "silakan ke loket"
+    counter_words = number_to_words(request.counter_id)
     return AnnouncementScript(
-        text=f"{head}, silakan ke loket {number_to_words(request.counter_id)}"
+        text=f"{lead} {ticket_words}, {tail} {counter_words}",
+        # The ticket id stays whole. A seam between "a" and "lima" would put a
+        # pause INSIDE the number the listener is trying to catch, which is the
+        # opposite of what pausing is for -- the seams belong in front of each
+        # number, not through one.
+        segments=(lead, ticket_words, tail, counter_words),
     )

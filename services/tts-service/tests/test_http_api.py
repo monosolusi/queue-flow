@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.application.synthesize_announcement import SynthesizeAnnouncementUseCase
-from app.domain.tts_engine import TtsEngineError, VoiceNotAvailableError
+from app.domain.tts_engine import TtsEngineError, TtsSettings, VoiceNotAvailableError
 from app.interface_adapters.http_api import build_router
 
 from .fakes import FakeCache, FakeConfig, FakeConfigProvider, FakeEngine, fake_finisher
@@ -199,3 +199,102 @@ def test_every_route_is_under_the_tts_prefix() -> None:
         "/tts/preview",
         "/tts/probe",
     }
+
+
+# ---------------------------------------------------------------------------
+# /tts/preview: the admin panel's "Tes Suara". Auditioning UNSAVED values is the
+# point -- a speed setting whose only acceptance test is "does it sound right"
+# is the wrong thing to make someone save before they can hear it.
+# ---------------------------------------------------------------------------
+
+
+def test_preview_without_text_announces_a_sample_ticket() -> None:
+    """The admin panel never has to know how a queue call is worded in
+    Indonesian; that knowledge is this service's reason for existing."""
+    response = build_client().get("/tts/preview")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "audio/mpeg"
+    assert response.headers["X-Announcement-Text"] == (
+        "nomor antrian a satu, silakan ke loket satu"
+    )
+
+
+def test_preview_still_accepts_explicit_text() -> None:
+    response = build_client().get("/tts/preview", params={"text": "halo semua"})
+    assert response.status_code == 200
+    assert response.headers["X-Announcement-Text"] == "halo semua"
+
+
+def test_preview_applies_a_speed_override() -> None:
+    engine = FakeEngine()
+    client = build_client(engine=engine)
+
+    assert client.get("/tts/preview", params={"speed": 0.8}).status_code == 200
+
+    _, settings = engine.calls[0]
+    assert settings.speed == 0.8
+
+
+def test_preview_leaves_un_auditioned_knobs_at_the_stored_values() -> None:
+    """Overriding speed must not quietly reset the volume, or the manager is
+    auditioning a delivery the store will never actually produce."""
+    engine = FakeEngine()
+    stored = FakeConfig(
+        engine=engine.id,
+        settings=TtsSettings(voice_id="fake-voice", speed=1.0, volume=1.5),
+    )
+    client = build_client(engine=engine, config=stored)
+
+    assert client.get("/tts/preview", params={"speed": 0.8}).status_code == 200
+
+    _, settings = engine.calls[0]
+    assert settings.speed == 0.8
+    assert settings.volume == 1.5
+    assert settings.voice_id == "fake-voice"
+
+
+def test_preview_applies_a_pause_override() -> None:
+    engine = FakeEngine()
+    client = build_client(engine=engine)
+
+    assert client.get("/tts/preview", params={"pauseMs": 400}).status_code == 200
+
+    # The sample announcement has four segments, so a pause turns one engine call
+    # into four -- which is the observable difference a pause makes here.
+    assert len(engine.calls) == 4
+
+
+def test_preview_with_no_overrides_uses_the_stored_delivery() -> None:
+    engine = FakeEngine()
+    client = build_client(engine=engine, config=FakeConfig(engine=engine.id, pause_ms=400))
+
+    assert client.get("/tts/preview").status_code == 200
+
+    assert len(engine.calls) == 4
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"speed": 0.1},
+        {"speed": 9},
+        {"volume": -1},
+        {"volume": 5},
+        {"pauseMs": -1},
+        {"pauseMs": 99_999},
+    ],
+)
+def test_preview_rejects_out_of_range_overrides(params: dict) -> None:
+    """`/tts/preview` is unauthenticated, so the knobs are bounded at the
+    transport edge rather than trusted and passed inward."""
+    assert build_client().get("/tts/preview", params=params).status_code == 422
+
+
+def test_two_previews_at_different_speeds_get_different_etags() -> None:
+    """The ETag is the digest of everything that can change the audio. If an
+    override were left out, the browser would replay the first clip and the
+    manager would conclude the setting does nothing."""
+    client = build_client()
+    slow = client.get("/tts/preview", params={"speed": 0.6})
+    fast = client.get("/tts/preview", params={"speed": 1.4})
+    assert slow.headers["ETag"] != fast.headers["ETag"]

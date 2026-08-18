@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { WizardPage } from './WizardPage';
 import type { IAdminApi, IAuthApi } from '../api/admin-api';
-import { DEFAULT_CATEGORIES, DEFAULT_STATE_MACHINE, DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES, DEFAULT_TV_GRID_LAYOUT, DEFAULT_PRINTER_CONFIGURATION, type SaveSystemConfigurationPayload, type SaveSystemConfigurationResult, type SystemConfigurationDto } from '../api/types';
+import { DEFAULT_CATEGORIES, DEFAULT_STATE_MACHINE, DEFAULT_BRAND_COLOR, DEFAULT_SERVICE_THEMES, DEFAULT_TV_GRID_LAYOUT, DEFAULT_PRINTER_CONFIGURATION, DEFAULT_TTS_CONFIGURATION, type SaveSystemConfigurationPayload, type SaveSystemConfigurationResult, type SystemConfigurationDto } from '../api/types';
 import { BROWSER_TIMEZONE } from '../lib/timezone';
 
 /** A clean store mirrors core-api's `GetSystemConfigurationUseCase`: the default
@@ -25,6 +25,7 @@ function cleanStore(): SystemConfigurationDto {
     edgeRoutingLayout: {},
     nodePositions: {}, nodeActions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const,
     printerConfiguration: { ...DEFAULT_PRINTER_CONFIGURATION },
+    ttsConfiguration: { ...DEFAULT_TTS_CONFIGURATION },
   };
 }
 
@@ -43,7 +44,7 @@ function makeApi(
   const save = vi.fn(
     saveImpl ??
       ((payload: SaveSystemConfigurationPayload) =>
-        Promise.resolve({ isInitialSetupCompleted: true, storeName: payload.storeName, brandColor: payload.brandColor, serviceThemes: payload.serviceThemes, tvPanelLayout: payload.tvPanelLayout, edgeRoutingLayout: {}, nodePositions: {}, nodeActions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const, printerConfiguration: payload.printerConfiguration })),
+        Promise.resolve({ isInitialSetupCompleted: true, storeName: payload.storeName, brandColor: payload.brandColor, serviceThemes: payload.serviceThemes, tvPanelLayout: payload.tvPanelLayout, edgeRoutingLayout: {}, nodePositions: {}, nodeActions: {}, endSources: [], startSources: [], terminalNodes: { start: 'auto', end: 'auto' } as const, printerConfiguration: payload.printerConfiguration, ttsConfiguration: payload.ttsConfiguration })),
   );
   // Auth spies (QUE-43). First-run finalize calls setupInitialAdmin then login;
   // re-edit finalize calls neither. Defaults resolve so the happy-path walk

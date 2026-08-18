@@ -17,6 +17,7 @@ import { AuditLogPage } from './pages/AuditLogPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { LoginPage } from './pages/LoginPage';
 import { PrinterConfigPage } from './pages/PrinterConfigPage';
+import { TtsConfigPage } from './pages/TtsConfigPage';
 import { TvLayoutPage } from './pages/TvLayoutPage';
 import { UsersPage } from './pages/UsersPage';
 import { WizardPage } from './pages/WizardPage';
@@ -224,6 +225,16 @@ function AppRoutes({ api }: { api: IAdminAppApi }) {
               <SetupGuard>
                 <RequireAuth>
                   <PrinterConfigPage api={api} />
+                </RequireAuth>
+              </SetupGuard>
+            }
+          />
+          <Route
+            path="/tts-config"
+            element={
+              <SetupGuard>
+                <RequireAuth>
+                  <TtsConfigPage api={api} />
                 </RequireAuth>
               </SetupGuard>
             }
