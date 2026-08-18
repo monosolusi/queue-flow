@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from ..domain.announcement import AnnouncementRequest, AnnouncementScript, build_script
 from ..domain.ports import AudioCachePort, AudioFinisher, TtsConfigProvider
-from ..domain.tts_engine import TtsEngine, TtsSettings, Voice
+from ..domain.tts_engine import PauseDuration, TtsEngine, TtsSettings, Voice
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +94,8 @@ class SynthesizeAnnouncementUseCase:
         self,
         text: str | None = None,
         *,
-        overrides: TtsSettings | None = None,
+        speed: float | None = None,
+        volume: float | None = None,
         pause_ms: int | None = None,
     ) -> Announcement:
         """Synthesize a sample for the admin panel's "Tes Suara" button.
@@ -105,29 +106,23 @@ class SynthesizeAnnouncementUseCase:
         phrasing -- the exact knowledge that was moved out of the consuming
         services and into this one.
 
-        `overrides` and `pause_ms` let the panel audition unsaved values. Without
-        them the manager would have to save a speed to find out whether they like
-        it, which for a setting whose only acceptance test is "does it sound
-        right" is the wrong way round. They are applied ON TOP of the resolved
-        config, so anything not being auditioned still comes from the store's
-        real configuration.
+        Each knob is an independent optional so the panel can audition unsaved
+        values. Without that the manager would have to save a speed to find out
+        whether they like it, which for a setting whose only acceptance test is
+        "does it sound right" is the wrong way round.
+
+        They are SCALARS, not a pre-merged `TtsSettings`, on purpose: merging one
+        auditioned knob over the stored configuration -- and knowing that an
+        omitted knob means "keep the store's", and that the voice is never
+        auditioned -- is this layer's policy. Handing an adapter the job of
+        assembling a settings object made it decide all three.
         """
         script = (
             AnnouncementScript(text=text, segments=(text,))
             if text is not None
             else build_script(SAMPLE_ANNOUNCEMENT)
         )
-        return self._render(script, overrides=overrides, pause_ms=pause_ms)
-
-    def current_settings(self) -> TtsSettings:
-        """The stored delivery knobs, so an adapter can override one of them.
-
-        Exposed rather than letting the adapter read the config provider itself:
-        the resolved config is this layer's collaborator, and handing the HTTP
-        layer a `TtsConfigProvider` would make the route responsible for knowing
-        which parts of a config are engine settings.
-        """
-        return self._resolve_config().settings
+        return self._render(script, speed=speed, volume=volume, pause_ms=pause_ms)
 
     def available_voices(self) -> list[EngineVoice]:
         """Every engine's voices, paired with the engine that offers them."""
@@ -141,23 +136,40 @@ class SynthesizeAnnouncementUseCase:
         self,
         script: AnnouncementScript,
         *,
-        overrides: TtsSettings | None = None,
+        speed: float | None = None,
+        volume: float | None = None,
         pause_ms: int | None = None,
     ) -> Announcement:
+        # Resolved exactly once. `_resolve_config` MUTATES (it clears the cache
+        # when the configuration changed), so calling it a second time from a
+        # read path would put a compare-and-set on every request -- two
+        # concurrent previews could interleave it and wipe the announcement
+        # cache for no reason.
         config = self._resolve_config()
-        settings = overrides if overrides is not None else config.settings
-        gap_ms = pause_ms if pause_ms is not None else config.pause_ms
+        stored = config.settings
+        # An omitted knob keeps the store's value; the voice is never auditioned,
+        # so a preview always tests the voice the board actually uses.
+        settings = TtsSettings(
+            voice_id=stored.voice_id,
+            speed=stored.speed if speed is None else speed,
+            volume=stored.volume if volume is None else volume,
+        )
+        pause = config.pause if pause_ms is None else PauseDuration(pause_ms)
         text = script.text
 
-        # The auditioned values, not the stored ones, are what identify the clip
-        # -- otherwise two previews at different speeds would collide on one key
-        # and the second would be served the first one's audio.
-        parts = (
-            config.cache_parts
-            if overrides is None and pause_ms is None
-            else (config.engine, settings.voice_id, settings.speed, settings.volume, gap_ms)
+        # A gap with no seam to sit in cannot change the audio, so it must not
+        # change the identity either -- free-form preview text is a single
+        # segment, and two pause values there would occupy two cache slots for
+        # byte-identical clips and pay for two full ffmpeg chains.
+        gap_ms = pause.milliseconds if len(script.segments) > 1 else 0
+        # Built here, in one place, from the values actually used. An earlier
+        # revision let the config expose a ready-made tuple and hand-rolled a
+        # second one for the override path; they agreed only by coincidence, and
+        # a knob added to one would have silently collided in the other.
+        key = self._cache_key(
+            (config.engine, settings.voice_id, settings.speed, settings.volume, gap_ms),
+            text,
         )
-        key = self._cache_key(parts, text)
 
         cached = self._cache.get(key)
         if cached is not None:
@@ -168,7 +180,15 @@ class SynthesizeAnnouncementUseCase:
         # segment costs one engine call per segment and gives each its own
         # intonation contour, so it is not something to do "just in case" -- with
         # `gap_ms` at 0 this is exactly the single call the pipeline always made.
-        if gap_ms > 0 and len(script.segments) > 1:
+        #
+        # Measured with the real voice on "nomor antrian a satu, silakan ke loket
+        # satu": each seam adds exactly `gap_ms` (3 seams x 200 ms = +0.60 s), but
+        # crossing from 0 to any pause at all also costs a fixed ~0.4 s, because
+        # per-utterance synthesis leaves a little lead-in and tail on each piece
+        # that sits above the trim's -50 dB floor. That is inherent to cutting the
+        # sentence up, not a leak -- lowering the floor to reclaim it would start
+        # eating quiet consonants.
+        if gap_ms > 0:
             speech = [
                 engine.synthesize(part, settings)
                 for part in _continuing(script.segments)

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from .tts_engine import TtsSettings
+from .tts_engine import PauseDuration, TtsSettings
 
 
 class AudioFinishingError(RuntimeError):
@@ -81,21 +81,23 @@ class TtsConfigLike(Protocol):
     what stops an infrastructure config carrying the wrong shape from satisfying
     this Protocol and failing later, inside the engine.
 
-    `pause_ms` sits BESIDE `settings`, not inside it, for the same reason
-    `engine` does: `TtsSettings` is the set of knobs handed to an engine, and no
-    engine is asked to produce this silence. It is decided when the finished clip
-    is assembled, so putting it in `TtsSettings` would hand every engine a
-    parameter every engine ignores.
+    `pause` sits BESIDE `settings`, not inside it, for the same reason `engine`
+    does: `TtsSettings` is the set of knobs handed to an engine, and no engine is
+    asked to produce this silence. It is decided when the finished clip is
+    assembled, so putting it in `TtsSettings` would hand every engine a parameter
+    every engine ignores.
+
+    There is deliberately no `cache_parts` here. Deciding what identifies a clip
+    is the use case's policy, and exposing a pre-built tuple meant the override
+    path had to hand-roll a second copy of it -- two tuples that had to agree
+    with nothing checking that they did.
     """
 
     @property
     def engine(self) -> str: ...
 
     @property
-    def cache_parts(self) -> tuple[object, ...]: ...
-
-    @property
     def settings(self) -> TtsSettings: ...
 
     @property
-    def pause_ms(self) -> int: ...
+    def pause(self) -> PauseDuration: ...

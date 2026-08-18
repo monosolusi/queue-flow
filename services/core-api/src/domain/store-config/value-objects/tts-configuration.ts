@@ -30,6 +30,15 @@ export const MAX_VOLUME = 2.0;
 export const MIN_PAUSE_MS = 0;
 export const MAX_PAUSE_MS = 2000;
 
+/** The defaults, named separately from the bounds because they are a different
+ *  idea and only coincide for the pause. `MIN_SPEED` is 0.5 while the speed
+ *  default is 1.0, so reading a default off a `MIN_*` constant works exactly
+ *  once and misleads everywhere else. Together they are the zero-behavior-change
+ *  delivery: the voice's own pace, unchanged volume, one continuous utterance. */
+export const DEFAULT_SPEED = 1.0;
+export const DEFAULT_VOLUME = 1.0;
+export const DEFAULT_PAUSE_MS = 0;
+
 /** The validated, immutable announcement-delivery props. */
 export interface TtsConfigurationProps {
   /** Speaking rate multiplier; `tts-service` maps it to Piper's
@@ -106,8 +115,8 @@ export class TtsConfiguration extends ValueObject<TtsConfigurationProps> {
     }
     const incoming = raw as Record<string, unknown>;
 
-    const speed = readMultiplier(incoming.speed, 'speed', MIN_SPEED, MAX_SPEED);
-    const volume = readMultiplier(incoming.volume, 'volume', MIN_VOLUME, MAX_VOLUME);
+    const speed = readMultiplier(incoming.speed, 'speed', MIN_SPEED, MAX_SPEED, DEFAULT_SPEED);
+    const volume = readMultiplier(incoming.volume, 'volume', MIN_VOLUME, MAX_VOLUME, DEFAULT_VOLUME);
 
     // pauseMs: optional → 0 default; present-but-not-an-integer-in-range →
     // reject. Integer rather than float because it is a duration in
@@ -115,7 +124,7 @@ export class TtsConfiguration extends ValueObject<TtsConfigurationProps> {
     const pauseMsRaw = incoming.pauseMs;
     let pauseMs: number;
     if (pauseMsRaw === undefined) {
-      pauseMs = MIN_PAUSE_MS;
+      pauseMs = DEFAULT_PAUSE_MS;
     } else if (
       typeof pauseMsRaw === 'number' &&
       Number.isInteger(pauseMsRaw) &&
@@ -139,9 +148,9 @@ export class TtsConfiguration extends ValueObject<TtsConfigurationProps> {
    *  before this value object existed, so a store that never opens the settings
    *  page hears no change. */
   public static DEFAULT: TtsConfiguration = TtsConfiguration.of({
-    speed: 1.0,
-    volume: 1.0,
-    pauseMs: 0,
+    speed: DEFAULT_SPEED,
+    volume: DEFAULT_VOLUME,
+    pauseMs: DEFAULT_PAUSE_MS,
   });
 
   public get speed(): number {
@@ -182,9 +191,15 @@ export class TtsConfiguration extends ValueObject<TtsConfigurationProps> {
  * declaration and therefore hoisted — the TDZ hazard that forces the
  * `MIN_*`/`MAX_*` `const`s above the class does not apply to it.
  */
-function readMultiplier(raw: unknown, field: string, min: number, max: number): number {
+function readMultiplier(
+  raw: unknown,
+  field: string,
+  min: number,
+  max: number,
+  fallback: number,
+): number {
   if (raw === undefined) {
-    return 1.0;
+    return fallback;
   }
   if (typeof raw === 'number' && Number.isFinite(raw) && raw >= min && raw <= max) {
     return raw;

@@ -198,6 +198,10 @@ def _join_speech(segments: list[bytes], gap_ms: int, work: Path) -> Path:
     the default (unpaused) delivery reaches `_finish` exactly as it always did --
     the no-pause path is not merely equivalent to the old one, it is the old one.
     """
+    if not segments:
+        # The port promises a clip; an empty concat listing would instead surface
+        # as an opaque ffmpeg failure several steps later.
+        raise AudioProcessingError("cannot build an announcement from zero speech segments")
     if len(segments) == 1:
         raw = work / "speech-raw.wav"
         raw.write_bytes(segments[0])
@@ -230,7 +234,7 @@ def _join_speech(segments: list[bytes], gap_ms: int, work: Path) -> Path:
     return joined
 
 
-def build_announcement_mp3(speech_segments: list[bytes], gap_ms: int = 0) -> bytes:
+def build_announcement_mp3(speech_segments: list[bytes], gap_ms: int) -> bytes:
     """Bell + normalised speech, encoded as a single mono MP3.
 
     Returns one file because the TV plays one file: the browser's autoplay gate is

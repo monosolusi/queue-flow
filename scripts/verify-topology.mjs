@@ -98,9 +98,16 @@ function putJson(path, body) {
 // shared fixture would couple this root infra script to a path inside a
 // service's test tree (and the TS helper can't be imported by a standalone mjs
 // without a TS loader). The two sites test different layers (in-process
-// supertest vs. the live gateway); drift is caught loudly — the acceptance
-// suite asserts the exact shape and this script PUTs it expecting 200. Keep
-// both in sync with PRD §7 when the wizard contract changes.
+// supertest vs. the live gateway). Keep both in sync with PRD §7 when the
+// wizard contract changes.
+//
+// THIS IS THE UNGUARDED COPY. Its TS twin is checked against the controller by
+// `system-config-wizard.integration.spec.ts` ("payload parity gate"), which runs
+// under `npm run verify`; nothing checks this one, because reaching the
+// controller's constant from a standalone .mjs would need the TS loader the
+// paragraph above exists to avoid. So when that gate fails, fix BOTH — this file
+// is the one that will otherwise sit broken until someone runs
+// `npm run compose:verify`, which is exactly how it drifted to 7 of 15 fields.
 function prdWizardPayload() {
   return {
     storeName: 'Toko Utama Surabaya',
@@ -134,9 +141,11 @@ function prdWizardPayload() {
     ],
     // The client is the source of truth for these canvas/appearance fields, and
     // all of them are REQUIRED by the controller's presence guard — a payload
-    // missing any one is a 400, not a partial save. They were absent here while
-    // the guard grew (this script's PUT started failing silently in tier 2 as a
-    // result), so keep this list in step with `REQUIRED_CONFIG_FIELDS` in
+    // missing any one is a 400, not a partial save. Seven of them were absent
+    // here while the guard grew. The PUT below does throw on a non-200, so this
+    // was never silent — it simply never ran: tier 2 needs a live gateway, so it
+    // is outside `npm run verify` and only executes on `npm run compose:verify`.
+    // Keep this list in step with `REQUIRED_CONFIG_FIELDS` in
     // services/core-api/src/interface-adapters/rest/system-config.controller.ts.
     edgeRoutingLayout: {},
     nodePositions: {},

@@ -9,7 +9,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from app.domain.tts_engine import TtsEngine, TtsSettings, Voice, VoiceNotAvailableError
+from app.domain.tts_engine import (
+    PauseDuration,
+    TtsEngine,
+    TtsSettings,
+    Voice,
+    VoiceNotAvailableError,
+)
 
 
 class FakeEngine(TtsEngine):
@@ -63,7 +69,7 @@ class FakeCache:
         return removed
 
 
-def fake_finisher(speech_segments: list[bytes], gap_ms: int = 0) -> bytes:
+def fake_finisher(speech_segments: list[bytes], gap_ms: int) -> bytes:
     """Stands in for the ffmpeg chain: marks the bytes as bell-prefixed and encoded.
 
     Renders the gap into the output so a test can tell a paused clip from an
@@ -81,21 +87,7 @@ class FakeConfig:
     settings: TtsSettings = field(
         default_factory=lambda: TtsSettings(voice_id="fake-voice")
     )
-    pause_ms: int = 0
-
-    @property
-    def cache_parts(self) -> tuple[object, ...]:
-        # Duplicates `TtsConfig.cache_parts` on purpose (a test double of a
-        # frozen dataclass), so a knob added there must be added here too -- if
-        # it is not, clips stop being distinguishable by that knob and the tests
-        # that would catch it are the ones using this class.
-        return (
-            self.engine,
-            self.settings.voice_id,
-            self.settings.speed,
-            self.settings.volume,
-            self.pause_ms,
-        )
+    pause: PauseDuration = PauseDuration(0)
 
 
 class FakeConfigProvider:

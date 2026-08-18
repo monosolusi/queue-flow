@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { WsAdapter } from '@nestjs/platform-ws';
 import request from 'supertest';
 import { AppModule } from '../../src/app.module';
+import { REQUIRED_CONFIG_FIELDS } from '../../src/interface-adapters/rest/system-config.controller';
 import { type ICategoryRepository, CATEGORY_REPOSITORY } from '../../src/domain/queue';
 import {
   type ICounterRoutingRuleRepository,
@@ -855,6 +856,23 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
     // cross-service contract, and a rename would otherwise only fail a test
     // whose fixture was renamed alongside it.
     expect(Object.keys(cfg.body.ttsConfiguration).sort()).toEqual(['pauseMs', 'speed', 'volume']);
+  });
+
+  it('the PRD wizard fixture carries every required field (payload parity gate)', async () => {
+    // `REQUIRED_CONFIG_FIELDS` grows as the config graph does, and three separate
+    // payloads have to grow with it: this suite's, `prdWizardPayload()` in
+    // test/acceptance/_helpers.ts, and the inlined copy in
+    // scripts/verify-topology.mjs. Only the first two run under `npm run verify`
+    // — the .mjs one is Docker-gated, which is how it drifted to 7 of 15 fields
+    // without anyone noticing.
+    //
+    // Asserting membership rather than eyeballing it means adding a required
+    // field fails HERE, at the layer that can actually run, instead of in a
+    // smoke test nobody executes locally.
+    const payload = wizardPayload() as unknown as Record<string, unknown>;
+    for (const field of REQUIRED_CONFIG_FIELDS) {
+      expect(Object.keys(payload)).toContain(field);
+    }
   });
 
   it('a clean store prefills ttsConfiguration with the default delivery', async () => {

@@ -28,7 +28,7 @@ interface HttpRequestWithPrincipal {
  * (or the `'system'` sentinel on the pre-setup wizard path). `brandColor` is
  * required on the wire (QUE-36 made it part of the config graph).
  */
-const REQUIRED_CONFIG_FIELDS: ReadonlyArray<keyof SaveSystemConfigurationCommand> = [
+export const REQUIRED_CONFIG_FIELDS: ReadonlyArray<keyof SaveSystemConfigurationCommand> = [
   'storeName',
   'stateMachine',
   'dailyReset',

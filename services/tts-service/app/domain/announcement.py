@@ -69,6 +69,23 @@ class AnnouncementScript:
     text: str
     segments: tuple[str, ...]
 
+    def __post_init__(self) -> None:
+        """Both forms must be the same announcement.
+
+        `build_script` assembles them from shared tokens so they cannot drift
+        there -- but this is a public frozen dataclass with two independently
+        settable fields, and the application layer constructs one directly for
+        free-form preview text. Checking here means the invariant holds at every
+        construction site rather than only the one a test covers. Punctuation is
+        ignored on BOTH sides: it is what distinguishes the forms, not what they
+        disagree on -- and free-form preview text is one segment that keeps its
+        own commas, so stripping only `text` would reject it.
+        """
+        if _words(" ".join(self.segments)) != _words(self.text):
+            raise InvalidAnnouncementError(
+                f"script segments {self.segments!r} do not spell out {self.text!r}"
+            )
+
 
 def build_script(request: AnnouncementRequest) -> AnnouncementScript:
     """Compose the spoken sentence for a called ticket.
@@ -122,3 +139,8 @@ def build_script(request: AnnouncementRequest) -> AnnouncementScript:
         # number, not through one.
         segments=(lead, ticket_words, tail, counter_words),
     )
+
+
+def _words(phrase: str) -> list[str]:
+    """The spoken words of a phrase, with punctuation and spacing normalised away."""
+    return phrase.replace(",", " ").split()

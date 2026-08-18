@@ -89,7 +89,7 @@ def test_announcement_mp3_is_bell_plus_speech_and_longer_than_either(
         # ~0.6 s of low-level tone; silence would be trimmed away entirely.
         handle.writeframes(b"\x00\x08" * int(SAMPLE_RATE * 0.6))
 
-    payload = build_announcement_mp3([speech.read_bytes()])
+    payload = build_announcement_mp3([speech.read_bytes()], 0)
 
     assert payload.startswith(MP3_SYNC)
     # Bell (~0.7 s incl. pad) + speech (~0.85 s incl. pad) at 64 kbps mono.
@@ -170,7 +170,7 @@ def test_full_pipeline_produces_a_playable_indonesian_announcement() -> None:
         assert rendered.getframerate() == SAMPLE_RATE
         assert rendered.getnframes() > SAMPLE_RATE * 0.5  # at least half a second
 
-    payload = build_announcement_mp3([speech])
+    payload = build_announcement_mp3([speech], 0)
     assert payload.startswith(MP3_SYNC)
     assert 10_000 < len(payload) < 200_000
 

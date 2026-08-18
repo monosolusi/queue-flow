@@ -9,7 +9,7 @@ from app.application.synthesize_announcement import (
     UnknownTtsEngineError,
 )
 from app.domain.announcement import AnnouncementRequest
-from app.domain.tts_engine import TtsSettings, Voice
+from app.domain.tts_engine import PauseDuration, TtsSettings, Voice
 
 from .fakes import (
     FakeCache,
@@ -210,7 +210,7 @@ def test_no_pause_synthesizes_the_whole_sentence_in_one_call() -> None:
     One engine call with the full sentence, which is what gives Piper the whole
     line to find an intonation contour for.
     """
-    use_case, engine = build(provider=FakeConfigProvider(FakeConfig(pause_ms=0)))
+    use_case, engine = build(provider=FakeConfigProvider(FakeConfig(pause=PauseDuration(0))))
 
     result = use_case.execute(AnnouncementRequest(ticket_number="A-005", counter_id=2))
 
@@ -220,7 +220,7 @@ def test_no_pause_synthesizes_the_whole_sentence_in_one_call() -> None:
 
 
 def test_a_configured_pause_synthesizes_each_segment_and_passes_the_gap_on() -> None:
-    use_case, engine = build(provider=FakeConfigProvider(FakeConfig(pause_ms=400)))
+    use_case, engine = build(provider=FakeConfigProvider(FakeConfig(pause=PauseDuration(400))))
 
     result = use_case.execute(AnnouncementRequest(ticket_number="A-005", counter_id=2))
 
@@ -232,7 +232,7 @@ def test_a_configured_pause_synthesizes_each_segment_and_passes_the_gap_on() -> 
 def test_non_final_segments_carry_a_continuing_comma_and_the_last_does_not() -> None:
     """A trailing comma is what keeps a segment from sounding like a finished
     sentence; on the LAST one it would ask for a mid-thought ending instead."""
-    use_case, engine = build(provider=FakeConfigProvider(FakeConfig(pause_ms=250)))
+    use_case, engine = build(provider=FakeConfigProvider(FakeConfig(pause=PauseDuration(250))))
 
     use_case.execute(AnnouncementRequest(ticket_number="A-001", counter_id=1))
 
@@ -244,7 +244,7 @@ def test_non_final_segments_carry_a_continuing_comma_and_the_last_does_not() -> 
 def test_the_text_reported_is_the_whole_sentence_even_when_segmented() -> None:
     """`X-Announcement-Text` answers "why did the board say that?" -- a list of
     fragments would answer a different question."""
-    use_case, _ = build(provider=FakeConfigProvider(FakeConfig(pause_ms=400)))
+    use_case, _ = build(provider=FakeConfigProvider(FakeConfig(pause=PauseDuration(400))))
 
     result = use_case.execute(AnnouncementRequest(ticket_number="A-005", counter_id=2))
 
@@ -255,12 +255,12 @@ def test_changing_only_the_pause_produces_a_different_clip() -> None:
     """The classic cache bug: same words, changed knob, stale audio served. The
     pause has to be in the digest or a manager's change is invisible."""
     cache = FakeCache()
-    provider = FakeConfigProvider(FakeConfig(pause_ms=0))
+    provider = FakeConfigProvider(FakeConfig(pause=PauseDuration(0)))
     use_case, _ = build(cache=cache, provider=provider)
     request = AnnouncementRequest(ticket_number="A-005", counter_id=2)
 
     first = use_case.execute(request)
-    provider.config = FakeConfig(pause_ms=400)
+    provider.config = FakeConfig(pause=PauseDuration(400))
     second = use_case.execute(request)
 
     assert first.cache_key != second.cache_key
@@ -271,7 +271,7 @@ def test_changing_only_the_pause_produces_a_different_clip() -> None:
 def test_a_pause_on_a_single_segment_script_stays_one_call() -> None:
     """A preview of free-form text has no seams; a configured pause must not make
     the use case invent one by splitting on nothing."""
-    use_case, engine = build(provider=FakeConfigProvider(FakeConfig(pause_ms=400)))
+    use_case, engine = build(provider=FakeConfigProvider(FakeConfig(pause=PauseDuration(400))))
 
     use_case.preview("halo semua")
 
@@ -294,10 +294,7 @@ def test_preview_overrides_audition_unsaved_knobs_without_touching_the_voice() -
     stored = FakeConfig(settings=TtsSettings(voice_id="fake-voice", speed=1.0, volume=1.0))
     use_case, engine = build(provider=FakeConfigProvider(stored))
 
-    use_case.preview(
-        "halo",
-        overrides=TtsSettings(voice_id="fake-voice", speed=0.8, volume=1.0),
-    )
+    use_case.preview("halo", speed=0.8)
 
     _, used = engine.calls[0]
     assert used.speed == 0.8
@@ -312,18 +309,29 @@ def test_two_previews_at_different_speeds_do_not_collide_in_the_cache() -> None:
     cache = FakeCache()
     use_case, _ = build(cache=cache)
 
-    slow = use_case.preview("halo", overrides=TtsSettings(voice_id="fake-voice", speed=0.6))
-    fast = use_case.preview("halo", overrides=TtsSettings(voice_id="fake-voice", speed=1.4))
+    slow = use_case.preview("halo", speed=0.6)
+    fast = use_case.preview("halo", speed=1.4)
 
     assert slow.cache_key != fast.cache_key
     assert fast.cached is False
 
 
-def test_a_pause_override_alone_also_separates_the_cache_entries() -> None:
-    cache = FakeCache()
-    use_case, _ = build(cache=cache)
+def test_a_pause_separates_cache_entries_only_where_it_can_change_the_audio() -> None:
+    """A gap with no seam to sit in is not part of the clip's identity.
 
-    a = use_case.preview("halo dunia", pause_ms=0)
-    b = use_case.preview("halo dunia", pause_ms=500)
+    Free-form preview text is a single segment, so there is nowhere for silence
+    to go and the two clips are byte-identical -- giving them separate keys would
+    buy two cache slots and two full ffmpeg chains for the same audio. A real
+    announcement has seams, so there the pause does change the key."""
+    use_case, _ = build(cache=FakeCache())
 
-    assert a.cache_key != b.cache_key
+    flat = use_case.preview("halo dunia", pause_ms=0)
+    still_flat = use_case.preview("halo dunia", pause_ms=500)
+    assert flat.cache_key == still_flat.cache_key
+    assert still_flat.cached is True
+    assert flat.mp3 == still_flat.mp3
+
+    use_case, _ = build(cache=FakeCache())
+    joined = use_case.preview(pause_ms=0)
+    spaced = use_case.preview(pause_ms=500)
+    assert joined.cache_key != spaced.cache_key

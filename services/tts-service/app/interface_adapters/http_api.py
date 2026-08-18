@@ -22,7 +22,12 @@ from ..application.synthesize_announcement import (
 )
 from ..domain.announcement import AnnouncementRequest, InvalidAnnouncementError
 from ..domain.ports import AudioFinishingError
-from ..domain.tts_engine import TtsEngineError, TtsSettings, VoiceNotAvailableError
+from ..domain.tts_engine import (
+    MAX_PAUSE_MS,
+    MIN_PAUSE_MS,
+    TtsEngineError,
+    VoiceNotAvailableError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +92,7 @@ def build_router(
         text: str | None = Query(default=None, min_length=1, max_length=200),
         speed: float | None = Query(default=None, ge=0.25, le=4.0),
         volume: float | None = Query(default=None, ge=0.0, le=2.0),
-        pauseMs: int | None = Query(default=None, ge=0, le=2000),  # noqa: N803
+        pauseMs: int | None = Query(default=None, ge=MIN_PAUSE_MS, le=MAX_PAUSE_MS),  # noqa: N803
         if_none_match: str | None = Header(default=None, alias="if-none-match"),
     ) -> Response:
         """Admin "Tes Suara": hear the announcement without calling a real ticket.
@@ -101,10 +106,21 @@ def build_router(
         engine's own limits (the admin panel offers a narrower range still), and
         the digest already folds delivery knobs in, so an auditioned clip cannot
         be served in place of a real announcement.
+
+        The multipliers are QUANTIZED to two decimals. This route is
+        unauthenticated and every distinct value is a full synthesis into a
+        bounded FIFO cache, so accepting continuous floats would let
+        `speed=1.0000001` evict the store's hot clips one request at a time. Two
+        decimals is finer than the admin slider's own 0.05 step, so nothing a
+        manager can actually select is lost.
         """
-        overrides = _overrides(use_case, speed, volume)
         result = _synthesize(
-            lambda: use_case.preview(text, overrides=overrides, pause_ms=pauseMs)
+            lambda: use_case.preview(
+                text,
+                speed=_quantize(speed),
+                volume=_quantize(volume),
+                pause_ms=pauseMs,
+            )
         )
         return _audio_response(result, if_none_match)
 
@@ -129,25 +145,9 @@ def build_router(
     return router
 
 
-def _overrides(
-    use_case: SynthesizeAnnouncementUseCase, speed: float | None, volume: float | None
-) -> TtsSettings | None:
-    """Build a settings override, or None when nothing was auditioned.
-
-    Returning None rather than a fully-defaulted `TtsSettings` matters: the use
-    case treats None as "use the stored config", which keeps the voice and the
-    un-auditioned knob at whatever the store actually has. Building a settings
-    object here would mean guessing a voice id, and guessing it wrong would make
-    the preview a test of the wrong voice.
-    """
-    if speed is None and volume is None:
-        return None
-    current = use_case.current_settings()
-    return TtsSettings(
-        voice_id=current.voice_id,
-        speed=current.speed if speed is None else speed,
-        volume=current.volume if volume is None else volume,
-    )
+def _quantize(value: float | None) -> float | None:
+    """Round a multiplier to two decimals, preserving "not auditioned" as None."""
+    return None if value is None else round(value, 2)
 
 
 def _parse(ticket_number: str, counter_id: int) -> AnnouncementRequest:

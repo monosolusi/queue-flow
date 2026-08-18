@@ -6,6 +6,7 @@ import pytest
 
 from app.domain.announcement import (
     AnnouncementRequest,
+    AnnouncementScript,
     InvalidAnnouncementError,
     build_script,
 )
@@ -136,3 +137,17 @@ def test_joining_the_segments_yields_the_same_words_as_the_sentence() -> None:
     present in one and missing from the other is a drift bug."""
     script = build_script(AnnouncementRequest(ticket_number="A-123", counter_id=12))
     assert " ".join(script.segments).split() == script.text.replace(",", "").split()
+
+
+def test_a_script_whose_segments_do_not_spell_out_the_sentence_is_rejected() -> None:
+    """`build_script` cannot produce a mismatch, but the type is public and the
+    application layer constructs one directly for free-form preview text."""
+    with pytest.raises(InvalidAnnouncementError):
+        AnnouncementScript(text="nomor antrian a satu", segments=("nomor antrian",))
+
+
+def test_free_form_single_segment_text_keeps_its_own_punctuation() -> None:
+    """Punctuation is normalised on BOTH sides — stripping only `text` would
+    reject the one-segment script a preview builds from arbitrary words."""
+    script = AnnouncementScript(text="halo, ini tes", segments=("halo, ini tes",))
+    assert script.segments == ("halo, ini tes",)

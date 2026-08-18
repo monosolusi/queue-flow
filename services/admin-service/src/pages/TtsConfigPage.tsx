@@ -233,15 +233,23 @@ export function TtsConfigPage({ api }: { api: IAdminApi }) {
         title="Suara Pengumuman"
         subtitle="Atur kecepatan dan jeda saat papan TV membacakan nomor antrian. Perubahan berlaku dalam waktu 30 detik."
         actions={
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={save}
-            disabled={saving || !valid}
-            data-testid="tts-save"
-          >
-            {saving ? 'Menyimpan…' : 'Simpan'}
-          </button>
+          <>
+            {/* Discards all three edits, so it belongs with Simpan rather than
+                inside "Tes Suara" — a destructive action filed under a heading
+                about listening reads as "reset the preview". */}
+            <button type="button" className="btn" onClick={reset} data-testid="tts-reset">
+              Kembalikan ke Bawaan
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={save}
+              disabled={saving || !valid}
+              data-testid="tts-save"
+            >
+              {saving ? 'Menyimpan…' : 'Simpan'}
+            </button>
+          </>
         }
       />
 
@@ -362,9 +370,6 @@ export function TtsConfigPage({ api }: { api: IAdminApi }) {
             data-testid="tts-preview"
           >
             {previewing ? 'Memutar…' : 'Putar Contoh'}
-          </button>
-          <button type="button" className="btn" onClick={reset} data-testid="tts-reset">
-            Kembalikan ke Bawaan
           </button>
         </div>
       </section>

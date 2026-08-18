@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.application.synthesize_announcement import SynthesizeAnnouncementUseCase
-from app.domain.tts_engine import TtsEngineError, TtsSettings, VoiceNotAvailableError
+from app.domain.tts_engine import PauseDuration, TtsEngineError, TtsSettings, VoiceNotAvailableError
 from app.interface_adapters.http_api import build_router
 
 from .fakes import FakeCache, FakeConfig, FakeConfigProvider, FakeEngine, fake_finisher
@@ -266,7 +266,7 @@ def test_preview_applies_a_pause_override() -> None:
 
 def test_preview_with_no_overrides_uses_the_stored_delivery() -> None:
     engine = FakeEngine()
-    client = build_client(engine=engine, config=FakeConfig(engine=engine.id, pause_ms=400))
+    client = build_client(engine=engine, config=FakeConfig(engine=engine.id, pause=PauseDuration(400)))
 
     assert client.get("/tts/preview").status_code == 200
 

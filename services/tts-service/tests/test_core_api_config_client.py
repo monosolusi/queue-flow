@@ -6,6 +6,7 @@ import json
 
 import pytest
 
+from app.domain.tts_engine import PauseDuration
 from app.infrastructure.core_api_config_client import (
     DEFAULT_ENGINE,
     DEFAULT_VOICE,
@@ -195,33 +196,33 @@ def test_malformed_json_is_treated_as_unreachable(
 
 def test_reads_the_pause_from_the_config_document() -> None:
     config = parse({"ttsConfiguration": {"voice": "v", "pauseMs": 400}})
-    assert config.pause_ms == 400
+    assert config.pause.milliseconds == 400
 
 
 def test_defaults_the_pause_to_zero_when_absent() -> None:
     """A store configured by an older wizard carries no pauseMs at all, and zero
     is the delivery it already has -- so an upgrade changes nothing audible."""
-    assert parse({"ttsConfiguration": {"voice": "v"}}).pause_ms == 0
-    assert parse({}).pause_ms == 0
+    assert parse({"ttsConfiguration": {"voice": "v"}}).pause.milliseconds == 0
+    assert parse({}).pause.milliseconds == 0
 
 
 @pytest.mark.parametrize("value", ["400", None, [], {}, True, False, 250.5])
 def test_a_non_integer_pause_falls_back(value: object) -> None:
     """`True` is an `int` in Python and would otherwise become a 1 ms pause."""
     config = parse({"ttsConfiguration": {"voice": "v", "pauseMs": value}})
-    assert config.pause_ms == 0
+    assert config.pause.milliseconds == 0
 
 
 @pytest.mark.parametrize("value", [-1, -400, 2001, 10_000])
 def test_an_out_of_range_pause_falls_back(value: int) -> None:
     config = parse({"ttsConfiguration": {"voice": "v", "pauseMs": value}})
-    assert config.pause_ms == 0
+    assert config.pause.milliseconds == 0
 
 
 def test_an_integral_float_pause_is_accepted() -> None:
     """`400.0` is unambiguously 400 ms; rejecting it would silently restore the
     old delivery for a value that is not actually wrong."""
-    assert parse({"ttsConfiguration": {"voice": "v", "pauseMs": 400.0}}).pause_ms == 400
+    assert parse({"ttsConfiguration": {"voice": "v", "pauseMs": 400.0}}).pause.milliseconds == 400
 
 
 def test_a_bad_pause_does_not_discard_the_other_knobs() -> None:
@@ -231,14 +232,19 @@ def test_a_bad_pause_does_not_discard_the_other_knobs() -> None:
     config = parse(
         {"ttsConfiguration": {"voice": "bu-sari", "speed": 1.4, "pauseMs": -5}}
     )
-    assert config.pause_ms == 0
+    assert config.pause.milliseconds == 0
     assert config.settings.speed == 1.4
     assert config.settings.voice_id == "bu-sari"
 
 
-def test_the_pause_is_part_of_the_cache_identity() -> None:
-    """A knob missing from `cache_parts` means a manager changes it and the store
-    keeps hearing the old clip, with nothing to explain why."""
-    a = parse({"ttsConfiguration": {"voice": "v", "pauseMs": 0}})
-    b = parse({"ttsConfiguration": {"voice": "v", "pauseMs": 400}})
-    assert a.cache_parts != b.cache_parts
+def test_the_parsed_pause_is_a_domain_value_with_the_range_enforced() -> None:
+    """The range belongs to `PauseDuration`, not to this parser -- so a value that
+    got through here is one every downstream caller can trust without re-checking.
+
+    (That a changed pause yields a different clip is asserted where the digest is
+    actually built: `test_changing_only_the_pause_produces_a_different_clip`.)"""
+    parsed = parse({"ttsConfiguration": {"voice": "v", "pauseMs": 400}}).pause
+    assert isinstance(parsed, PauseDuration)
+    assert parsed.milliseconds == 400
+    with pytest.raises(ValueError):
+        PauseDuration(-1)
