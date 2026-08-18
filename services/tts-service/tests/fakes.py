@@ -9,13 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from app.domain.tts_engine import (
-    PauseDuration,
-    TtsEngine,
-    TtsSettings,
-    Voice,
-    VoiceNotAvailableError,
-)
+from app.domain.announcement import PauseDuration
+from app.domain.tts_engine import TtsEngine, TtsSettings, Voice, VoiceNotAvailableError
 
 
 class FakeEngine(TtsEngine):

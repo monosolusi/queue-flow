@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from app.domain.tts_engine import PauseDuration
+from app.domain.announcement import PauseDuration
 from app.infrastructure.core_api_config_client import (
     DEFAULT_ENGINE,
     DEFAULT_VOICE,
@@ -206,11 +206,33 @@ def test_defaults_the_pause_to_zero_when_absent() -> None:
     assert parse({}).pause.milliseconds == 0
 
 
-@pytest.mark.parametrize("value", ["400", None, [], {}, True, False, 250.5])
+@pytest.mark.parametrize("value", ["400", [], {}, True, False, 250.5])
 def test_a_non_integer_pause_falls_back(value: object) -> None:
     """`True` is an `int` in Python and would otherwise become a 1 ms pause."""
     config = parse({"ttsConfiguration": {"voice": "v", "pauseMs": value}})
     assert config.pause.milliseconds == 0
+
+
+def test_an_explicit_null_pause_is_absent_not_invalid(caplog) -> None:
+    """An absent (or null) pause is the NORMAL case, not corruption.
+
+    A store configured by an older wizard carries no `pauseMs` at all, and this
+    parse runs on every config refresh — so treating it as a misconfiguration
+    would log a warning once per TTL for ever and send an operator hunting a
+    problem that is not there. Deliberately separate from the invalid-value
+    parametrize above, which is exactly where it used to hide.
+    """
+    with caplog.at_level("WARNING"):
+        assert parse({"ttsConfiguration": {"voice": "v", "pauseMs": None}}).pause.milliseconds == 0
+        assert parse({"ttsConfiguration": {"voice": "v"}}).pause.milliseconds == 0
+    assert caplog.records == []
+
+
+def test_an_out_of_range_pause_does_warn(caplog) -> None:
+    """The counterpart: a value that IS wrong must still be discoverable."""
+    with caplog.at_level("WARNING"):
+        parse({"ttsConfiguration": {"voice": "v", "pauseMs": 99_999}})
+    assert any("pauseMs" in r.message for r in caplog.records)
 
 
 @pytest.mark.parametrize("value", [-1, -400, 2001, 10_000])

@@ -22,7 +22,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from app.domain.tts_engine import MAX_PAUSE_MS, MIN_PAUSE_MS, TtsSettings
+from app.domain.announcement import MAX_PAUSE_MS, MIN_PAUSE_MS
+from app.domain.tts_engine import TtsSettings
 
 CORE_API_VO = (
     Path(__file__).resolve().parents[2]

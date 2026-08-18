@@ -19,7 +19,8 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
-from ..domain.tts_engine import PauseDuration, TtsSettings
+from ..domain.announcement import DEFAULT_PAUSE_MS, InvalidAnnouncementError, PauseDuration
+from ..domain.tts_engine import TtsSettings
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ DEFAULT_VOICE = "id_ID-news_tts-medium"
 #: continuous utterance, the delivery this service had before the setting
 #: existed. The RANGE is not restated here -- `PauseDuration` owns it, the same
 #: way `TtsSettings` owns the speed and volume ranges.
-DEFAULT_PAUSE = PauseDuration(0)
+DEFAULT_PAUSE = PauseDuration(DEFAULT_PAUSE_MS)
 
 
 @dataclass(frozen=True)
@@ -162,11 +163,18 @@ def _pause_or(value: object, default: PauseDuration) -> PauseDuration:
     wrong. A fractional one is left to `PauseDuration` to reject -- that is a
     client bug, not a preference.
     """
+    # Absent is the NORMAL case, not corruption: a store configured by an older
+    # wizard carries no `pauseMs` at all, and this runs on every config refresh.
+    # Routing it through the failure branch would log a misconfiguration warning
+    # once per TTL, for ever, and send an operator hunting a problem that is not
+    # there.
+    if value is None:
+        return default
     if isinstance(value, float) and value.is_integer():
         value = int(value)
     try:
         return PauseDuration(value)  # type: ignore[arg-type]
-    except ValueError as exc:
+    except InvalidAnnouncementError as exc:
         logger.warning("invalid ttsConfiguration.pauseMs (%s); using default", exc)
         return default
 

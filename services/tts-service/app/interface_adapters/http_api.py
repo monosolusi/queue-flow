@@ -20,11 +20,18 @@ from ..application.synthesize_announcement import (
     SynthesizeAnnouncementUseCase,
     UnknownTtsEngineError,
 )
-from ..domain.announcement import AnnouncementRequest, InvalidAnnouncementError
-from ..domain.ports import AudioFinishingError
-from ..domain.tts_engine import (
+from ..domain.announcement import (
     MAX_PAUSE_MS,
     MIN_PAUSE_MS,
+    AnnouncementRequest,
+    InvalidAnnouncementError,
+)
+from ..domain.ports import AudioFinishingError
+from ..domain.tts_engine import (
+    MAX_SPEED,
+    MAX_VOLUME,
+    MIN_SPEED,
+    MIN_VOLUME,
     TtsEngineError,
     VoiceNotAvailableError,
 )
@@ -90,8 +97,8 @@ def build_router(
     @router.get("/preview")
     def preview(
         text: str | None = Query(default=None, min_length=1, max_length=200),
-        speed: float | None = Query(default=None, ge=0.25, le=4.0),
-        volume: float | None = Query(default=None, ge=0.0, le=2.0),
+        speed: float | None = Query(default=None, ge=MIN_SPEED, le=MAX_SPEED),
+        volume: float | None = Query(default=None, ge=MIN_VOLUME, le=MAX_VOLUME),
         pauseMs: int | None = Query(default=None, ge=MIN_PAUSE_MS, le=MAX_PAUSE_MS),  # noqa: N803
         if_none_match: str | None = Header(default=None, alias="if-none-match"),
     ) -> Response:
@@ -107,19 +114,13 @@ def build_router(
         the digest already folds delivery knobs in, so an auditioned clip cannot
         be served in place of a real announcement.
 
-        The multipliers are QUANTIZED to two decimals. This route is
-        unauthenticated and every distinct value is a full synthesis into a
-        bounded FIFO cache, so accepting continuous floats would let
-        `speed=1.0000001` evict the store's hot clips one request at a time. Two
-        decimals is finer than the admin slider's own 0.05 step, so nothing a
-        manager can actually select is lost.
+        The use case quantizes the multipliers, which is what keeps this
+        unauthenticated route from flooding the bounded clip cache -- see
+        `SynthesizeAnnouncementUseCase.preview`.
         """
         result = _synthesize(
             lambda: use_case.preview(
-                text,
-                speed=_quantize(speed),
-                volume=_quantize(volume),
-                pause_ms=pauseMs,
+                text, speed=speed, volume=volume, pause_ms=pauseMs
             )
         )
         return _audio_response(result, if_none_match)
@@ -143,11 +144,6 @@ def build_router(
         )
 
     return router
-
-
-def _quantize(value: float | None) -> float | None:
-    """Round a multiplier to two decimals, preserving "not auditioned" as None."""
-    return None if value is None else round(value, 2)
 
 
 def _parse(ticket_number: str, counter_id: int) -> AnnouncementRequest:

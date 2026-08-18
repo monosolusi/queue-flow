@@ -8,8 +8,8 @@ from app.application.synthesize_announcement import (
     SynthesizeAnnouncementUseCase,
     UnknownTtsEngineError,
 )
-from app.domain.announcement import AnnouncementRequest
-from app.domain.tts_engine import PauseDuration, TtsSettings, Voice
+from app.domain.announcement import AnnouncementRequest, PauseDuration
+from app.domain.tts_engine import TtsSettings, Voice
 
 from .fakes import (
     FakeCache,

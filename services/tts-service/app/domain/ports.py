@@ -12,7 +12,8 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from .tts_engine import PauseDuration, TtsSettings
+from .announcement import PauseDuration
+from .tts_engine import TtsSettings
 
 
 class AudioFinishingError(RuntimeError):

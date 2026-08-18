@@ -27,6 +27,12 @@ interface HttpRequestWithPrincipal {
  * — it is the authenticated admin's username (QUE-43), threaded from the guard
  * (or the `'system'` sentinel on the pre-setup wizard path). `brandColor` is
  * required on the wire (QUE-36 made it part of the config graph).
+ *
+ * @internal Exported ONLY for the payload parity gate in
+ * `test/interface-adapters/system-config-wizard.integration.spec.ts`, which
+ * checks the wizard fixtures against it. Do not import from `src/` — this is
+ * transport policy, and a use case or value object reaching for it would be
+ * pulling the wire contract inward.
  */
 export const REQUIRED_CONFIG_FIELDS: ReadonlyArray<keyof SaveSystemConfigurationCommand> = [
   'storeName',

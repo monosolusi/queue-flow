@@ -23,6 +23,7 @@ from app.domain.announcement import AnnouncementRequest, build_script
 from app.domain.tts_engine import TtsSettings, VoiceNotAvailableError
 from app.infrastructure.audio_post_processor import (
     SAMPLE_RATE,
+    AudioProcessingError,
     build_announcement_mp3,
     build_silent_mp3,
     synthesize_bell,
@@ -225,3 +226,11 @@ def test_a_model_without_its_config_sidecar_fails_clearly(tmp_path: Path) -> Non
 
     with pytest.raises(VoiceNotAvailableError, match="sidecar"):
         engine.synthesize("satu", TtsSettings(voice_id=DEFAULT_VOICE))
+
+
+def test_joining_zero_segments_fails_with_a_named_error() -> None:
+    """The port promises a clip. An empty concat listing would instead surface as
+    an opaque ffmpeg failure several steps later. Needs no ffmpeg — the guard
+    fires before anything is invoked."""
+    with pytest.raises(AudioProcessingError):
+        build_announcement_mp3([], 0)

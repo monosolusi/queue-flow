@@ -21,7 +21,7 @@ import {
 } from '../../src/infrastructure/persistence/in-memory';
 import { projectStateMachine, type WizardCategoryDto } from '../../src/application/store-config';
 import { StateMachine } from '../../src/domain/store-config';
-import { authHeader, bootstrapAuthedAdmin } from '../acceptance/_helpers';
+import { authHeader, bootstrapAuthedAdmin, prdWizardPayload } from '../acceptance/_helpers';
 
 /**
  * The PRD §7 reference wizard payload — 2 categories, 2 counters, the default
@@ -858,18 +858,23 @@ describe('System-config wizard REST surface (integration — QUE-30 / FR-WZD)', 
     expect(Object.keys(cfg.body.ttsConfiguration).sort()).toEqual(['pauseMs', 'speed', 'volume']);
   });
 
-  it('the PRD wizard fixture carries every required field (payload parity gate)', async () => {
-    // `REQUIRED_CONFIG_FIELDS` grows as the config graph does, and three separate
-    // payloads have to grow with it: this suite's, `prdWizardPayload()` in
-    // test/acceptance/_helpers.ts, and the inlined copy in
-    // scripts/verify-topology.mjs. Only the first two run under `npm run verify`
-    // — the .mjs one is Docker-gated, which is how it drifted to 7 of 15 fields
-    // without anyone noticing.
-    //
-    // Asserting membership rather than eyeballing it means adding a required
-    // field fails HERE, at the layer that can actually run, instead of in a
-    // smoke test nobody executes locally.
-    const payload = wizardPayload() as unknown as Record<string, unknown>;
+  // `REQUIRED_CONFIG_FIELDS` grows as the config graph does, and three separate
+  // payloads have to grow with it: this suite's `wizardPayload()`,
+  // `prdWizardPayload()` in test/acceptance/_helpers.ts, and the inlined copy in
+  // scripts/verify-topology.mjs. Only the first two run under `npm run verify`
+  // — the .mjs one is Docker-gated, which is how it drifted to 7 of 15 fields
+  // without anyone noticing.
+  //
+  // `prdWizardPayload` is the one that matters here. This suite's own payload is
+  // already guarded: it gets PUT with an `expect(200)` a few tests up, so a
+  // missing field fails there first. The acceptance fixture is the true twin of
+  // the .mjs copy, and asserting membership rather than eyeballing it means
+  // adding a required field fails at the layer that actually runs.
+  it.each([
+    ['prdWizardPayload (test/acceptance/_helpers.ts)', prdWizardPayload],
+    ['wizardPayload (this suite)', wizardPayload],
+  ])('%s carries every required config field (payload parity gate)', (_label, build) => {
+    const payload = build() as unknown as Record<string, unknown>;
     for (const field of REQUIRED_CONFIG_FIELDS) {
       expect(Object.keys(payload)).toContain(field);
     }

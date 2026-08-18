@@ -8,13 +8,62 @@ URL and this module decides the words.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from .indonesian_number import letters_to_words, number_to_words
 
+#: Anything that is neither a word character nor whitespace -- i.e. punctuation.
+_PUNCTUATION = re.compile(r"[^\w\s]")
+
 
 class InvalidAnnouncementError(ValueError):
     """A request that cannot be turned into a sayable script."""
+
+
+#: Bounds for the silence held at each seam of an announcement, milliseconds.
+#: They live in the domain for the same reason the speed and volume ranges do:
+#: this is a delivery invariant, and an invariant with no owner gets restated by
+#: every adapter that happens to touch it -- which is how a negative gap reaches
+#: ffmpeg as `apad=pad_dur=-0.5` and 500s.
+#:
+#: The ceiling is a usability guard rather than an engine limit: the sentence has
+#: three seams, so 2000 ms already adds six seconds of silence.
+MIN_PAUSE_MS = 0
+MAX_PAUSE_MS = 2000
+#: One continuous utterance -- the delivery the board had before this setting
+#: existed. Named separately from `MIN_PAUSE_MS` because a default and a bound
+#: are different ideas that only coincide here; they do not for speed (min 0.5,
+#: default 1.0), and reading one off the other works exactly once.
+DEFAULT_PAUSE_MS = 0
+
+
+@dataclass(frozen=True)
+class PauseDuration:
+    """How long to hold each seam of an announcement.
+
+    Lives beside `AnnouncementScript` because the two are the same idea from
+    either end: that type decides WHERE the seams are, this one decides how long
+    they hold. Deliberately NOT a field of `TtsSettings` and not in the module
+    that declares the `TtsEngine` port -- no engine renders this silence
+    (`PiperTtsEngine` maps only speed and volume, and `PrerecordedTtsEngine`
+    honours neither), so an engine implementer should never meet it. It is
+    decided when the finished clip is assembled.
+    """
+
+    milliseconds: int = DEFAULT_PAUSE_MS
+
+    def __post_init__(self) -> None:
+        # `bool` is an `int` in Python, and `True` is not a duration.
+        if isinstance(self.milliseconds, bool) or not isinstance(self.milliseconds, int):
+            raise InvalidAnnouncementError(
+                f"pause must be a whole number of milliseconds, got {self.milliseconds!r}"
+            )
+        if not MIN_PAUSE_MS <= self.milliseconds <= MAX_PAUSE_MS:
+            raise InvalidAnnouncementError(
+                f"pause must be within [{MIN_PAUSE_MS}, {MAX_PAUSE_MS}] ms, "
+                f"got {self.milliseconds}"
+            )
 
 
 @dataclass(frozen=True)
@@ -142,5 +191,11 @@ def build_script(request: AnnouncementRequest) -> AnnouncementScript:
 
 
 def _words(phrase: str) -> list[str]:
-    """The spoken words of a phrase, with punctuation and spacing normalised away."""
-    return phrase.replace(",", " ").split()
+    """The spoken words of a phrase, with punctuation and spacing normalised away.
+
+    Strips ALL punctuation rather than just the comma. The comma is the only
+    separator `build_script` uses today, so a `replace(",", " ")` would be
+    correct -- and would silently encode that fact, then fire on the producer the
+    first time the phrasing gained a period or a dash.
+    """
+    return _PUNCTUATION.sub(" ", phrase).split()

@@ -12,9 +12,14 @@ import hashlib
 import logging
 from dataclasses import dataclass
 
-from ..domain.announcement import AnnouncementRequest, AnnouncementScript, build_script
+from ..domain.announcement import (
+    AnnouncementRequest,
+    AnnouncementScript,
+    PauseDuration,
+    build_script,
+)
 from ..domain.ports import AudioCachePort, AudioFinisher, TtsConfigProvider
-from ..domain.tts_engine import PauseDuration, TtsEngine, TtsSettings, Voice
+from ..domain.tts_engine import TtsEngine, TtsSettings, Voice
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +31,11 @@ logger = logging.getLogger(__name__)
 # unchanged by that, but the version is bumped anyway -- a cache full of clips
 # built by an older chain is not worth the risk of reasoning about which of them
 # happen to still be byte-identical.
+#
+# Also bump it when the SEAMS move. The key digests the sentence, not its
+# segmentation, because segmentation is a pure function of the sentence -- so
+# re-cutting `build_script`'s segments changes what a paused announcement sounds
+# like without changing a single key.
 PIPELINE_VERSION = 2
 
 _KEY_SEPARATOR = "\x1f"
@@ -116,7 +126,22 @@ class SynthesizeAnnouncementUseCase:
         omitted knob means "keep the store's", and that the voice is never
         auditioned -- is this layer's policy. Handing an adapter the job of
         assembling a settings object made it decide all three.
+
+        The multipliers are QUANTIZED to `_AUDITION_DECIMALS`. Every distinct
+        value is a full synthesis into a bounded FIFO cache, so continuous floats
+        would let `speed=1.0000001` evict the store's hot clips one request at a
+        time -- and `/tts/preview` is unauthenticated. It happens HERE rather than
+        at the route because it is a statement about what identifies a clip, and
+        that is this layer's policy; a second adapter calling `preview()` would
+        otherwise reopen the hole. Two decimals is finer than the admin slider's
+        own 0.05 step, so nothing a manager can select is lost.
+
+        Only the AUDITIONED values are rounded. A stored speed comes from
+        core-api's value object, and quietly altering a configured value on its
+        way to the engine would make the board sound like something nobody chose.
         """
+        speed = _quantize(speed)
+        volume = _quantize(volume)
         script = (
             AnnouncementScript(text=text, segments=(text,))
             if text is not None
@@ -257,3 +282,13 @@ def _continuing(segments: tuple[str, ...]) -> list[str]:
     the pause, which the finisher produces, still works.
     """
     return [f"{part}," for part in segments[:-1]] + [segments[-1]]
+
+
+#: Decimal places the auditioned multipliers are rounded to. Bounds the key space
+#: of an unauthenticated route; see `SynthesizeAnnouncementUseCase.preview`.
+_AUDITION_DECIMALS = 2
+
+
+def _quantize(value: float | None) -> float | None:
+    """Round an auditioned multiplier, preserving "not auditioned" as None."""
+    return None if value is None else round(value, _AUDITION_DECIMALS)

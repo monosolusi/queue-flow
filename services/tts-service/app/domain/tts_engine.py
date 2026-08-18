@@ -35,6 +35,15 @@ class Voice:
     language: str
 
 
+#: Engine-neutral multiplier bounds. Exported so the HTTP edge can bound a query
+#: parameter with the SAME numbers `__post_init__` enforces, instead of restating
+#: them as literals in a route signature.
+MIN_SPEED = 0.25
+MAX_SPEED = 4.0
+MIN_VOLUME = 0.0
+MAX_VOLUME = 2.0
+
+
 @dataclass(frozen=True)
 class TtsSettings:
     """Per-request delivery knobs, mirroring `TtsConfiguration` in core-api.
@@ -51,55 +60,14 @@ class TtsSettings:
     volume: float = 1.0
 
     def __post_init__(self) -> None:
-        if not 0.25 <= self.speed <= 4.0:
-            raise ValueError(f"speed must be within [0.25, 4.0], got {self.speed}")
-        if not 0.0 <= self.volume <= 2.0:
-            raise ValueError(f"volume must be within [0.0, 2.0], got {self.volume}")
-
-
-#: Bounds for the silence inserted at each seam of an announcement,
-#: milliseconds. They live in the domain for the same reason the speed and
-#: volume ranges do: the pause is a delivery invariant, and an invariant with no
-#: owner gets restated by every adapter that happens to touch it -- which is how
-#: a negative gap reaches ffmpeg as `apad=pad_dur=-0.5` and 500s.
-#:
-#: `0` means "read the announcement as one continuous utterance". The ceiling is
-#: a usability guard rather than an engine limit: the sentence has three seams,
-#: so 2000 ms already adds six seconds of silence.
-MIN_PAUSE_MS = 0
-MAX_PAUSE_MS = 2000
-
-
-@dataclass(frozen=True)
-class PauseDuration:
-    """How long to hold each seam of an announcement.
-
-    A type rather than a bare `int` so the range is checked once, wherever the
-    value enters the domain, instead of once per entry point. Deliberately NOT a
-    field of `TtsSettings`: no engine renders this silence (`PiperTtsEngine` maps
-    only speed and volume, and `PrerecordedTtsEngine` honours neither), so
-    putting it there would hand every engine a knob every engine ignores. It is
-    decided when the finished clip is assembled.
-    """
-
-    milliseconds: int = MIN_PAUSE_MS
-
-    def __post_init__(self) -> None:
-        # `bool` is an `int` in Python, and `True` is not a duration.
-        if isinstance(self.milliseconds, bool) or not isinstance(self.milliseconds, int):
+        if not MIN_SPEED <= self.speed <= MAX_SPEED:
             raise ValueError(
-                f"pause must be a whole number of milliseconds, got {self.milliseconds!r}"
+                f"speed must be within [{MIN_SPEED}, {MAX_SPEED}], got {self.speed}"
             )
-        if not MIN_PAUSE_MS <= self.milliseconds <= MAX_PAUSE_MS:
+        if not MIN_VOLUME <= self.volume <= MAX_VOLUME:
             raise ValueError(
-                f"pause must be within [{MIN_PAUSE_MS}, {MAX_PAUSE_MS}] ms, "
-                f"got {self.milliseconds}"
+                f"volume must be within [{MIN_VOLUME}, {MAX_VOLUME}], got {self.volume}"
             )
-
-    @property
-    def is_silent_seam(self) -> bool:
-        """True when a seam actually holds -- i.e. the sentence gets segmented."""
-        return self.milliseconds > MIN_PAUSE_MS
 
 
 class TtsEngine(ABC):

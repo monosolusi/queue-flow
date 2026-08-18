@@ -7,7 +7,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.application.synthesize_announcement import SynthesizeAnnouncementUseCase
-from app.domain.tts_engine import PauseDuration, TtsEngineError, TtsSettings, VoiceNotAvailableError
+from app.domain.announcement import PauseDuration
+from app.domain.tts_engine import TtsEngineError, TtsSettings, VoiceNotAvailableError
 from app.interface_adapters.http_api import build_router
 
 from .fakes import FakeCache, FakeConfig, FakeConfigProvider, FakeEngine, fake_finisher
@@ -298,3 +299,16 @@ def test_two_previews_at_different_speeds_get_different_etags() -> None:
     slow = client.get("/tts/preview", params={"speed": 0.6})
     fast = client.get("/tts/preview", params={"speed": 1.4})
     assert slow.headers["ETag"] != fast.headers["ETag"]
+
+
+def test_preview_quantizes_a_multiplier_so_the_key_space_stays_bounded() -> None:
+    """`/tts/preview` is unauthenticated and every distinct value is a full
+    synthesis into a bounded FIFO cache — continuous floats would let a flood of
+    `speed=1.000000N` evict the store's hot clips one request at a time."""
+    client = build_client()
+    a = client.get("/tts/preview", params={"speed": 1.0})
+    b = client.get("/tts/preview", params={"speed": 1.001})
+    assert a.headers["ETag"] == b.headers["ETag"]
+    # ...but a difference the admin slider can actually express is preserved.
+    c = client.get("/tts/preview", params={"speed": 1.05})
+    assert c.headers["ETag"] != a.headers["ETag"]
