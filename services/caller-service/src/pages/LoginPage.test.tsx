@@ -24,7 +24,7 @@ function makeApi(loginImpl: ICallerApi['login']): ICallerApi {
       waitingCount: 0,
     })),
     getWorkflowActions: vi.fn(async () => ({ byStatus: {} })),
-    getBrandColor: vi.fn(async () => ({ brandColor: '', themeMode: 'light' as const })),
+    getClientConfig: vi.fn(async () => ({ brandColor: '', themeMode: 'light' as const })),
     callNext: vi.fn(async () => {}),
     reannounce: vi.fn(async () => {}),
     transfer: vi.fn(async () => {}),

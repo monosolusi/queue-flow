@@ -1,5 +1,23 @@
 import type { PrintPayload } from '../print/print-provider';
-import type { CategoryDto, CreatedTicketDto, CutMode, PaperWidth, PrinterMode, StoreProfileSlice } from './types';
+import type {
+  CategoryDto,
+  CreatedTicketDto,
+  CutMode,
+  KioskLicenseSlice,
+  PaperWidth,
+  PrinterMode,
+  StoreProfileSlice,
+} from './types';
+
+/** Recognised license states. An unknown one is treated as VALID: a state this
+ *  build has never heard of must not stop a shop from selling tickets. */
+const LICENSE_STATES: ReadonlySet<string> = new Set([
+  'VALID',
+  'EXPIRING_SOON',
+  'GRACE',
+  'MISMATCH_GRACE',
+  'RESTRICTED',
+]);
 
 /**
  * The slice of the core-api the kiosk consumes (ISP — only category listing,
@@ -112,6 +130,7 @@ export class KioskApi implements IKioskApi {
       storeName: string;
       brandColor: string;
       serviceThemes?: { kiosk?: string };
+      license?: { state?: unknown; restrictsNewTickets?: unknown } | null;
       printerConfiguration?: {
         mode?: unknown;
         paperWidth?: unknown;
@@ -132,9 +151,25 @@ export class KioskApi implements IKioskApi {
         cut === 'full' || cut === 'none' ? cut : 'partial';
       const printerBaudRate: number =
         typeof baud === 'number' && Number.isInteger(baud) && baud > 0 ? baud : 9600;
+      // Only an EXPLICIT `restrictsNewTickets === true` blocks the kiosk.
+      // A missing field, a null slice, or an unrecognised state all resolve to
+      // "not restricted" — the same absence-is-not-evidence rule the server's
+      // host fingerprint follows, applied at the client boundary.
+      const rawLicense = c.license;
+      const license: KioskLicenseSlice | null =
+        rawLicense == null
+          ? null
+          : {
+              state: LICENSE_STATES.has(String(rawLicense.state))
+                ? (String(rawLicense.state) as KioskLicenseSlice['state'])
+                : 'VALID',
+              restrictsNewTickets: rawLicense.restrictsNewTickets === true,
+            };
+
       return {
         storeName: c.storeName,
         brandColor: c.brandColor,
+        license,
         themeMode: c.serviceThemes?.kiosk === 'dark' ? 'dark' : 'light',
         printerMode,
         printerPaperWidth,

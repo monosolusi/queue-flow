@@ -34,6 +34,20 @@ import {
   InMemoryAuditLogRepository,
 } from '../../src/infrastructure/persistence/in-memory';
 import { AUDIT_LOG_REPOSITORY } from '../../src/domain/audit';
+import { createPrivateKey, sign as cryptoSign } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  INSTALLATION_REPOSITORY,
+  LICENSE_REPOSITORY,
+  type IInstallationRepository,
+  type ILicenseRepository,
+} from '../../src/domain/licensing';
+import { LicenseStateService } from '../../src/infrastructure/licensing/license-state.service';
+import { TRUSTED_KEY_ENV } from '../../src/infrastructure/licensing/license-token-verifier.factory';
+
+/** The generator's own fixtures — one file, so it cannot drift from itself. */
+const LICENSE_FIXTURES = join(__dirname, '../../../../tools/license-generator/test/fixtures');
 import type { IQueueEventPublisher } from '../../src/domain/queue';
 import { QUEUE_EVENT_PUBLISHER } from '../../src/domain/queue';
 
@@ -145,16 +159,109 @@ export function prdWizardPayload() {
   };
 }
 
-/** Boots the real NestJS app against the in-memory persistence profile
+export interface CreateAppOptions {
+  /** Install a valid licence after boot. Default true. */
+  readonly licensed?: boolean;
+  /** Make the test signing key trusted. Default true. */
+  readonly trustedKey?: boolean;
+}
+
+/**
+ * Boots the real NestJS app against the in-memory persistence profile
  * (QMS_PERSISTENCE unset → in-memory) on an ephemeral port. The WS adapter is
  * attached so /ws shares the HTTP port — the same boot the production
- * `main.ts` uses, minus the fixed port. */
-export async function createApp(): Promise<BootedApp> {
+ * `main.ts` uses, minus the fixed port.
+ *
+ * **Licence enforcement is ON here, unlike the unit suites.** `jest.setup.ts`
+ * disables it globally so the ~12 app-booting integration specs can test
+ * ticketing and realtime without licensing getting in the way — but the
+ * ACCEPTANCE suite is the DoD gate, and a DoD that runs with the guard switched
+ * off proves nothing about what ships. Turning it off here once hid a real
+ * defect: with enforcement on, DoD-2 failed 18 of 23 because an unlicensed
+ * store cannot complete the wizard.
+ *
+ * So every acceptance app boots enforced and, by default, licensed — which is
+ * also the honest model of a real store, since a customer activates before they
+ * set anything up. `licensed: false` opts out for the licensing spec itself.
+ */
+export async function createApp(options: CreateAppOptions = {}): Promise<BootedApp> {
+  // Must be set before the module factory runs: the verifier reads the trusted
+  // key at DI construction time, not per call.
+  process.env.QMS_LICENSE_ENFORCEMENT = 'on';
+  if (options.trustedKey !== false) {
+    process.env[TRUSTED_KEY_ENV] = testKeyLine();
+  }
+
   const app = await NestFactory.create(AppModule, { logger: false });
   app.useWebSocketAdapter(new WsAdapter(app));
   await app.listen(0);
   const port = (app.getHttpServer().address() as { port: number }).port;
+
+  if (options.licensed !== false) {
+    await installTestLicense(app);
+  }
   return { app, port };
+}
+
+/** The `"<keyId> <base64Spki>"` line `qms-license keygen` writes, verbatim. */
+export function testKeyLine(): string {
+  return readFileSync(join(LICENSE_FIXTURES, 'test-public-key.txt'), 'utf8').trim();
+}
+
+/**
+ * Mints a real, correctly signed licence — the same bytes `qms-license issue`
+ * produces. Signed with the committed TEST key, which the production
+ * trusted-key table does not contain, so nothing exploitable ships.
+ */
+export function signTestLicense(payloadOverrides: Record<string, unknown> = {}): string {
+  const privateKey = createPrivateKey(
+    readFileSync(join(LICENSE_FIXTURES, 'test-signing-key.pem'), 'utf8'),
+  );
+  const header = { alg: 'Ed25519', kid: testKeyLine().split(/\s+/)[0], v: 1 };
+  const payload = {
+    licenseId: '7f3c1d2e-9a4b-4c5d-8e6f-0a1b2c3d4e5f',
+    issuedAt: new Date().toISOString(),
+    customer: { name: PRD_STORE_NAME, ref: 'INV-ACC-001' },
+    product: { id: 'qms', majorVersion: 1 },
+    type: 'perpetual',
+    expiresAt: null,
+    supportUntil: '2099-01-01T23:59:59.999Z',
+    // Claims no dev or CI host can read, which exercises the UNAVAILABLE path:
+    // a licence bound to hardware this box cannot report must still be VALID.
+    host: {
+      bind: true,
+      claims: { boardUuid: 'a'.repeat(64), machineId: 'b'.repeat(64) },
+      weights: { boardUuid: 2, machineId: 1 },
+    },
+    entitlements: { maxCounters: null, maxCategories: null, features: [] },
+    grace: { expiryDays: 14, mismatchDays: 30 },
+    ...payloadOverrides,
+  };
+  const h = Buffer.from(JSON.stringify(header)).toString('base64url');
+  const pl = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const sig = cryptoSign(null, Buffer.from(`${h}.${pl}`, 'ascii'), privateKey);
+  return [
+    '-----BEGIN QMS LICENSE-----',
+    `${h}.${pl}.${sig.toString('base64url')}`,
+    '-----END QMS LICENSE-----',
+    '',
+  ].join('\n');
+}
+
+/**
+ * Activates a licence for whatever installation id this app just minted, then
+ * refreshes the cached verdict so the guard sees it immediately.
+ *
+ * Entitlements are uncapped: these suites are about the queue, and a cap would
+ * turn an unrelated DoD spec into a licensing failure.
+ */
+export async function installTestLicense(app: INestApplication): Promise<void> {
+  const installations = app.get<IInstallationRepository>(INSTALLATION_REPOSITORY);
+  const licenses = app.get<ILicenseRepository>(LICENSE_REPOSITORY);
+  const { installationId } = await installations.getOrCreate(new Date());
+
+  await licenses.activate(signTestLicense({ installationId: installationId.toString() }), 'system');
+  await app.get(LicenseStateService).refresh();
 }
 
 /** Clears every in-memory repository so each test starts from a clean store.
@@ -191,7 +298,7 @@ export function repos(app: INestApplication) {
  * from the principal or from the old literal). So the seeded admin is named
  * `manager1` to make the forgery-fix assertions real change-detectors.
  */
-const BOOTSTRAP_ADMIN_USERNAME = 'manager1';
+export const BOOTSTRAP_ADMIN_USERNAME = 'manager1';
 const BOOTSTRAP_ADMIN_PASSWORD = 'password123';
 
 /**

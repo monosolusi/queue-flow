@@ -16,6 +16,14 @@ import {
   TOKEN_GENERATOR,
   USER_REPOSITORY,
 } from '../../../domain/identity';
+import {
+  HOST_FINGERPRINT_READER,
+  INSTALLATION_REPOSITORY,
+  LICENSE_REPOSITORY,
+  LICENSE_TOKEN_VERIFIER,
+} from '../../../domain/licensing';
+import { createLicenseTokenVerifier } from '../../licensing/license-token-verifier.factory';
+import { SysfsHostFingerprintReader } from '../../licensing/sysfs-host-fingerprint-reader';
 import { REPORT_QUERY_PORT } from '../../../domain/reporting';
 import { TRANSACTION_MANAGER } from '../../../domain/shared';
 import { CryptoTokenGenerator } from '../../auth/crypto-token-generator';
@@ -30,6 +38,8 @@ import { PostgresAuditLogRepository } from './postgres-audit-log.repository';
 import { PostgresReportQueryRepository } from './postgres-report-query.repository';
 import { PostgresUserRepository } from './postgres-user.repository';
 import { PostgresSessionRepository } from './postgres-session.repository';
+import { PostgresInstallationRepository } from './postgres-installation.repository';
+import { PostgresLicenseRepository } from './postgres-license.repository';
 import { PostgresTransactionManager } from './postgres-transaction-manager';
 import { PostgresMigrationRunner } from './migration-runner';
 import { PostgresDurabilityProbe } from './durability-probe';
@@ -110,6 +120,21 @@ import { PostgresDurabilityProbe } from './durability-probe';
     },
     { provide: PASSWORD_HASHER, useClass: ScryptPasswordHasher },
     { provide: TOKEN_GENERATOR, useClass: CryptoTokenGenerator },
+    // Licensing context. The two repos take the pool (useFactory); the verifier
+    // and the fingerprint reader have no-arg constructors, so useClass suffices
+    // — the same split the Identity block above makes.
+    {
+      provide: INSTALLATION_REPOSITORY,
+      useFactory: (pool) => new PostgresInstallationRepository(pool),
+      inject: [PG_CONNECTION],
+    },
+    {
+      provide: LICENSE_REPOSITORY,
+      useFactory: (pool) => new PostgresLicenseRepository(pool),
+      inject: [PG_CONNECTION],
+    },
+    { provide: LICENSE_TOKEN_VERIFIER, useFactory: createLicenseTokenVerifier },
+    { provide: HOST_FINGERPRINT_READER, useClass: SysfsHostFingerprintReader },
     // QUE-26 reporting read side — raw-SQL CQRS read over tickets + archived_tickets.
     {
       provide: REPORT_QUERY_PORT,
@@ -141,6 +166,10 @@ import { PostgresDurabilityProbe } from './durability-probe';
     SESSION_REPOSITORY,
     PASSWORD_HASHER,
     TOKEN_GENERATOR,
+    INSTALLATION_REPOSITORY,
+    LICENSE_REPOSITORY,
+    LICENSE_TOKEN_VERIFIER,
+    HOST_FINGERPRINT_READER,
     REPORT_QUERY_PORT,
     TRANSACTION_MANAGER,
   ],

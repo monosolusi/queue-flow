@@ -25,6 +25,14 @@
  *   unlike `STATE_SCHEMA_CHANGE` / `ROUTING_CHANGE`, which are recorded on
  *   every save. Pairs with the dynamic scheduler re-arm so a policy edit is
  *   both observable (audit) and immediately effective (re-arm) without restart.
+ * - `LICENSE_ACTIVATED` — a license file was accepted and made active. The
+ *   before/after snapshot carries the license id, customer, type and window —
+ *   never the token itself. With no license server to query, this log is the
+ *   only local record of when a store's entitlement changed.
+ * - `LICENSE_REJECTED` — an upload was refused (bad signature, wrong
+ *   installation, unreadable). Audited as deliberately as an acceptance:
+ *   repeated rejections are what tampering looks like, and an attacker probing
+ *   the endpoint should leave a trail rather than silence.
  *
  * Keeping this as a closed enum (rather than a free string) makes the audit
  * surface auditable itself: every recorded action is one of these known kinds.
@@ -36,4 +44,6 @@ export enum AuditAction {
   ARCHIVE_PREVIOUS_DAY = 'ARCHIVE_PREVIOUS_DAY',
   TRANSACTION_LOG_CLEANUP = 'TRANSACTION_LOG_CLEANUP',
   DAILY_RESET_POLICY_CHANGE = 'DAILY_RESET_POLICY_CHANGE',
+  LICENSE_ACTIVATED = 'LICENSE_ACTIVATED',
+  LICENSE_REJECTED = 'LICENSE_REJECTED',
 }

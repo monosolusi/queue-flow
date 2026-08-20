@@ -26,7 +26,7 @@ function makeApi(brandColor = '', reject?: Error, me: AuthUserDto | null = user)
     reannounce: () => Promise.resolve(),
     transfer: () => Promise.resolve(),
     applyTransition: () => Promise.resolve(),
-    getBrandColor: reject ? () => Promise.reject(reject) : () => Promise.resolve({ brandColor, themeMode: 'light' as const }),
+    getClientConfig: reject ? () => Promise.reject(reject) : () => Promise.resolve({ brandColor, themeMode: 'light' as const }),
   };
 }
 

@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { AdminApi } from './api/admin-api';
 import type { IAdminAppApi } from './api/admin-api';
 import { applyBrandColor, applyThemeMode } from './lib/theme';
+import { LicenseGuard } from './components/LicenseGuard';
 import { SetupGuard } from './components/SetupGuard';
 import { WizardGuard } from './components/WizardGuard';
 import { AppShell } from './components/AppShell';
@@ -11,10 +12,12 @@ import { RequireAuth } from './auth/RequireAuth';
 import { SystemConfigProvider, useSystemConfigContext } from './config/system-config-context';
 import { ToastProvider } from './toast/toast-context';
 import { AdminPanel } from './pages/AdminPanel';
+import { AktivasiPage } from './pages/AktivasiPage';
 import { AlurStatusDesigner } from './pages/AlurStatusDesigner';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { AuditLogPage } from './pages/AuditLogPage';
 import { DashboardPage } from './pages/DashboardPage';
+import { LisensiPage } from './pages/LisensiPage';
 import { LoginPage } from './pages/LoginPage';
 import { PrinterConfigPage } from './pages/PrinterConfigPage';
 import { TtsConfigPage } from './pages/TtsConfigPage';
@@ -109,11 +112,12 @@ import { ConfigDraftProvider } from './pages/admin-config/config-draft-context';
  * preserves the single-`<main>` invariant (AC8) and gives wizard/login toasts
  * for free.
  *
- * **SetupGuard is composed OUTSIDE RequireAuth on every operational route
- * (`<SetupGuard><RequireAuth>…</RequireAuth></SetupGuard>`): setup first, then
- * auth.** A first-run visitor has no account, so the setup check must precede
- * the auth check or a clean visitor is bounced to `/login` with no way to create
- * an account (the reported bug). `/wizard` is gated by WizardGuard (first-run
+ * **Every operational route is wrapped in {@link Gated}: license -> setup ->
+ * auth, outermost first.** A first-run visitor has no account, so the setup
+ * check must precede the auth check or a clean visitor is bounced to `/login`
+ * with no way to create an account (the reported bug). The license check
+ * precedes both, matching the gateway's `access-check`: there is no point
+ * configuring a store that is not licensed to run. `/wizard` is gated by WizardGuard (first-run
  * only) — once setup completes, the wizard is closed and the store-name +
  * state-machine editing surfaces that used to live only in the wizard now live
  * in the operational `AdminPanel` (no functionality lost).
@@ -138,6 +142,28 @@ export function App({ api }: { api?: IAdminAppApi } = {}) {
  * the resolved configuration for the shell's store-name chrome, the dashboard's
  * category labels, and the app-wide theme side effects.
  */
+/**
+ * The full gate stack, in the one order that works: **license -> setup -> auth**.
+ *
+ * License first because there is no point configuring a store that is not
+ * licensed to run. Setup before auth because a first-run visitor has no account
+ * — reversing those two bounces a clean browser to `/login` with no way to
+ * create one (a bug this repo has already had once). The gateway's
+ * `access-check` answers the same two gates in the same order.
+ *
+ * Extracted because it was repeated on every operational route; a third level
+ * nested by hand ten times is nine chances to get the order wrong.
+ */
+function Gated({ children }: { children: React.ReactNode }) {
+  return (
+    <LicenseGuard>
+      <SetupGuard>
+        <RequireAuth>{children}</RequireAuth>
+      </SetupGuard>
+    </LicenseGuard>
+  );
+}
+
 function AppRoutes({ api }: { api: IAdminAppApi }) {
   const { config } = useSystemConfigContext();
 
@@ -165,40 +191,46 @@ function AppRoutes({ api }: { api: IAdminAppApi }) {
           single-<main> landmark invariant still holds. */}
       <AppShell storeName={config?.storeName}>
         <Routes>
+          {/* Deliberately ungated. LicenseGuard sends a restricted store HERE,
+              so guarding it would loop; and SetupGuard would divert an
+              unlicensed-and-unconfigured store to /wizard, which it is not yet
+              allowed to complete. This page must work with no license, no
+              config and no account — that is the whole point of it. */}
+          <Route path="/aktivasi" element={<AktivasiPage api={api} />} />
           <Route
             path="/login"
             element={
-              <SetupGuard>
-                <LoginPage api={api} />
-              </SetupGuard>
+              <LicenseGuard>
+                <SetupGuard>
+                  <LoginPage api={api} />
+                </SetupGuard>
+              </LicenseGuard>
             }
           />
           <Route
             path="/wizard"
             element={
-              <WizardGuard>
-                <WizardPage api={api} />
-              </WizardGuard>
+              <LicenseGuard>
+                <WizardGuard>
+                  <WizardPage api={api} />
+                </WizardGuard>
+              </LicenseGuard>
             }
           />
           <Route
             path="/"
             element={
-              <SetupGuard>
-                <RequireAuth>
-                  <DashboardPage api={api} config={config} />
-                </RequireAuth>
-              </SetupGuard>
+              <Gated>
+                <DashboardPage api={api} config={config} />
+              </Gated>
             }
           />
           <Route
             path="/config"
             element={
-              <SetupGuard>
-                <RequireAuth>
-                  <ConfigDraftProvider api={api} />
-                </RequireAuth>
-              </SetupGuard>
+              <Gated>
+                <ConfigDraftProvider api={api} />
+              </Gated>
             }
           >
             <Route index element={<Navigate to="profil" replace />} />
@@ -212,61 +244,57 @@ function AppRoutes({ api }: { api: IAdminAppApi }) {
           <Route
             path="/tv-layout"
             element={
-              <SetupGuard>
-                <RequireAuth>
-                  <TvLayoutPage api={api} />
-                </RequireAuth>
-              </SetupGuard>
+              <Gated>
+                <TvLayoutPage api={api} />
+              </Gated>
             }
           />
           <Route
             path="/printer-config"
             element={
-              <SetupGuard>
-                <RequireAuth>
-                  <PrinterConfigPage api={api} />
-                </RequireAuth>
-              </SetupGuard>
+              <Gated>
+                <PrinterConfigPage api={api} />
+              </Gated>
             }
           />
           <Route
             path="/tts-config"
             element={
-              <SetupGuard>
-                <RequireAuth>
-                  <TtsConfigPage api={api} />
-                </RequireAuth>
-              </SetupGuard>
+              <Gated>
+                <TtsConfigPage api={api} />
+              </Gated>
             }
           />
           <Route
             path="/analytics"
             element={
-              <SetupGuard>
-                <RequireAuth>
-                  <AnalyticsPage api={api} />
-                </RequireAuth>
-              </SetupGuard>
+              <Gated>
+                <AnalyticsPage api={api} />
+              </Gated>
             }
           />
           <Route
             path="/users"
             element={
-              <SetupGuard>
-                <RequireAuth>
-                  <UsersPage api={api} />
-                </RequireAuth>
-              </SetupGuard>
+              <Gated>
+                <UsersPage api={api} />
+              </Gated>
+            }
+          />
+          <Route
+            path="/lisensi"
+            element={
+              <Gated>
+                <LisensiPage api={api} />
+              </Gated>
             }
           />
           <Route
             path="/audit"
             element={
-              <SetupGuard>
-                <RequireAuth>
-                  <AuditLogPage api={api} />
-                </RequireAuth>
-              </SetupGuard>
+              <Gated>
+                <AuditLogPage api={api} />
+              </Gated>
             }
           />
           <Route path="*" element={<Navigate to="/" replace />} />

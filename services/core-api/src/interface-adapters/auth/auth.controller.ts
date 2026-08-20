@@ -1,3 +1,4 @@
+import { DrainCritical } from '../licensing/drain-critical.decorator';
 import {
   BadRequestException,
   Body,
@@ -77,6 +78,7 @@ export class AuthController {
    * password with the same message (no enumeration).
    */
   @Post('login')
+  @DrainCritical()
   @Public()
   @HttpCode(200)
   async login(@Body() body: LoginRequestDto): Promise<LoginResultDto> {
@@ -92,6 +94,7 @@ export class AuthController {
    * the `Authorization` header (already validated by {@link AuthGuard}).
    */
   @Post('logout')
+  @DrainCritical()
   @HttpCode(204)
   async logout(@Req() request: HttpRequest): Promise<void> {
     const token = extractBearerToken(request.headers?.authorization);

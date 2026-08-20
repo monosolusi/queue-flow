@@ -64,7 +64,7 @@ module.exports = {
       name: 'identity-anti-corruption',
       severity: 'error',
       from: { path: '^src/domain/identity/' },
-      to: { path: '^src/domain/(queue|store-config|audit|reporting)/' },
+      to: { path: '^src/domain/(queue|store-config|audit|reporting|licensing)/' },
     },
     {
       // Bounded-context anti-corruption (QUE-43), symmetric: no other bounded
@@ -74,8 +74,41 @@ module.exports = {
       // concern (attached to `req.user` by guards), never a domain dependency.
       name: 'no-context-imports-identity',
       severity: 'error',
-      from: { path: '^src/domain/(queue|store-config|audit|reporting)/' },
+      from: { path: '^src/domain/(queue|store-config|audit|reporting|licensing)/' },
       to: { path: '^src/domain/identity/' },
+    },
+    {
+      // Bounded-context anti-corruption for Licensing, same contract as
+      // Identity's. Licensing answers one question — may this installation run,
+      // and with what caps — from a vendor-signed token. It shares only the
+      // shared kernel. Letting it reach into Queue or Store Config would make a
+      // licence check depend on how tickets or categories happen to be modelled,
+      // and would put the enforcement policy on the wrong side of a boundary
+      // that a licence-bypass patch would love to blur.
+      name: 'licensing-anti-corruption',
+      severity: 'error',
+      from: { path: '^src/domain/licensing/' },
+      to: { path: '^src/domain/(queue|store-config|audit|reporting|identity)/' },
+    },
+    {
+      // Symmetric: no other context may import Licensing internals. Entitlement
+      // caps reach Store Config as plain numbers through a use case, never as a
+      // `License` the config domain would then be coupled to.
+      name: 'no-context-imports-licensing',
+      severity: 'error',
+      from: { path: '^src/domain/(queue|store-config|audit|reporting|identity)/' },
+      to: { path: '^src/domain/licensing/' },
+    },
+    {
+      // The application-tier half of `no-context-imports-licensing`. The
+      // Licensing comment promises entitlement caps reach Store Config "as
+      // plain numbers through a use case"; without this rule nothing stopped
+      // `application/store-config` importing `Entitlements` directly and
+      // quietly re-coupling the two contexts one layer up.
+      name: 'application-store-config-no-licensing',
+      severity: 'error',
+      from: { path: '^src/application/store-config/' },
+      to: { path: '^src/(domain|application)/licensing/' },
     },
     {
       // No circular imports within the domain.

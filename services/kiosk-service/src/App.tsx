@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { KioskApi } from './api/kiosk-api';
 import type { IKioskApi } from './api/kiosk-api';
-import type { StoreProfileSlice } from './api/types';
+import type { KioskLicenseSlice, StoreProfileSlice } from './api/types';
+import { LicenseNotice } from './components/LicenseNotice';
 import { CategorySelectPage } from './pages/CategorySelectPage';
 import { PrinterSetupPage } from './pages/PrinterSetupPage';
 import { TicketResultPage } from './pages/TicketResultPage';
@@ -62,6 +63,11 @@ export function App({
   const [printer, setPrinter] = useState<IPrintProvider>(
     () => printProvider ?? new BrowserPrintProvider({ paperWidth: 80 }),
   );
+  // `null` until the config resolves, and `null` again if it never does. Both
+  // mean UNKNOWN, and the kiosk keeps selling tickets: a config fetch that
+  // failed says nothing about the license, and blocking on it would turn a
+  // network blip into a shop that cannot serve anyone.
+  const [license, setLicense] = useState<KioskLicenseSlice | null>(null);
 
   useEffect(() => {
     // An injected provider is the test seam — never override it with config.
@@ -72,6 +78,7 @@ export function App({
       .then((profile) => {
         if (cancelled) return;
         setPrinter(buildPrintProvider(profile, kioskApi));
+        setLicense(profile.license);
       })
       .catch(() => {
         /* config fetch failure → keep the default chrome 80mm (prior behavior) */
@@ -80,6 +87,12 @@ export function App({
       cancelled = true;
     };
   }, [kioskApi, printProvider]);
+
+  // Replaces the whole surface rather than wrapping the routes: there is no
+  // route a visitor can usefully reach when no ticket can be issued.
+  if (license?.restrictsNewTickets === true) {
+    return <LicenseNotice license={license} />;
+  }
 
   return (
     <Routes>

@@ -4,7 +4,7 @@
 // order and fails fast on the first non-zero exit. No workspaces — each
 // `npm run` is scoped to its service directory.
 import { execSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 const root = new URL('..', import.meta.url).pathname;
 
@@ -36,6 +36,94 @@ function runPythonTests(label, cwd) {
   });
 }
 
+// The one file in tools/license-generator that is allowed to contain private
+// key material: a throwaway key that signs only the golden test fixture.
+const ALLOWED_KEY_FILE = 'tools/license-generator/test/fixtures/test-signing-key.pem';
+
+// Leaking the license signing key would let anyone mint licenses for every
+// installation ever shipped, and a leak is unrecoverable — you cannot revoke a
+// key from machines that have no network.
+//
+// Scans tracked, untracked AND **ignored** files. The ignored pass is the point:
+// `.gitignore` excludes `*.pem`, so the single most likely accident — running
+// `qms-license keygen --out .` and dropping signing-key.pem in the repo — is
+// invisible to `--exclude-standard`. An ignore rule also goes silent the moment
+// someone force-adds the file, which is the other case this catches.
+function assertNoSigningKeyInTree() {
+  process.stdout.write('\n▶ license signing-key leak gate\n');
+  // `--directory` collapses a wholly-ignored directory into one entry, so the
+  // ignored pass lists `node_modules/` rather than its 40k files — without it
+  // the output overflows execSync's buffer (ENOBUFS) and the gate dies instead
+  // of running. A stray key at the repo root is still listed individually,
+  // which is the case this pass exists for.
+  const listed = [
+    execSync('git ls-files --cached --others --exclude-standard', { cwd: root, encoding: 'utf8' }),
+    execSync('git ls-files --others --ignored --exclude-standard --directory', {
+      cwd: root,
+      encoding: 'utf8',
+    }),
+  ].join('\n');
+
+  const files = listed
+    .split('\n')
+    .filter(
+      (f) =>
+        f.length > 0 &&
+        f !== ALLOWED_KEY_FILE &&
+        // Third-party trees carry their own test keys; scanning them is noise.
+        // Directory entries end in '/'; readFileSync on them throws EISDIR and
+        // is caught below, but filtering here keeps the scan cheap.
+        !f.endsWith('/'),
+    );
+
+  const leaked = files.filter((file) => {
+    try {
+      return /-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----/.test(readFileSync(`${root}/${file}`, 'utf8'));
+    } catch {
+      return false; // unreadable or binary — not a PEM key
+    }
+  });
+
+  if (leaked.length > 0) {
+    throw new Error(
+      `private key material found in the repo tree:\n    ${leaked.join('\n    ')}\n` +
+        `  The license signing key must live outside the repo (default ~/.qms-license/).\n` +
+        `  Only ${ALLOWED_KEY_FILE} may contain a key, and it signs test fixtures only.`,
+    );
+  }
+}
+
+/**
+ * A build with an empty `TRUSTED_SIGNING_KEYS` table cannot activate any
+ * license, so every store running it is stuck on the activation screen. That is
+ * a release error the vendor must not be able to make silently.
+ *
+ * Fails only when `QMS_RELEASE=1` — a developer checkout before the one-time
+ * keygen is a legitimate state and should not have a red gate, but the release
+ * path must not be able to walk past it. core-api also logs an error at boot
+ * when it happens in a production image.
+ */
+function assertSigningKeyConfigured() {
+  const trustedKeys = readFileSync(
+    `${root}/services/core-api/src/infrastructure/licensing/trusted-keys.ts`,
+    'utf8',
+  );
+  // Any uncommented entry in the array literal counts as configured.
+  const configured = /^\s*\{\s*keyId:/m.test(trustedKeys);
+  if (configured) return;
+
+  const message =
+    'no signing key in trusted-keys.ts — this build cannot activate any license.\n' +
+    '    Run: node tools/license-generator/bin/qms-license.mjs keygen\n' +
+    '    then paste the printed entry into\n' +
+    '    services/core-api/src/infrastructure/licensing/trusted-keys.ts';
+
+  if (process.env.QMS_RELEASE === '1') {
+    throw new Error(message);
+  }
+  process.stdout.write(`\n⚠ ${message}\n  (not fatal here; QMS_RELEASE=1 makes it fatal)\n`);
+}
+
 let failed = false;
 try {
   // Design-token drift gate (QUE-37): re-vendor the canonical shared tokens into
@@ -46,6 +134,17 @@ try {
   execSync('node scripts/sync-design-tokens.mjs', { cwd: root, stdio: 'inherit', env: process.env });
   execSync('git diff --exit-code -- services/*/src/styles/_tokens.css services/*/src/styles/_interactions.css', {
     cwd: root, stdio: 'inherit', env: process.env,
+  });
+  assertNoSigningKeyInTree();
+  assertSigningKeyConfigured();
+  // The vendor license generator (tools/, outside every Docker build context so
+  // it can never ship). Runs first and cheaply: its committed golden.lic is the
+  // drift gate against core-api's independent verifier, so if the token format
+  // moved, failing here names the cause directly instead of surfacing as an
+  // unexplained verifier failure later in the run.
+  process.stdout.write('\n▶ license-generator (node --test)\n');
+  execSync('npm test', {
+    cwd: `${root}/tools/license-generator`, stdio: 'inherit', env: process.env,
   });
   // core-api: arch:check + jest + build (the architecture gate, NFR-MNT-01).
   run('core-api (arch + unit + build)', 'core-api', 'npm run verify');

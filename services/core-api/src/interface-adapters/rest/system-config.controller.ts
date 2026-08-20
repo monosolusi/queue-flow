@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, HttpException, Put, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpException, Inject, Put, Req, Res, UseGuards } from '@nestjs/common';
 import {
   GetActiveStateMachineUseCase,
   GetSetupStatusUseCase,
@@ -11,6 +11,13 @@ import { AuthGuard } from '../auth/auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { AdminOrSetupGuard } from '../auth/admin-or-setup.guard';
+import { licenseSummary } from '../../application/licensing/license-status.dto';
+import {
+  LICENSE_STATUS_PROVIDER,
+  type ILicenseStatusProvider,
+} from '../../domain/licensing/license-status-provider.port';
+import { restrictsNewTickets } from '../../domain/licensing/license-status';
+import { isEnforcementDisabled } from '../../infrastructure/licensing/enforcement-switch';
 
 /** Minimal structural shape of an Express request with the guard-attached
  *  principal — avoids a `@types/express` dep. */
@@ -467,12 +474,33 @@ export class SystemConfigController {
     private readonly saveConfig: SaveSystemConfigurationUseCase,
     private readonly getActiveStateMachine: GetActiveStateMachineUseCase,
     private readonly getSetupStatus: GetSetupStatusUseCase,
+    @Inject(LICENSE_STATUS_PROVIDER) private readonly licenseStatus: ILicenseStatusProvider,
   ) {}
 
-  /** `GET /api/system/config` → full config (default-shaped when not yet set up). */
+  /**
+   * `GET /api/system/config` → full config (default-shaped when not yet set up),
+   * plus a compact `license` slice.
+   *
+   * The slice is composed HERE rather than inside
+   * `GetSystemConfigurationUseCase`: Store Config and Licensing are separate
+   * bounded contexts, and assembling two contexts into one response is an
+   * interface-adapter job. Putting it in the use case would make the config
+   * read depend on the licence read for every caller that does not want it.
+   *
+   * All four PWAs already fetch this endpoint at boot, so the licence state
+   * reaches every screen with no new endpoint and no new auth surface — the
+   * route `brandColor` and `printerConfiguration` took before it.
+   */
   @Get('config')
   async config() {
-    return this.getConfig.execute();
+    const config = await this.getConfig.execute();
+    const status = this.licenseStatus.current;
+    return {
+      ...config,
+      // `null` only during the boot window, before the first evaluation lands.
+      // A client must read that as "unknown", never as "unlicensed".
+      license: status === null ? null : licenseSummary(status),
+    };
   }
 
   /**
@@ -534,6 +562,21 @@ export class SystemConfigController {
       printerConfiguration: body.printerConfiguration!,
       ttsConfiguration: body.ttsConfiguration!,
       actor: principal?.username ?? 'system',
+      // Licence caps enter as PLAIN NUMBERS, composed here at the interface
+      // adapter. Store Config and Licensing are separate bounded contexts and
+      // dep-cruiser forbids the import both ways, so assembling the two is an
+      // adapter job — the same reason the `license` slice on GET config is
+      // composed here rather than inside the config use case.
+      //
+      // A null verdict (core-api's boot window) enforces nothing: absence must
+      // widen, never narrow.
+      // Gated on the SAME switch as the guard. Without that, a dev build with
+      // enforcement off would wave the request through the guard and then have
+      // the save rejected by a RESTRICTED store's {1,1} caps — configurable in
+      // appearance, unconfigurable in fact.
+      entitlementCaps: isEnforcementDisabled()
+        ? null
+        : (this.licenseStatus.current?.entitlements.toDto() ?? null),
     };
     return this.saveConfig.execute(command);
   }
@@ -578,4 +621,55 @@ export class SystemConfigController {
       403,
     );
   }
+
+  /**
+   * `GET /api/system/access-check` → the gateway's single `auth_request` probe.
+   *
+   * nginx allows only ONE `auth_request` per location, so the licence gate and
+   * the first-run gate cannot be chained — they are answered together here, and
+   * the reason is returned in an `X-QMS-Gate` response header that the gateway
+   * lifts with `auth_request_set` to pick which page to redirect to.
+   *
+   * Licence is checked FIRST: there is no point setting up a store that is not
+   * licensed to run, and the activation screen has to come before the wizard.
+   *
+   * `GET /api/system/setup-status` is left exactly as it was. The admin SPA and
+   * the tier-2 topology test both depend on its contract, and widening it would
+   * have changed a shape two existing callers already rely on.
+   *
+   * Uses `@Res` rather than `HttpException` — unlike every other endpoint here —
+   * because the header IS the payload as far as nginx is concerned:
+   * `auth_request` discards the body and reads only the status and headers.
+   */
+  @Get('access-check')
+  async accessCheck(@Res() response: GateResponse): Promise<void> {
+    const license = this.licenseStatus.current;
+    // A null verdict means the first evaluation has not finished. Denying here
+    // would bounce every screen to activation while the store is merely booting.
+    if (license !== null && restrictsNewTickets(license)) {
+      response.setHeader('X-QMS-Gate', 'LICENSE_REQUIRED');
+      response.status(403).json({ code: 'LICENSE_REQUIRED', licenseIssue: license.issue });
+      return;
+    }
+
+    const { isInitialSetupCompleted } = await this.getSetupStatus.execute();
+    if (!isInitialSetupCompleted) {
+      response.setHeader('X-QMS-Gate', 'SETUP_REQUIRED');
+      response.status(403).json({ code: 'SETUP_REQUIRED', isInitialSetupCompleted: false });
+      return;
+    }
+
+    response.status(200).json({ ok: true });
+  }
+}
+
+/**
+ * The slice of the platform response object this endpoint needs. Structural
+ * rather than an `express.Response` import: `express` is only a transitive
+ * dependency of core-api, so importing its types fails both tsc and
+ * dep-cruiser's `no-non-package-json` rule.
+ */
+interface GateResponse {
+  setHeader(name: string, value: string): void;
+  status(code: number): { json(body: unknown): void };
 }

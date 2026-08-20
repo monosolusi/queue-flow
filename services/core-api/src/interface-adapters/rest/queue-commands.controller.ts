@@ -1,3 +1,4 @@
+import { DrainCritical } from '../licensing/drain-critical.decorator';
 import { BadRequestException, Body, Controller, Param, Post, UseGuards } from '@nestjs/common';
 import {
   ApplyTransitionUseCase,
@@ -39,6 +40,7 @@ export class QueueCommandsController {
    *  Counter-level: it **picks** a ticket by routing + priority rather than acting
    *  on one the staff named, which is why it is not a per-ticket transition. */
   @Post('call-next')
+  @DrainCritical()
   callNext(@Body() body: { counterId?: number | string }) {
     const counterId = parseCounterId(body?.counterId);
     return this.callNextUseCase.execute({ counterId });
@@ -49,6 +51,7 @@ export class QueueCommandsController {
    *  state change, so it stays available on a flow that draws no
    *  `CALLING -> CALLING` edge; only valid from CALLING (a 409 otherwise). */
   @Post(':ticketId/reannounce')
+  @DrainCritical()
   reannounce(@Param('ticketId') ticketId: string) {
     return this.reannounceUseCase.execute({ ticketId: parseTicketId(ticketId) });
   }
@@ -65,6 +68,7 @@ export class QueueCommandsController {
    * date convention remains in the application layer via {@link toDateKey}.
    */
   @Post(':ticketId/transfer')
+  @DrainCritical()
   transfer(
     @Param('ticketId') ticketId: string,
     @Body() body: { targetCategoryId?: string },
@@ -105,6 +109,7 @@ export class QueueCommandsController {
    * re-queue (number and category unchanged).
    */
   @Post(':ticketId/transition')
+  @DrainCritical()
   transition(
     @Param('ticketId') ticketId: string,
     @Body() body: { targetStatus?: string; counterId?: number | string },

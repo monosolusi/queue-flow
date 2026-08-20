@@ -398,8 +398,97 @@ export interface ConfigRoutingRuleDto {
 }
 
 /** Full config projection from `GET /api/system/config`. */
+// ---------------------------------------------------------------- licensing
+
+/**
+ * License states, mirroring core-api's `LicenseState`. Only `RESTRICTED`
+ * withholds anything; the rest differ solely in how loudly the UI warns.
+ */
+export type LicenseStateName =
+  | 'VALID'
+  | 'EXPIRING_SOON'
+  | 'GRACE'
+  | 'MISMATCH_GRACE'
+  | 'RESTRICTED';
+
+export type LicenseIssueName =
+  | 'NONE'
+  | 'ABSENT'
+  | 'INVALID'
+  | 'WRONG_INSTALLATION'
+  | 'EXPIRED'
+  | 'HOST_MISMATCH';
+
+/** Why an uploaded file was refused. Drives which remediation copy is shown. */
+export type LicenseRejectionReason =
+  | 'MALFORMED'
+  | 'UNTRUSTED'
+  | 'WRONG_INSTALLATION'
+  | 'WRONG_PRODUCT';
+
+/**
+ * The compact slice carried on the public `GET /api/system/config`, which every
+ * PWA already fetches at boot. `null` only during core-api's boot window,
+ * before its first evaluation lands — read that as "unknown", never as
+ * "unlicensed".
+ */
+export interface LicenseSummaryDto {
+  readonly state: LicenseStateName;
+  readonly issue: LicenseIssueName;
+  /** English diagnostic from the server; the UI renders its own Indonesian copy. */
+  readonly detail: string;
+  readonly expiresAt: string | null;
+  readonly graceEndsAt: string | null;
+  readonly restrictsNewTickets: boolean;
+}
+
+/** Full projection from `GET /api/license`, for the admin license screen. */
+export interface LicenseStatusDto extends LicenseSummaryDto {
+  readonly type: 'perpetual' | 'trial' | 'free' | null;
+  readonly customerName: string | null;
+  readonly supportUntil: string | null;
+  readonly daysUntilExpiry: number | null;
+  /** Maintenance window still open. Advisory only — never restricts. */
+  readonly supportActive: boolean;
+  /** This build's major version is covered. Advisory only — never restricts. */
+  readonly versionCovered: boolean;
+  readonly entitlements: {
+    readonly maxCounters: number | null;
+    readonly maxCategories: number | null;
+    readonly features: readonly string[];
+  };
+  readonly host: {
+    readonly outcome: 'MATCH' | 'MISMATCH' | 'UNAVAILABLE';
+    readonly matchedWeight: number;
+    readonly recordedWeight: number;
+    readonly requiredWeight: number;
+    readonly changed: readonly string[];
+    readonly unreadable: readonly string[];
+  } | null;
+}
+
+/** What the customer sends the vendor to have a license issued. */
+export interface ActivationRequestDto {
+  readonly installationId: string;
+  readonly claims: Readonly<Record<string, string>>;
+  readonly majorVersion: number;
+  /** The single `QMSREQ1-…` string to copy. */
+  readonly blob: string;
+}
+
+export interface LicenseHistoryEntryDto {
+  readonly id: string;
+  readonly installedAt: string;
+  readonly installedBy: string;
+  readonly isActive: boolean;
+}
+
 export interface SystemConfigurationDto {
   readonly isInitialSetupCompleted: boolean;
+  /** Licensing verdict. `null` during core-api's boot window — "unknown", not
+   *  "unlicensed"; a client must never block on it. Optional so a fake in an
+   *  existing test does not have to supply it. */
+  readonly license?: LicenseSummaryDto | null;
   readonly storeName: string;
   readonly stateMachine: StateMachineDto;
   readonly dailyResetPolicy: DailyResetPolicyDto;
@@ -544,6 +633,10 @@ export interface SaveSystemConfigurationPayload {
 /** Result of `PUT /api/system/config`. */
 export interface SaveSystemConfigurationResult {
   readonly isInitialSetupCompleted: boolean;
+  /** Licensing verdict. `null` during core-api's boot window — "unknown", not
+   *  "unlicensed"; a client must never block on it. Optional so a fake in an
+   *  existing test does not have to supply it. */
+  readonly license?: LicenseSummaryDto | null;
   readonly storeName: string;
   readonly brandColor: string;
   readonly serviceThemes: ServiceThemesMap;

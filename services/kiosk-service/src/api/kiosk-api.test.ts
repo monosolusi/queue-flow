@@ -115,6 +115,9 @@ describe('KioskApi (wire contract — FR-ENG-01 / QUE-9)', () => {
       printerPaperWidth: 80,
       printerCutMode: 'partial',
       printerBaudRate: 9600,
+      // The mocked response carries no `license`, and absent must map to null
+      // ("unknown"), never to a fabricated verdict in either direction.
+      license: null,
     };
     const fetchMock = fetchReturning(rawConfig);
     vi.stubGlobal('fetch', fetchMock);
@@ -126,6 +129,37 @@ describe('KioskApi (wire contract — FR-ENG-01 / QUE-9)', () => {
     expect(url).toBe('/api/system/config');
     expect(init?.method).toBeUndefined();
     expect(result).toEqual(expected);
+  });
+
+  it('getStoreProfile maps the license slice when core-api reports one', async () => {
+    vi.stubGlobal(
+      'fetch',
+      fetchReturning({
+        storeName: 'Toko Contoh',
+        brandColor: '#2563eb',
+        license: { state: 'RESTRICTED', issue: 'ABSENT', restrictsNewTickets: true },
+      }),
+    );
+
+    const result = await api.getStoreProfile();
+
+    expect(result.license).toEqual({ state: 'RESTRICTED', restrictsNewTickets: true });
+  });
+
+  it.each([
+    ['an unrecognised state', { state: 'SOMETHING_NEW', restrictsNewTickets: false }, 'VALID', false],
+    ['a missing flag', { state: 'GRACE' }, 'GRACE', false],
+    ['a non-boolean flag', { state: 'GRACE', restrictsNewTickets: 'yes' }, 'GRACE', false],
+  ])('getStoreProfile degrades %s to "not restricted"', async (_label, license, state, restricts) => {
+    // Only an explicit `true` may stop a shop selling tickets. Anything the
+    // client cannot parse has to fail OPEN here — the server's own guard is the
+    // real enforcement point, so a lenient client costs nothing and a strict one
+    // would turn a wire-format surprise into a closed shop.
+    vi.stubGlobal('fetch', fetchReturning({ storeName: 'T', brandColor: '#000', license }));
+
+    const result = await api.getStoreProfile();
+
+    expect(result.license).toEqual({ state, restrictsNewTickets: restricts });
   });
 
   it('getStoreProfile maps printerConfiguration.mode/paperWidth → printerMode/printerPaperWidth', async () => {

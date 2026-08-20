@@ -106,6 +106,17 @@ export function SpeakerIcon() {
   );
 }
 
+export function ShieldIcon() {
+  // A shield with a check — "license / entitlement". Decorative like every
+  // other nav icon (aria-hidden via navIcon); the label carries the a11y name.
+  return navIcon(
+    <>
+      <path d="M12 3 4 6v6c0 4.5 3.2 8.3 8 9 4.8-.7 8-4.5 8-9V6z" />
+      <path d="m9 12 2 2 4-4" />
+    </>,
+  );
+}
+
 export function PrinterIcon() {
   // A printer with a paper feed — "printer configuration".
   return navIcon(
