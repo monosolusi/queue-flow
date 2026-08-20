@@ -41,6 +41,25 @@ function makeConfig(brandColor = '#2563eb'): SystemConfigurationDto {
  * guards pass on the prefill and the finalize path (the arm under test) is
  * reachable in a handful of clicks.
  */
+const INSTALLATION_ID = '11111111-2222-4333-8444-555555555555';
+/** A healthy license, so these suites test routing/wizard rather than licensing. */
+const VALID_LICENSE = {
+  state: 'VALID',
+  issue: 'NONE',
+  detail: 'The license is valid.',
+  expiresAt: null,
+  graceEndsAt: null,
+  restrictsNewTickets: false,
+  type: 'perpetual',
+  customerName: 'Toko Contoh',
+  supportUntil: null,
+  daysUntilExpiry: null,
+  supportActive: true,
+  versionCovered: true,
+  entitlements: { maxCounters: null, maxCategories: null, features: [] },
+  host: null,
+} as const;
+
 const CAT_ID = '11111111-1111-4111-8111-111111111111';
 function cleanWalkableConfig(): SystemConfigurationDto {
   return {
@@ -74,6 +93,14 @@ function makeApi(
     getQueueBoard: vi.fn(() => Promise.resolve({ active: [], waiting: [], waitingCount: 0 })),
     getCounters: vi.fn(() => Promise.resolve([])),
     getAuditLog: vi.fn(),
+    // Licensing (ILicenseApi). A VALID verdict by default so these tests keep
+    // exercising what they are about; the license screens have their own suite.
+    getLicense: vi.fn(() => Promise.resolve(VALID_LICENSE)),
+    getActivationRequest: vi.fn(() =>
+      Promise.resolve({ installationId: INSTALLATION_ID, claims: {}, majorVersion: 1, blob: 'QMSREQ1-x' }),
+    ),
+    activateLicense: vi.fn(() => Promise.resolve(VALID_LICENSE)),
+    getLicenseHistory: vi.fn(() => Promise.resolve([])),
     triggerManualReset: vi.fn(),
     cleanupTransactionLogs: vi.fn(),
     // IAuthApi (QUE-43) — App wires an AuthProvider; with no token in jsdom it

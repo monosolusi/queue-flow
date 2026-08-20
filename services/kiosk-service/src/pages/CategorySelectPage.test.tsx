@@ -40,6 +40,7 @@ function makeApi(
         printerPaperWidth: 80,
         printerCutMode: 'partial',
         printerBaudRate: 9600,
+      license: { state: 'VALID', restrictsNewTickets: false },
       }),
     printTicket: () => Promise.resolve(),
   };
@@ -86,6 +87,7 @@ describe('CategorySelectPage (kiosk — FR-KSK-01 / QUE-17)', () => {
           printerPaperWidth: 80,
           printerCutMode: 'partial',
           printerBaudRate: 9600,
+      license: { state: 'VALID', restrictsNewTickets: false },
         }),
       printTicket: () => Promise.resolve(),
     });
@@ -105,6 +107,7 @@ describe('CategorySelectPage (kiosk — FR-KSK-01 / QUE-17)', () => {
           printerPaperWidth: 80,
           printerCutMode: 'partial',
           printerBaudRate: 9600,
+      license: { state: 'VALID', restrictsNewTickets: false },
         }),
       printTicket: () => Promise.resolve(),
     });
@@ -128,6 +131,7 @@ describe('CategorySelectPage (kiosk — FR-KSK-01 / QUE-17)', () => {
           printerPaperWidth: 80,
           printerCutMode: 'partial',
           printerBaudRate: 9600,
+      license: { state: 'VALID', restrictsNewTickets: false },
         }),
       printTicket: () => Promise.resolve(),
     });
@@ -329,6 +333,7 @@ describe('CategorySelectPage (kiosk — FR-KSK-01 / QUE-17)', () => {
       printerPaperWidth: 80,
       printerCutMode: 'partial',
       printerBaudRate: 9600,
+      license: { state: 'VALID', restrictsNewTickets: false },
     });
     expect(await screen.findByText('Customer Service')).toBeInTheDocument();
 

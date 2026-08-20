@@ -2779,3 +2779,176 @@ fieldset {
   }
 }
 
+
+/* --------------------------------------------------------------- licensing */
+
+/*
+ * Licence banner. Rendered above the routed page for every non-VALID state, so
+ * the store is warned before anything is withheld — a grace period nobody
+ * notices is just a delayed outage.
+ *
+ * Tones map to SEVERITY, not to state names: the state vocabulary lives in
+ * license-labels.ts, and baking `MISMATCH_GRACE` into a selector would put the
+ * same enum in two places.
+ */
+.license-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--surface-2);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.license-banner__text {
+  /* min-width:0 is load-bearing: without it a long Indonesian sentence refuses
+     to wrap and pushes the action link out of the row. */
+  flex: 1 1 20rem;
+  min-width: 0;
+}
+
+.license-banner__action {
+  flex: 0 0 auto;
+  font-weight: 600;
+  color: var(--accent-on-surface);
+}
+
+.license-banner--info {
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.license-banner--warn {
+  border-color: color-mix(in srgb, var(--warn) 35%, transparent);
+}
+
+.license-banner--danger {
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+  color: var(--danger-on-surface);
+}
+
+.license-banner--danger .license-banner__action {
+  color: var(--danger-on-surface);
+}
+
+/* A VALID licence renders no banner at all, but the tone is defined so a future
+   caller cannot land on an unstyled element. */
+.license-banner--ok {
+  border-color: var(--surface-2);
+}
+
+.license-status {
+  font-size: 1.15rem;
+}
+
+.license-status--info { color: var(--accent-on-surface); }
+.license-status--warn { color: var(--warn); }
+.license-status--danger { color: var(--danger-on-surface); }
+
+.license-status__action,
+.license-note {
+  max-width: 60ch;
+  color: var(--text-muted);
+}
+
+.license-facts {
+  display: grid;
+  grid-template-columns: minmax(10rem, auto) 1fr;
+  gap: 0.5rem 1.5rem;
+  margin: 1rem 0 0;
+}
+
+.license-facts dt {
+  color: var(--text-muted);
+}
+
+.license-facts dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.license-cta {
+  margin-top: 1.5rem;
+}
+
+/* ----------------------------------------------------------- activation page
+ *
+ * Chromeless, like the wizard: an unlicensed store has no working sidebar
+ * destinations. Centred and narrow because the whole task is "copy one string,
+ * paste one file", and a full-width column scatters two short steps across a
+ * counter display.
+ */
+.aktivasi {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
+
+.aktivasi__reason {
+  max-width: 60ch;
+  color: var(--text-muted);
+}
+
+.aktivasi__step {
+  margin-top: 1.5rem;
+  padding: 1.25rem 1.5rem;
+  border: 1px solid var(--surface-2);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.aktivasi__step > h2 {
+  margin-top: 0;
+  font-size: 1.1rem;
+}
+
+.aktivasi__field {
+  display: block;
+  margin: 1rem 0 0.75rem;
+}
+
+.aktivasi__field > span {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+}
+
+/* Monospace + break-all: these are opaque base64 blobs, and a proportional font
+   makes a truncated or mis-pasted one impossible to eyeball. */
+.aktivasi__blob,
+.aktivasi__token {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  word-break: break-all;
+  resize: vertical;
+}
+
+.aktivasi__installation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 1rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.aktivasi__installation code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all;
+}
+
+.aktivasi__upload {
+  margin-bottom: 1rem;
+}
+
+.aktivasi__error {
+  max-width: 60ch;
+  color: var(--danger-on-surface);
+}

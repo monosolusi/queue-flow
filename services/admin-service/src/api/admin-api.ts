@@ -1,11 +1,15 @@
 import { clearToken, readToken, UNAUTHORIZED_EVENT } from '../auth/token-store';
 import type {
+  ActivationRequestDto,
   AuditLogEntryDto,
   AuthUserDto,
   CleanupTransactionLogResultDto,
   CounterDto,
   CounterPerformanceDto,
   DailyReportDto,
+  LicenseHistoryEntryDto,
+  LicenseRejectionReason,
+  LicenseStatusDto,
   LoginResponseDto,
   ManualResetResultDto,
   QueueBoardStateDto,
@@ -28,6 +32,36 @@ import type {
  */
 export interface ISystemConfigApi {
   getSystemConfig(): Promise<SystemConfigurationDto>;
+}
+
+/** Raised by {@link ILicenseApi.activateLicense} when core-api refuses a file.
+ *  Carries the machine-readable `reason` so the activation screen can show the
+ *  right remediation — "this is not a license file", "this was issued for
+ *  another machine" and "we did not sign this" need three different answers,
+ *  and a bare message string cannot be branched on. */
+export class LicenseRejectedError extends Error {
+  constructor(
+    public readonly reason: LicenseRejectionReason | null,
+    detail: string,
+  ) {
+    super(detail);
+    this.name = 'LicenseRejectedError';
+    // Restore the prototype chain so `instanceof` survives the TS downlevel.
+    Object.setPrototypeOf(this, LicenseRejectedError.prototype);
+  }
+}
+
+/**
+ * The licensing slice (ISP). Carved out so the activation page — the ONLY page
+ * an unlicensed store can render, and one that runs before any account exists —
+ * depends on four methods rather than the full admin surface.
+ */
+export interface ILicenseApi {
+  getLicense(): Promise<LicenseStatusDto>;
+  getActivationRequest(): Promise<ActivationRequestDto>;
+  /** @throws {LicenseRejectedError} when core-api refuses the file. */
+  activateLicense(token: string): Promise<LicenseStatusDto>;
+  getLicenseHistory(): Promise<readonly LicenseHistoryEntryDto[]>;
 }
 
 /**
@@ -97,7 +131,7 @@ export interface IUsersApi {
  * needs (`WizardPage` takes `IAdminApi & IAuthApi`, `LoginPage` takes
  * `IAuthApi`, `UsersPage` takes `IUsersApi`).
  */
-export type IAdminAppApi = IAdminApi & IAuthApi & IUsersApi;
+export type IAdminAppApi = IAdminApi & IAuthApi & IUsersApi & ILicenseApi;
 
 const API_BASE = '/api';
 
@@ -228,7 +262,7 @@ async function deleteEmpty(path: string): Promise<void> {
  * NGINX in production, proxied to core-api:3000 by Vite in dev. No remote calls
  * (NFR-REL-01).
  */
-export class AdminApi implements IAdminApi {
+export class AdminApi implements IAdminApi, ILicenseApi {
   getSystemConfig(): Promise<SystemConfigurationDto> {
     return getJson<SystemConfigurationDto>('/system/config');
   }
@@ -329,5 +363,45 @@ export class AdminApi implements IAdminApi {
 
   deleteUser(id: string): Promise<void> {
     return deleteEmpty(`/users/${encodeURIComponent(id)}`);
+  }
+  // --- licensing ----------------------------------------------------------
+
+  getLicense(): Promise<LicenseStatusDto> {
+    return getJson<LicenseStatusDto>('/license');
+  }
+
+  getActivationRequest(): Promise<ActivationRequestDto> {
+    return getJson<ActivationRequestDto>('/license/activation-request');
+  }
+
+  /**
+   * Bespoke rather than `postJson` because a 400 here is a normal outcome that
+   * the screen must branch on: the generic helper flattens the body to a
+   * message string, discarding the `reason` code that decides which
+   * remediation the manager is shown.
+   */
+  async activateLicense(token: string): Promise<LicenseStatusDto> {
+    const res = await fetch(`${API_BASE}/license`, {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    if (res.ok) return (await res.json()) as LicenseStatusDto;
+
+    if (res.status === 401) onUnauthorized();
+    let body: { reason?: LicenseRejectionReason; message?: string } = {};
+    try {
+      body = (await res.json()) as typeof body;
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new LicenseRejectedError(
+      body.reason ?? null,
+      body.message ?? `POST /license -> ${res.status}`,
+    );
+  }
+
+  getLicenseHistory(): Promise<readonly LicenseHistoryEntryDto[]> {
+    return getJson<readonly LicenseHistoryEntryDto[]>('/license/history');
   }
 }

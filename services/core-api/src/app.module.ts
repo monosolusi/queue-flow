@@ -8,6 +8,7 @@ import { SystemApiModule } from './interface-adapters/rest/system-api.module';
 import { SystemConfigApiModule } from './interface-adapters/rest/system-config-api.module';
 import { PrintingApiModule } from './interface-adapters/rest/printing-api.module';
 import { ReportingApiModule } from './interface-adapters/rest/reporting-api.module';
+import { LicenseApiModule } from './interface-adapters/licensing/license-api.module';
 import { HealthModule } from './interface-adapters/rest/health.module';
 import { AuthApiModule } from './interface-adapters/auth/auth-api.module';
 import { SchedulerModule } from './infrastructure/scheduler/scheduler.module';
@@ -36,6 +37,9 @@ import { BootstrapModule } from './infrastructure/bootstrap/bootstrap.module';
 @Module({
   imports: [
     ScheduleModule.forRoot(),
+    // First: it registers the APP_GUARD that gates every mutating request, and
+    // it is @Global so LicenseStateService resolves in any feature module.
+    LicenseApiModule,
     RealtimeModule,
     RestApiModule,
     TicketsApiModule,

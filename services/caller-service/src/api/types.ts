@@ -43,8 +43,21 @@ export interface AssignedCategoryDto {
 /** A per-surface light/dark choice (QUE-47). Light is the default. */
 export type ThemeMode = 'light' | 'dark';
 
+/**
+ * The licence slice the caller panel consumes (ISP). Staff DO need to see a
+ * licence warning — unlike the kiosk and the TV, whose audience is a customer
+ * who can neither understand nor fix one — because they are the people who
+ * will be asked why the kiosk stopped printing.
+ */
+export interface CallerLicenseSlice {
+  readonly state: 'VALID' | 'EXPIRING_SOON' | 'GRACE' | 'MISMATCH_GRACE' | 'RESTRICTED';
+  readonly restrictsNewTickets: boolean;
+}
+
 export interface BrandConfigSlice {
   readonly brandColor: string;
+  /** `null` when core-api reported none — unknown, never "unlicensed". */
+  readonly license?: CallerLicenseSlice | null;
   /** This service's theme (the caller surface key from `serviceThemes`). */
   readonly themeMode: ThemeMode;
 }

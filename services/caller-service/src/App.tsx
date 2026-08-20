@@ -1,7 +1,9 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { CallerApi } from './api/caller-api';
 import type { ICallerApi } from './api/caller-api';
+import type { CallerLicenseSlice } from './api/types';
+import { LicenseBanner } from './components/LicenseBanner';
 import { AuthProvider } from './auth/useAuth';
 import { RequireAuth } from './auth/RequireAuth';
 import { applyBrandColor, applyThemeMode } from './lib/theme';
@@ -31,12 +33,15 @@ export function App({ api }: { api?: ICallerApi } = {}) {
   const callerApi = useMemo(() => api ?? new CallerApi(), [api]);
   const { bound, bind, unbind } = useCounterBinding();
 
+  const [license, setLicense] = useState<CallerLicenseSlice | null>(null);
+
   useEffect(() => {
     callerApi
-      .getBrandColor()
+      .getClientConfig()
       .then((c) => {
         applyBrandColor(c.brandColor);
         applyThemeMode(c.themeMode);
+        setLicense(c.license ?? null);
       })
       .catch(() => {
         /* keep the static `#2563eb` default on fetch failure */
@@ -45,6 +50,10 @@ export function App({ api }: { api?: ICallerApi } = {}) {
 
   return (
     <AuthProvider api={callerApi}>
+      {/* Above the routed panel, not inside it: the warning applies to the whole
+          surface, and every route under here is a place staff might be standing
+          when the kiosk stops printing. */}
+      <LicenseBanner license={license} />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route

@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthContext } from '../auth/auth-context';
 import { useToast } from '../toast/useToast';
+import { LicenseBanner } from './LicenseBanner';
 import { NAV_GROUPS } from './nav-config';
 import { ConfigIcon } from './nav-icons';
 
@@ -33,6 +34,7 @@ function pageTitleFor(pathname: string): string {
   if (pathname.startsWith('/analytics')) return 'Analitik & Laporan';
   if (pathname.startsWith('/users')) return 'Pengguna';
   if (pathname.startsWith('/audit')) return 'Log Audit';
+  if (pathname.startsWith('/lisensi')) return 'Lisensi';
   return '';
 }
 
@@ -205,7 +207,15 @@ export function AppShell({
   // those pages own their chrome), but the skip-link target + single-<main>
   // landmark invariant (AC8) must hold on every route, so wrap the children in
   // the same <main id="main-content"> as the shell routes, just without chrome.
-  if (location.pathname.startsWith('/wizard') || location.pathname.startsWith('/login')) {
+  if (
+    location.pathname.startsWith('/wizard') ||
+    location.pathname.startsWith('/login') ||
+    // The activation page owns its own full-width layout for the same reason
+    // the wizard does, plus one of its own: the sidebar links to pages an
+    // unlicensed store cannot use, and offering them is a dead end. It also
+    // states the license problem itself, so the shell banner would repeat it.
+    location.pathname.startsWith('/aktivasi')
+  ) {
     return <main id="main-content">{children}</main>;
   }
 
@@ -270,7 +280,14 @@ export function AppShell({
           </span>
           <ProfileMenu />
         </header>
-        <main id="main-content">{children}</main>
+        <main id="main-content">
+          {/* Above the routed page, inside the landmark. Only rendered on
+              shell routes: the chromeless /aktivasi states the problem itself,
+              and /wizard + /login predate any license the banner could warn
+              about. Returns null when there is nothing to say. */}
+          <LicenseBanner />
+          {children}
+        </main>
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 import type { ISystemConfigurationRepository } from '../../domain/store-config';
 import type { ICounterRoutingRuleRepository } from '../../domain/store-config';
 import type { ICategoryRepository } from '../../domain/queue';
+import { InvalidArgumentException } from '../../domain/shared/errors';
 import { Category, TicketStatus } from '../../domain/queue';
 import { CounterRoutingRule } from '../../domain/store-config';
 import { SystemConfiguration } from '../../domain/store-config';
@@ -121,12 +122,32 @@ export interface WizardDailyResetDto {
  * profile, state machine, daily-reset policy, category master data, and counter
  * routing rules. `actor` is recorded on the audit entries (NFR-SEC-02).
  */
+/**
+ * The licence's entitlement caps, as PLAIN NUMBERS.
+ *
+ * Deliberately not an `Entitlements` value object: Store Config and Licensing
+ * are separate bounded contexts and dep-cruiser forbids the import in both
+ * directions. The interface adapter reads the licence verdict and passes the
+ * two numbers down, which is the anti-corruption boundary working as intended.
+ *
+ * `null` on either field means uncapped; a `null` command field means the
+ * caller supplied no licence context at all (unit tests, an older caller), and
+ * nothing is enforced. Absence must widen, never narrow — a licence issued
+ * before a cap existed must not brick a store the day the cap ships.
+ */
+export interface EntitlementCaps {
+  readonly maxCounters: number | null;
+  readonly maxCategories: number | null;
+}
+
 export interface SaveSystemConfigurationCommand {
   readonly storeName: string;
   readonly stateMachine: WizardStateMachineDto;
   readonly dailyReset: WizardDailyResetDto;
   readonly categories: readonly WizardCategoryDto[];
   readonly routingRules: readonly WizardRoutingRuleDto[];
+  /** Licence caps to enforce this save against. Omitted/null enforces nothing. */
+  readonly entitlementCaps?: EntitlementCaps | null;
   readonly brandColor: string;
   /** Per-service light/dark theme map (QUE-47). Required on the wire; the VO
    *  defaults any missing surface to `'light'` and rejects a present-but-invalid
@@ -333,6 +354,13 @@ export class SaveSystemConfigurationUseCase {
     // 1. Build + validate the domain objects (throws InvalidValueObjectException
     //    on bad input — the controller maps that to 400). Done BEFORE opening the
     //    transaction so a malformed payload fails fast without acquiring a tx.
+    // Entitlements first, before anything else is built: it is the cheapest
+    // check and the one whose failure is most obviously the caller's to fix.
+    // Enforced where the resource is CREATED, not where it is read, so a store
+    // that is already over a newly-issued cap keeps serving and is merely
+    // unable to add more.
+    assertWithinEntitlements(command);
+
     const stateMachine = this.buildStateMachine(command.stateMachine);
     const dailyResetPolicy = DailyResetPolicy.of(
       command.dailyReset.mode,
@@ -731,5 +759,29 @@ export class SaveSystemConfigurationUseCase {
       );
     }
     return built;
+  }
+}
+
+/**
+ * Rejects a save that would exceed the licence's caps.
+ *
+ * `InvalidArgumentException` (→ 400), not a licence-specific error: the payload
+ * is well-formed and the caller can fix it by removing a counter or a category.
+ * Message names the cap and the count so the admin UI can say something useful
+ * without knowing the licensing vocabulary.
+ */
+function assertWithinEntitlements(command: SaveSystemConfigurationCommand): void {
+  const caps = command.entitlementCaps;
+  if (caps === undefined || caps === null) return;
+
+  if (caps.maxCounters !== null && command.routingRules.length > caps.maxCounters) {
+    throw new InvalidArgumentException(
+      `license allows at most ${caps.maxCounters} counter(s), got ${command.routingRules.length}`,
+    );
+  }
+  if (caps.maxCategories !== null && command.categories.length > caps.maxCategories) {
+    throw new InvalidArgumentException(
+      `license allows at most ${caps.maxCategories} category/categories, got ${command.categories.length}`,
+    );
   }
 }

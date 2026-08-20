@@ -1,0 +1,15 @@
+{
+  "name": "@qms/license-generator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Vendor-only CLI that issues and inspects QMS license files. Never shipped to customers: tools/ sits outside every service's Docker build context. Zero dependencies (node: builtins only), like scripts/*.mjs.",
+  "license": "UNLICENSED",
+  "bin": {
+    "qms-license": "./bin/qms-license.mjs"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.mjs\"",
+    "verify": "node --test \"test/**/*.test.mjs\""
+  }
+}

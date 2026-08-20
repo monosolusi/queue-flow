@@ -41,6 +41,7 @@ function makeApi(profile: Partial<StoreProfileSlice> = {}): { api: IKioskApi; pr
     printerPaperWidth: 80,
     printerCutMode: 'partial',
     printerBaudRate: 9600,
+      license: { state: 'VALID', restrictsNewTickets: false },
     ...profile,
   };
   const api: IKioskApi = {

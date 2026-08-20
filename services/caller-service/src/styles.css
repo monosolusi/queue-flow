@@ -774,3 +774,23 @@ button {
     transition: none;
   }
 }
+
+/*
+ * Licence warning for counter staff. A strip, never a block: the panel keeps
+ * working in every state — draining the existing queue is exactly what the
+ * graded ladder preserves.
+ */
+.caller-license-banner {
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 0.9rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.caller-license-banner--danger {
+  border-bottom-color: color-mix(in srgb, var(--danger) 35%, transparent);
+  color: var(--danger-on-surface);
+}

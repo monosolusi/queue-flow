@@ -62,6 +62,16 @@ export type PaperWidth = 58 | 80;
 /** When the ESC/POS cut command fires (usb-serial mode only). */
 export type CutMode = 'full' | 'partial' | 'none';
 
+/**
+ * The licence slice the kiosk consumes (ISP — the kiosk needs to know whether
+ * it may issue a ticket and what to say if not; entitlement caps, customer
+ * name and host verdict are admin concerns and stay out of this surface).
+ */
+export interface KioskLicenseSlice {
+  readonly state: 'VALID' | 'EXPIRING_SOON' | 'GRACE' | 'MISMATCH_GRACE' | 'RESTRICTED';
+  readonly restrictsNewTickets: boolean;
+}
+
 export interface StoreProfileSlice {
   readonly storeName: string;
   readonly brandColor: string;
@@ -77,4 +87,11 @@ export interface StoreProfileSlice {
   /** Serial baud rate for usb-serial mode (`port.open({ baudRate })`). Ignored by
    *  chrome/network-escpos. Defaults to 9600. */
   readonly printerBaudRate: number;
+  /**
+   * Licensing verdict, or `null` when core-api did not report one — an older
+   * backend, or its boot window. `null` means UNKNOWN and the kiosk keeps
+   * working: refusing to sell tickets because a field was missing would be a
+   * self-inflicted outage.
+   */
+  readonly license: KioskLicenseSlice | null;
 }

@@ -51,6 +51,10 @@ fronted by an NGINX reverse proxy (`gateway`, ports 80/443).
 | `admin-service` | React | 3004 | `/admin`, `/wizard` | Manager control panel, wizard, analytics, master data |
 | `db-service` | PostgreSQL 15 / SQLite | 5432 | internal | Queue transactions, system config, audit trail |
 
+Plus one **non-container** component: `tools/license-generator` — the vendor-only
+CLI that mints `.lic` files. It is outside every Docker build context
+(`context: ./services/<svc>`), so it physically cannot ship to a customer.
+
 **Clean Architecture (core-api):** Infrastructure (Express, Postgres, WS) →
 Interface Adapters (Controllers, Presenters, Repos) → Application (use cases) →
 Domain (entities, VOs, aggregates, events, ports). **NFR-MNT-01:** Domain has
@@ -70,7 +74,8 @@ DIP — use cases & domain depend on interfaces, not the ORM/DB directly.
 
 ## Domain model (DDD bounded contexts)
 
-Four bounded contexts: **Queue**, **Store Config**, **Reporting**, **Identity**.
+Five bounded contexts: **Queue**, **Store Config**, **Reporting**, **Identity**,
+**Licensing**.
 (Announcement audio lives in `tts-service`, not core-api: core-api still never
 plays or synthesizes sound and has no `domain/notification` context — a
 server-side audio *model* would be over-abstraction. What core-api owns is the
@@ -94,6 +99,12 @@ later needs no migration (JSONB sub-keys, the `baudRate`-after-0013 precedent).)
 - **Reporting** — `DailyQueueReport`, `CounterPerformance`.
 - **Identity (QUE-43)** — `User` entity (`Identifier` UUID, `Username`,
   `PasswordHash`, `Role` ∈ {`admin`, `caller-staff`}, timestamps) + RBAC.
+- **Licensing** — `License` entity (vendor-signed, immutable) + VOs
+  `InstallationId`, `HostFingerprint`, `LicenseType` ∈ {`perpetual`, `trial`,
+  `free`}, `Entitlements`; pure policy `evaluateLicense()` → `LicenseState` ∈
+  {`VALID`, `EXPIRING_SOON`, `GRACE`, `MISMATCH_GRACE`, `RESTRICTED`}. Separate
+  from Store Config because Store Config is manager-editable and a licence is
+  vendor-issued. Walled off both ways by dep-cruiser, like Identity.
 
 Default state machine: `WAITING → CALLING → SERVING → COMPLETED`, plus
 `SKIPPED` (from `CALLING`, returns via "Panggil Ulang"). Custom states
@@ -149,6 +160,22 @@ categories, routings) lives in PRD §7 — read it before touching config code.
   **authenticated principal's username** (QUE-43) — never client-supplied or a
   hardcoded literal; the first-run wizard path (no principal yet) uses a
   `'system'` sentinel.
+- **Licence gate precedes everything.** Order is **licence → setup → auth**, in
+  all three layers: the gateway's single `auth_request` (`/api/system/access-check`,
+  which answers both gates and returns the reason in `X-QMS-Gate` — nginx allows
+  only ONE `auth_request` per location, so they cannot be chained), core-api's
+  `APP_GUARD` (`LicenseGuard` — the repo's first, and it runs before every
+  controller `@UseGuards`), and the admin SPA's `Gated` wrapper. Reads are NEVER
+  blocked; `RESTRICTED` withholds mutations, with an explicit allowlist for the
+  drain path (`call-next` / `transition` / `reannounce` / `transfer`) so an
+  existing queue can still be served. New mutating endpoints fail CLOSED.
+  The exemption is the `@DrainCritical()` decorator on the handler, **never** a
+  URL list in the guard — a hand-copied routing table rots, and it fails closed,
+  so the rot kills the counter panel during a lapse. The **acceptance** suite
+  runs with enforcement ON and a real test licence (`createApp()` installs one);
+  only the unit suites switch it off via `test/jest.setup.ts`. A DoD that runs
+  with the guard off proves nothing — turning it off there once hid a real
+  wizard-breaking defect.
 - **Clean architecture layering (NFR-MNT-01).** Domain has no framework/ORM/IO
   imports — enforced by static analysis (acceptance criterion) in **both**
   languages: dep-cruiser for core-api, `tests/test_architecture.py` for
@@ -199,6 +226,13 @@ recovery passes with no duplicate/lost ticket numbers.
   Runtime from source. The voice is downloaded during `docker build` (build-time
   internet is already required by every service's `npm ci`) — runtime stays
   offline per NFR-REL-01.
+- **Licensing:** Ed25519-signed `.lic` files, offline end to end. Vendor CLI
+  `tools/license-generator` (zero-dep `node:crypto`) issues them; core-api's
+  `Ed25519LicenseTokenVerifier` is its deliberate TWIN, kept in step by the
+  committed `golden.lic` fixture both suites verify. `TRUSTED_SIGNING_KEYS`
+  ships EMPTY — run `qms-license keygen` and paste the printed line before the
+  first release. Binding: `InstallationId` (DB-held, survives a restore) hard,
+  `HostFingerprint` soft. Migration `0020_licensing.sql`.
 - **Deployment:** `docker-compose.yml` + per-service Dockerfiles + nginx
   `gateway` with first-run `auth_request` guard. `gateway` `depends_on
   core-api-service` with `condition: service_healthy`, and `tts-service` with
@@ -290,6 +324,19 @@ in that area). Each area's load-bearing essence:
   presets stripped at finalize; **category id-preservation is load-bearing**
   (send existing ids or orphan tickets); id↔code boundary mapping. → memory
   `admin-wizard-gotchas`
+- **Licensing** — signature over the ASCII bytes `headerB64.payloadB64` (never a
+  re-serialised payload, which is the canonical-JSON bug class); host fingerprint
+  is a WEIGHTED CLAIM SET with a threshold, not one combined hash (an OS
+  reinstall must not read like a clone); firmware placeholders (`Default string`,
+  the mass-duplicated SMBIOS UUID) MUST be filtered on the RAW value before
+  hashing or every unit of a model matches every other; **absent ≠ mismatch**
+  everywhere; grace anchors — expiry from the licence, host mismatch from
+  `installation.host_mismatch_since` (a licence cannot know when hardware
+  changed); expiry judged against `max(now, last_seen_at)` because an offline box
+  has no NTP; `LicenseStateService` uses `onApplicationBootstrap` (NOT
+  `onModuleInit` — it would race the migration runner) and its first evaluation
+  must never throw (that aborts boot into a `restart: always` crash loop).
+  → memory `licensing-gotchas`
 - **Gateway & deployment** — `gateway` `depends_on core-api-service` healthy +
   `/api/health` healthcheck; first-run `auth_request` guard (403
   `SETUP_REQUIRED`, never throw); `nginx -t` standalone DNS gotcha; topology

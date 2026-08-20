@@ -16,12 +16,22 @@ import {
   TOKEN_GENERATOR,
   USER_REPOSITORY,
 } from '../../../domain/identity';
+import {
+  HOST_FINGERPRINT_READER,
+  INSTALLATION_REPOSITORY,
+  LICENSE_REPOSITORY,
+  LICENSE_TOKEN_VERIFIER,
+} from '../../../domain/licensing';
+import { createLicenseTokenVerifier } from '../../licensing/license-token-verifier.factory';
+import { SysfsHostFingerprintReader } from '../../licensing/sysfs-host-fingerprint-reader';
 import { REPORT_QUERY_PORT } from '../../../domain/reporting';
 import { TRANSACTION_MANAGER, NoOpTransactionManager } from '../../../domain/shared';
 import {
   InMemoryAuditLogRepository,
   InMemoryCategoryRepository,
   InMemoryCounterRoutingRuleRepository,
+  InMemoryInstallationRepository,
+  InMemoryLicenseRepository,
   InMemoryQueueRepository,
   InMemoryReportQueryRepository,
   InMemorySequenceRepository,
@@ -67,6 +77,16 @@ import { DevSeedService } from '../seed/dev-seed.service';
     { provide: SESSION_REPOSITORY, useClass: InMemorySessionRepository },
     { provide: PASSWORD_HASHER, useClass: ScryptPasswordHasher },
     { provide: TOKEN_GENERATOR, useClass: CryptoTokenGenerator },
+    // Licensing context. The verifier and reader are the REAL infrastructure
+    // impls even here: the verifier ships with an empty trusted-key table so it
+    // rejects everything by default, and the reader finds no bind-mounts on a
+    // dev box and reports UNAVAILABLE. Acceptance tests override the verifier
+    // token with a test-keyed instance rather than swapping in a fake, so the
+    // genuine Ed25519 path stays under test.
+    { provide: INSTALLATION_REPOSITORY, useClass: InMemoryInstallationRepository },
+    { provide: LICENSE_REPOSITORY, useClass: InMemoryLicenseRepository },
+    { provide: LICENSE_TOKEN_VERIFIER, useFactory: createLicenseTokenVerifier },
+    { provide: HOST_FINGERPRINT_READER, useClass: SysfsHostFingerprintReader },
     // QUE-26 reporting read side. The in-memory report query scans the SAME
     // queue store the live queue uses (active tickets via allActive() + archived
     // via archivedTickets()), so it must share the QUEUE_REPOSITORY singleton —
@@ -96,6 +116,10 @@ import { DevSeedService } from '../seed/dev-seed.service';
     SESSION_REPOSITORY,
     PASSWORD_HASHER,
     TOKEN_GENERATOR,
+    INSTALLATION_REPOSITORY,
+    LICENSE_REPOSITORY,
+    LICENSE_TOKEN_VERIFIER,
+    HOST_FINGERPRINT_READER,
     REPORT_QUERY_PORT,
     TRANSACTION_MANAGER,
   ],

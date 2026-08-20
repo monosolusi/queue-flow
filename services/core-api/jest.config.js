@@ -8,6 +8,7 @@ module.exports = {
   // testMatch on the CLI, replacing this list entirely). The negation keeps
   // acceptance specs out of the default `npm test` unit gate so it stays fast.
   testMatch: ['**/*.spec.ts', '!**/*.acceptance.spec.ts'],
+  setupFiles: ['<rootDir>/test/jest.setup.ts'],
   moduleFileExtensions: ['ts', 'js', 'json'],
   moduleNameMapper: {
     '^@core-api/domain(/.*)?$': '<rootDir>/src/domain$1',

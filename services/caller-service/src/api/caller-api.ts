@@ -2,11 +2,21 @@ import { clearToken, readToken } from '../auth/token-store';
 import type {
   AuthUserDto,
   BrandConfigSlice,
+  CallerLicenseSlice,
   CounterDto,
   LoginResponseDto,
   QueueSnapshotDto,
   WorkflowActionsDto,
 } from './types';
+
+/** Recognised license states; anything else degrades to VALID. */
+const CALLER_LICENSE_STATES: ReadonlySet<string> = new Set([
+  'VALID',
+  'EXPIRING_SOON',
+  'GRACE',
+  'MISMATCH_GRACE',
+  'RESTRICTED',
+]);
 
 /**
  * The slice of core-api the caller panel consumes (ISP — never leaks
@@ -49,7 +59,7 @@ export interface ICallerApi {
    *  action ({@link transfer}), not part of this surface. */
   getWorkflowActions(): Promise<WorkflowActionsDto>;
   /** The manager-configured brand color (QUE-36) applied to `--accent` (QUE-37 AC6). */
-  getBrandColor(): Promise<BrandConfigSlice>;
+  getClientConfig(): Promise<BrandConfigSlice>;
   // Command surface (FR-CLR-02 / FR-ENG-03) -------------------------------
   /** Counter-level: pick and call this counter's next ticket by routing +
    *  priority. Not a per-ticket transition, which is why it survives alongside
@@ -286,18 +296,33 @@ export class CallerApi implements ICallerApi {
   getWorkflowActions(): Promise<WorkflowActionsDto> {
     return getJson<WorkflowActionsDto>('/queue/actions', { onUnauthorized: this.onUnauthorized });
   }
-  getBrandColor(): Promise<BrandConfigSlice> {
+  getClientConfig(): Promise<BrandConfigSlice> {
     // Reuses the existing `GET /api/system/config` read surface (DRY); the
-    // caller consumes only the `{ brandColor, themeMode }` slice (ISP). The
+    // caller consumes only the `{ brandColor, themeMode, license }` slice
+    // (ISP) — renamed off `getBrandColor` once it carried more than a colour. The
     // endpoint is public so it never 401s; the bearer token (when present) is
     // harmlessly ignored by the server. `themeMode` is this service's surface
     // key from the `serviceThemes` map (QUE-47).
-    return getJson<{ brandColor: string; serviceThemes?: { caller?: string } }>(
-      '/system/config',
-      { onUnauthorized: this.onUnauthorized },
-    ).then((c) => ({
+    return getJson<{
+      brandColor: string;
+      serviceThemes?: { caller?: string };
+      license?: { state?: unknown; restrictsNewTickets?: unknown } | null;
+    }>('/system/config', { onUnauthorized: this.onUnauthorized }).then((c) => ({
       brandColor: c.brandColor,
       themeMode: c.serviceThemes?.caller === 'dark' ? 'dark' : 'light',
+      // Only an explicit `true` counts as restricted; an unknown state degrades
+      // to VALID. The server's guard is the real enforcement point, so a
+      // lenient client costs nothing and a strict one would turn a wire-format
+      // surprise into a panel shouting at staff about nothing.
+      license:
+        c.license == null
+          ? null
+          : {
+              state: CALLER_LICENSE_STATES.has(String(c.license.state))
+                ? (String(c.license.state) as CallerLicenseSlice['state'])
+                : 'VALID',
+              restrictsNewTickets: c.license.restrictsNewTickets === true,
+            },
     }));
   }
   callNext(counterId: number): Promise<void> {
