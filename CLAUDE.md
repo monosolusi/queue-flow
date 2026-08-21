@@ -4,9 +4,10 @@
 > project "Enterprise Offline Queue Management System (QMS)". PRD wins over
 > this file when they disagree — update this file to match.
 
-Offline, on-premise queue management for a single branch/store. Runs 100% on a
-local LAN — **no internet, no cloud, no external CDN/API calls at runtime**.
-Visitors take tickets at a kiosk, staff call them from a counter panel, a TV
+Offline, on-premise queue management for a single branch/store. Runs on a local
+LAN — **no cloud, no external CDN, no remote API call in day-to-day operation**;
+the single exception is one outbound HTTPS call at install time to redeem the
+activation key (see NFR-REL-01 below). Visitors take tickets at a kiosk, staff call them from a counter panel, a TV
 board shows now-serving with sequential audio. A manager administers
 categories, counters, the state machine, and daily-reset policy via an admin
 panel + first-run setup wizard. PRD is in **Bahasa Indonesia**; UI
@@ -19,7 +20,9 @@ Per-service scripts run from that service's directory.
 
 | Task | Command |
 |---|---|
-| Bring up the whole stack | `docker compose up -d` (root) |
+| Bring up the whole stack (store) | `./install.sh` (root) — pulls published images |
+| Bring up the whole stack (dev) | `docker compose up -d --build` (root) |
+| Publish store images (vendor) | `npm run release` (root) |
 | Per-service unit + build gate | `npm run verify` (root, `scripts/run-verify.mjs`) |
 | core-api arch check | `npm run arch:check` (in `services/core-api`) — dep-cruiser, **must stay clean** |
 | core-api unit / build | `npm test` / `npm run build` (in `services/core-api`) — `postbuild` copies `.sql` |
@@ -51,9 +54,14 @@ fronted by an NGINX reverse proxy (`gateway`, ports 80/443).
 | `admin-service` | React | 3004 | `/admin`, `/wizard` | Manager control panel, wizard, analytics, master data |
 | `db-service` | PostgreSQL 15 / SQLite | 5432 | internal | Queue transactions, system config, audit trail |
 
-Plus one **non-container** component: `tools/license-generator` — the vendor-only
-CLI that mints `.lic` files. It is outside every Docker build context
-(`context: ./services/<svc>`), so it physically cannot ship to a customer.
+Plus one **non-container** component: `tools/license-format` — the licence wire
+format and its committed `golden.lic`. **Not a tool**: nothing in this repo
+issues a licence. Keys and tokens come from a separate licensing product
+(generator + activation server) that serves every product we ship; its contract
+is `docs/LICENSE-SERVER-CONTRACT.md`. What survives here is the independent twin
+core-api's verifier is checked against, plus the signing primitives the
+acceptance suite and `verify-topology.mjs` use to stand up a fake activation
+server.
 
 **Clean Architecture (core-api):** Infrastructure (Express, Postgres, WS) →
 Interface Adapters (Controllers, Presenters, Repos) → Application (use cases) →
@@ -100,11 +108,13 @@ later needs no migration (JSONB sub-keys, the `baudRate`-after-0013 precedent).)
 - **Identity (QUE-43)** — `User` entity (`Identifier` UUID, `Username`,
   `PasswordHash`, `Role` ∈ {`admin`, `caller-staff`}, timestamps) + RBAC.
 - **Licensing** — `License` entity (vendor-signed, immutable) + VOs
-  `InstallationId`, `HostFingerprint`, `LicenseType` ∈ {`perpetual`, `trial`,
-  `free`}, `Entitlements`; pure policy `evaluateLicense()` → `LicenseState` ∈
-  {`VALID`, `EXPIRING_SOON`, `GRACE`, `MISMATCH_GRACE`, `RESTRICTED`}. Separate
-  from Store Config because Store Config is manager-editable and a licence is
-  vendor-issued. Walled off both ways by dep-cruiser, like Identity.
+  `InstallationId`, `HostFingerprint`, `LicenseKey`, `LicenseType` ∈
+  {`perpetual`, `trial`, `free`}, `Entitlements`; ports `ILicenseTokenVerifier`,
+  `IHostFingerprintReader`, `ILicenseActivationClient`; pure policy
+  `evaluateLicense()` → `LicenseState` ∈ {`VALID`, `EXPIRING_SOON`, `GRACE`,
+  `MISMATCH_GRACE`, `RESTRICTED`}. Separate from Store Config because Store
+  Config is manager-editable and a licence is vendor-issued. Walled off both
+  ways by dep-cruiser, like Identity.
 
 Default state machine: `WAITING → CALLING → SERVING → COMPLETED`, plus
 `SKIPPED` (from `CALLING`, returns via "Panggil Ulang"). Custom states
@@ -143,9 +153,13 @@ categories, routings) lives in PRD §7 — read it before touching config code.
 
 ## Hard constraints (do not violate)
 
-- **No internet at runtime (NFR-REL-01).** All assets served from the local PC
-  server. Never add an external CDN link / `<script src="https://…">` / remote
-  API call to runtime code. Bundling must inline/vendor everything.
+- **No internet at runtime (NFR-REL-01), with exactly ONE exception.** All
+  assets served from the local PC server. Never add an external CDN link /
+  `<script src="https://…">` / remote API call to runtime code. Bundling must
+  inline/vendor everything. The one permitted outbound call is
+  `HttpLicenseActivationClient` redeeming the activation key, at install time,
+  once — never repeated, never on a request path. Adding a second exception is a
+  product decision, not an implementation detail.
 - **Power-loss resilient (NFR-REL-02).** PostgreSQL/SQLite + WAL. After a power
   cut, ticket numbers + transaction state recover exactly — no dupes, no gaps.
   Design writes so a crash mid-operation leaves the DB consistent.
@@ -226,15 +240,26 @@ recovery passes with no duplicate/lost ticket numbers.
   Runtime from source. The voice is downloaded during `docker build` (build-time
   internet is already required by every service's `npm ci`) — runtime stays
   offline per NFR-REL-01.
-- **Licensing:** Ed25519-signed `.lic` files, offline end to end. Vendor CLI
-  `tools/license-generator` (zero-dep `node:crypto`) issues them; core-api's
-  `Ed25519LicenseTokenVerifier` is its deliberate TWIN, kept in step by the
-  committed `golden.lic` fixture both suites verify. `TRUSTED_SIGNING_KEYS`
-  ships EMPTY — run `qms-license keygen` and paste the printed line before the
-  first release. Binding: `InstallationId` (DB-held, survives a restore) hard,
-  `HostFingerprint` soft. Migration `0020_licensing.sql`.
-- **Deployment:** `docker-compose.yml` + per-service Dockerfiles + nginx
-  `gateway` with first-run `auth_request` guard. `gateway` `depends_on
+- **Licensing:** online activation ONCE, then offline forever.
+  `POST /api/license/activate {key}` → `ILicenseActivationClient` redeems the
+  20-symbol Crockford-base32 key against the vendor's activation server → the
+  Ed25519-signed token that comes back is verified LOCALLY (a hostile server
+  gains nothing) and stored; every later evaluation reads it from the DB. There
+  is NO offline `.lic` upload path — that was removed on purpose, and adding one
+  back re-opens the "one key, four branches" hole. `tools/license-format` keeps
+  the format + `golden.lic`, the TWIN core-api's verifier is checked against.
+  `TRUSTED_SIGNING_KEYS` ships EMPTY — paste the licensing product's public key
+  before the first release (`npm run release` refuses until then). Binding:
+  `InstallationId` (DB-held, survives a restore) hard, `HostFingerprint` soft
+  and now a SINGLE claim (`boardUuid`); `machine-id` was dropped because its
+  clone ritual needed a reboot and the activation server enforces uniqueness
+  anyway. Seat release is vendor-side only — the client has no deactivate
+  button; re-redeeming the same key replaces the licence in one transaction.
+  Migration `0020_licensing.sql`.
+- **Deployment:** `docker-compose.yml` (each service carries `image:` alongside
+  `build:` — stores `pull`, developers `--build`) + per-service Dockerfiles +
+  nginx `gateway` with first-run `auth_request` guard. `./install.sh` is the
+  store's one command; `npm run release` is the vendor's. `gateway` `depends_on
   core-api-service` with `condition: service_healthy`, and `tts-service` with
   `condition: service_started` — **not** `service_healthy`, or a voice that fails
   to load would stop the gateway from ever starting and hang
