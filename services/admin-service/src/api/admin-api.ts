@@ -1,6 +1,5 @@
 import { clearToken, readToken, UNAUTHORIZED_EVENT } from '../auth/token-store';
 import type {
-  ActivationRequestDto,
   AuditLogEntryDto,
   AuthUserDto,
   CleanupTransactionLogResultDto,
@@ -34,11 +33,11 @@ export interface ISystemConfigApi {
   getSystemConfig(): Promise<SystemConfigurationDto>;
 }
 
-/** Raised by {@link ILicenseApi.activateLicense} when core-api refuses a file.
+/** Raised by {@link ILicenseApi.activateWithKey} when activation is refused.
  *  Carries the machine-readable `reason` so the activation screen can show the
- *  right remediation — "this is not a license file", "this was issued for
- *  another machine" and "we did not sign this" need three different answers,
- *  and a bare message string cannot be branched on. */
+ *  right remediation — "there is no internet here", "this key is already used
+ *  on another device" and "you mistyped it" need three different answers, and a
+ *  bare message string cannot be branched on. */
 export class LicenseRejectedError extends Error {
   constructor(
     public readonly reason: LicenseRejectionReason | null,
@@ -58,9 +57,13 @@ export class LicenseRejectedError extends Error {
  */
 export interface ILicenseApi {
   getLicense(): Promise<LicenseStatusDto>;
-  getActivationRequest(): Promise<ActivationRequestDto>;
-  /** @throws {LicenseRejectedError} when core-api refuses the file. */
-  activateLicense(token: string): Promise<LicenseStatusDto>;
+  /**
+   * Redeems an activation key. Requires internet — once, at this moment only.
+   *
+   * @throws {LicenseRejectedError} when activation is refused, for any reason
+   *   from "no network" to "that key runs another shop".
+   */
+  activateWithKey(key: string): Promise<LicenseStatusDto>;
   getLicenseHistory(): Promise<readonly LicenseHistoryEntryDto[]>;
 }
 
@@ -370,21 +373,17 @@ export class AdminApi implements IAdminApi, ILicenseApi {
     return getJson<LicenseStatusDto>('/license');
   }
 
-  getActivationRequest(): Promise<ActivationRequestDto> {
-    return getJson<ActivationRequestDto>('/license/activation-request');
-  }
-
   /**
    * Bespoke rather than `postJson` because a 400 here is a normal outcome that
    * the screen must branch on: the generic helper flattens the body to a
    * message string, discarding the `reason` code that decides which
    * remediation the manager is shown.
    */
-  async activateLicense(token: string): Promise<LicenseStatusDto> {
-    const res = await fetch(`${API_BASE}/license`, {
+  async activateWithKey(key: string): Promise<LicenseStatusDto> {
+    const res = await fetch(`${API_BASE}/license/activate`, {
       method: 'POST',
       headers: { ...authHeaders(), 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ token }),
+      body: JSON.stringify({ key }),
     });
     if (res.ok) return (await res.json()) as LicenseStatusDto;
 
@@ -397,7 +396,7 @@ export class AdminApi implements IAdminApi, ILicenseApi {
     }
     throw new LicenseRejectedError(
       body.reason ?? null,
-      body.message ?? `POST /license -> ${res.status}`,
+      body.message ?? `POST /license/activate -> ${res.status}`,
     );
   }
 

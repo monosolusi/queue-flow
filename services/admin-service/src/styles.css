@@ -2879,9 +2879,9 @@ fieldset {
 /* ----------------------------------------------------------- activation page
  *
  * Chromeless, like the wizard: an unlicensed store has no working sidebar
- * destinations. Centred and narrow because the whole task is "copy one string,
- * paste one file", and a full-width column scatters two short steps across a
- * counter display.
+ * destinations. Centred and narrow because the whole task is now "type one
+ * key", and a full-width column scatters a single short form across a counter
+ * display.
  */
 .aktivasi {
   max-width: 46rem;
@@ -2894,17 +2894,25 @@ fieldset {
   color: var(--text-muted);
 }
 
-.aktivasi__step {
-  margin-top: 1.5rem;
-  padding: 1.25rem 1.5rem;
+/* The internet requirement, stated before anyone tries. Given a card of its own
+   rather than a line of body text because the person who needs it is standing
+   in the shop deciding whether to go and tether a phone, and discovering it
+   through a fifteen-second timeout instead turns a five-minute fix into a
+   second visit. */
+.aktivasi__online {
+  max-width: 60ch;
+  margin-top: 1.25rem;
+  padding: 0.875rem 1rem;
   border: 1px solid var(--surface-2);
+  border-left: 3px solid var(--accent);
   border-radius: var(--radius);
   background: var(--surface);
+  color: var(--text-muted);
+  font-size: 0.9rem;
 }
 
-.aktivasi__step > h2 {
-  margin-top: 0;
-  font-size: 1.1rem;
+.aktivasi__online strong {
+  color: var(--text);
 }
 
 .aktivasi__field {
@@ -2918,23 +2926,35 @@ fieldset {
   font-weight: 600;
 }
 
-/* Monospace + break-all: these are opaque base64 blobs, and a proportional font
-   makes a truncated or mis-pasted one impossible to eyeball. */
-.aktivasi__blob,
-.aktivasi__token {
+/* Monospace, wide-tracked and large: the key is read off a phone screen and
+   typed on a touch keyboard, often by someone crouched under a counter. A
+   proportional font makes 0/O and 1/I ambiguous exactly where this format is
+   already at its most fragile — the alphabet omits those letters, but only the
+   typography stops the eye from second-guessing. */
+.aktivasi__key {
   width: 100%;
+  padding: 0.75rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.85rem;
-  word-break: break-all;
-  resize: vertical;
+  font-size: 1.25rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
+.aktivasi__hint {
+  max-width: 60ch;
+  margin: 0.5rem 0 1rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+/* Demoted below the form: no longer part of activation, kept because it is the
+   first thing the vendor asks for when a key will not redeem. */
 .aktivasi__installation {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
-  margin-top: 1rem;
+  margin-top: 2rem;
   color: var(--text-muted);
   font-size: 0.85rem;
 }
@@ -2942,10 +2962,6 @@ fieldset {
 .aktivasi__installation code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   word-break: break-all;
-}
-
-.aktivasi__upload {
-  margin-bottom: 1rem;
 }
 
 .aktivasi__error {

@@ -35,6 +35,7 @@ export class LicenseStateService
 {
   private readonly logger = new Logger(LicenseStateService.name);
   private status: LicenseStatus | null = null;
+  private installation: string | null = null;
   private timer: NodeJS.Timeout | null = null;
 
   constructor(
@@ -67,7 +68,7 @@ export class LicenseStateService
     if (TRUSTED_SIGNING_KEYS.length === 0 && process.env.NODE_ENV === 'production') {
       this.logger.error(
         'NO TRUSTED SIGNING KEY COMPILED IN — this build cannot activate any license. ' +
-          'Run `node tools/license-generator/bin/qms-license.mjs keygen` and paste the printed ' +
+          'Paste the licensing product\'s public signing key into ' +
           'entry into src/infrastructure/licensing/trusted-keys.ts, then rebuild.',
       );
     }
@@ -106,11 +107,26 @@ export class LicenseStateService
     return this.status;
   }
 
+  /**
+   * This installation's id, cached alongside the verdict.
+   *
+   * Deliberately NOT on {@link ILicenseStatusProvider}: the enforcement guard
+   * has no use for it, and widening the port so one controller can render a
+   * support detail is the interface-segregation mistake. The licence controller
+   * already holds this concretion for `refresh()`, so it costs nothing there.
+   *
+   * `null` only during the boot window, before the first evaluation.
+   */
+  public get installationId(): string | null {
+    return this.installation;
+  }
+
   public async refresh(): Promise<LicenseStatus> {
     try {
-      const { status } = await this.getStatus.execute();
+      const { status, installationId } = await this.getStatus.execute();
       this.logChange(status);
       this.status = status;
+      this.installation = installationId.toString();
       return status;
     } catch (error) {
       // A licence evaluation that throws must never take down the boot path or

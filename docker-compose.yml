@@ -1,13 +1,26 @@
 # Enterprise Offline Queue Management System (QMS) — single-host deployment.
 #
 # Every service runs in its own container on one local PC server, fronted by
-# the `gateway` reverse proxy. Bring the whole stack up with one command:
+# the `gateway` reverse proxy. At a store, bring the whole stack up with:
 #
-#   docker compose up -d
+#   ./install.sh
+#
+# which pulls the published images and starts them. In development, build from
+# source instead with `docker compose up -d --build`.
 #
 # Then open http://antrian.local/ (or the server IP) — a clean browser is
-# redirected to /admin/wizard for first-run setup (FR-WZD-01). No internet is
-# required at runtime (NFR-REL-01); every container self-heals (NFR-REL-03).
+# redirected to /admin/aktivasi, and after activation to /admin/wizard
+# (FR-WZD-01). No internet is required at runtime (NFR-REL-01) beyond the single
+# outbound call that redeems the activation key; every container self-heals
+# (NFR-REL-03).
+#
+# ## image: alongside build:
+#
+# Each first-party service names both. `build` is what a developer uses and what
+# scripts/release.mjs invokes to produce the tagged images; `image` is what a
+# store pulls, so a mini PC never compiles five services and downloads a 63 MB
+# voice model over a shop's connection. QMS_REGISTRY and QMS_VERSION come from
+# the .env file beside this one — see .env.example.
 
 services:
   # --- Database ------------------------------------------------------------
@@ -32,6 +45,7 @@ services:
 
   # --- Backend ------------------------------------------------------------
   core-api-service:
+    image: ${QMS_REGISTRY:-qms}/core-api:${QMS_VERSION:-latest}
     build:
       context: ./services/core-api
     restart: always # NFR-REL-03
@@ -66,6 +80,7 @@ services:
   # at runtime (NFR-REL-01) and `docker compose up -d --build` remains the only
   # bring-up step (NFR-MNT-02).
   tts-service:
+    image: ${QMS_REGISTRY:-qms}/tts:${QMS_VERSION:-latest}
     build:
       context: ./services/tts-service
     restart: always # NFR-REL-03
@@ -105,6 +120,7 @@ services:
 
   # --- Frontends (static PWAs served by per-service nginx) ---------------
   kiosk-service:
+    image: ${QMS_REGISTRY:-qms}/kiosk:${QMS_VERSION:-latest}
     build:
       context: ./services/kiosk-service
     restart: always # NFR-REL-03
@@ -112,6 +128,7 @@ services:
       - "80"
 
   tv-display-service:
+    image: ${QMS_REGISTRY:-qms}/tv-display:${QMS_VERSION:-latest}
     build:
       context: ./services/tv-display-service
     restart: always # NFR-REL-03
@@ -119,6 +136,7 @@ services:
       - "80"
 
   caller-service:
+    image: ${QMS_REGISTRY:-qms}/caller:${QMS_VERSION:-latest}
     build:
       context: ./services/caller-service
     restart: always # NFR-REL-03
@@ -126,6 +144,7 @@ services:
       - "80"
 
   admin-service:
+    image: ${QMS_REGISTRY:-qms}/admin:${QMS_VERSION:-latest}
     build:
       context: ./services/admin-service
     restart: always # NFR-REL-03

@@ -15,14 +15,17 @@
  *
  * ## Before the first release
  *
- * This table ships EMPTY, which makes every licence fail as INVALID and leaves
- * every store on the activation screen. That is the correct default — a
- * placeholder key would be a key an attacker also has. Generate the real one and
- * paste the line it prints:
+ * This table ships EMPTY, which makes every activation fail as UNTRUSTED and
+ * leaves every store on the activation screen. That is the correct default — a
+ * placeholder key would be a key an attacker also has.
  *
- *   node tools/license-generator/bin/qms-license.mjs keygen
+ * Paste in the public half of your licensing product's signing key, in the
+ * `{ keyId, publicKeyDerB64 }` form it prints. Done once, ever, across every
+ * product that licensing product serves. See
+ * docs/LICENSE-SERVER-CONTRACT.md.
  *
- * The private half never enters this repo; `npm run verify` fails if it does.
+ * The private half never enters this repo; `npm run verify` fails if it does,
+ * and `QMS_RELEASE=1 npm run verify` fails while this table is still empty.
  */
 export interface TrustedSigningKey {
   readonly keyId: string;

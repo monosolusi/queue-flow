@@ -1,3 +1,6 @@
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+
 import type { INestApplication } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { WsAdapter } from '@nestjs/platform-ws';
@@ -45,9 +48,10 @@ import {
 } from '../../src/domain/licensing';
 import { LicenseStateService } from '../../src/infrastructure/licensing/license-state.service';
 import { TRUSTED_KEY_ENV } from '../../src/infrastructure/licensing/license-token-verifier.factory';
+import { ACTIVATION_URL_ENV } from '../../src/infrastructure/licensing/http-license-activation-client';
 
-/** The generator's own fixtures — one file, so it cannot drift from itself. */
-const LICENSE_FIXTURES = join(__dirname, '../../../../tools/license-generator/test/fixtures');
+/** The shared format fixtures — one copy, so it cannot drift from itself. */
+const LICENSE_FIXTURES = join(__dirname, '../../../../tools/license-format/test/fixtures');
 import type { IQueueEventPublisher } from '../../src/domain/queue';
 import { QUEUE_EVENT_PUBLISHER } from '../../src/domain/queue';
 
@@ -203,15 +207,15 @@ export async function createApp(options: CreateAppOptions = {}): Promise<BootedA
   return { app, port };
 }
 
-/** The `"<keyId> <base64Spki>"` line `qms-license keygen` writes, verbatim. */
+/** The `"<keyId> <base64Spki>"` trusted-key line, verbatim. */
 export function testKeyLine(): string {
   return readFileSync(join(LICENSE_FIXTURES, 'test-public-key.txt'), 'utf8').trim();
 }
 
 /**
- * Mints a real, correctly signed licence — the same bytes `qms-license issue`
- * produces. Signed with the committed TEST key, which the production
- * trusted-key table does not contain, so nothing exploitable ships.
+ * Mints a real, correctly signed licence — the same bytes the activation server
+ * returns. Signed with the committed TEST key, which the production trusted-key
+ * table does not contain, so nothing exploitable ships.
  */
 export function signTestLicense(payloadOverrides: Record<string, unknown> = {}): string {
   const privateKey = createPrivateKey(
@@ -249,11 +253,96 @@ export function signTestLicense(payloadOverrides: Record<string, unknown> = {}):
 }
 
 /**
- * Activates a licence for whatever installation id this app just minted, then
- * refreshes the cached verdict so the guard sees it immediately.
+ * A valid activation key — correct check symbol, so it survives the VO and
+ * reaches the network stage. Computed the way the activation server does it.
+ */
+export function testActivationKey(payload = 'M4RS7QRSTVWXYZ0123A'): string {
+  const alphabet = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+  let sum = 0;
+  for (let i = 0; i < payload.length; i += 1) sum += alphabet.indexOf(payload[i]) * (2 * i + 1);
+  const full = payload + alphabet[sum % 32];
+  return `${full.slice(0, 5)}-${full.slice(5, 10)}-${full.slice(10, 15)}-${full.slice(15)}`;
+}
+
+export interface FakeActivationServer {
+  readonly url: string;
+  /** Every redemption body the client sent, in order. */
+  readonly calls: Record<string, unknown>[];
+  /** Swap in a failure — `{ status, code }` — or back to signing. */
+  respondWith(reply: { status: number; code?: string; token?: string } | null): void;
+  close(): Promise<void>;
+}
+
+/**
+ * The vendor's activation server, standing in.
  *
- * Entitlements are uncapped: these suites are about the queue, and a cap would
- * turn an unrelated DoD spec into a licensing failure.
+ * A real HTTP server rather than a stubbed port, because the acceptance suite's
+ * job is to prove the wire works end to end: `fetch`, the JSON contract, the
+ * status-code mapping and the signature check all participate. A stub here
+ * would leave the one outbound call the product makes completely untested.
+ *
+ * By default it does what the real one does — bind the licence to whatever
+ * installation id it was sent, and sign it with the committed TEST key.
+ */
+export async function startFakeActivationServer(): Promise<FakeActivationServer> {
+  const calls: Record<string, unknown>[] = [];
+  let override: { status: number; code?: string; token?: string } | null = null;
+
+  const server = createServer((req, res) => {
+    let raw = '';
+    req.on('data', (chunk) => {
+      raw += chunk;
+    });
+    req.on('end', () => {
+      const body = JSON.parse(raw || '{}') as Record<string, unknown>;
+      calls.push(body);
+
+      if (override !== null) {
+        res.writeHead(override.status, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(override.token !== undefined ? { token: override.token } : { code: override.code }));
+        return;
+      }
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          token: signTestLicense({ installationId: String(body.installationId) }),
+        }),
+      );
+    });
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as AddressInfo;
+  process.env[ACTIVATION_URL_ENV] = `http://127.0.0.1:${port}/v1/activations`;
+
+  return {
+    url: `http://127.0.0.1:${port}/v1/activations`,
+    calls,
+    respondWith: (reply) => {
+      override = reply;
+    },
+    close: async () => {
+      delete process.env[ACTIVATION_URL_ENV];
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    },
+  };
+}
+
+/**
+ * Seeds an active licence for whatever installation id this app just minted,
+ * then refreshes the cached verdict so the guard sees it immediately.
+ *
+ * Writes straight to the repository rather than redeeming a key. Activation is
+ * not what these suites are testing — they are about the queue, and every one
+ * of them would otherwise have to stand up an activation server to get past the
+ * guard. The genuine online path, including the signature check on what comes
+ * back, is exercised in `licensing.acceptance.spec.ts` against
+ * {@link startFakeActivationServer}.
+ *
+ * Entitlements are uncapped: a cap would turn an unrelated DoD spec into a
+ * licensing failure.
  */
 export async function installTestLicense(app: INestApplication): Promise<void> {
   const installations = app.get<IInstallationRepository>(INSTALLATION_REPOSITORY);

@@ -1,5 +1,6 @@
 export * from './evaluate-license';
 export * from './host-fingerprint-reader.port';
+export * from './license-activation-client.port';
 export * from './license';
 export * from './license-status';
 export * from './license-status-provider.port';
@@ -9,4 +10,5 @@ export * from './repositories/license.repository';
 export * from './value-objects/entitlements';
 export * from './value-objects/host-fingerprint';
 export * from './value-objects/installation-id';
+export * from './value-objects/license-key';
 export * from './value-objects/license-type';

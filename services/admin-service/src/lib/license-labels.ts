@@ -32,23 +32,53 @@ export const LICENSE_TYPE_LABELS: Record<string, string> = {
 export const LICENSE_ISSUE_ACTIONS: Record<LicenseIssueName, string> = {
   NONE: '',
   ABSENT:
-    'Perangkat ini belum diaktivasi. Kirim Kode Permintaan Aktivasi di bawah ke penyedia sistem, lalu unggah file lisensi yang dikirim balik.',
+    'Perangkat ini belum diaktivasi. Masukkan Kunci Aktivasi dari penyedia sistem di bawah ini.',
   INVALID:
-    'File lisensi yang terpasang tidak dapat dibaca — kemungkinan rusak atau sudah diubah. Unggah ulang file asli dari penyedia sistem.',
+    'Lisensi yang terpasang tidak dapat dibaca — kemungkinan rusak. Aktivasi ulang dengan Kunci Aktivasi Anda.',
   WRONG_INSTALLATION:
-    'Lisensi ini diterbitkan untuk perangkat lain. Kirim Kode Permintaan Aktivasi perangkat INI ke penyedia sistem untuk mendapat lisensi yang sesuai.',
+    'Lisensi ini diterbitkan untuk perangkat lain. Hubungi penyedia sistem agar kunci Anda dilepas dari perangkat lama, lalu aktivasi ulang.',
   EXPIRED:
     'Masa berlaku lisensi sudah habis. Hubungi penyedia sistem untuk perpanjangan.',
   HOST_MISMATCH:
-    'Lisensi ini diaktivasi di perangkat lain. Kalau Anda baru mengganti mini PC atau menginstal ulang sistem operasi, hubungi penyedia sistem untuk lisensi pengganti.',
+    'Lisensi ini diaktivasi di perangkat lain. Kalau Anda baru mengganti mini PC atau menginstal ulang sistem operasi, hubungi penyedia sistem untuk aktivasi ulang.',
 };
 
-/** Why an uploaded file was refused, in the manager's terms. */
+/**
+ * Why an activation was refused, in the manager's terms.
+ *
+ * Each of these leads somewhere different, which is the entire reason the
+ * server sends a code instead of a sentence. `OFFLINE` sends someone to find a
+ * signal; `KEY_ALREADY_USED` sends them to the phone; `KEY_MALFORMED` sends
+ * them back to the keyboard. Collapsing any two of them into "aktivasi gagal"
+ * costs a technician an afternoon.
+ *
+ * None of them says "hubungi teknisi" and stops there — every line names the
+ * next physical action.
+ */
 export const LICENSE_REJECTION_LABELS: Record<LicenseRejectionReason, string> = {
-  MALFORMED: 'File ini bukan file lisensi yang valid, atau isinya rusak. Pastikan Anda mengunggah file .lic yang dikirim penyedia sistem, apa adanya.',
-  UNTRUSTED: 'File ini tidak diterbitkan oleh penyedia sistem, atau isinya sudah diubah setelah diterbitkan.',
-  WRONG_INSTALLATION: 'Lisensi ini untuk perangkat lain. Kirim Kode Permintaan Aktivasi perangkat ini ke penyedia sistem.',
-  WRONG_PRODUCT: 'Lisensi ini untuk produk lain, bukan sistem antrean ini.',
+  KEY_MALFORMED:
+    'Kunci Aktivasi ini tidak lengkap atau ada karakter yang salah ketik. Periksa lagi huruf dan angkanya, lalu coba lagi.',
+  OFFLINE:
+    'Tidak ada koneksi internet. Aktivasi hanya perlu internet sekali, saat pemasangan — sambungkan kabel LAN ke internet atau nyalakan hotspot HP, lalu coba lagi. Setelah aktif, sistem berjalan tanpa internet.',
+  TIMEOUT:
+    'Server penyedia sistem tidak menjawab tepat waktu. Koneksinya ada, tapi lambat — tunggu sebentar lalu tekan Aktifkan lagi.',
+  SERVER_ERROR:
+    'Server penyedia sistem sedang bermasalah. Coba lagi beberapa saat lagi; kalau tetap gagal, hubungi penyedia sistem.',
+  KEY_UNKNOWN:
+    'Kunci Aktivasi ini tidak dikenali. Pastikan Anda memasukkan kunci yang benar dari penyedia sistem.',
+  KEY_ALREADY_USED:
+    'Kunci Aktivasi ini sudah dipakai di perangkat lain. Kalau Anda mengganti atau memindahkan perangkat, hubungi penyedia sistem untuk melepas kunci dari perangkat lama.',
+  KEY_REVOKED:
+    'Kunci Aktivasi ini sudah dinonaktifkan oleh penyedia sistem. Hubungi penyedia sistem untuk kunci penggantinya.',
+  KEY_EXPIRED:
+    'Masa pakai Kunci Aktivasi ini sudah lewat. Hubungi penyedia sistem untuk kunci yang baru.',
+  MALFORMED:
+    'Jawaban dari server penyedia sistem tidak dapat dibaca. Coba lagi; kalau tetap gagal, hubungi penyedia sistem.',
+  UNTRUSTED:
+    'Lisensi yang diterima tidak diterbitkan oleh penyedia sistem ini. Hubungi penyedia sistem — jangan lanjutkan.',
+  WRONG_INSTALLATION:
+    'Lisensi yang diterima ternyata untuk perangkat lain. Hubungi penyedia sistem.',
+  WRONG_PRODUCT: 'Kunci ini untuk produk lain, bukan sistem antrean ini.',
 };
 
 /** Severity for banner styling. Never a raw state name in a class. */

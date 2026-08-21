@@ -1,133 +1,99 @@
-# Install runbook — mini PC deployment
+# Install runbook
 
-For the technician setting up a store. Assumes a Linux mini PC with Docker
-installed and no internet at the store beyond the initial image build.
+Three audiences, three sections. Find yours and stop there.
+
+Licences are issued by a separate licensing product, not by anything in this
+repo. Its contract is in [`LICENSE-SERVER-CONTRACT.md`](LICENSE-SERVER-CONTRACT.md).
 
 ---
 
-## 0. Before the very first release (vendor, once ever)
+## Vendor — once, ever
 
-`services/core-api/src/infrastructure/licensing/trusted-keys.ts` ships **empty**,
-so a stock build trusts no licence and every store stays on the activation
-screen. Generate the signing key and paste in the line it prints:
+Paste the **public** half of your licensing product's Ed25519 signing key into
+`services/core-api/src/infrastructure/licensing/trusted-keys.ts`, in the
+`{ keyId, publicKeyDerB64 }` form it prints.
+
+That table ships empty, so until this is done every build refuses every key.
+`QMS_RELEASE=1 npm run verify` fails while it is empty, `npm run release`
+refuses outright, and core-api logs an error at boot in a production image.
+
+One key covers every product that licensing product serves. **Back the private
+half up offline** — lose it and no existing installation can ever be
+re-licensed.
+
+## Vendor — per release
 
 ```sh
-node tools/license-generator/bin/qms-license.mjs keygen
+cp .env.example .env      # set QMS_REGISTRY, pin QMS_VERSION
+npm run release           # build, tag, push
 ```
 
-`npm run verify` warns while this is unset, and **`QMS_RELEASE=1 npm run verify`
-fails** — wire that into the release pipeline so an un-keyed image can never
-ship. core-api also logs an error at boot if a production build has no key.
+## Technician — per store
 
-**Back that key up offline.** Lose it and you can never issue a licence for an
-existing installation again — every customer would need re-issuing under a new
-key. It lives at `~/.qms-license/signing-key.pem` (mode 0600), never in the repo;
-`npm run verify` fails if a private key appears in the tree.
-
----
-
-## 1. Prepare the OS
-
-If you image one mini PC and clone the disk to the rest — which is the sane way
-to do this at volume — **you must regenerate the machine id on every clone**:
+The mini PC needs Docker, the shop network, and internet **during install
+only**.
 
 ```sh
-sudo rm -f /etc/machine-id /var/lib/dbus/machine-id
-sudo systemd-machine-id-setup
-sudo reboot
+./install.sh
 ```
 
-`/etc/machine-id` is written once at OS install. A cloned disk carries the
-source machine's id, so without this step every unit in the fleet reports the
-same identity and one of the two licence host claims silently stops
-distinguishing anything. `product_uuid` (the motherboard's, weight 2) is immune,
-which is why it carries the heavier weight — but do not lean on that alone.
+That pulls the published images, enables host-identity binding on Linux, and
+starts everything. Re-running it is safe, and is also how a store is upgraded.
 
-Verify the two claims are readable and distinct per unit:
+Then open `http://antrian.local/` (or the machine's IP) on any device on the
+shop network. The activation page opens by itself.
 
-```sh
-cat /etc/machine-id
-sudo cat /sys/class/dmi/id/product_uuid
-```
+## Whoever is standing at the screen — activate
 
-If `product_uuid` reads `Default string`, `To be filled by O.E.M.` or
-`03000200-0400-0500-0006-000700080009`, the board is reporting a model rather
-than a machine. QMS filters those out automatically — the unit simply falls back
-to `machine-id` alone, and you may want to issue its licence with
-`--no-bind-host`.
+Type the **Activation Key** the vendor sent — 20 characters, shown as
+`XXXXX-XXXXX-XXXXX-XXXXX` — and press **Aktifkan**.
+
+Upper/lower case, hyphens and stray spaces do not matter. A mistyped key is
+caught before anything is sent.
+
+**Activation needs the internet, once.** If this machine has no connection,
+plug in a LAN cable with internet or share a phone hotspot first. After
+activation the system runs entirely offline and never calls out again.
+
+The store then moves on to the setup wizard. Licence first, setup second.
 
 ---
 
-## 2. Enable host fingerprint mounts
+## When something goes wrong
 
-```sh
-cd /opt/qms
-ln -sf docker-compose.prod.yml docker-compose.override.yml
-```
+| What the screen says | What it means | What to do |
+|---|---|---|
+| No internet connection | This machine cannot reach the licensing server | Tether a phone or plug in an internet LAN cable, then press Aktifkan again. Only needed this once. |
+| Server did not answer in time | There *is* a connection, just a slow one | Wait a moment and press Aktifkan again. |
+| Key looks mistyped | Failed its own checksum; never left the machine | Re-read the key. `0`/`O` and `1`/`I` are interchangeable, so those are not the problem. |
+| Key already used on another device | It is bound to a different installation | Call the vendor to release the seat, then activate again with the same key. |
+| Key not recognised / disabled / past its date | The vendor's records disagree | Call the vendor. Quote the **ID Perangkat** shown at the bottom of the page. |
+| Licence not issued by this provider | The reply was not signed by a key this build trusts | Stop and call the vendor. Do not retry — something is wrong with the build or the network path. |
 
-Compose auto-loads `docker-compose.override.yml`, so bring-up stays one command.
-Without this the licence still works — host claims read as unavailable, which
-never blocks — but host binding is not enforced, and core-api logs a warning
-saying so at boot.
+### Replacing the motherboard
 
----
+The board identity changes, so the licence drops to a host mismatch. The store
+keeps running at full function for **30 days** with a banner. Inside that
+window, have the vendor release the seat and activate again with the same key.
 
-## 3. Bring the stack up
+Reinstalling the OS on the *same* board changes nothing — that case needs no
+action.
 
-```sh
-docker compose up -d
-```
+### Moving to a new mini PC
 
-Then open `http://antrian.local/` (or the server IP). A clean browser lands on
-the activation page.
+Restoring the `pgdata` volume carries the installation identity with it, so the
+licence is still "for" this installation — but the board identity will not
+match, and after the grace window the kiosk stops issuing new tickets while the
+existing queue drains. Have the vendor release the seat and activate again.
 
----
+### The board reports a placeholder identity
 
-## 4. Activate
+`install.sh` says so if it does — some mini PCs report a model rather than a
+machine. Tell the vendor: that unit needs its licence issued without host
+binding. Nothing else changes.
 
-1. On `/admin/aktivasi`, press **Salin Kode** — one `QMSREQ1-…` string.
-2. Send it to the vendor (WhatsApp / email).
-3. The vendor issues the licence:
+### Running fully offline afterwards
 
-   ```sh
-   node tools/license-generator/bin/qms-license.mjs issue \
-     --request 'QMSREQ1-…' \
-     --customer "Toko Maju Jaya" --ref INV-2026-0142 \
-     --type perpetual --support-until 2027-08-18 \
-     --max-counters 8 --out toko-maju.lic
-   ```
-
-4. Send `toko-maju.lic` back. Upload or paste it on the same page.
-
-The store now redirects to the first-run wizard. Licence first, setup second.
-
----
-
-## 5. Verify
-
-```sh
-# Should print SIGNATURE: VALID and the right customer.
-node tools/license-generator/bin/qms-license.mjs inspect toko-maju.lic
-```
-
-In the admin panel, **Konfigurasi Sistem → Lisensi** should show *Aktif*, and the
-Perangkat section should say the licence matches this device. If it says the
-device identity cannot be read, step 2 was skipped.
-
----
-
-## Later: replacing hardware
-
-A replaced motherboard changes `product_uuid`, so the licence drops to a host
-mismatch. The store keeps running at full function for **30 days** with a banner;
-inside that window, send the new activation request and issue a replacement
-licence. Reinstalling the OS on the *same* board changes only `machine-id`, which
-on its own is not enough to trigger a mismatch — that case needs no action.
-
-## Later: moving to a new mini PC
-
-Restoring the `pgdata` volume onto new hardware carries the installation id with
-it, so the licence is still "for" this installation — but the host claims will
-not match, and after the grace window the kiosk stops issuing new tickets while
-the existing queue drains. Issue a replacement licence against the new
-activation request.
+Once activated, nothing in the stack contacts the internet. To upgrade a store
+with no connection at all, copy the images across yourself and run
+`./install.sh --no-pull`.

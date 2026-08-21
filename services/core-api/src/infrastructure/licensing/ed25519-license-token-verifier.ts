@@ -14,7 +14,7 @@ const ARMOR_END = '-----END QMS LICENSE-----';
 const TOKEN_VERSION = 1;
 
 /**
- * Verifies licence tokens minted by `tools/license-generator`.
+ * Verifies licence tokens minted by the licensing product.
  *
  * This is the deliberate TWIN of that tool's `src/token.mjs`. They are
  * duplicated rather than shared because the repo has no workspaces and a
