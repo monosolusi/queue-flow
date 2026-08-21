@@ -3,20 +3,18 @@ import { APP_GUARD } from '@nestjs/core';
 
 import { RecordAuditEntryUseCase } from '../../application/audit';
 import { GetSessionUserUseCase } from '../../application/identity';
-import {
-  ActivateLicenseUseCase,
-  GetActivationRequestUseCase,
-  GetLicenseStatusUseCase,
-} from '../../application/licensing';
+import { ActivateLicenseUseCase, GetLicenseStatusUseCase } from '../../application/licensing';
 import { AUDIT_LOG_REPOSITORY } from '../../domain/audit';
 import {
   HOST_FINGERPRINT_READER,
   INSTALLATION_REPOSITORY,
+  LICENSE_ACTIVATION_CLIENT,
   LICENSE_REPOSITORY,
   LICENSE_STATUS_PROVIDER,
   LICENSE_TOKEN_VERIFIER,
 } from '../../domain/licensing';
 import { TRANSACTION_MANAGER } from '../../domain/shared';
+import { HttpLicenseActivationClient } from '../../infrastructure/licensing/http-license-activation-client';
 import { LicenseStateService } from '../../infrastructure/licensing/license-state.service';
 import { PersistenceModule } from '../../infrastructure/persistence/persistence.module';
 import { AdminOrUnlicensedGuard } from './admin-or-unlicensed.guard';
@@ -60,22 +58,30 @@ import { LicenseGuard } from './license.guard';
       inject: [AUDIT_LOG_REPOSITORY],
       useFactory: (auditLog) => new RecordAuditEntryUseCase(auditLog),
     },
+    // Bound here rather than alongside LICENSE_TOKEN_VERIFIER in the two
+    // persistence modules: those bind a port once per profile because the
+    // profile is what varies, and this port does not vary at all. One binding
+    // in the module that consumes it beats the same line copied into both.
+    { provide: LICENSE_ACTIVATION_CLIENT, useClass: HttpLicenseActivationClient },
     {
       provide: ActivateLicenseUseCase,
       inject: [
         LICENSE_REPOSITORY,
         LICENSE_TOKEN_VERIFIER,
+        LICENSE_ACTIVATION_CLIENT,
         GetLicenseStatusUseCase,
         TRANSACTION_MANAGER,
         RecordAuditEntryUseCase,
       ],
-      useFactory: (licenses, verifier, getStatus, transactions, recordAudit) =>
-        new ActivateLicenseUseCase(licenses, verifier, getStatus, transactions, recordAudit),
-    },
-    {
-      provide: GetActivationRequestUseCase,
-      inject: [GetLicenseStatusUseCase],
-      useFactory: (getStatus) => new GetActivationRequestUseCase(getStatus),
+      useFactory: (licenses, verifier, activation, getStatus, transactions, recordAudit) =>
+        new ActivateLicenseUseCase(
+          licenses,
+          verifier,
+          activation,
+          getStatus,
+          transactions,
+          recordAudit,
+        ),
     },
     LicenseStateService,
     // The enforcement points depend on the read PORT, not on the service that

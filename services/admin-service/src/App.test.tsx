@@ -47,6 +47,7 @@ const VALID_LICENSE = {
   state: 'VALID',
   issue: 'NONE',
   detail: 'The license is valid.',
+  installationId: INSTALLATION_ID,
   expiresAt: null,
   graceEndsAt: null,
   restrictsNewTickets: false,
@@ -96,10 +97,7 @@ function makeApi(
     // Licensing (ILicenseApi). A VALID verdict by default so these tests keep
     // exercising what they are about; the license screens have their own suite.
     getLicense: vi.fn(() => Promise.resolve(VALID_LICENSE)),
-    getActivationRequest: vi.fn(() =>
-      Promise.resolve({ installationId: INSTALLATION_ID, claims: {}, majorVersion: 1, blob: 'QMSREQ1-x' }),
-    ),
-    activateLicense: vi.fn(() => Promise.resolve(VALID_LICENSE)),
+    activateWithKey: vi.fn(() => Promise.resolve(VALID_LICENSE)),
     getLicenseHistory: vi.fn(() => Promise.resolve([])),
     triggerManualReset: vi.fn(),
     cleanupTransactionLogs: vi.fn(),

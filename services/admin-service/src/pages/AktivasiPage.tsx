@@ -1,20 +1,23 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LicenseRejectedError, type ILicenseApi } from '../api/admin-api';
-import type { ActivationRequestDto, LicenseStatusDto } from '../api/types';
+import type { LicenseStatusDto } from '../api/types';
 import { useSystemConfigContext } from '../config/system-config-context';
 import {
   LICENSE_ISSUE_ACTIONS,
   LICENSE_REJECTION_LABELS,
 } from '../lib/license-labels';
+import {
+  KEY_SYMBOLS,
+  formatLicenseKey,
+  isLicenseKeyComplete,
+  isLicenseKeyValid,
+} from '../lib/license-key';
 import { useToast } from '../toast/useToast';
-
-/** Guards against a paste that is clearly not a licence before a round trip. */
-const ARMOR_BEGIN = '-----BEGIN QMS LICENSE-----';
 
 type LoadState =
   | { readonly kind: 'loading' }
-  | { readonly kind: 'ready'; readonly request: ActivationRequestDto; readonly status: LicenseStatusDto }
+  | { readonly kind: 'ready'; readonly status: LicenseStatusDto }
   | { readonly kind: 'error' };
 
 /**
@@ -23,23 +26,23 @@ type LoadState =
  * Chromeless (like `/wizard` and `/login`): the sidebar links to pages the
  * store cannot use yet, and offering them would be a dead end.
  *
- * The flow it has to support is a person standing in a shop with a phone, no
- * internet on the mini PC, and no shell access:
+ * The flow it has to support is a person standing in a shop with the key the
+ * vendor sent them: type it, press Aktifkan, done. There is no file to receive,
+ * save and find again, and no code to copy back the other way — the device
+ * identity travels inside the request the server never shows anyone.
  *
- *   1. copy ONE string (the activation request),
- *   2. send it to the vendor over WhatsApp,
- *   3. paste back — or upload — the `.lic` that comes in reply.
- *
- * That is why the request is a single prefixed blob rather than an installation
- * id plus a table of hashes: two things to copy is two things to get wrong, and
- * a mistyped id is only discovered after the licence has been issued.
+ * The one thing that flow needs and the old file-based one did not is the
+ * INTERNET, once. That is stated at the top of the page rather than discovered
+ * through a failure, because the person who has to act on it is usually
+ * standing in the shop with a phone they could tether, and finding out after a
+ * fifteen-second timeout is how a five-minute fix becomes a second visit.
  */
 export function AktivasiPage({ api }: { api: ILicenseApi }) {
   const [load, setLoad] = useState<LoadState>({ kind: 'loading' });
-  const [token, setToken] = useState('');
+  const [key, setKey] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [rejection, setRejection] = useState<string | null>(null);
-  const [copied, setCopied] = useState<'request' | 'installation' | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const { refresh: refreshConfig } = useSystemConfigContext();
   const toast = useToast();
@@ -49,8 +52,8 @@ export function AktivasiPage({ api }: { api: ILicenseApi }) {
     let cancelled = false;
     void (async () => {
       try {
-        const [request, status] = await Promise.all([api.getActivationRequest(), api.getLicense()]);
-        if (!cancelled) setLoad({ kind: 'ready', request, status });
+        const status = await api.getLicense();
+        if (!cancelled) setLoad({ kind: 'ready', status });
       } catch {
         if (!cancelled) setLoad({ kind: 'error' });
       }
@@ -60,41 +63,47 @@ export function AktivasiPage({ api }: { api: ILicenseApi }) {
     };
   }, [api]);
 
-  const copy = useCallback(async (value: string, which: 'request' | 'installation') => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(which);
-      // Not a toast: the confirmation belongs next to the button that was
-      // pressed, and a manager copying twice should see it twice.
-      window.setTimeout(() => setCopied(null), 2000);
-    } catch {
-      toast.error('Tidak dapat menyalin otomatis. Silakan pilih teksnya dan salin manual.');
-    }
-  }, [toast]);
+  const copyInstallationId = useCallback(
+    async (value: string) => {
+      try {
+        await navigator.clipboard.writeText(value);
+        setCopied(true);
+        // Not a toast: the confirmation belongs next to the button that was
+        // pressed, and a manager copying twice should see it twice.
+        window.setTimeout(() => setCopied(false), 2000);
+      } catch {
+        toast.error('Tidak dapat menyalin otomatis. Silakan pilih teksnya dan salin manual.');
+      }
+    },
+    [toast],
+  );
 
-  const readFile = useCallback((file: File) => {
-    const reader = new FileReader();
-    reader.onload = () => setToken(String(reader.result ?? ''));
-    reader.onerror = () => toast.error('Gagal membaca file. Coba pilih ulang.');
-    reader.readAsText(file);
-  }, [toast]);
+  /**
+   * Reformats as the manager types: upper-cases, resolves the O/0 and I/1
+   * look-alikes, and re-groups. Typing, pasting a hyphen-less key and pasting
+   * one wrapped across two lines in an email all converge on the same value,
+   * so nobody has to know which form is "right".
+   */
+  function onKeyChange(raw: string) {
+    setKey(formatLicenseKey(raw));
+    setRejection(null);
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setRejection(null);
 
-    const trimmed = token.trim();
-    if (!trimmed.includes(ARMOR_BEGIN)) {
+    if (!isLicenseKeyValid(key)) {
       // Caught here rather than at the server so the manager gets the answer
-      // immediately, and so an accidental screenshot or empty paste does not
-      // land in the audit log as a rejected activation attempt.
-      setRejection(LICENSE_REJECTION_LABELS.MALFORMED);
+      // immediately — and so a typo never reaches the activation server as a
+      // failed redemption against a key that was fine.
+      setRejection(LICENSE_REJECTION_LABELS.KEY_MALFORMED);
       return;
     }
 
     setSubmitting(true);
     try {
-      await api.activateLicense(trimmed);
+      await api.activateWithKey(key);
       // Refresh the shared snapshot BEFORE navigating, or LicenseGuard would
       // still hold the RESTRICTED verdict and bounce straight back here.
       await refreshConfig();
@@ -125,7 +134,11 @@ export function AktivasiPage({ api }: { api: ILicenseApi }) {
     );
   }
 
-  const { request, status } = load;
+  const { status } = load;
+  // Only gates the button. The full check runs on submit, so a manager who
+  // pastes a complete-but-mistyped key still gets the specific reason rather
+  // than a button that silently refuses to work.
+  const ready = isLicenseKeyComplete(key);
 
   return (
     <div className="aktivasi">
@@ -135,83 +148,61 @@ export function AktivasiPage({ api }: { api: ILicenseApi }) {
         {LICENSE_ISSUE_ACTIONS[status.issue] || 'Perangkat ini memerlukan lisensi yang aktif.'}
       </p>
 
-      <section className="aktivasi__step" aria-labelledby="langkah-1">
-        <h2 id="langkah-1">Langkah 1 — Kirim kode ini ke penyedia sistem</h2>
-        <p>
-          Salin <strong>Kode Permintaan Aktivasi</strong> di bawah dan kirim lewat WhatsApp atau email.
-          Kode ini hanya berisi identitas perangkat — tidak ada data pelanggan atau data antrean di dalamnya.
-        </p>
+      <p className="aktivasi__online" role="note">
+        <strong>Aktivasi memerlukan koneksi internet — satu kali saja.</strong> Setelah aktif,
+        sistem antrean berjalan sepenuhnya tanpa internet dan tidak pernah menghubungi server lagi.
+      </p>
 
+      <form onSubmit={(e) => void submit(e)}>
         <label className="aktivasi__field">
-          <span>Kode Permintaan Aktivasi</span>
-          <textarea
-            readOnly
-            rows={4}
-            className="aktivasi__blob"
-            value={request.blob}
-            onFocus={(e) => e.currentTarget.select()}
+          <span>Kunci Aktivasi</span>
+          <input
+            type="text"
+            className="aktivasi__key"
+            value={key}
+            onChange={(e) => onKeyChange(e.currentTarget.value)}
+            placeholder="XXXXX-XXXXX-XXXXX-XXXXX"
+            /* 4 groups of 5 plus 3 hyphens. Typing past the end is silently
+               dropped by the formatter, so a double-paste cannot corrupt it. */
+            maxLength={KEY_SYMBOLS + 3}
+            autoComplete="off"
+            autoCapitalize="characters"
+            spellCheck={false}
+            inputMode="text"
+            aria-invalid={rejection !== null}
+            aria-describedby={rejection !== null ? 'lisensi-error' : 'lisensi-bantuan'}
           />
         </label>
-        <button type="button" className="btn btn--primary" onClick={() => void copy(request.blob, 'request')}>
-          {copied === 'request' ? 'Tersalin ✓' : 'Salin Kode'}
-        </button>
+        <p className="aktivasi__hint" id="lisensi-bantuan">
+          Kunci ini dikirim oleh penyedia sistem, berbentuk 20 huruf dan angka. Huruf besar-kecil
+          tidak masalah.
+        </p>
 
+        {rejection !== null && (
+          <p className="aktivasi__error" id="lisensi-error" role="alert">
+            {rejection}
+          </p>
+        )}
+
+        <button type="submit" className="btn btn--primary" disabled={submitting || !ready}>
+          {submitting ? 'Mengaktifkan…' : 'Aktifkan'}
+        </button>
+      </form>
+
+      {status.installationId !== null && (
         <p className="aktivasi__installation">
-          ID Perangkat: <code>{request.installationId}</code>{' '}
+          {/* No longer part of the activation flow — kept because it is the
+              first thing the vendor asks for when a key will not redeem. */}
+          ID Perangkat: <code>{status.installationId}</code>{' '}
           <button
             type="button"
             className="btn btn--ghost"
-            onClick={() => void copy(request.installationId, 'installation')}
+            onClick={() => void copyInstallationId(status.installationId as string)}
           >
-            {copied === 'installation' ? 'Tersalin ✓' : 'Salin'}
+            {copied ? 'Tersalin ✓' : 'Salin'}
           </button>
         </p>
-      </section>
-
-      <section className="aktivasi__step" aria-labelledby="langkah-2">
-        <h2 id="langkah-2">Langkah 2 — Pasang file lisensi yang diterima</h2>
-
-        <form onSubmit={(e) => void submit(e)}>
-          <div className="aktivasi__upload">
-            <input
-              type="file"
-              id="lisensi-file"
-              accept=".lic,text/plain"
-              onChange={(e) => {
-                const file = e.currentTarget.files?.[0];
-                if (file) readFile(file);
-              }}
-            />
-            <label htmlFor="lisensi-file">Pilih file .lic</label>
-          </div>
-
-          <label className="aktivasi__field">
-            {/* The paste path is not a fallback — on a tablet it is often the
-                easier one, because the licence arrives as chat text rather than
-                as a file that has to be saved somewhere findable first. */}
-            <span>…atau tempel isi lisensinya di sini</span>
-            <textarea
-              rows={8}
-              className="aktivasi__token"
-              value={token}
-              placeholder={`${ARMOR_BEGIN}\n…\n-----END QMS LICENSE-----`}
-              onChange={(e) => setToken(e.currentTarget.value)}
-              aria-invalid={rejection !== null}
-              aria-describedby={rejection !== null ? 'lisensi-error' : undefined}
-            />
-          </label>
-
-          {rejection !== null && (
-            <p className="aktivasi__error" id="lisensi-error" role="alert">
-              {rejection}
-            </p>
-          )}
-
-          <button type="submit" className="btn btn--primary" disabled={submitting || token.trim() === ''}>
-            {submitting ? 'Memasang…' : 'Aktifkan'}
-          </button>
-        </form>
-      </section>
+      )}
     </div>
   );
 }

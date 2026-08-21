@@ -25,6 +25,17 @@ export interface LicenseSummaryDto {
 
 /** Full projection, for the admin licence screen. */
 export interface LicenseStatusDto extends LicenseSummaryDto {
+  /**
+   * This installation's identity, shown on the activation and licence screens
+   * so a customer can quote it during a support call.
+   *
+   * It moved here when the `QMSREQ1-…` activation blob was retired: the id is
+   * no longer part of anyone's workflow, but it is still the first thing the
+   * vendor asks for when a key will not redeem. Unlike the host claim digests,
+   * publishing it costs nothing — it is bound to a licence, not a secret, and
+   * knowing it does not help anyone produce one.
+   */
+  installationId: string | null;
   type: string | null;
   customerName: string | null;
   supportUntil: string | null;
@@ -53,9 +64,13 @@ export function licenseSummary(status: LicenseStatus): LicenseSummaryDto {
   };
 }
 
-export function licenseStatusToDto(status: LicenseStatus): LicenseStatusDto {
+export function licenseStatusToDto(
+  status: LicenseStatus,
+  installationId: string | null = null,
+): LicenseStatusDto {
   return {
     ...licenseSummary(status),
+    installationId,
     type: status.type,
     customerName: status.customerName,
     supportUntil: status.supportUntil?.toISOString() ?? null,

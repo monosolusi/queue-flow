@@ -1,4 +1,4 @@
-import { createHash, createPrivateKey, sign as cryptoSign } from 'node:crypto';
+import { createPrivateKey, generateKeyPairSync, sign as cryptoSign } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -19,12 +19,17 @@ import type { TrustedSigningKey } from '../../src/infrastructure/licensing/trust
 import { RecordAuditEntryUseCase } from '../../src/application/audit';
 import {
   ActivateLicenseUseCase,
-  GetActivationRequestUseCase,
   GetLicenseStatusUseCase,
   LicenseRejectionReason,
 } from '../../src/application/licensing';
+import {
+  ActivationTransportFailure,
+  type ActivationRedemption,
+  type ILicenseActivationClient,
+  type RedemptionResult,
+} from '../../src/domain/licensing/license-activation-client.port';
 
-const FIXTURES = join(__dirname, '../../../../tools/license-generator/test/fixtures');
+const FIXTURES = join(__dirname, '../../../../tools/license-format/test/fixtures');
 const INSTALLATION = '11111111-2222-4333-8444-555555555555';
 const BOARD = 'a'.repeat(64);
 const MACHINE = 'b'.repeat(64);
@@ -95,6 +100,40 @@ class StubFingerprintReader implements IHostFingerprintReader {
   }
 }
 
+/**
+ * A key whose check symbol is correct, so it reaches the network stage. Built
+ * by the same arithmetic the activation server uses, not by calling the VO —
+ * a fixture derived from the implementation cannot detect a broken one.
+ */
+function validKey(payload = 'M4RS7QRSTVWXYZ0123A'): string {
+  const alphabet = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+  let sum = 0;
+  for (let i = 0; i < payload.length; i += 1) sum += alphabet.indexOf(payload[i]) * (2 * i + 1);
+  const full = payload + alphabet[sum % 32];
+  return `${full.slice(0, 5)}-${full.slice(5, 10)}-${full.slice(10, 15)}-${full.slice(15)}`;
+}
+
+const KEY = validKey();
+
+/**
+ * Stands in for the vendor's activation server. Records what it was asked, so
+ * the tests can assert that the installation id and host claims actually reach
+ * the party that has to bind them.
+ */
+class StubActivationClient implements ILicenseActivationClient {
+  public readonly calls: ActivationRedemption[] = [];
+  public reply: RedemptionResult;
+
+  constructor(reply: RedemptionResult) {
+    this.reply = reply;
+  }
+
+  async redeem(request: ActivationRedemption): Promise<RedemptionResult> {
+    this.calls.push(request);
+    return this.reply;
+  }
+}
+
 const NOW = new Date('2026-06-01T00:00:00.000Z');
 const days = (n: number) => new Date(NOW.getTime() + n * 86_400_000);
 
@@ -117,15 +156,17 @@ function harness(options: { now?: Date; lastSeenAt?: Date } = {}) {
     fingerprints,
     () => (options.now ?? NOW).getTime(),
   );
+  const activation = new StubActivationClient({ ok: true, armoredToken: signLicense() });
   const activate = new ActivateLicenseUseCase(
     licenses,
     verifier,
+    activation,
     getStatus,
     undefined,
     new RecordAuditEntryUseCase(auditLog),
   );
 
-  return { installations, licenses, auditLog, fingerprints, getStatus, activate };
+  return { installations, licenses, auditLog, fingerprints, getStatus, activate, activation };
 }
 
 describe('GetLicenseStatusUseCase', () => {
@@ -226,87 +267,219 @@ describe('GetLicenseStatusUseCase', () => {
   });
 });
 
-describe('ActivateLicenseUseCase', () => {
-  it('accepts a licence issued for this installation and reports it VALID', async () => {
+describe('ActivateLicenseUseCase — redeeming a key', () => {
+  it('redeems the key and reports the licence VALID', async () => {
     const h = harness();
-    const result = await h.activate.execute({ token: signLicense(), actor: 'manager1' });
+    const result = await h.activate.execute({ key: KEY, actor: 'manager1' });
 
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.status.state).toBe(LicenseState.VALID);
     expect(await h.licenses.getActive()).not.toBeNull();
   });
 
+  it('sends the installation id and host claims the server needs to bind the licence', async () => {
+    const h = harness();
+    await h.activate.execute({ key: KEY, actor: 'manager1' });
+
+    expect(h.activation.calls).toHaveLength(1);
+    expect(h.activation.calls[0]).toEqual({
+      key: KEY,
+      installationId: INSTALLATION,
+      claims: { boardUuid: BOARD, machineId: MACHINE },
+      productId: 'qms',
+      majorVersion: 1,
+    });
+  });
+
+  it('normalises the key before sending it, so the server sees one canonical form', async () => {
+    const h = harness();
+    await h.activate.execute({ key: `  ${KEY.replace(/-/g, '').toLowerCase()}  `, actor: 'manager1' });
+
+    expect(h.activation.calls[0].key).toBe(KEY);
+  });
+
   it('records the activation under the authenticated principal, never a literal', async () => {
     const h = harness();
-    await h.activate.execute({ token: signLicense(), actor: 'manager1' });
+    await h.activate.execute({ key: KEY, actor: 'manager1' });
 
     const entries = await h.auditLog.list();
     const activated = entries.find((e) => e.action === AuditAction.LICENSE_ACTIVATED);
     expect(activated?.actor).toBe('manager1');
   });
 
-  it('never writes the token itself into the audit log', async () => {
-    // Any admin can read the audit log, and the token is the bearer credential
-    // for this entitlement.
+  it('writes neither the token nor the full key into the audit log', async () => {
+    // Any admin can read the audit log. The token is the bearer credential for
+    // this entitlement, and the key is what mints one.
     const h = harness();
     const token = signLicense();
-    await h.activate.execute({ token, actor: 'manager1' });
+    h.activation.reply = { ok: true, armoredToken: token };
+    await h.activate.execute({ key: KEY, actor: 'manager1' });
 
-    const entries = await h.auditLog.list();
-    expect(JSON.stringify(entries)).not.toContain('BEGIN QMS LICENSE');
-    expect(JSON.stringify(entries)).not.toContain(token.split('\n')[1]);
+    const dumped = JSON.stringify(await h.auditLog.list());
+    expect(dumped).not.toContain('BEGIN QMS LICENSE');
+    expect(dumped).not.toContain(token.split('\n')[1]);
+    expect(dumped).not.toContain(KEY);
+    // Enough left to match a support conversation to a row, and no more.
+    expect(dumped).toContain(KEY.split('-')[3]);
   });
+});
 
-  it('rejects a licence issued for a different installation', async () => {
+describe('ActivateLicenseUseCase — the key never left the building', () => {
+  it('rejects a mistyped key WITHOUT calling the activation server', async () => {
+    // The whole point of the check symbol. A slipped finger must not cost a
+    // network round trip, and must not burn a redemption attempt against a
+    // customer whose key was fine all along.
     const h = harness();
-    const result = await h.activate.execute({
-      token: signLicense({ installationId: '99999999-8888-4777-a666-555555555555' }),
-      actor: 'manager1',
-    });
+    const mistyped = KEY.slice(0, -1) + (KEY.endsWith('0') ? '1' : '0');
 
-    expect(result).toMatchObject({ ok: false, reason: LicenseRejectionReason.WRONG_INSTALLATION });
+    const result = await h.activate.execute({ key: mistyped, actor: 'manager1' });
+
+    expect(result).toMatchObject({ ok: false, reason: LicenseRejectionReason.KEY_MALFORMED });
+    expect(h.activation.calls).toHaveLength(0);
     expect(await h.licenses.getActive()).toBeNull();
   });
 
-  it('rejects an edited licence as UNTRUSTED', async () => {
+  it('rejects an empty or nonsense key without calling out', async () => {
     const h = harness();
-    const lines = signLicense().split('\n');
-    const [header, payload, signature] = lines[1].split('.');
-    const forged = Buffer.from(
+    for (const key of ['', 'halo pak', 'QMS-1234']) {
+      const result = await h.activate.execute({ key, actor: 'manager1' });
+      expect(result).toMatchObject({ ok: false, reason: LicenseRejectionReason.KEY_MALFORMED });
+    }
+    expect(h.activation.calls).toHaveLength(0);
+  });
+});
+
+describe('ActivateLicenseUseCase — the server said no', () => {
+  it.each([
+    [ActivationTransportFailure.OFFLINE, LicenseRejectionReason.OFFLINE],
+    [ActivationTransportFailure.TIMEOUT, LicenseRejectionReason.TIMEOUT],
+    [ActivationTransportFailure.SERVER_ERROR, LicenseRejectionReason.SERVER_ERROR],
+    [ActivationTransportFailure.KEY_UNKNOWN, LicenseRejectionReason.KEY_UNKNOWN],
+    [ActivationTransportFailure.KEY_ALREADY_USED, LicenseRejectionReason.KEY_ALREADY_USED],
+    [ActivationTransportFailure.KEY_REVOKED, LicenseRejectionReason.KEY_REVOKED],
+    [ActivationTransportFailure.KEY_EXPIRED, LicenseRejectionReason.KEY_EXPIRED],
+    [ActivationTransportFailure.PRODUCT_MISMATCH, LicenseRejectionReason.WRONG_PRODUCT],
+  ])('maps transport %s to rejection %s', async (failure, expected) => {
+    // Every transport outcome keeps its own identity all the way to the screen.
+    // Collapsing them is the failure mode that sends a technician hunting for a
+    // dead network when the real answer is "that key belongs to another shop".
+    const h = harness();
+    h.activation.reply = { ok: false, failure, detail: 'x' };
+
+    const result = await h.activate.execute({ key: KEY, actor: 'manager1' });
+
+    expect(result).toMatchObject({ ok: false, reason: expected });
+    expect(await h.licenses.getActive()).toBeNull();
+  });
+
+  it('audits a rejection, because repeated rejections are what tampering looks like', async () => {
+    const h = harness();
+    h.activation.reply = {
+      ok: false,
+      failure: ActivationTransportFailure.KEY_UNKNOWN,
+      detail: 'no such key',
+    };
+    await h.activate.execute({ key: KEY, actor: 'manager1' });
+
+    const entries = await h.auditLog.list();
+    expect(entries.some((e) => e.action === AuditAction.LICENSE_REJECTED)).toBe(true);
+  });
+});
+
+describe('ActivateLicenseUseCase — the server is not trusted just for answering', () => {
+  it('rejects a token signed by a key this build does not know', async () => {
+    // THE test for the whole online design. If a reply were trusted because of
+    // where it came from, repointing QMS_LICENSE_ACTIVATION_URL at a homemade
+    // server would mint free licences. It must not.
+    const h = harness();
+    const foreignKey = createPrivateKey(
+      generateKeyPairSync('ed25519').privateKey.export({ type: 'pkcs8', format: 'pem' }) as string,
+    );
+    const header = { alg: 'Ed25519', kid: testKey().keyId, v: 1 };
+    const payload = JSON.parse(
+      Buffer.from(signLicense().split('\n')[1].split('.')[1], 'base64url').toString('utf8'),
+    ) as object;
+    const headerB64 = Buffer.from(JSON.stringify(header)).toString('base64url');
+    const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
+    const forged = cryptoSign(
+      null,
+      Buffer.from(`${headerB64}.${payloadB64}`, 'ascii'),
+      foreignKey,
+    );
+    h.activation.reply = {
+      ok: true,
+      armoredToken: [
+        '-----BEGIN QMS LICENSE-----',
+        `${headerB64}.${payloadB64}.${forged.toString('base64url')}`,
+        '-----END QMS LICENSE-----',
+      ].join('\n'),
+    };
+
+    const result = await h.activate.execute({ key: KEY, actor: 'manager1' });
+
+    expect(result).toMatchObject({ ok: false, reason: LicenseRejectionReason.UNTRUSTED });
+    expect(await h.licenses.getActive()).toBeNull();
+  });
+
+  it('rejects a token the server tampered with after signing', async () => {
+    const h = harness();
+    const [header, payload, signature] = signLicense().split('\n')[1].split('.');
+    const inflated = Buffer.from(
       JSON.stringify({
         ...(JSON.parse(Buffer.from(payload, 'base64url').toString()) as object),
         entitlements: { maxCounters: 999, maxCategories: 999, features: [] },
       }),
     ).toString('base64url');
+    h.activation.reply = {
+      ok: true,
+      armoredToken: [
+        '-----BEGIN QMS LICENSE-----',
+        `${header}.${inflated}.${signature}`,
+        '-----END QMS LICENSE-----',
+      ].join('\n'),
+    };
 
-    const result = await h.activate.execute({
-      token: ['-----BEGIN QMS LICENSE-----', `${header}.${forged}.${signature}`, '-----END QMS LICENSE-----'].join('\n'),
-      actor: 'manager1',
-    });
-
+    const result = await h.activate.execute({ key: KEY, actor: 'manager1' });
     expect(result).toMatchObject({ ok: false, reason: LicenseRejectionReason.UNTRUSTED });
   });
 
-  it('rejects a file that is not a licence at all', async () => {
-    const result = await harness().activate.execute({ token: 'halo pak', actor: 'manager1' });
+  it('rejects a token issued for a different installation', async () => {
+    const h = harness();
+    h.activation.reply = {
+      ok: true,
+      armoredToken: signLicense({ installationId: '99999999-8888-4777-a666-555555555555' }),
+    };
+
+    const result = await h.activate.execute({ key: KEY, actor: 'manager1' });
+
+    expect(result).toMatchObject({ ok: false, reason: LicenseRejectionReason.WRONG_INSTALLATION });
+    expect(await h.licenses.getActive()).toBeNull();
+  });
+
+  it('rejects a reply that is not a licence at all', async () => {
+    const h = harness();
+    h.activation.reply = { ok: true, armoredToken: 'halo pak' };
+
+    const result = await h.activate.execute({ key: KEY, actor: 'manager1' });
     expect(result).toMatchObject({ ok: false, reason: LicenseRejectionReason.MALFORMED });
   });
+});
 
-  it('audits a rejection, because repeated rejections are what tampering looks like', async () => {
-    const h = harness();
-    await h.activate.execute({ token: 'halo pak', actor: 'manager1' });
-
-    const entries = await h.auditLog.list();
-    expect(entries.some((e) => e.action === AuditAction.LICENSE_REJECTED)).toBe(true);
-  });
-
+describe('ActivateLicenseUseCase — re-activation after the vendor releases a seat', () => {
   it('replaces the previous licence rather than accumulating active ones', async () => {
+    // This is what makes vendor-side deactivation work with no client-side
+    // button: the customer simply redeems again, and the swap is one
+    // transaction with no window in which the store has no licence at all.
     const h = harness();
-    await h.activate.execute({ token: signLicense(), actor: 'manager1' });
-    await h.activate.execute({
-      token: signLicense({ licenseId: '8a3c1d2e-9a4b-4c5d-8e6f-0a1b2c3d4e5f', customer: { name: 'Toko Baru', ref: null } }),
-      actor: 'manager1',
-    });
+    await h.activate.execute({ key: KEY, actor: 'manager1' });
+    h.activation.reply = {
+      ok: true,
+      armoredToken: signLicense({
+        licenseId: '8a3c1d2e-9a4b-4c5d-8e6f-0a1b2c3d4e5f',
+        customer: { name: 'Toko Baru', ref: null },
+      }),
+    };
+    await h.activate.execute({ key: KEY, actor: 'manager1' });
 
     const history = await h.licenses.history();
     expect(history).toHaveLength(2);
@@ -314,70 +487,31 @@ describe('ActivateLicenseUseCase', () => {
     const { status } = await h.getStatus.execute();
     expect(status.customerName).toBe('Toko Baru');
   });
-});
 
-describe('GetActivationRequestUseCase', () => {
-  it('emits one prefixed blob carrying the installation id and the host claims', async () => {
+  it('clears an open host-mismatch window, so replacement hardware starts clean', async () => {
     const h = harness();
-    const request = await new GetActivationRequestUseCase(h.getStatus).execute();
+    await h.activate.execute({ key: KEY, actor: 'manager1' });
+    await h.installations.setHostMismatchSince(days(-45));
 
-    expect(request.blob.startsWith('QMSREQ1-')).toBe(true);
-    const decoded = JSON.parse(
-      Buffer.from(request.blob.slice('QMSREQ1-'.length), 'base64url').toString('utf8'),
-    );
-    expect(decoded).toEqual({
-      v: 1,
-      installationId: INSTALLATION,
-      claims: { boardUuid: BOARD, machineId: MACHINE },
-      majorVersion: 1,
-    });
+    await h.activate.execute({ key: KEY, actor: 'manager1' });
+
+    expect(h.installations.record.hostMismatchSince).toBeNull();
   });
 
-  it('carries only digests, never a raw hardware identifier', async () => {
+  it('leaves the existing licence untouched when a re-activation is refused', async () => {
+    // A failed re-activation must not be a way to lose a working licence.
     const h = harness();
-    const request = await new GetActivationRequestUseCase(h.getStatus).execute();
-    for (const value of Object.values(request.claims)) {
-      expect(value).toMatch(/^[0-9a-f]{64}$/);
-    }
-  });
+    await h.activate.execute({ key: KEY, actor: 'manager1' });
+    h.activation.reply = {
+      ok: false,
+      failure: ActivationTransportFailure.OFFLINE,
+      detail: 'no route to host',
+    };
 
-  it('produces byte-identical bytes to the generator\'s committed golden.req', async () => {
-    // The activation-request format has two independent implementations, same
-    // as the licence token. This is its drift gate: core-api emits the blob,
-    // the vendor CLI decodes it, and nothing else would notice them diverging
-    // until a customer's activation stopped working — on the very first step,
-    // before any licence exists to fall back on.
-    const installations = new FixedInstallationRepository(
-      installationIdOf('11111111-2222-4333-8444-555555555555'),
-      NOW,
-    );
-    const claim = (name: string, value: string) =>
-      createHash('sha256').update(`${name}:${value}`).digest('hex');
-    const fingerprints = new StubFingerprintReader({
-      boardUuid: claim('boardUuid', '4c4c4544-0037-5a10-8054-b7c04f4d5632'),
-      machineId: claim('machineId', 'd9f1a0c4b7e2436fa1c8e5d3b60947fe'),
-    });
-    const getStatus = new GetLicenseStatusUseCase(
-      installations,
-      new InMemoryLicenseRepository(),
-      new Ed25519LicenseTokenVerifier([testKey()]),
-      fingerprints,
-      () => NOW.getTime(),
-    );
+    await h.activate.execute({ key: KEY, actor: 'manager1' });
 
-    const request = await new GetActivationRequestUseCase(getStatus).execute();
-
-    expect(request.blob).toBe(readFileSync(join(FIXTURES, 'golden.req'), 'utf8').trim());
-  });
-
-  it('still produces a usable request on a host with no fingerprint mounts', async () => {
-    // The vendor can then issue with --no-bind-host; the installation id alone
-    // is enough to bind a licence.
-    const h = harness();
-    h.fingerprints.claims = {};
-    const request = await new GetActivationRequestUseCase(h.getStatus).execute();
-
-    expect(request.claims).toEqual({});
-    expect(request.installationId).toBe(INSTALLATION);
+    const { status } = await h.getStatus.execute();
+    expect(status.state).toBe(LicenseState.VALID);
+    expect((await h.licenses.history()).filter((row) => row.isActive)).toHaveLength(1);
   });
 });

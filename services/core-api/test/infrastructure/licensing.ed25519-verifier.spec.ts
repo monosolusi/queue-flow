@@ -10,13 +10,13 @@ import type { TrustedSigningKey } from '../../src/infrastructure/licensing/trust
  * Read from the generator's own fixtures rather than from a copy.
  *
  * A copy could drift; a single file cannot. This suite and
- * `tools/license-generator/test/token.test.mjs` verify the SAME bytes with two
+ * `tools/license-format/test/token.test.mjs` verify the SAME bytes with two
  * independent implementations, which is the only thing standing between a
  * format change and a license that fails at a customer site with no network to
  * push a fix over. The fixtures are test-only and never enter any Docker build
  * context (core-api's Dockerfile copies `src/` alone).
  */
-const FIXTURES = join(__dirname, '../../../../tools/license-generator/test/fixtures');
+const FIXTURES = join(__dirname, '../../../../tools/license-format/test/fixtures');
 
 function testKey(): TrustedSigningKey {
   const [keyId, publicKeyDerB64] = readFileSync(join(FIXTURES, 'test-public-key.txt'), 'utf8')

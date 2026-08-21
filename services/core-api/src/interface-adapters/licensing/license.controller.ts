@@ -10,11 +10,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 
-import {
-  ActivateLicenseUseCase,
-  GetActivationRequestUseCase,
-  type ActivationRequestDto,
-} from '../../application/licensing';
+import { ActivateLicenseUseCase } from '../../application/licensing';
 import {
   licenseStatusToDto,
   type LicenseStatusDto,
@@ -35,8 +31,13 @@ import { RolesGuard } from '../auth/roles.guard';
 import { AdminOrUnlicensedGuard } from './admin-or-unlicensed.guard';
 import { DrainCritical } from './drain-critical.decorator';
 
-/** Largest licence file accepted. A real one is well under 2 KB. */
-const MAX_TOKEN_BYTES = 16 * 1024;
+/**
+ * Largest activation key accepted. A real one is 23 characters; the slack is
+ * for the spaces and line wraps a key picks up on its way through a chat app.
+ * The endpoint is reachable unauthenticated on an unlicensed store, so it needs
+ * its own bound rather than relying on the body parser's.
+ */
+const MAX_KEY_BYTES = 256;
 
 /**
  * The principal, when there is one. `@CurrentUser()` is deliberately NOT used
@@ -50,7 +51,7 @@ interface HttpRequestWithPrincipal {
 }
 
 interface ActivateLicenseBody {
-  token?: unknown;
+  key?: unknown;
 }
 
 interface LicenseHistoryEntryDto {
@@ -77,7 +78,6 @@ export class LicenseController {
     @Inject(LICENSE_STATUS_PROVIDER) private readonly licenseStatus: ILicenseStatusProvider,
     private readonly licenseState: LicenseStateService,
     private readonly activateLicense: ActivateLicenseUseCase,
-    private readonly getActivationRequest: GetActivationRequestUseCase,
     @Inject(LICENSE_REPOSITORY) private readonly licenses: ILicenseRepository,
   ) {}
 
@@ -85,35 +85,26 @@ export class LicenseController {
   @Get()
   async status(): Promise<LicenseStatusDto> {
     const status = this.licenseStatus.current ?? (await this.licenseState.refresh());
-    return licenseStatusToDto(status);
+    return licenseStatusToDto(status, this.licenseState.installationId);
   }
 
   /**
-   * The blob the customer sends the vendor to have a licence issued.
+   * Redeems an activation key.
    *
-   * Guarded by the same bootstrap rule as the upload — open while the store is
-   * RESTRICTED (there is no account yet on a fresh mini PC), admin-only once it
-   * is licensed. It carries the host claim DIGESTS, and `license-status.dto.ts`
-   * deliberately withholds those from the status projection on the grounds that
-   * publishing them hands anyone building a clone the exact values to
-   * reproduce. Serving them unauthenticated forever, from a licensed store,
-   * would have contradicted that outright.
-   */
-  @Get('activation-request')
-  @UseGuards(AdminOrUnlicensedGuard)
-  async activationRequest(): Promise<ActivationRequestDto> {
-    return this.getActivationRequest.execute();
-  }
-
-  /**
-   * Installs an uploaded licence.
+   * There is no "install this token" counterpart. Accepting a token directly
+   * would be an offline activation path in all but name, and the product
+   * deliberately has none: redeeming through the activation server is what
+   * stops one key from quietly running four branches. Everything a token needs
+   * to be trusted still applies to what comes back — this endpoint is the only
+   * door, not a shortcut around the lock.
    *
-   * A rejected file answers 400 with a machine-readable `reason` rather than a
-   * generic error: the screen renders different Indonesian copy for "this is
-   * not a licence file", "this was issued for another machine", and "this was
-   * not signed by us", and those need three different remediations.
+   * A rejection answers 400 with a machine-readable `reason` rather than a
+   * generic error. "There is no internet here", "this key belongs to another
+   * device" and "this key is mistyped" are three different problems with three
+   * different remedies, and the screen renders different Indonesian copy for
+   * each.
    */
-  @Post()
+  @Post('activate')
   @HttpCode(200)
   @DrainCritical()
   @UseGuards(AdminOrUnlicensedGuard)
@@ -121,19 +112,16 @@ export class LicenseController {
     @Body() body: ActivateLicenseBody,
     @Req() request: HttpRequestWithPrincipal,
   ): Promise<LicenseStatusDto> {
-    const token = body?.token;
-    if (typeof token !== 'string' || token.trim().length === 0) {
-      throw new BadRequestException({ code: 'LICENSE_MISSING', message: 'token is required' });
+    const key = body?.key;
+    if (typeof key !== 'string' || key.trim().length === 0) {
+      throw new BadRequestException({ code: 'LICENSE_MISSING', message: 'key is required' });
     }
-    if (Buffer.byteLength(token, 'utf8') > MAX_TOKEN_BYTES) {
-      // The endpoint is reachable unauthenticated on an unlicensed store, so it
-      // needs its own bound — a signature check on a multi-megabyte body is a
-      // free way to make the box work.
-      throw new BadRequestException({ code: 'LICENSE_TOO_LARGE', message: 'license file is too large' });
+    if (Buffer.byteLength(key, 'utf8') > MAX_KEY_BYTES) {
+      throw new BadRequestException({ code: 'LICENSE_TOO_LARGE', message: 'activation key is too long' });
     }
 
     const result = await this.activateLicense.execute({
-      token,
+      key,
       // No principal exists on the pre-setup activation path; NFR-SEC-02's
       // `'system'` sentinel covers it, exactly as the wizard's config save does.
       actor: request.user?.username ?? 'system',
@@ -149,9 +137,9 @@ export class LicenseController {
 
     // Publish the new verdict immediately rather than waiting for the refresh
     // interval, so the screen never shows "not licensed" straight after a
-    // successful upload.
+    // successful activation.
     await this.licenseState.refresh();
-    return licenseStatusToDto(result.status);
+    return licenseStatusToDto(result.status, this.licenseState.installationId);
   }
 
   /** Activation history. Admin-only — it names who installed what and when. */

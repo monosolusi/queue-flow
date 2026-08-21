@@ -1,0 +1,12 @@
+{
+  "name": "@qms/license-format",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The QMS licence wire format and its committed golden fixture. NOT a vendor tool — licences are issued by the separate licensing product; this exists so core-api's verifier has an independent twin to be checked against. Zero dependencies (node: builtins only), like scripts/*.mjs.",
+  "license": "UNLICENSED",
+  "scripts": {
+    "test": "node --test \"test/**/*.test.mjs\"",
+    "verify": "node --test \"test/**/*.test.mjs\""
+  }
+}

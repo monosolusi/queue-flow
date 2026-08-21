@@ -14,8 +14,6 @@ import {
 } from '../src/token.mjs';
 import {
   buildPayload,
-  decodeActivationRequest,
-  encodeActivationRequest,
   endOfDayUtc,
   normalizeClaims,
 } from '../src/payload.mjs';
@@ -248,55 +246,3 @@ test('claims that are not sha256 digests are dropped, never carried as placehold
 
 // -------------------------------------------------------- activation requests
 
-test('the committed golden activation request still decodes', () => {
-  // The OTHER wire format across this boundary, and the one that runs FIRST —
-  // before any licence exists. core-api's spec builds the same bytes from the
-  // same pinned inputs, so a field rename or a prefix change breaks one of the
-  // two suites instead of breaking every customer's activation at the vendor.
-  const golden = readFileSync(join(fixtures, 'golden.req'), 'utf8');
-
-  assert.deepEqual(decodeActivationRequest(golden), {
-    installationId: GOLDEN.installationId,
-    claims: {
-      boardUuid: createHash('sha256').update(`boardUuid:${GOLDEN.boardUuid}`).digest('hex'),
-      machineId: createHash('sha256').update(`machineId:${GOLDEN.machineId}`).digest('hex'),
-    },
-    majorVersion: 1,
-  });
-});
-
-test('an activation request survives a round trip', () => {
-  const blob = encodeActivationRequest({
-    installationId: '11111111-2222-4333-8444-555555555555',
-    claims: { boardUuid: 'a'.repeat(64) },
-    majorVersion: 1,
-  });
-  assert.match(blob, /^QMSREQ1-/);
-  assert.deepEqual(decodeActivationRequest(blob), {
-    installationId: '11111111-2222-4333-8444-555555555555',
-    claims: { boardUuid: 'a'.repeat(64) },
-    majorVersion: 1,
-  });
-});
-
-test('an activation request survives the line breaks a chat app inserts', () => {
-  const blob = encodeActivationRequest({
-    installationId: '11111111-2222-4333-8444-555555555555',
-    claims: {},
-    majorVersion: 1,
-  });
-  const wrapped = `  ${blob.slice(0, 20)}\n${blob.slice(20)}  `;
-  assert.equal(
-    decodeActivationRequest(wrapped).installationId,
-    '11111111-2222-4333-8444-555555555555',
-  );
-});
-
-test('a corrupt or foreign activation request is rejected with a usable message', () => {
-  assert.throws(() => decodeActivationRequest('hello'), /must start with 'QMSREQ1-'/);
-  assert.throws(() => decodeActivationRequest('QMSREQ1-!!!!'), /corrupt/);
-  assert.throws(
-    () => decodeActivationRequest(encodeActivationRequest({ installationId: 'nope', claims: {} })),
-    /no valid installationId/,
-  );
-});

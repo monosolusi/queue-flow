@@ -12,7 +12,7 @@
  * configured. It is NOT a wall: `docker-compose.yml` belongs to the customer
  * and can override `NODE_ENV`. Anyone willing to do that is already willing to
  * edit the JavaScript in the image, so this adds no meaningful attack surface —
- * see the threat model in tools/license-generator/README.md.
+ * see docs/LICENSE-SERVER-CONTRACT.md.
  */
 export function isEnforcementDisabled(): boolean {
   return process.env.QMS_LICENSE_ENFORCEMENT === 'off' && process.env.NODE_ENV !== 'production';

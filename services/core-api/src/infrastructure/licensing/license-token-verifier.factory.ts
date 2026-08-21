@@ -2,9 +2,8 @@ import { Ed25519LicenseTokenVerifier } from './ed25519-license-token-verifier';
 import { TRUSTED_SIGNING_KEYS, type TrustedSigningKey } from './trusted-keys';
 
 /**
- * Format: `"<keyId> <base64SpkiPublicKey>"` — exactly the line
- * `qms-license keygen` writes to `public-key.txt`, so the file can be piped
- * straight into the variable.
+ * Format: `"<keyId> <base64SpkiPublicKey>"` — the same line the licensing
+ * product prints for its signing key, so it can be pasted straight in.
  */
 export const TRUSTED_KEY_ENV = 'QMS_LICENSE_TRUSTED_KEY';
 
@@ -25,7 +24,7 @@ export const TRUSTED_KEY_ENV = 'QMS_LICENSE_TRUSTED_KEY';
  * customer owns `docker-compose.yml` and can override `NODE_ENV` — but anyone
  * willing to do that is already willing to edit the image's JavaScript, so this
  * adds no meaningful attack surface. See the threat model in
- * tools/license-generator/README.md.
+ * docs/LICENSE-SERVER-CONTRACT.md.
  *
  * The compiled list is ALWAYS trusted; the env key is only ever ADDED to it,
  * never a replacement — so a misconfigured variable cannot make a genuine

@@ -1,20 +1,17 @@
 /**
- * Regenerates golden.lic AND golden.req. Run ONLY when a wire format changes
- * on purpose:
+ * Regenerates golden.lic. Run ONLY when the token format changes on purpose:
  *
- *   node tools/license-generator/test/fixtures/make-golden.mjs
+ *   node tools/license-format/test/fixtures/make-golden.mjs
  *
- * TWO formats cross the core-api <-> generator boundary, and both need a
- * golden. `golden.lic` gates the licence direction (generator -> core-api);
- * `golden.req` gates the activation-request direction (core-api -> generator),
- * which runs FIRST, before any licence exists. Without the second one, both
- * suites could keep asserting against their own literals while every customer's
- * activation blob quietly stopped decoding at the vendor.
- *
- * The committed goldens are the drift gate between this generator and
- * core-api's independent implementations. Both sides verify the same committed bytes,
+ * The committed golden is the drift gate between this format definition and
+ * core-api's independent verifier. Both sides check the same committed bytes,
  * so an encoding change on either one fails a test instead of failing at a
  * customer site — where there is no network to push a fix over.
+ *
+ * There used to be a second golden, `golden.req`, pinning the `QMSREQ1-…`
+ * activation blob a customer copied off the screen. That format no longer
+ * exists: activation is an online key redemption, and the device identity
+ * travels inside a request no human ever handles.
  *
  * Every input below is pinned (licenseId, issuedAt, claim digests) so the
  * output is byte-stable: a regeneration that changes nothing produces no diff.
@@ -26,7 +23,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { encodeToken, keyIdFor } from '../../src/token.mjs';
-import { buildPayload, encodeActivationRequest } from '../../src/payload.mjs';
+import { buildPayload } from '../../src/payload.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -63,20 +60,5 @@ const privateKey = createPrivateKey(readFileSync(join(here, 'test-signing-key.pe
 writeFileSync(
   join(here, 'golden.lic'),
   encodeToken({ payload, privateKey, keyId: keyIdFor(publicKeyDerB64) }),
-  'utf8',
-);
-
-// The activation request core-api emits for the same pinned inputs. Newline so
-// the file is a well-formed text file; both readers trim.
-writeFileSync(
-  join(here, 'golden.req'),
-  `${encodeActivationRequest({
-    installationId: GOLDEN.installationId,
-    claims: {
-      boardUuid: claim('boardUuid', GOLDEN.boardUuid),
-      machineId: claim('machineId', GOLDEN.machineId),
-    },
-    majorVersion: 1,
-  })}\n`,
   'utf8',
 );

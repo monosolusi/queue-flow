@@ -419,8 +419,27 @@ export type LicenseIssueName =
   | 'EXPIRED'
   | 'HOST_MISMATCH';
 
-/** Why an uploaded file was refused. Drives which remediation copy is shown. */
+/**
+ * Why an activation was refused. Drives which remediation copy is shown.
+ *
+ * The split matters more than it looks. "There is no internet here", "this key
+ * belongs to another branch" and "you mistyped it" are the three overwhelmingly
+ * likely outcomes, and they have three completely different remedies — showing
+ * the wrong one costs a technician a return trip.
+ */
 export type LicenseRejectionReason =
+  // Before the request leaves: the key failed its own check symbol.
+  | 'KEY_MALFORMED'
+  // The trip out.
+  | 'OFFLINE'
+  | 'TIMEOUT'
+  | 'SERVER_ERROR'
+  // What the activation server said about the key.
+  | 'KEY_UNKNOWN'
+  | 'KEY_ALREADY_USED'
+  | 'KEY_REVOKED'
+  | 'KEY_EXPIRED'
+  // What came back was not a licence we accept.
   | 'MALFORMED'
   | 'UNTRUSTED'
   | 'WRONG_INSTALLATION'
@@ -444,6 +463,8 @@ export interface LicenseSummaryDto {
 
 /** Full projection from `GET /api/license`, for the admin license screen. */
 export interface LicenseStatusDto extends LicenseSummaryDto {
+  /** Shown so a customer can quote it on a support call. `null` while booting. */
+  readonly installationId: string | null;
   readonly type: 'perpetual' | 'trial' | 'free' | null;
   readonly customerName: string | null;
   readonly supportUntil: string | null;
@@ -465,15 +486,6 @@ export interface LicenseStatusDto extends LicenseSummaryDto {
     readonly changed: readonly string[];
     readonly unreadable: readonly string[];
   } | null;
-}
-
-/** What the customer sends the vendor to have a license issued. */
-export interface ActivationRequestDto {
-  readonly installationId: string;
-  readonly claims: Readonly<Record<string, string>>;
-  readonly majorVersion: number;
-  /** The single `QMSREQ1-…` string to copy. */
-  readonly blob: string;
 }
 
 export interface LicenseHistoryEntryDto {

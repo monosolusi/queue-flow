@@ -1,46 +1,20 @@
-# Production overlay — host fingerprint mounts for license binding.
+# Production overlay — the host fingerprint mount for licence binding.
 #
-# The installer on the mini PC links this as `docker-compose.override.yml`:
+# `install.sh` links this as `docker-compose.override.yml`, which Compose
+# auto-loads with no extra flags, so bring-up at the store stays exactly
+# `docker compose up -d` (NFR-MNT-02).
 #
-#     ln -sf docker-compose.prod.yml docker-compose.override.yml
+# NOT part of the base docker-compose.yml on purpose: macOS has no /sys, so a
+# developer running `docker compose up -d` — and the Docker-gated tier 2 of
+# scripts/verify-topology.mjs — would fail on a missing bind-mount source. An
+# absent mount degrades to "fingerprint unavailable", which never blocks, so
+# leaving it out of dev costs nothing.
 #
-# Compose auto-loads that filename with no extra flags, so bring-up at the store
-# stays exactly `docker compose up -d` (NFR-MNT-02).
-#
-# It is NOT part of the base docker-compose.yml on purpose: macOS has no /sys
-# and no /etc/machine-id, so a developer running `docker compose up -d` — and
-# the Docker-gated tier 2 of scripts/verify-topology.mjs — would fail on a
-# missing bind-mount source. Absent mounts degrade to "fingerprint unavailable",
-# which never blocks, so leaving them out of dev costs nothing.
-#
-# ## What these are, and why not the obvious alternatives
-#
-#   product_uuid  the motherboard's SMBIOS UUID. Survives an OS reinstall, and
-#                 differs on a different unit — the claim that actually catches
-#                 a cloned deployment. Mode 0400 root:root; core-api's
-#                 Dockerfile declares no USER, so the process can read it.
-#                 Adding a USER line would silently reduce this to unreadable,
-#                 which weakens binding rather than breaking loudly.
-#   machine-id    written once by systemd at OS install; stable across reboots,
-#                 container recreates and image upgrades. The HOST's, not the
-#                 container's — Docker does not populate the container's.
-#
-# NOT mounted: the container's MAC address (regenerated on every recreate,
-# which is why the MAC-based approach some enterprise licenses use cannot be
-# copied here), and board_serial / product_serial (mini PCs routinely report
-# "Default string" there).
-#
-# ## Golden-image warning
-#
-# If one OS image is prepared and cloned onto every mini PC, machine-id is
-# IDENTICAL on all of them. After cloning, the install runbook must run:
-#
-#     rm -f /etc/machine-id /var/lib/dbus/machine-id && systemd-machine-id-setup
-#
-# product_uuid is immune to this, which is why it carries the heavier weight.
+# Why product_uuid is the only claim, and why /etc/machine-id is deliberately
+# not here any more: see the note in
+# services/core-api/src/infrastructure/licensing/sysfs-host-fingerprint-reader.ts.
 
 services:
   core-api-service:
     volumes:
       - /sys/class/dmi/id/product_uuid:/host/board-uuid:ro
-      - /etc/machine-id:/host/machine-id:ro
